@@ -140,18 +140,27 @@ consteval std::array<LaneMasks, kNPrefixVariants> make_lane_masks() {
 
 inline constexpr auto kLaneMasks = make_lane_masks();
 
+// No unsigned byte compare in AVX2: bias so '0'..'9' map to [-128, -119],
+// making every non-digit byte compare greater.
+inline uint32_t nondigit_mask32(__m256i ascii) {
+    const __m256i biased = _mm256_add_epi8(ascii, _mm256_set1_epi8(80));
+    const __m256i delims = _mm256_cmpgt_epi8(biased, _mm256_set1_epi8(-119));
+    return static_cast<uint32_t>(_mm256_movemask_epi8(delims));
+}
+
 // Returns the offset of the first byte after hitSound, or -1 to request the
 // scalar fallback (structurally unusual line: signs, decimals, empty or
-// over-long fields, missing delimiters).
-inline int fast_parse_prefix(const char* line, HitObject& h) {
+// over-long fields, missing delimiters). `nl_mask` receives the positions
+// of any '\n' inside the same 32-byte window — most circle lines fit
+// entirely in it, so the caller usually gets the line end for free.
+inline int fast_parse_prefix(const char* line, HitObject& h,
+                             uint32_t& nl_mask) {
     const __m256i ascii = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(line));
     const __m256i digits = _mm256_sub_epi8(ascii, _mm256_set1_epi8('0'));
 
-    // No unsigned byte compare in AVX2: bias so '0'..'9' map to
-    // [-128, -119], making every non-digit byte compare greater.
-    const __m256i biased = _mm256_add_epi8(ascii, _mm256_set1_epi8(80));
-    const __m256i delims = _mm256_cmpgt_epi8(biased, _mm256_set1_epi8(-119));
-    const auto mask = static_cast<uint32_t>(_mm256_movemask_epi8(delims));
+    nl_mask = static_cast<uint32_t>(_mm256_movemask_epi8(
+        _mm256_cmpeq_epi8(ascii, _mm256_set1_epi8('\n'))));
+    const uint32_t mask = nondigit_mask32(ascii);
 
     const uint32_t m1 = _blsr_u32(mask);
     const uint32_t m2 = _blsr_u32(m1);

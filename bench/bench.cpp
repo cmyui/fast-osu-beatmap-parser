@@ -291,7 +291,8 @@ int main(int argc, char** argv) {
         auto t0 = std::chrono::steady_clock::now();
         for (int it = 0; it < kIters; ++it)
             for (const auto& l : lines) {
-                fosu::detail::fast_parse_prefix(l.data(), h);
+                uint32_t nl_mask;
+                fosu::detail::fast_parse_prefix(l.data(), h, nl_mask);
                 sink += static_cast<uint32_t>(h.time);
             }
         auto t1 = std::chrono::steady_clock::now();

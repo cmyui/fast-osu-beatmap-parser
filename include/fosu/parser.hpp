@@ -42,16 +42,20 @@ inline std::string_view trim(const char* p, const char* end) {
     return {p, static_cast<size_t>(end - p)};
 }
 
+// Editor-emitted section names are unique on their second byte except
+// [Editor]/[Events], which the third byte splits. No full compares.
 inline Section match_section(std::string_view line) {
-    if (line == "[General]") return Section::General;
-    if (line == "[Editor]") return Section::Editor;
-    if (line == "[Metadata]") return Section::Metadata;
-    if (line == "[Difficulty]") return Section::Difficulty;
-    if (line == "[Events]") return Section::Events;
-    if (line == "[TimingPoints]") return Section::TimingPoints;
-    if (line == "[Colours]") return Section::Colours;
-    if (line == "[HitObjects]") return Section::HitObjects;
-    return Section::Unknown;
+    if (line.size() < 3) return Section::Unknown;
+    switch (line[1]) {
+        case 'G': return Section::General;
+        case 'E': return line[2] == 'd' ? Section::Editor : Section::Events;
+        case 'M': return Section::Metadata;
+        case 'D': return Section::Difficulty;
+        case 'T': return Section::TimingPoints;
+        case 'C': return Section::Colours;
+        case 'H': return Section::HitObjects;
+        default: return Section::Unknown;
+    }
 }
 
 inline bool split_kv(const char* p, size_t len, std::string_view& key,
@@ -79,86 +83,129 @@ inline double parse_f64_field(std::string_view v, double fallback) {
     return q == v.data() ? fallback : out;
 }
 
-inline void parse_general_kv(Beatmap& bm, std::string_view k, std::string_view v) {
-    switch (k.empty() ? '\0' : k[0]) {
-        case 'A':
-            if (k == "AudioFilename") bm.audio_filename = v;
-            else if (k == "AudioLeadIn") bm.audio_lead_in = parse_i32_field(v, 0);
+// Key-value lines are dispatched on their first four bytes loaded as one
+// u32 — editor-emitted keys are unique on that prefix within a section
+// (plus one disambiguating byte where two keys share it). The key length
+// then locates the value with no memchr and no trim.
+inline constexpr uint32_t key4(char a, char b, char c, char d) {
+    return static_cast<uint32_t>(static_cast<uint8_t>(a)) |
+           static_cast<uint32_t>(static_cast<uint8_t>(b)) << 8 |
+           static_cast<uint32_t>(static_cast<uint8_t>(c)) << 16 |
+           static_cast<uint32_t>(static_cast<uint8_t>(d)) << 24;
+}
+
+// Value after "Key:", tolerating the single space General/Editor emit.
+inline std::string_view kv_value(const char* p, size_t len, size_t key_len) {
+    size_t off = key_len + 1;
+    if (off < len && p[off] == ' ') ++off;
+    return {p + off, len > off ? len - off : 0};
+}
+
+inline void parse_general_line(Beatmap& bm, const char* p, size_t len) {
+    switch (load_u32_le(p)) {
+        case key4('A', 'u', 'd', 'i'):
+            if (p[5] == 'F') bm.audio_filename = kv_value(p, len, 13);
+            else if (p[5] == 'L')
+                bm.audio_lead_in = parse_i32_field(kv_value(p, len, 11), 0);
             break;
-        case 'C':
-            if (k == "Countdown") bm.countdown = parse_i32_field(v, 1);
-            else if (k == "CountdownOffset") bm.countdown_offset = parse_i32_field(v, 0);
+        case key4('P', 'r', 'e', 'v'):
+            bm.preview_time = parse_i32_field(kv_value(p, len, 11), -1);
             break;
-        case 'E':
-            if (k == "EpilepsyWarning") bm.epilepsy_warning = parse_bool(v);
+        case key4('C', 'o', 'u', 'n'):
+            if (p[9] == 'O')
+                bm.countdown_offset = parse_i32_field(kv_value(p, len, 15), 0);
+            else
+                bm.countdown = parse_i32_field(kv_value(p, len, 9), 1);
             break;
-        case 'L':
-            if (k == "LetterboxInBreaks") bm.letterbox_in_breaks = parse_bool(v);
+        case key4('S', 'a', 'm', 'p'):
+            if (p[6] == 'S') bm.sample_set = kv_value(p, len, 9);
+            else
+                bm.samples_match_playback_rate =
+                    parse_bool(kv_value(p, len, 24));
             break;
-        case 'M':
-            if (k == "Mode") bm.mode = parse_i32_field(v, 0);
+        case key4('S', 't', 'a', 'c'):
+            bm.stack_leniency = parse_f64_field(kv_value(p, len, 13), 0.7);
             break;
-        case 'O':
-            if (k == "OverlayPosition") bm.overlay_position = v;
+        case key4('M', 'o', 'd', 'e'):
+            bm.mode = parse_i32_field(kv_value(p, len, 4), 0);
             break;
-        case 'P':
-            if (k == "PreviewTime") bm.preview_time = parse_i32_field(v, -1);
+        case key4('L', 'e', 't', 't'):
+            bm.letterbox_in_breaks = parse_bool(kv_value(p, len, 17));
             break;
-        case 'S':
-            if (k == "SampleSet") bm.sample_set = v;
-            else if (k == "StackLeniency") bm.stack_leniency = parse_f64_field(v, 0.7);
-            else if (k == "SkinPreference") bm.skin_preference = v;
-            else if (k == "SpecialStyle") bm.special_style = parse_bool(v);
-            else if (k == "SamplesMatchPlaybackRate")
-                bm.samples_match_playback_rate = parse_bool(v);
+        case key4('W', 'i', 'd', 'e'):
+            bm.widescreen_storyboard = parse_bool(kv_value(p, len, 20));
             break;
-        case 'U':
-            if (k == "UseSkinSprites") bm.use_skin_sprites = parse_bool(v);
+        case key4('E', 'p', 'i', 'l'):
+            bm.epilepsy_warning = parse_bool(kv_value(p, len, 15));
             break;
-        case 'W':
-            if (k == "WidescreenStoryboard") bm.widescreen_storyboard = parse_bool(v);
+        case key4('S', 'p', 'e', 'c'):
+            bm.special_style = parse_bool(kv_value(p, len, 12));
+            break;
+        case key4('U', 's', 'e', 'S'):
+            bm.use_skin_sprites = parse_bool(kv_value(p, len, 14));
+            break;
+        case key4('O', 'v', 'e', 'r'):
+            bm.overlay_position = kv_value(p, len, 15);
+            break;
+        case key4('S', 'k', 'i', 'n'):
+            bm.skin_preference = kv_value(p, len, 14);
             break;
         default:
             break;
     }
 }
 
-inline void parse_editor_kv(Beatmap& bm, std::string_view k, std::string_view v) {
-    if (k == "Bookmarks") bm.bookmarks = v;
-    else if (k == "DistanceSpacing") bm.distance_spacing = parse_f64_field(v, 0);
-    else if (k == "BeatDivisor") bm.beat_divisor = parse_i32_field(v, 4);
-    else if (k == "GridSize") bm.grid_size = parse_i32_field(v, 4);
-    else if (k == "TimelineZoom") bm.timeline_zoom = parse_f64_field(v, 1);
+inline void parse_editor_line(Beatmap& bm, const char* p, size_t len) {
+    switch (load_u32_le(p)) {
+        case key4('B', 'o', 'o', 'k'):
+            bm.bookmarks = kv_value(p, len, 9);
+            break;
+        case key4('D', 'i', 's', 't'):
+            bm.distance_spacing = parse_f64_field(kv_value(p, len, 15), 0);
+            break;
+        case key4('B', 'e', 'a', 't'):
+            bm.beat_divisor = parse_i32_field(kv_value(p, len, 11), 4);
+            break;
+        case key4('G', 'r', 'i', 'd'):
+            bm.grid_size = parse_i32_field(kv_value(p, len, 8), 4);
+            break;
+        case key4('T', 'i', 'm', 'e'):
+            bm.timeline_zoom = parse_f64_field(kv_value(p, len, 12), 1);
+            break;
+        default:
+            break;
+    }
 }
 
-inline void parse_metadata_kv(Beatmap& bm, std::string_view k, std::string_view v) {
-    switch (k.empty() ? '\0' : k[0]) {
-        case 'T':
-            if (k == "Title") bm.title = v;
-            else if (k == "TitleUnicode") bm.title_unicode = v;
-            else if (k == "Tags") bm.tags = v;
+inline void parse_metadata_line(Beatmap& bm, const char* p, size_t len) {
+    switch (load_u32_le(p)) {
+        case key4('T', 'i', 't', 'l'):
+            if (p[5] == 'U') bm.title_unicode = kv_value(p, len, 12);
+            else bm.title = kv_value(p, len, 5);
             break;
-        case 'A':
-            if (k == "Artist") bm.artist = v;
-            else if (k == "ArtistUnicode") bm.artist_unicode = v;
+        case key4('A', 'r', 't', 'i'):
+            if (p[6] == 'U') bm.artist_unicode = kv_value(p, len, 13);
+            else bm.artist = kv_value(p, len, 6);
             break;
-        case 'C':
-            if (k == "Creator") bm.creator = v;
+        case key4('C', 'r', 'e', 'a'):
+            bm.creator = kv_value(p, len, 7);
             break;
-        case 'V':
-            if (k == "Version") bm.version = v;
+        case key4('V', 'e', 'r', 's'):
+            bm.version = kv_value(p, len, 7);
             break;
-        case 'S':
-            if (k == "Source") bm.source = v;
+        case key4('S', 'o', 'u', 'r'):
+            bm.source = kv_value(p, len, 6);
             break;
-        case 'B': {
+        case key4('T', 'a', 'g', 's'):
+            bm.tags = kv_value(p, len, 4);
+            break;
+        case key4('B', 'e', 'a', 't'): {
+            const bool set_id = p[7] == 'S';
+            const auto v = kv_value(p, len, set_id ? 12 : 9);
             int64_t id;
-            if (k == "BeatmapID") {
-                if (parse_i64(v.data(), v.data() + v.size(), id) != v.data())
-                    bm.beatmap_id = id;
-            } else if (k == "BeatmapSetID") {
-                if (parse_i64(v.data(), v.data() + v.size(), id) != v.data())
-                    bm.beatmap_set_id = id;
+            if (parse_i64(v.data(), v.data() + v.size(), id) != v.data()) {
+                if (set_id) bm.beatmap_set_id = id;
+                else bm.beatmap_id = id;
             }
             break;
         }
@@ -167,18 +214,31 @@ inline void parse_metadata_kv(Beatmap& bm, std::string_view k, std::string_view 
     }
 }
 
-inline void parse_difficulty_kv(Beatmap& bm, std::string_view k, std::string_view v,
-                                bool& ar_specified) {
-    if (k == "HPDrainRate") bm.hp = parse_f64_field(v, 5);
-    else if (k == "CircleSize") bm.cs = parse_f64_field(v, 5);
-    else if (k == "OverallDifficulty") bm.od = parse_f64_field(v, 5);
-    else if (k == "ApproachRate") {
-        bm.ar = parse_f64_field(v, 5);
-        ar_specified = true;
-    } else if (k == "SliderMultiplier")
-        bm.slider_multiplier = parse_f64_field(v, 1.4);
-    else if (k == "SliderTickRate")
-        bm.slider_tick_rate = parse_f64_field(v, 1);
+inline void parse_difficulty_line(Beatmap& bm, const char* p, size_t len,
+                                  bool& ar_specified) {
+    switch (load_u32_le(p)) {
+        case key4('H', 'P', 'D', 'r'):
+            bm.hp = parse_f64_field(kv_value(p, len, 11), 5);
+            break;
+        case key4('C', 'i', 'r', 'c'):
+            bm.cs = parse_f64_field(kv_value(p, len, 10), 5);
+            break;
+        case key4('O', 'v', 'e', 'r'):
+            bm.od = parse_f64_field(kv_value(p, len, 17), 5);
+            break;
+        case key4('A', 'p', 'p', 'r'):
+            bm.ar = parse_f64_field(kv_value(p, len, 12), 5);
+            ar_specified = true;
+            break;
+        case key4('S', 'l', 'i', 'd'):
+            if (p[6] == 'M')
+                bm.slider_multiplier = parse_f64_field(kv_value(p, len, 16), 1.4);
+            else
+                bm.slider_tick_rate = parse_f64_field(kv_value(p, len, 14), 1);
+            break;
+        default:
+            break;
+    }
 }
 
 inline std::string_view strip_quotes(std::string_view v) {
@@ -285,6 +345,74 @@ inline void parse_timing_point_line(Beatmap& bm, const char* p, size_t len) {
     bm.timing_points.push_back(tp);
 }
 
+#if FOSU_SIMD_X86
+// Timing point fast path built on what editor-emitted files guarantee:
+// integer offsets (0 decimal offsets across 6.6k real timing points
+// sampled) and a tail of up to six small integers that fits a 32-byte
+// window — extracted branchlessly from one delimiter mask instead of six
+// parse calls. Unusual shapes defer to the generic parser.
+inline void parse_timing_point_line_fast(Beatmap& bm, const char* p,
+                                         const char* end) {
+    TimingPoint tp{0, 0, 4, 0, 0, 100, true, 0};
+    const char* q = p;
+    const bool neg = *q == '-';
+    q += neg;
+    const uint32_t run = digit_run8(q);
+    if (run == 0 || run > 8 || q[run] == '.') {
+        parse_timing_point_line(bm, p, static_cast<size_t>(end - p));
+        return;
+    }
+    const auto off = static_cast<double>(swar_parse_u64(q, run));
+    tp.time = neg ? -off : off;
+    q += run;
+    // A digit at q means the offset exceeded the 8-byte window (a >27h
+    // timestamp); any other surprise likewise defers to the generic
+    // parser, which owns the malformed-line decision.
+    if (q >= end || *q != ',') {
+        parse_timing_point_line(bm, p, static_cast<size_t>(end - p));
+        return;
+    }
+    const char* r = parse_double(q + 1, end, tp.beat_length);
+    if (r == q + 1) {
+        parse_timing_point_line(bm, p, static_cast<size_t>(end - p));
+        return;
+    }
+    q = r;
+    if (q < end && *q == ',' && end - q <= 32) {
+        ++q;
+        const auto tail_len = static_cast<uint32_t>(end - q);
+        const uint32_t m = nondigit_mask32(
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(q)));
+        const uint32_t m1 = _blsr_u32(m);
+        const uint32_t m2 = _blsr_u32(m1);
+        const uint32_t m3 = _blsr_u32(m2);
+        const uint32_t m4 = _blsr_u32(m3);
+        const uint32_t m5 = _blsr_u32(m4);
+        const uint32_t d[6] = {_tzcnt_u32(m),  _tzcnt_u32(m1), _tzcnt_u32(m2),
+                               _tzcnt_u32(m3), _tzcnt_u32(m4), _tzcnt_u32(m5)};
+        uint64_t v[6] = {4, 0, 0, 100, 1, 0};
+        uint32_t start = 0;
+        for (int i = 0; i < 6; ++i) {  // fully unrolled; per-file constant
+                                       // field count keeps this predictable
+            const uint32_t len = d[i] - start;
+            if (start >= tail_len || len - 1 > 7) break;
+            v[i] = swar_parse_u64(q + start, len);
+            start = d[i] + 1;
+        }
+        tp.meter = static_cast<int32_t>(v[0]);
+        tp.sample_set = static_cast<int32_t>(v[1]);
+        tp.sample_index = static_cast<int32_t>(v[2]);
+        tp.volume = static_cast<int32_t>(v[3]);
+        tp.uninherited = v[4] != 0;
+        tp.effects = static_cast<uint32_t>(v[5]);
+    } else if (q < end && *q == ',') {
+        parse_timing_point_line(bm, p, static_cast<size_t>(end - p));  // oversized tail: generic
+        return;
+    }
+    bm.timing_points.push_back(tp);
+}
+#endif  // FOSU_SIMD_X86
+
 // Slider control point coordinate: overwhelmingly 1-4 plain digits, parsed
 // branchlessly via SWAR. Signs, 5+ digit values, and empty fields take the
 // general path. Returns the advanced pointer, or `p` unchanged on failure.
@@ -308,43 +436,128 @@ inline bool parse_slider_params(Beatmap& bm, HitObject& h, const char* p,
     if (p >= end) return false;
     Slider s{};
     s.curve_type = *p++;
-    s.point_begin = static_cast<uint32_t>(bm.slider_points.size());
+
+    // Points are written straight into the pool through a raw cursor —
+    // one bounds ensure per slider instead of a checked push per point.
+    // A point pair costs at least 4 bytes ("|x:y"), which bounds the count.
+    auto& pts = bm.slider_points;
+    const size_t base = pts.size();
+    pts.resize(base + static_cast<size_t>(end - p) / 4 + 1);
+    SliderPoint* w = pts.data() + base;
     while (p < end && *p == '|') {
         int32_t px, py;
         const char* q = parse_coord(p + 1, end, px);
-        if (q == p + 1 || q >= end || *q != ':') return false;
+        // A coord ending at the line end reads the terminator from the
+        // padded buffer, never ':' — no explicit q < end check needed.
+        if (q == p + 1 || *q != ':') {
+            pts.resize(base);
+            return false;
+        }
         const char* r = parse_coord(q + 1, end, py);
-        if (r == q + 1) return false;
-        bm.slider_points.push_back({px, py});
+        if (r == q + 1) {
+            pts.resize(base);
+            return false;
+        }
+        *w++ = {px, py};
         p = r;
     }
-    s.point_count =
-        static_cast<uint32_t>(bm.slider_points.size()) - s.point_begin;
+    pts.resize(static_cast<size_t>(w - pts.data()));
+    s.point_begin = static_cast<uint32_t>(base);
+    s.point_count = static_cast<uint32_t>(pts.size() - base);
+
     if (p >= end || *p != ',') return false;
-    int64_t slides;
-    const char* q = parse_i64(p + 1, end, slides);
-    if (q == p + 1) return false;
-    s.slides = clamp_i32(slides);
-    p = q;
+    ++p;
+    const uint32_t srun = digit_run8(p);  // slides: a bare small integer
+    if (srun - 1 > 6) return false;
+    s.slides = static_cast<int32_t>(swar_parse_u64(p, srun));
+    p += srun;
     if (p >= end || *p != ',') return false;
-    q = parse_double(p + 1, end, s.length);
+    const char* q = parse_double(p + 1, end, s.length);
     if (q == p + 1) return false;
     p = q;
+
     // Optional: edgeSounds, edgeSets, hitSample (assigned positionally).
     std::string_view extra[3];
-    int n = 0;
-    while (n < 3 && p < end && *p == ',') {
+    if (p < end && *p == ',') {
         ++p;
-        const auto* c = static_cast<const char*>(memchr(p, ',', end - p));
-        const char* fend = c ? c : end;
-        extra[n++] = {p, static_cast<size_t>(fend - p)};
-        p = fend;
+#if FOSU_SIMD_X86
+        const auto span = static_cast<size_t>(end - p);
+        if (span <= 32) {
+            // Both remaining comma positions from one 32-byte scan.
+            const __m256i v =
+                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
+            const auto cm =
+                static_cast<uint32_t>(_mm256_movemask_epi8(
+                    _mm256_cmpeq_epi8(v, _mm256_set1_epi8(',')))) &
+                static_cast<uint32_t>((1ull << span) - 1);
+            const uint32_t c0 = _tzcnt_u32(cm);
+            const uint32_t c1 = _tzcnt_u32(_blsr_u32(cm));
+            if (c0 >= span) {
+                extra[0] = {p, span};
+            } else if (c1 >= span) {
+                extra[0] = {p, c0};
+                extra[1] = {p + c0 + 1, span - c0 - 1};
+            } else {
+                extra[0] = {p, c0};
+                extra[1] = {p + c0 + 1, c1 - c0 - 1};
+                extra[2] = {p + c1 + 1, span - c1 - 1};
+            }
+        } else
+#endif
+        {
+            int n = 0;
+            while (n < 3 && p < end) {
+                const auto* c =
+                    static_cast<const char*>(memchr(p, ',', end - p));
+                const char* fend = c ? c : end;
+                extra[n++] = {p, static_cast<size_t>(fend - p)};
+                p = fend + 1;
+            }
+        }
     }
     s.edge_sounds = extra[0];
     s.edge_sets = extra[1];
     h.hit_sample = extra[2];
     h.slider = static_cast<uint32_t>(bm.sliders.size());
     bm.sliders.push_back(s);
+    return true;
+}
+
+// Everything after the "x,y,time,type,hitSound" prefix: slider params,
+// spinner/hold end times, trailing hitSample.
+inline bool finish_hitobject(Beatmap& bm, HitObject& h, const char* p,
+                             const char* end, size_t bytes_remaining) {
+    if (h.type & 2) {  // slider
+        if (p >= end || *p != ',') return false;
+        // Size the slider pools once, when a map first proves it has
+        // sliders — reserving eagerly per map wastes multi-MB allocations
+        // on slider-free maps, which costs more than the reallocations it
+        // saves.
+        if (bm.sliders.capacity() == 0) {
+            bm.slider_points.reserve(bytes_remaining / 14);
+            bm.sliders.reserve(bytes_remaining / 48);
+        }
+        return parse_slider_params(bm, h, p + 1, end);
+    }
+    if (h.type & 8 || h.type & 128) {  // spinner / mania hold
+        if (p >= end || *p != ',') return false;
+        int64_t t;
+        const char* q = parse_i64(p + 1, end, t);
+        if (q == p + 1) return false;
+        h.end_time = clamp_i32(t);
+        p = q;
+        if ((h.type & 128) && p < end && *p == ':') ++p;
+        else if (p < end && *p == ',') ++p;
+        else {
+            h.hit_sample = {};
+            return true;
+        }
+        h.hit_sample = {p, static_cast<size_t>(end - p)};
+        return true;
+    }
+    // circle: optional trailing hitSample
+    if (p < end && *p == ',')
+        h.hit_sample = {p + 1, static_cast<size_t>(end - (p + 1))};
     return true;
 }
 
@@ -359,7 +572,8 @@ inline void parse_hitobject_line(Beatmap& bm, const char* line, size_t len,
     int next = -1;
 #if FOSU_SIMD_X86
     if (use_simd) {
-        next = fast_parse_prefix(line, h);
+        uint32_t nl_mask;
+        next = fast_parse_prefix(line, h, nl_mask);
         if (next >= 0) ++bm.stats.fast_path_lines;
     }
 #else
@@ -375,47 +589,72 @@ inline void parse_hitobject_line(Beatmap& bm, const char* line, size_t len,
         ++bm.stats.slow_path_lines;
     }
 
-    const char* p = line + next;
-    const char* end = line + len;
-    const bool ok = [&] {
-        if (h.type & 2) {  // slider
-            if (p >= end || *p != ',') return false;
-            // Size the slider pools once, when a map first proves it has
-            // sliders — reserving eagerly per map wastes multi-MB
-            // allocations on slider-free maps, which costs more than the
-            // reallocations it saves.
-            if (bm.sliders.capacity() == 0) {
-                bm.slider_points.reserve(bytes_remaining / 14);
-                bm.sliders.reserve(bytes_remaining / 48);
-            }
-            return parse_slider_params(bm, h, p + 1, end);
-        }
-        if (h.type & 8 || h.type & 128) {  // spinner / mania hold
-            if (p >= end || *p != ',') return false;
-            int64_t t;
-            const char* q = parse_i64(p + 1, end, t);
-            if (q == p + 1) return false;
-            h.end_time = clamp_i32(t);
-            p = q;
-            if ((h.type & 128) && p < end && *p == ':') ++p;
-            else if (p < end && *p == ',') ++p;
-            else {
-                h.hit_sample = {};
-                return true;
-            }
-            h.hit_sample = {p, static_cast<size_t>(end - p)};
-            return true;
-        }
-        // circle: optional trailing hitSample
-        if (p < end && *p == ',')
-            h.hit_sample = {p + 1, static_cast<size_t>(end - (p + 1))};
-        return true;
-    }();
-    if (!ok) {
+    if (!finish_hitobject(bm, h, line + next, line + len, bytes_remaining)) {
         bm.hit_objects.pop_back();
         ++bm.stats.malformed_lines;
     }
 }
+
+#if FOSU_SIMD_X86
+// Fused [HitObjects] section loop: one 32-byte load per line yields the
+// prefix delimiter mask AND the newline position (5-field circle lines —
+// the majority in real maps — never touch memchr). Returns the position
+// after the section.
+inline const char* parse_hitobjects_section(Beatmap& bm, const char* p,
+                                            const char* file_end) {
+    while (p < file_end) {
+        const char c = *p;
+        if (c == '\r' || c == '\n') {
+            ++p;
+            continue;
+        }
+        if (c == '[') return p;
+
+        bm.hit_objects.emplace_back();
+        HitObject& h = bm.hit_objects.back();
+        h.end_time = 0;
+        h.slider = HitObject::kNoSlider;
+        h.hit_sample = {};
+
+        uint32_t nl_mask;
+        const int next = fast_parse_prefix(p, h, nl_mask);
+
+        const char* nl = nl_mask
+                             ? p + _tzcnt_u32(nl_mask)
+                             : static_cast<const char*>(memchr(
+                                   p + 32, '\n',
+                                   file_end - p > 32
+                                       ? static_cast<size_t>(file_end - p) - 32
+                                       : 0));
+        const char* line_end = nl ? nl : file_end;
+        if (line_end > p && line_end[-1] == '\r') --line_end;
+        const char* next_line = nl ? nl + 1 : file_end;
+
+        bool ok;
+        if (next >= 0) {
+            ++bm.stats.fast_path_lines;
+            ok = finish_hitobject(bm, h, p + next, line_end,
+                                  static_cast<size_t>(file_end - p));
+        } else {
+            const int sn = scalar_parse_prefix(
+                p, static_cast<size_t>(line_end - p), h);
+            if (sn >= 0) {
+                ++bm.stats.slow_path_lines;
+                ok = finish_hitobject(bm, h, p + sn, line_end,
+                                      static_cast<size_t>(file_end - p));
+            } else {
+                ok = false;
+            }
+        }
+        if (!ok) {
+            bm.hit_objects.pop_back();
+            ++bm.stats.malformed_lines;
+        }
+        p = next_line;
+    }
+    return p;
+}
+#endif  // FOSU_SIMD_X86
 
 }  // namespace detail
 
@@ -459,12 +698,21 @@ inline Beatmap parse(const char* data, size_t size, ParseOptions opts = {}) {
         if (len == 0) goto next_line;
         if (*p == '[') {
             sec = match_section({p, len});
-            if (sec == Section::HitObjects)
+            if (sec == Section::HitObjects) {
                 bm.hit_objects.reserve(
                     bm.hit_objects.size() +
                     static_cast<size_t>(file_end - line_end) / 24);
-            else if (sec == Section::TimingPoints)
+#if FOSU_SIMD_X86
+                if (opts.use_simd) {
+                    p = parse_hitobjects_section(bm, nl ? nl + 1 : file_end,
+                                                 file_end);
+                    sec = Section::Unknown;
+                    continue;
+                }
+#endif
+            } else if (sec == Section::TimingPoints) {
                 bm.timing_points.reserve(256);
+            }
             goto next_line;
         }
         if (len >= 2 && p[0] == '/' && p[1] == '/') goto next_line;
@@ -482,24 +730,32 @@ inline Beatmap parse(const char* data, size_t size, ParseOptions opts = {}) {
                 break;
             }
             case Section::General:
+                if (len >= 5) parse_general_line(bm, p, len);
+                break;
             case Section::Editor:
+                if (len >= 5) parse_editor_line(bm, p, len);
+                break;
             case Section::Metadata:
+                if (len >= 5) parse_metadata_line(bm, p, len);
+                break;
             case Section::Difficulty:
+                if (len >= 5) parse_difficulty_line(bm, p, len, ar_specified);
+                break;
             case Section::Colours: {
                 std::string_view k, v;
-                if (!split_kv(p, len, k, v)) break;
-                if (sec == Section::General) parse_general_kv(bm, k, v);
-                else if (sec == Section::Editor) parse_editor_kv(bm, k, v);
-                else if (sec == Section::Metadata) parse_metadata_kv(bm, k, v);
-                else if (sec == Section::Difficulty)
-                    parse_difficulty_kv(bm, k, v, ar_specified);
-                else parse_colour_kv(bm, k, v);
+                if (split_kv(p, len, k, v)) parse_colour_kv(bm, k, v);
                 break;
             }
             case Section::Events:
                 parse_event_line(bm, p, len);
                 break;
             case Section::TimingPoints:
+#if FOSU_SIMD_X86
+                if (opts.use_simd) {
+                    parse_timing_point_line_fast(bm, p, line_end);
+                    break;
+                }
+#endif
                 parse_timing_point_line(bm, p, len);
                 break;
             case Section::HitObjects:

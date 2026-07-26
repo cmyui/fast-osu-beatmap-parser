@@ -208,6 +208,24 @@ static void test_old_format() {
     CHECK_EQ(bm.hit_objects[0].hitsound, 4u);
 }
 
+static void test_long_timing_offsets() {
+    // Offsets past the 8-byte SWAR window (>27h marathons) must defer to
+    // the generic parser, not vanish as malformed.
+    for (bool simd : {true, false}) {
+        auto bm = parse_str(
+            "osu file format v14\n"
+            "[TimingPoints]\n"
+            "123456789,300.5,4,2,1,60,1,0\n"
+            "4123456789,-50,4,2,1,60,0,0\n",
+            simd);
+        CHECK_EQ(bm.timing_points.size(), 2u);
+        CHECK(bm.timing_points[0].time == 123456789.0);
+        CHECK(bm.timing_points[1].time == 4123456789.0);
+        CHECK_EQ(bm.timing_points[0].volume, 60);
+        CHECK_EQ(bm.stats.malformed_lines, 0u);
+    }
+}
+
 static void test_mania_hold() {
     auto bm = parse_str(
         "osu file format v14\n"
@@ -440,7 +458,8 @@ static void test_fuzz_equivalence() {
         }
 
         fosu::HitObject fast{}, ref{};
-        const int fn = fosu::detail::fast_parse_prefix(buf, fast);
+        uint32_t nl_mask;
+        const int fn = fosu::detail::fast_parse_prefix(buf, fast, nl_mask);
         const int rn = fosu::detail::scalar_parse_prefix(buf, strlen(buf), ref);
         if (fn < 0) continue;
         ++fast_taken;
@@ -467,6 +486,7 @@ int main() {
     test_mania_hold();
     test_aspire_edge_cases();
     test_malformed();
+    test_long_timing_offsets();
     test_fuzz_parse_double();
     test_fuzz_parse_coord();
 #if FOSU_SIMD_X86

@@ -1,8 +1,17 @@
 # fast-osu-beatmap-parser (fosu)
 
 A header-only C++20 parser for the `.osu` beatmap format, built around a
-table-driven AVX2 fast path for hitobject lines, a zero-copy design, and a
-lenient scalar fallback so throughput never costs correctness.
+table-driven AVX2 fast path for hitobject lines, a zero-copy design, and
+data-fitting fast paths that exploit what editor-emitted files guarantee.
+
+**Design goal: performance for valid, editor-emitted beatmaps.** This
+project deliberately inverts the usual priority order — robustness against
+hand-edited/adversarial files and code readability are explicit non-goals.
+Format regularities observed in real ranked maps (integer timing offsets,
+key names unique on their first bytes, field-count conventions per format
+version) are treated as free information and exploited directly. Structurally
+surprising lines defer to generic fallback parsers rather than being
+validated up front, so common shapes pay nothing.
 
 The SIMD hitobject technique is based on a prototype by
 [Flamme](https://fla.me), extended here with parallel delimiter extraction,
@@ -106,8 +115,8 @@ across interleaved A/B runs (min-taking is robust to neighbor noise).
 
 | parser | MB/s | ns/object | vs baseline |
 |---|---|---|---|
-| fosu AVX2 | 808 | 56.5 | 6.4× |
-| fosu scalar | 619 | 73.6 | 4.7× |
+| fosu AVX2 | 883 | 51.6 | 6.5× |
+| fosu scalar | 630 | 72.4 | 4.7× |
 | getline+sscanf baseline | 135 | 340 | 1× |
 
 Hitobject-prefix microbenchmark (isolates the SIMD technique from parser
@@ -115,7 +124,7 @@ overhead): **5.2 ns/line AVX2 vs 20.6 ns/line scalar** — 4×, roughly
 19 cycles for a full `x,y,time,type,hitSound` parse.
 
 Homogeneous per-section costs (200k-line single-section corpora, AVX2
-path): circles 14 ns/line, sliders 84 ns/line, timing points 44 ns/line.
+path): circles 13 ns/line, sliders 73 ns/line, timing points 37 ns/line.
 
 A lesson learned the hard way: an earlier synthetic corpus (maps 10–50×
 larger than typical ranked maps, unrealistically sparse timing points)
@@ -140,20 +149,35 @@ Amdahl-limited (1.35× on Zen 4) — slider parameters, timing-point doubles,
 and line handling dominate once prefixes are cheap. The next wins are
 listed below.
 
-## Beyond the prefix: SWAR everywhere else
+## Beyond the prefix: SWAR + data-fitting everywhere else
 
 The non-prefix hot paths use branchless SWAR (plain integer ops, portable
-to ARM):
+to ARM) and format knowledge measured from real ranked maps:
 
+- **Fused [HitObjects] loop**: the section owns its own line iteration, and
+  the prefix's single 32-byte load doubles as the newline scan — a bare
+  5-field circle line (60% of real hitobject lines) is fully parsed,
+  including finding the line end, from one load. No memchr, no separate
+  probe.
 - **Slider control points** (`|x:y|…`): each coordinate's digit-run length
   comes from an 8-byte nibble-classify + tzcnt, and 1–4 digit values
   convert with two multiplies — no per-digit loop, no length branch
-  mispredicts. Signs and 5+ digit Aspire values take the general path.
+  mispredicts. Points write through a raw cursor with one bounds ensure
+  per slider; the trailing edgeSounds/edgeSets/hitSample fields get their
+  comma positions from a single 32-byte scan. Signs and 5+ digit Aspire
+  values take the general path.
+- **Timing points**: offsets are integers in every editor-emitted file
+  sampled (6.6k real timing points), so they parse as one SWAR run; the
+  up-to-six-small-int tail is extracted branchlessly from one 32-byte
+  delimiter mask instead of six parse calls. Odd shapes (decimal offsets,
+  >27h timestamps) defer to the generic parser.
 - **Decimal parsing** (`parse_double`): digit runs are consumed 8 at a
   time with the three-multiply SWAR reduction; >18 significant digits or
   exponents delegate to strtod.
-- **Line splitting**: a 32-byte AVX2 newline probe resolves most lines
-  without a memchr call.
+- **Sections and keys dispatch on their first bytes**: `[G` can only be
+  `[General]`, `Titl` + one byte distinguishes `Title`/`TitleUnicode`, and
+  the matched key's known length locates the value — no full string
+  compares, no memchr, no trim.
 - **Slider pools** are reserved once per map, at the first slider — eager
   per-map reservation wastes multi-MB allocations on slider-free maps and
   costs more than the reallocations it avoids.
