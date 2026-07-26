@@ -808,9 +808,13 @@ inline void parse_into(const char* data, size_t size, Beatmap& bm,
         if (*p == '[') {
             sec = match_section({p, len});
             if (sec == Section::HitObjects) {
+                // /16: the shortest hitobject line observed across 167
+                // popular ranked maps is 15 bytes + newline; a smaller
+                // divisor only over-reserves (untouched pages are free),
+                // while under-reserving costs a full-array growth memmove.
                 bm.hit_objects.reserve(
                     bm.hit_objects.size() +
-                    static_cast<size_t>(file_end - line_end) / 24);
+                    static_cast<size_t>(file_end - line_end) / 16);
 #if FOSU_SIMD_X86
                 if (opts.use_simd) {
                     p = parse_hitobjects_section(bm, nl ? nl + 1 : file_end,

@@ -187,6 +187,23 @@ newline probe in the main line loop (deleted — the fused section loops
 had eroded its value to nothing) and the slider-extras 32-byte scan
 (kept pending a larger corpus; its measurement was inside noise).
 
+### The large corpus (popular maps)
+
+`bench/fetch_corpus_large.sh` fetches the second corpus: 167 .osu files
+from the 43 most-played ranked mapsets (all-time playcount via mirror
+APIs, cross-checked between osu.direct and nerinyan; top sets per mode;
+plus the most-played recently-ranked sets for modern file shapes).
+3.86 MB, 70,732 hitobjects, corpus checksum `c16c5c00b51eaa2e`.
+
+A structural census across it validated every data-fitting assumption:
+slider coordinates never exceed 3 digits (0.40% signed), times never
+exceed 6 digits, beat_length fractions never exceed 13 digits, and the
+pool reserve estimates never under-reserve — except one: the
+hit_objects `/24` bytes-per-object divisor under-reserved on exactly one
+file (an old Big Black diff with bare 15-byte lines), which is why the
+divisor is now `/16` (the corpus-wide minimum line + newline). The
+17-file corpus stays as the historical comparison anchor.
+
 A lesson learned the hard way: an earlier synthetic corpus (maps 10–50×
 larger than typical ranked maps, unrealistically sparse timing points)
 showed a *regression* for changes that are a clear win on real maps —
