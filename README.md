@@ -159,6 +159,13 @@ mallopt(M_TRIM_THRESHOLD, INT_MAX);    // the heap never shrinks
 // fresh parse() measured 900 -> 1236 MB/s with these — equal to reuse.
 ```
 
+These are process-global application policy (they change how the whole
+program's malloc behaves), so fosu never sets them itself — and a
+process that can simply keep a `Beatmap` alive should prefer
+`parse_into`, which achieves the identical effect scoped to one
+object's pools. Non-glibc allocators (jemalloc/tcmalloc/mimalloc)
+return pages lazily and shrink this gap on their own.
+
 Hitobject-prefix microbenchmark (isolates the SIMD technique from parser
 overhead): **4.1 ns/line AVX2 vs 20.6 ns/line scalar** — 5×, roughly
 15 cycles for a full `x,y,time,type,hitSound` parse.
