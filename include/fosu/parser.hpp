@@ -793,24 +793,13 @@ inline void parse_into(const char* data, size_t size, Beatmap& bm,
     bool ar_specified = false;
 
     while (p < file_end) {
-        const char* nl;
-#if FOSU_SIMD_X86 && !defined(FOSU_NO_LINE_PROBE)
-        // Most lines fit in one 32-byte probe (the buffer padding contains
-        // no '\n', so hits are always within the file); longer lines fall
-        // through to memchr for the remainder.
-        const auto probe = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
-        const auto nl_mask = static_cast<uint32_t>(_mm256_movemask_epi8(
-            _mm256_cmpeq_epi8(probe, _mm256_set1_epi8('\n'))));
-        if (nl_mask)
-            nl = p + _tzcnt_u32(nl_mask);
-        else if (file_end - p <= 32)
-            nl = nullptr;
-        else
-            nl = static_cast<const char*>(
-                memchr(p + 32, '\n', static_cast<size_t>(file_end - p) - 32));
-#else
-        nl = static_cast<const char*>(memchr(p, '\n', file_end - p));
-#endif
+        // The fused section loops consume [TimingPoints]/[HitObjects] —
+        // 95%+ of file bytes — so this loop only walks headers, metadata,
+        // and events, where per-line memchr is free. (A 32-byte SIMD line
+        // probe here measured exactly zero in the ablation audit: its
+        // value was eroded to nothing when the fused sections landed.)
+        const char* nl =
+            static_cast<const char*>(memchr(p, '\n', file_end - p));
         const char* line_end = nl ? nl : file_end;
         if (line_end > p && line_end[-1] == '\r') --line_end;
         const size_t len = static_cast<size_t>(line_end - p);

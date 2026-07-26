@@ -153,6 +153,19 @@ Homogeneous per-section costs (AVX2 path): circles 13 ns/line, sliders
 73 ns/line (200k-line synthetic corpora), timing points 29 ns/line
 (measured on the corpus's 6,629 real timing lines, whole-parse).
 
+### What each optimization is worth (ablation audit)
+
+Each fast path toggled off individually against the full build (July
+2026, same interleaved-rounds methodology). Marginal value on the real
+corpus today: hit_objects reserve estimate **+27%**, deferred slider
+pool reserve **+16%**, one-pass timing parser **+7.8%**, timing fused
+section **+4.5%**, hitobjects fused section **+4.3%** (measured with the
+SIMD prefix retained per-line, so this is fusion itself), SWAR
+coordinate path **+4.2%**. Two pieces measured ~zero: a 32-byte SIMD
+newline probe in the main line loop (deleted — the fused section loops
+had eroded its value to nothing) and the slider-extras 32-byte scan
+(kept pending a larger corpus; its measurement was inside noise).
+
 A lesson learned the hard way: an earlier synthetic corpus (maps 10–50×
 larger than typical ranked maps, unrealistically sparse timing points)
 showed a *regression* for changes that are a clear win on real maps —
