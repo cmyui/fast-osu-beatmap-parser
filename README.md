@@ -162,11 +162,20 @@ Benchmark against real beatmaps.
 ### Build notes (from the disassembly audit)
 
 - **gcc over clang**: gcc 13 measures ~6% faster than clang 18 on this
-  code (823-857 vs 879-920 MB/s across interleaved rounds).
-- **PGO is worth +2-3%**: `make bench-pgo BENCH_ARGS=bench/corpus` trains
-  on the corpus and rebuilds with measured branch probabilities (fresh
-  parse up to ~950 MB/s, reuse ~1290 MB/s). Header-only libraries can't
-  ship a profile; consumers should train on their own workload.
+  code (823-857 vs 879-920 MB/s across interleaved rounds) — and clang
+  with its own PGO does not close the gap, so the difference is codegen
+  quality on intrinsics-heavy code, not branch-layout luck.
+- **Tuning flags are worth +4-6% combined** (now the Linux default in
+  the Makefile): `-mtune=znver4` alone is +3-5% — pure Zen 4 instruction
+  scheduling, same portable x86-64-v3 ISA — plus `-fno-plt` and
+  `-fno-stack-protector` (Ubuntu enables stack-protector-strong by
+  default). `-march=native` measured no better than `-mtune` alone: the
+  extra AVX-512 ISA buys the compiler nothing here.
+- **PGO is worth +2-3% on top**: `make bench-pgo BENCH_ARGS=bench/corpus`
+  trains on the corpus and rebuilds with measured branch probabilities.
+  Full stack (tuning + PGO) peaks at ~970 MB/s fresh / ~1290 MB/s reuse.
+  Header-only libraries can't ship a profile; consumers should train on
+  their own workload.
 - Two audit findings are baked into the source: `HitObject` construction
   skips `emplace_back()`'s 48-byte zero-fill (the parser writes every
   field on all paths), and the timing-point fast parser is force-inlined
