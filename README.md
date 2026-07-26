@@ -1,8 +1,9 @@
 # fast-osu-beatmap-parser (fosu)
 
 A header-only C++20 parser for the `.osu` beatmap format, built around a
-table-driven AVX2 fast path for hitobject lines, a zero-copy design, and
-data-fitting fast paths that exploit what editor-emitted files guarantee.
+table-driven AVX2 fast path for hitobject lines, a zero-copy design,
+adaptive shape caching, section-selective parsing, and data-fitting fast
+paths that exploit what editor-emitted files guarantee.
 
 **Design goal: performance for valid, editor-emitted beatmaps.** This
 project deliberately inverts the usual priority order — robustness against
@@ -135,12 +136,21 @@ type syntax (v128+ files), decimal `x,y` on the fast path (falls back).
 
 ## Benchmarks
 
-Real-map corpus (`bench/fetch_corpus.sh`): 17 ranked .osu files spanning
-format v3–v14 — The Unforgiving (13-diff 2012 marathon album, ~500 timing
-points per diff), Freedom Dive, The Big Black, Blue Zenith, and Disco
-Prince (the first ranked map, 2007). 0.82 MB, 17,902 hitobjects, 100%
-taken by the fast path, zero malformed lines. Best of 9 runs, single
-thread. `make bench BENCH_ARGS=bench/corpus` reproduces.
+All numbers come from real ranked beatmaps. Three corpora, three roles:
+
+| corpus | files | size | objects | checksum | role |
+|---|---|---|---|---|---|
+| historical (`bench/fetch_corpus.sh`) | 17 | 0.82 MB | 17,902 | `e7f15a16a8370431` | continuity anchor — every number ever reported |
+| popular (`bench/fetch_corpus_large.sh`) | 167 | 3.86 MB | 70,732 | `c16c5c00b51eaa2e` | most-played ranked sets, census + validation |
+| production | 10,011 | 438 MB | 8,730,940 | `272b2f66dcd5f90a` | ranked maps by a private server's playcounts (contains play data, not distributed) — the adjudicator |
+
+The historical corpus: The Unforgiving (13-diff 2012 marathon album,
+~500 timing points per diff), Freedom Dive, The Big Black, Blue Zenith,
+and Disco Prince (the first ranked map, 2007); 100% fast-path, zero
+malformed lines. Best of 9 runs, single thread; `make bench
+BENCH_ARGS=bench/corpus` reproduces. The production corpus parses at
+~1.4–1.5 GB/s fresh even though 438 MB cannot fit in L3 — the parser
+streams from DRAM without becoming memory-bound.
 
 ### AMD EPYC Genoa (Zen 4), Ubuntu 24.04, gcc 13.3
 
@@ -191,12 +201,21 @@ Hitobject-prefix microbenchmark (isolates the SIMD technique from parser
 overhead): **4.1 ns/line AVX2 vs 20.6 ns/line scalar** — 5×, roughly
 15 cycles for a full `x,y,time,type,hitSound` parse.
 
-Homogeneous per-section costs (AVX2 path): circles 13 ns/line, timing
-points 29 ns/line (the corpus's 6,629 real timing lines, integrated).
-The slider params portion measures ~42 ns/slider isolated on the
-corpus's 5,127 real slider lines; a dedicated deep-dive (SIMD point
-kernels, fused tail, pool cursor) measured every variant within noise
-of the shipped code — that path is at its floor.
+Per-line-class budgets, measured on homogeneous workloads built from
+the production corpus's real lines (steady-state reuse, hardware
+counters):
+
+| line class | bytes/line | cycles/line | instructions/line | IPC |
+|---|---|---|---|---|
+| circles | 27.8 | 40.4 | 152 | 3.76 |
+| sliders | 67.2 | 198.8 | 725 | 3.65 |
+| timing points | 32.5 | ~106 (with shape cache) | ~354 | 3.4 |
+
+All three classes run at IPC 3.4–3.8: the parser is throughput-bound,
+not latency- or mispredict-bound. The slider params portion measured
+~42 ns/slider isolated; a dedicated deep-dive (SIMD point kernels,
+fused tail, pool cursor) measured every variant within noise of the
+shipped code — that path is at its floor.
 
 ### What each optimization is worth (ablation audit)
 
@@ -209,7 +228,8 @@ SIMD prefix retained per-line, so this is fusion itself), SWAR
 coordinate path **+4.2%**. Two pieces measured ~zero: a 32-byte SIMD
 newline probe in the main line loop (deleted — the fused section loops
 had eroded its value to nothing) and the slider-extras 32-byte scan
-(kept pending a larger corpus; its measurement was inside noise).
+(kept; its ceiling remained inside measurement noise at every corpus
+size).
 
 ### The large corpus (popular maps)
 
@@ -219,14 +239,16 @@ APIs, cross-checked between osu.direct and nerinyan; top sets per mode;
 plus the most-played recently-ranked sets for modern file shapes).
 3.86 MB, 70,732 hitobjects, corpus checksum `c16c5c00b51eaa2e`.
 
-A structural census across it validated every data-fitting assumption:
-slider coordinates never exceed 3 digits (0.40% signed), times never
-exceed 6 digits, beat_length fractions never exceed 13 digits, and the
-pool reserve estimates never under-reserve — except one: the
-hit_objects `/24` bytes-per-object divisor under-reserved on exactly one
-file (an old Big Black diff with bare 15-byte lines), which is why the
-divisor is now `/16` (the corpus-wide minimum line + newline). The
-17-file corpus stays as the historical comparison anchor.
+A structural census — re-run at 10,011-map scale on the production
+corpus — validated every data-fitting assumption against the real
+population: slider coordinates exceed 3 digits in 33 of 12.3 million
+(0.62% signed), times top out at 7 digits (the fast path allows 8),
+beat_length fractions exceed 13 digits in 10 of 1.16 million lines, and
+the pool reserve estimates never under-reserve across all 10,011 files.
+The one census-found defect: the hit_objects `/24` bytes-per-object
+divisor under-reserved on old Big Black diffs with bare 15-byte lines,
+which is why the divisor is now `/16` (the observed minimum line +
+newline; `/24` would have under-reserved on 81 of the 10k files).
 
 A lesson learned the hard way: an earlier synthetic corpus (maps 10–50×
 larger than typical ranked maps, unrealistically sparse timing points)
@@ -327,7 +349,20 @@ to ARM) and format knowledge measured from real ranked maps:
   `popcount(nondigits) == commas + dot + minus` — decides. Odd shapes
   (old 2/7-field formats, decimal offsets, >27h timestamps) defer to the
   generic parser. Measured 65 -> 29 ns/line on all 6,629 real timing
-  lines of the corpus, integrated.
+  lines of the corpus, integrated. On top of that sits an adaptive
+  **shape cache**: a section's accepted lines deposit their exact
+  (comma mask, nondigit mask, length) layout in a 16-entry table, and a
+  matching later line replays through cached geometry — validity by key
+  equality, the six small tail fields converted together by one cached
+  shuffle + maddubs. The 10k census says the top 8 exact shapes cover a
+  median 98.1% of a file's timing lines; measured +6.8% on timing
+  (~29 -> ~27 ns/line). Timing sections are the one place this pays:
+  they are shape-homogeneous, so the hit/miss branch predicts (see the
+  entropy note below).
+- **Section-selective parsing**: unwanted sections skip via one memchr
+  jump and parsing stops once everything requested has been seen —
+  0.39us vs 29.6us per map (~75x) for a difficulty-only caller on the
+  production corpus.
 - **Decimal parsing** (`parse_double`): digit runs are consumed 8 at a
   time with the three-multiply SWAR reduction; >18 significant digits or
   exponents delegate to strtod.
@@ -338,6 +373,35 @@ to ARM) and format knowledge measured from real ranked maps:
 - **Slider pools** are reserved once per map, at the first slider — eager
   per-map reservation wastes multi-MB allocations on slider-free maps and
   costs more than the reallocations it avoids.
+
+## Why the hot loop's branches stay (the entropy-payment result)
+
+The deepest finding of the project. A circle line costs 152 instructions
+of which only ~25 convert digits — the rest is dispatch, validation and
+bookkeeping — so an instruction-count attack looks obvious. Three
+architectures were built, fuzz-pinned to bit-identical output, and
+measured against the fused loop:
+
+| how the circle/slider entropy is paid | result |
+|---|---|
+| predicted branches, in place (the shipped fused single-pass loop) | **champion** |
+| one hit/miss branch + per-shape replay (single-pass shape cache) | −3–5% (+8.3% branch misses: the branch is a coin flip in kind-interleaved files) |
+| branchless binning + homogeneous per-shape kernels (two-pass) | −22% (branch misses *fell* 23% and it lost anyway: records, a second pass and three traversals cost more than the branches did) |
+
+The per-shape circle kernel itself measures **+37%** on a pure-circle
+stream — the savings are real — but every delivery mechanism costs more
+than it earns, because a beatmap's circle/slider interleaving is
+genuine information that must be paid for somewhere, and the predictor
+sitting on one well-placed branch with full local history is the
+cheapest known way to pay it. Corollaries measured along the way:
+replacing four never-failing byte compares with mask arithmetic lost
+1.3% (predicted branches are free; arithmetic is not), and `[[likely]]`
+annotations lost 5% to code-layout perturbation. The floor claim is
+therefore not "minimal instructions" but **minimal expected cost under
+the real branch distribution** — and the timing shape cache is the
+exception that proves it: timing sections are shape-homogeneous, so
+their hit/miss branch predicts, and the same idea that loses 3–5% on
+hit objects wins 6.8% there.
 
 ## Future work
 
@@ -351,12 +415,19 @@ to ARM) and format knowledge measured from real ranked maps:
   (embarrassingly parallel; per-thread `parse_into` state), and a
   parse-once binary `Beatmap` cache for repeat workloads (recalc
   pipelines re-parse the same maps every rework).
-- `[Events]` batch-skipping (~10% of bytes are storyboard lines that get
-  per-line dispatch; worth ~1-2%) — the largest unexploited data-fit item.
-
-Closed with measurements (see the ablation/audit notes above): the
-slider path is at its floor — SIMD point kernels (AVX2 and AVX-512
-compress/expand), a fused speculative tail, and pool-cursor writes all
-measured within noise of the shipped code; explicit line pipelining of
-the hitobjects loop measured 19% *slower* (the fused loop is
-throughput-bound, and the out-of-order core already overlaps lines).
+Closed with measurements, so nobody re-treads them: the slider path is
+at its floor (SIMD point kernels, fused speculative tail, pool-cursor
+writes: all within noise); line pipelining −19%; the single-pass
+hitobject shape cache −3–5% and the branchless binned two-pass −22%
+(the entropy result above); comma-mask folding −1.3% and mask-derived
+hitSound corpus-dependent (both replaced free predicted branches with
+paid arithmetic); `[[likely]]` hints −5%; `-fwhole-program`/static
+linkage neutral to −6% (gcc's inlining judgment was already right);
+splat-constant hoisting mechanically successful but a wash (the
+rematerialization executes in OOO slack); mmap −13%; `-march=native` no
+better than `-mtune`; `[Events]` batch-skipping subsumed and
+closed: for callers that don't want the section, selective parsing
+skips it entirely (the idea, generalized); for full parses that keep
+breaks/backgrounds, the residual in-section skim was declined by gate
+measurement — events content already parses at 3.7 GB/s, ~2.8% of total
+cycles, a ~+1.4% ceiling.
