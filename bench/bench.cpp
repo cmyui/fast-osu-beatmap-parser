@@ -238,6 +238,23 @@ int main(int argc, char** argv) {
         },
         kReps);
     report("fosu (AVX2)", simd, total_bytes, total_objects);
+
+    fosu::Beatmap reused;
+    const auto simd_reuse = run_bench(
+        [&] {
+            uint64_t sum = 0;
+            for (const auto& b : padded) {
+                fosu::parse_into(b, reused, {.use_simd = true});
+                sum ^= checksum(reused);
+            }
+            return sum;
+        },
+        kReps);
+    report("fosu (AVX2, reuse)", simd_reuse, total_bytes, total_objects);
+    if (simd_reuse.check != simd.check) {
+        printf("CHECKSUM MISMATCH between fresh and reused Beatmap!\n");
+        return 1;
+    }
 #endif
 
     const auto scalar = run_bench(

@@ -745,14 +745,41 @@ inline const char* parse_hitobjects_section(Beatmap& bm, const char* p,
 }
 #endif  // FOSU_SIMD_X86
 
+// Resets bm for reuse: every field returns to its default, but vector
+// capacity is kept, so the steady state of a parse-many loop allocates
+// nothing and touches no new pages.
+inline void reset_for_reuse(Beatmap& bm) {
+    auto breaks = std::move(bm.breaks);
+    auto colours = std::move(bm.combo_colours);
+    auto tps = std::move(bm.timing_points);
+    auto objs = std::move(bm.hit_objects);
+    auto sliders = std::move(bm.sliders);
+    auto points = std::move(bm.slider_points);
+    bm = Beatmap{};
+    breaks.clear();
+    colours.clear();
+    tps.clear();
+    objs.clear();
+    sliders.clear();
+    points.clear();
+    bm.breaks = std::move(breaks);
+    bm.combo_colours = std::move(colours);
+    bm.timing_points = std::move(tps);
+    bm.hit_objects = std::move(objs);
+    bm.sliders = std::move(sliders);
+    bm.slider_points = std::move(points);
+}
+
 }  // namespace detail
 
 // `data` must be followed by kBufferPadding readable zero bytes (io.hpp).
 // String fields of the result view into `data`; keep the buffer alive.
-inline Beatmap parse(const char* data, size_t size,
-                     [[maybe_unused]] ParseOptions opts = {}) {
+// parse_into clears bm (keeping vector capacity) and fills it; pass the
+// same Beatmap across calls to parse many files without allocating.
+inline void parse_into(const char* data, size_t size, Beatmap& bm,
+                       [[maybe_unused]] ParseOptions opts = {}) {
     using namespace detail;
-    Beatmap bm;
+    reset_for_reuse(bm);
     const char* p = data;
     const char* file_end = data + size;
     if (size >= 3 && static_cast<uint8_t>(p[0]) == 0xEF &&
@@ -864,11 +891,23 @@ inline Beatmap parse(const char* data, size_t size,
 
     // Old format versions omit ApproachRate; it mirrors OverallDifficulty.
     if (!ar_specified) bm.ar = bm.od;
+}
+
+inline void parse_into(const FileBuffer& buf, Beatmap& bm,
+                       ParseOptions opts = {}) {
+    parse_into(buf.data.get(), buf.size, bm, opts);
+}
+
+inline Beatmap parse(const char* data, size_t size, ParseOptions opts = {}) {
+    Beatmap bm;
+    parse_into(data, size, bm, opts);
     return bm;
 }
 
 inline Beatmap parse(const FileBuffer& buf, ParseOptions opts = {}) {
-    return parse(buf.data.get(), buf.size, opts);
+    Beatmap bm;
+    parse_into(buf.data.get(), buf.size, bm, opts);
+    return bm;
 }
 
 }  // namespace fosu

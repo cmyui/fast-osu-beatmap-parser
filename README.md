@@ -23,11 +23,25 @@ around it.
 ```cpp
 #include <fosu/parser.hpp>
 
-auto buf = fosu::read_file_padded("map.osu");   // guarantees 64B zero padding
+auto buf = fosu::read_file_padded("map.osu");   // guarantees 128B zero padding
 fosu::Beatmap bm = fosu::parse(buf);
 // bm.hit_objects, bm.timing_points, bm.sliders, bm.ar, bm.title, ...
 // string_view fields point into `buf` — keep it alive.
+
+// Parse-many loop: reuse both buffers and the steady state allocates
+// nothing (+32% measured on real maps; see Benchmarks).
+fosu::FileBuffer fb;
+fosu::Beatmap bm2;
+for (const char* path : paths) {
+    if (!fosu::read_into(path, fb)) continue;
+    fosu::parse_into(fb, bm2);      // clears bm2, keeps vector capacity
+    consume(bm2);                   // valid until the next parse_into
+}
 ```
+
+Bytes that don't come from a file (e.g. an HTTP body) parse zero-copy via
+`fosu::parse(data, size)` as long as the buffer has `fosu::kBufferPadding`
+(128) readable zero bytes past the end.
 
 ```sh
 make test          # native + x86-64-v3 test suites (Rosetta on Apple Silicon)
@@ -81,8 +95,8 @@ asserts the invariant *fast path accepts ⇒ results byte-identical to the
 scalar reference*, and the benchmark cross-checks full-corpus checksums
 between both paths on every run.
 
-Both paths require `fosu::kBufferPadding` (64) readable zero bytes past the
-buffer end — `read_file_padded`/`make_padded` provide this.
+Both paths require `fosu::kBufferPadding` (128) readable zero bytes past the
+buffer end — `read_file_padded`/`read_into`/`make_padded` provide this.
 
 ## Format coverage
 
@@ -118,9 +132,16 @@ across interleaved A/B runs (min-taking is robust to neighbor noise).
 
 | parser | MB/s | ns/object | vs baseline |
 |---|---|---|---|
+| fosu AVX2, reused `Beatmap` (`parse_into`) | 1170 | 38.9 | 8.7× |
 | fosu AVX2 | 910 | 50.1 | 6.7× |
 | fosu scalar | 630 | 72.4 | 4.7× |
 | getline+sscanf baseline | 135 | 340 | 1× |
+
+The `parse_into` row is the same parser writing into a reused `Beatmap`
+(vector capacity kept across parses): constructing and destroying a fresh
+result object costs ~25% of the entire parse in malloc, first-touch page
+faults, and free. Both rows produce bit-identical results (whole-corpus
+checksum cross-checked every run).
 
 Hitobject-prefix microbenchmark (isolates the SIMD technique from parser
 overhead): **4.1 ns/line AVX2 vs 20.6 ns/line scalar** — 5×, roughly
@@ -135,6 +156,30 @@ larger than typical ranked maps, unrealistically sparse timing points)
 showed a *regression* for changes that are a clear win on real maps —
 allocation and code-layout effects dominate at unrealistic map sizes.
 Benchmark against real beatmaps.
+
+### I/O strategy (why there's no mmap)
+
+Measured end-to-end (open → bytes → parse → release) on the same corpus,
+hot page cache, min-of-reps per phase: byte acquisition was 16.5% of
+end-to-end with the original stdio path. Three findings now baked into
+`io.hpp`:
+
+- `std::make_unique<char[]>` value-initializes — the old read path
+  memset the whole buffer to zero and then `fread` over it;
+- raw `open`/`fstat`/`read` beats the stdio equivalent by ~2.6 µs/file
+  (FILE allocation, seek-based sizing, buffering logic);
+- **mmap measured 13% slower end-to-end than `read()`** despite the
+  cheapest acquire: per-file `munmap` costs about as much as the entire
+  read copy, and first-touch soft faults land inside the parse loop.
+  `MAP_POPULATE` just moves the fault cost and keeps the munmap bill.
+  Small hot files parsed once sequentially are `read()`'s home turf.
+
+Together: 895 → 951 MB/s end-to-end from the read side alone, on top of
+the `parse_into` gain above. The fixed syscall floor (`open`+`fstat`+
+`close`) is ~3 µs/file on this VM — the remaining I/O cost is not
+attackable without batching (io_uring) or skipping the filesystem, and
+production consumers feeding network bytes through `parse(data, size)`
+skip it entirely.
 
 ### Apple M3, macOS 26 (Rosetta 2 for the x86 rows)
 

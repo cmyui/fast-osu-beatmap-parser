@@ -1,8 +1,12 @@
+#include <unistd.h>
+
 #include <cinttypes>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
+#include <string_view>
 
 #include <fosu/parser.hpp>
 
@@ -549,6 +553,201 @@ static void test_fuzz_equivalence() {
 }
 #endif
 
+// --- parse_into / read_into reuse ---------------------------------------
+
+static uint64_t fp_mix(uint64_t h, uint64_t v) {
+    h ^= v + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2);
+    return h;
+}
+static uint64_t fp_sv(uint64_t h, std::string_view s) {
+    h = fp_mix(h, s.size());
+    for (char c : s) h = fp_mix(h, static_cast<uint8_t>(c));
+    return h;
+}
+static uint64_t fp_d(uint64_t h, double d) {
+    uint64_t b;
+    memcpy(&b, &d, 8);
+    return fp_mix(h, b);
+}
+
+// Covers every Beatmap field so reused-vs-fresh divergence anywhere shows.
+static uint64_t fingerprint(const fosu::Beatmap& bm) {
+    uint64_t h = 0;
+    h = fp_mix(h, static_cast<uint64_t>(bm.format_version));
+    h = fp_sv(h, bm.audio_filename);
+    h = fp_mix(h, static_cast<uint32_t>(bm.audio_lead_in));
+    h = fp_mix(h, static_cast<uint32_t>(bm.preview_time));
+    h = fp_mix(h, static_cast<uint32_t>(bm.countdown));
+    h = fp_sv(h, bm.sample_set);
+    h = fp_d(h, bm.stack_leniency);
+    h = fp_mix(h, static_cast<uint32_t>(bm.mode));
+    h = fp_mix(h, bm.letterbox_in_breaks);
+    h = fp_mix(h, bm.widescreen_storyboard);
+    h = fp_mix(h, bm.epilepsy_warning);
+    h = fp_mix(h, bm.special_style);
+    h = fp_mix(h, bm.use_skin_sprites);
+    h = fp_mix(h, bm.samples_match_playback_rate);
+    h = fp_mix(h, static_cast<uint32_t>(bm.countdown_offset));
+    h = fp_sv(h, bm.overlay_position);
+    h = fp_sv(h, bm.skin_preference);
+    h = fp_sv(h, bm.bookmarks);
+    h = fp_d(h, bm.distance_spacing);
+    h = fp_mix(h, static_cast<uint32_t>(bm.beat_divisor));
+    h = fp_mix(h, static_cast<uint32_t>(bm.grid_size));
+    h = fp_d(h, bm.timeline_zoom);
+    h = fp_sv(h, bm.title);
+    h = fp_sv(h, bm.title_unicode);
+    h = fp_sv(h, bm.artist);
+    h = fp_sv(h, bm.artist_unicode);
+    h = fp_sv(h, bm.creator);
+    h = fp_sv(h, bm.version);
+    h = fp_sv(h, bm.source);
+    h = fp_sv(h, bm.tags);
+    h = fp_mix(h, static_cast<uint64_t>(bm.beatmap_id));
+    h = fp_mix(h, static_cast<uint64_t>(bm.beatmap_set_id));
+    h = fp_d(h, bm.hp);
+    h = fp_d(h, bm.cs);
+    h = fp_d(h, bm.od);
+    h = fp_d(h, bm.ar);
+    h = fp_d(h, bm.slider_multiplier);
+    h = fp_d(h, bm.slider_tick_rate);
+    h = fp_sv(h, bm.background);
+    h = fp_sv(h, bm.video);
+    h = fp_mix(h, bm.breaks.size());
+    for (const auto& b : bm.breaks) {
+        h = fp_mix(h, static_cast<uint32_t>(b.start));
+        h = fp_mix(h, static_cast<uint32_t>(b.end));
+    }
+    h = fp_mix(h, bm.combo_colours.size());
+    for (uint32_t c : bm.combo_colours) h = fp_mix(h, c);
+    h = fp_mix(h, bm.timing_points.size());
+    for (const auto& tp : bm.timing_points) {
+        h = fp_d(h, tp.time);
+        h = fp_d(h, tp.beat_length);
+        h = fp_mix(h, static_cast<uint32_t>(tp.meter));
+        h = fp_mix(h, static_cast<uint32_t>(tp.sample_set));
+        h = fp_mix(h, static_cast<uint32_t>(tp.sample_index));
+        h = fp_mix(h, static_cast<uint32_t>(tp.volume));
+        h = fp_mix(h, tp.uninherited);
+        h = fp_mix(h, tp.effects);
+    }
+    h = fp_mix(h, bm.hit_objects.size());
+    for (const auto& o : bm.hit_objects) {
+        h = fp_mix(h, static_cast<uint32_t>(o.x));
+        h = fp_mix(h, static_cast<uint32_t>(o.y));
+        h = fp_mix(h, o.type);
+        h = fp_mix(h, o.hitsound);
+        h = fp_mix(h, static_cast<uint32_t>(o.time));
+        h = fp_mix(h, static_cast<uint32_t>(o.end_time));
+        h = fp_mix(h, o.slider);
+        h = fp_sv(h, o.hit_sample);
+    }
+    h = fp_mix(h, bm.sliders.size());
+    for (const auto& s : bm.sliders) {
+        h = fp_mix(h, s.point_begin);
+        h = fp_mix(h, s.point_count);
+        h = fp_mix(h, static_cast<uint32_t>(s.slides));
+        h = fp_d(h, s.length);
+        h = fp_mix(h, static_cast<uint8_t>(s.curve_type));
+        h = fp_sv(h, s.edge_sounds);
+        h = fp_sv(h, s.edge_sets);
+    }
+    h = fp_mix(h, bm.slider_points.size());
+    for (const auto& p : bm.slider_points) {
+        h = fp_mix(h, static_cast<uint32_t>(p.x));
+        h = fp_mix(h, static_cast<uint32_t>(p.y));
+    }
+    h = fp_mix(h, bm.stats.fast_path_lines);
+    h = fp_mix(h, bm.stats.slow_path_lines);
+    h = fp_mix(h, bm.stats.malformed_lines);
+    h = fp_mix(h, bm.stats.storyboard_lines);
+    return h;
+}
+
+static const char* kSmallMap =
+    "osu file format v11\r\n"
+    "[General]\r\n"
+    "AudioFilename: b.mp3\r\n"
+    "Mode: 3\r\n"
+    "[Metadata]\r\n"
+    "Title:Second\r\n"
+    "BeatmapID:42\r\n"
+    "[Difficulty]\r\n"
+    "HPDrainRate:3\r\n"
+    "OverallDifficulty:7\r\n"
+    "[TimingPoints]\r\n"
+    "500,400,4,1,0,80,1,0\r\n"
+    "[HitObjects]\r\n"
+    "100,100,500,1,0\r\n"
+    "256,192,1000,12,0,2000\r\n";
+
+void test_parse_into_reuse() {
+    printf("parse_into reuse\n");
+    fosu::FileBuffer full = fosu::make_padded(kFullMap);
+    fosu::FileBuffer small = fosu::make_padded(kSmallMap);
+    fosu::FileBuffer empty = fosu::make_padded("osu file format v14\r\n");
+
+    fosu::Beatmap bm;
+    fosu::parse_into(full, bm);
+    CHECK_EQ(fingerprint(bm), fingerprint(fosu::parse(full)));
+    const size_t cap_objs = bm.hit_objects.capacity();
+
+    // Shrinking reuse: stale fullmap state must not leak into the result.
+    fosu::parse_into(small, bm);
+    CHECK_EQ(fingerprint(bm), fingerprint(fosu::parse(small)));
+    CHECK(bm.hit_objects.capacity() >= cap_objs);  // capacity kept
+    CHECK(bm.title == "Second");
+    CHECK(bm.background.empty());
+    CHECK_EQ(bm.combo_colours.size(), 0u);
+
+    // Growing reuse.
+    fosu::parse_into(full, bm);
+    CHECK_EQ(fingerprint(bm), fingerprint(fosu::parse(full)));
+
+    // Near-empty file: everything back at defaults.
+    fosu::parse_into(empty, bm);
+    CHECK_EQ(fingerprint(bm), fingerprint(fosu::parse(empty)));
+    CHECK_EQ(bm.hit_objects.size(), 0u);
+    CHECK(std::abs(bm.stack_leniency - 0.7) < 1e-12);
+    CHECK(bm.sample_set == "Normal");
+}
+
+void test_read_into_reuse() {
+    printf("read_into reuse\n");
+    char path[] = "/tmp/fosu_read_into_XXXXXX";
+    const int fd = mkstemp(path);
+    CHECK(fd >= 0);
+    const std::string big(10000, 'A');
+    const std::string little(100, 'B');
+    CHECK_EQ(write(fd, big.data(), big.size()),
+             static_cast<ssize_t>(big.size()));
+    close(fd);
+
+    fosu::FileBuffer buf;
+    CHECK(fosu::read_into(path, buf));
+    CHECK_EQ(buf.size, big.size());
+    CHECK(memcmp(buf.data.get(), big.data(), big.size()) == 0);
+    const char* alloc0 = buf.data.get();
+    const size_t cap0 = buf.capacity;
+
+    FILE* f = fopen(path, "wb");
+    fwrite(little.data(), 1, little.size(), f);
+    fclose(f);
+
+    CHECK(fosu::read_into(path, buf));
+    CHECK_EQ(buf.size, little.size());
+    CHECK(buf.data.get() == alloc0);  // allocation reused
+    CHECK_EQ(buf.capacity, cap0);
+    CHECK(memcmp(buf.data.get(), little.data(), little.size()) == 0);
+    bool pad_zero = true;
+    for (size_t i = 0; i < fosu::kBufferPadding; ++i)
+        pad_zero &= buf.data[buf.size + i] == 0;
+    CHECK(pad_zero);
+
+    unlink(path);
+    CHECK(!fosu::read_into("/nonexistent/fosu-no-such-file", buf));
+}
+
 int main() {
     test_full_map();
     test_old_format();
@@ -556,6 +755,8 @@ int main() {
     test_aspire_edge_cases();
     test_malformed();
     test_long_timing_offsets();
+    test_parse_into_reuse();
+    test_read_into_reuse();
     test_fuzz_parse_double();
     test_fuzz_parse_coord();
 #if FOSU_SIMD_X86
