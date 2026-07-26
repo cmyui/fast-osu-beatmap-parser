@@ -132,8 +132,8 @@ across interleaved A/B runs (min-taking is robust to neighbor noise).
 
 | parser | MB/s | ns/object | vs baseline |
 |---|---|---|---|
-| fosu AVX2 | 910 | 50.1 | 6.7× |
-| fosu AVX2, reused `Beatmap` (`parse_into`) | 1170 | 38.9 | 8.7× |
+| fosu AVX2 | 930 | 49.0 | 6.9× |
+| fosu AVX2, reused `Beatmap` (`parse_into`) | 1230 | 37.1 | 9.1× |
 | fosu scalar | 630 | 72.4 | 4.7× |
 | getline+sscanf baseline | 135 | 340 | 1× |
 
@@ -158,6 +158,20 @@ larger than typical ranked maps, unrealistically sparse timing points)
 showed a *regression* for changes that are a clear win on real maps —
 allocation and code-layout effects dominate at unrealistic map sizes.
 Benchmark against real beatmaps.
+
+### Build notes (from the disassembly audit)
+
+- **gcc over clang**: gcc 13 measures ~6% faster than clang 18 on this
+  code (823-857 vs 879-920 MB/s across interleaved rounds).
+- **PGO is worth +2-3%**: `make bench-pgo BENCH_ARGS=bench/corpus` trains
+  on the corpus and rebuilds with measured branch probabilities (fresh
+  parse up to ~950 MB/s, reuse ~1290 MB/s). Header-only libraries can't
+  ship a profile; consumers should train on their own workload.
+- Two audit findings are baked into the source: `HitObject` construction
+  skips `emplace_back()`'s 48-byte zero-fill (the parser writes every
+  field on all paths), and the timing-point fast parser is force-inlined
+  into its section loop (gcc otherwise leaves a per-line call with
+  per-call constant rebuilds).
 
 ### I/O strategy (why there's no mmap)
 

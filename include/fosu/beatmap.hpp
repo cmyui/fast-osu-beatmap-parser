@@ -20,6 +20,14 @@ struct HitObject {
 
     static constexpr uint32_t kNoSlider = 0xFFFFFFFF;
 
+    // Tag construction that skips value-init: the parser writes every
+    // field on both the fast and fallback paths, so emplace_back()'s
+    // 48-byte zero-fill per object is pure waste (measured in the
+    // disassembly audit). HitObject{} still zero-initializes.
+    struct uninit_t {};
+    HitObject() = default;
+    explicit HitObject(uninit_t) {}
+
     bool is_circle() const { return type & 1; }
     bool is_slider() const { return type & 2; }
     bool is_spinner() const { return type & 8; }

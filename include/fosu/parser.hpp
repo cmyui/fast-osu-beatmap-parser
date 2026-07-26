@@ -357,6 +357,9 @@ inline void parse_timing_point_line(Beatmap& bm, const char* p, size_t len) {
 //
 // All eight TimingPoint fields are written unconditionally; the caller
 // discards the write by not advancing its cursor when this returns false.
+// always_inline: gcc leaves this out of line otherwise — a call plus
+// per-call constant rebuilds on every timing line (disassembly audit).
+__attribute__((always_inline))
 inline bool fast_parse_timing_point(__m256i a, __m256i b, const char* p,
                                     size_t len, TimingPoint& tp) {
     if (len > 64 || len < 15) return false;  // real lines: 20..39 bytes
@@ -664,7 +667,7 @@ inline bool finish_hitobject(Beatmap& bm, HitObject& h, const char* p,
 // parse_hitobjects_section instead.
 inline void parse_hitobject_line(Beatmap& bm, const char* line, size_t len,
                                  size_t bytes_remaining) {
-    bm.hit_objects.emplace_back();
+    bm.hit_objects.emplace_back(HitObject::uninit_t{});
     HitObject& h = bm.hit_objects.back();
     h.end_time = 0;
     h.slider = HitObject::kNoSlider;
@@ -699,7 +702,7 @@ inline const char* parse_hitobjects_section(Beatmap& bm, const char* p,
         }
         if (c == '[') return p;
 
-        bm.hit_objects.emplace_back();
+        bm.hit_objects.emplace_back(HitObject::uninit_t{});
         HitObject& h = bm.hit_objects.back();
         h.hit_sample = {};  // the fast prefix writes every other field
 
