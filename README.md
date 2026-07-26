@@ -425,6 +425,9 @@ paid arithmetic); `[[likely]]` hints −5%; `-fwhole-program`/static
 linkage neutral to −6% (gcc's inlining judgment was already right);
 splat-constant hoisting mechanically successful but a wash (the
 rematerialization executes in OOO slack); mmap −13%; `-march=native` no
-better than `-mtune`; `[Events]` batch-skipping declined by gate
-measurement (events content already parses at 3.7 GB/s — ~2.8% of total
-cycles with a ~+1.4% ceiling).
+better than `-mtune`; `[Events]` batch-skipping subsumed and
+closed: for callers that don't want the section, selective parsing
+skips it entirely (the idea, generalized); for full parses that keep
+breaks/backgrounds, the residual in-section skim was declined by gate
+measurement — events content already parses at 3.7 GB/s, ~2.8% of total
+cycles, a ~+1.4% ceiling.
