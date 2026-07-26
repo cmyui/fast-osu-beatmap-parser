@@ -96,29 +96,38 @@ Synthetic corpus: 40 maps, 3.57 MB, 85,600 hitobjects (60% circles /
 36% sliders / 4% spinners, realistic field-width distributions). Best of 9
 runs, single thread. `make bench` reproduces.
 
-Apple M-series, macOS 26:
+### AMD EPYC Genoa (Zen 4), Ubuntu 24.04, gcc 13.3
+
+Shared-tenancy VM; runs pinned to one core with `taskset`, best of 5×9
+repetitions (min-taking is robust to neighbor noise, and run-to-run spread
+was <2%).
 
 | parser | MB/s | ns/object | vs baseline |
 |---|---|---|---|
-| fosu AVX2 (Rosetta 2 translated) | 586 | 71.1 | 7.1× |
-| fosu scalar (Rosetta 2 translated) | 548 | 76.0 | 6.6× |
-| fosu scalar (native arm64) | 681 | 61.1 | 5.2× |
-| getline+sscanf baseline (Rosetta) | 83 | 503.5 | 1× |
-| getline+sscanf baseline (native) | 130 | 320.4 | 1× |
+| fosu AVX2 | 862 | 48.3 | 6.3× |
+| fosu scalar | 638 | 65.3 | 4.7× |
+| getline+sscanf baseline | 136 | 305.4 | 1× |
 
 Hitobject-prefix microbenchmark (isolates the SIMD technique from parser
-overhead): **13.7 ns/line AVX2 vs 27.6 ns/line scalar** under Rosetta —
-about 2×; expect a larger gap on native x86 silicon, where translated
-vector code pays more Rosetta overhead than translated scalar code.
+overhead): **5.1 ns/line AVX2 vs 19.9 ns/line scalar** — 3.9×, roughly
+19 cycles for a full `x,y,time,type,hitSound` parse.
 
-Two honest caveats:
+### Apple M3, macOS 26 (Rosetta 2 for the x86 rows)
 
-- These are *translated* x86 numbers. Nobody should quote Rosetta results
-  as x86 hardware performance in either direction; run `make bench` on a
-  real Haswell+/Zen machine for citable numbers.
-- Whole-file speedup from the SIMD path is Amdahl-limited (~7% here):
-  slider parameters, timing-point doubles, and line handling dominate once
-  prefixes are cheap. The next wins are listed below.
+| parser | MB/s | ns/object |
+|---|---|---|
+| fosu AVX2 (Rosetta 2 translated) | 586 | 71.1 |
+| fosu scalar (native arm64) | 681 | 61.1 |
+| getline+sscanf baseline (native) | 130 | 320.4 |
+
+Rosetta numbers are included only to show translation cost — its 256-bit
+ops decompose to 128-bit NEON, which halves the SIMD advantage (2× vs the
+3.9× on real silicon). Don't quote them as x86 performance.
+
+One more honest caveat: whole-file speedup from the SIMD path is
+Amdahl-limited (1.35× on Zen 4) — slider parameters, timing-point doubles,
+and line handling dominate once prefixes are cheap. The next wins are
+listed below.
 
 ## Future work
 
