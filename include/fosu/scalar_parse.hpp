@@ -1,7 +1,12 @@
 #pragma once
 
+// Scalar/SWAR numeric parsing. Like the rest of the parser, these helpers
+// assume the buffer is followed by kBufferPadding readable zero bytes.
+
 #include <cstdint>
 #include <cstdlib>
+
+#include "swar.hpp"
 
 namespace fosu::detail {
 
@@ -52,10 +57,15 @@ inline constexpr double kPow10[20] = {
     1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19,
 };
 
-// Fast decimal parse for the values that appear in .osu files. Values with
-// exponents or more than 18 significant digits fall back to strtod, which
-// requires the buffer to be followed by a parse-terminating byte (the padded
-// file buffer guarantees this).
+inline constexpr uint64_t kPow10u[9] = {
+    1,       10,       100,       1000,     10000,
+    100000,  1000000,  10000000,  100000000,
+};
+
+// Fast decimal parse for the values that appear in .osu files. Digit runs
+// are consumed 8 at a time with SWAR conversion instead of byte loops.
+// Values with exponents or more than 18 significant digits fall back to
+// strtod (the buffer padding guarantees strtod terminates).
 inline const char* parse_double(const char* p, const char* end, double& out) {
     const char* start = p;
     bool neg = false;
@@ -67,31 +77,44 @@ inline const char* parse_double(const char* p, const char* end, double& out) {
     int digits = 0;
     int frac = 0;
     bool any = false;
-    bool overflow = false;
-    while (p < end && is_digit(*p)) {
+    for (;;) {
+        uint32_t run = digit_run8(p);
+        if (run > static_cast<uint64_t>(end - p))
+            run = static_cast<uint32_t>(end - p);
+        if (!run) break;
         any = true;
-        if (digits < 18) {
-            mant = mant * 10 + static_cast<uint64_t>(*p - '0');
-            ++digits;
-        } else {
-            overflow = true;
+        if (digits + static_cast<int>(run) > 18) {
+            char* e;
+            out = strtod(start, &e);
+            return e;
         }
-        ++p;
+        mant = mant * kPow10u[run] + swar_parse_u64(p, run);
+        digits += static_cast<int>(run);
+        p += run;
+        if (run < 8) break;
     }
     if (p < end && *p == '.') {
         ++p;
-        while (p < end && is_digit(*p)) {
+        for (;;) {
+            uint32_t run = digit_run8(p);
+            if (run > static_cast<uint64_t>(end - p))
+                run = static_cast<uint32_t>(end - p);
+            if (!run) break;
             any = true;
-            if (digits < 18) {
-                mant = mant * 10 + static_cast<uint64_t>(*p - '0');
-                ++digits;
-                ++frac;
+            if (digits + static_cast<int>(run) > 18) {
+                char* e;
+                out = strtod(start, &e);
+                return e;
             }
-            ++p;
+            mant = mant * kPow10u[run] + swar_parse_u64(p, run);
+            digits += static_cast<int>(run);
+            frac += static_cast<int>(run);
+            p += run;
+            if (run < 8) break;
         }
     }
     if (!any) return start;
-    if (overflow || (p < end && (*p == 'e' || *p == 'E'))) {
+    if (p < end && (*p == 'e' || *p == 'E')) {
         char* e;
         out = strtod(start, &e);
         return e;

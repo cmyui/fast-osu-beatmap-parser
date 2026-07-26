@@ -92,25 +92,36 @@ type syntax (v128+ files), decimal `x,y` on the fast path (falls back).
 
 ## Benchmarks
 
-Synthetic corpus: 40 maps, 3.57 MB, 85,600 hitobjects (60% circles /
-36% sliders / 4% spinners, realistic field-width distributions). Best of 9
-runs, single thread. `make bench` reproduces.
+Real-map corpus (`bench/fetch_corpus.sh`): 17 ranked .osu files spanning
+format v3–v14 — The Unforgiving (13-diff 2012 marathon album, ~500 timing
+points per diff), Freedom Dive, The Big Black, Blue Zenith, and Disco
+Prince (the first ranked map, 2007). 0.82 MB, 17,902 hitobjects, 100%
+taken by the fast path, zero malformed lines. Best of 9 runs, single
+thread. `make bench BENCH_ARGS=bench/corpus` reproduces.
 
 ### AMD EPYC Genoa (Zen 4), Ubuntu 24.04, gcc 13.3
 
-Shared-tenancy VM; runs pinned to one core with `taskset`, best of 5×9
-repetitions (min-taking is robust to neighbor noise, and run-to-run spread
-was <2%).
+Shared-tenancy VM; runs pinned to one core with `taskset`, best-of-reps
+across interleaved A/B runs (min-taking is robust to neighbor noise).
 
 | parser | MB/s | ns/object | vs baseline |
 |---|---|---|---|
-| fosu AVX2 | 862 | 48.3 | 6.3× |
-| fosu scalar | 638 | 65.3 | 4.7× |
-| getline+sscanf baseline | 136 | 305.4 | 1× |
+| fosu AVX2 | 808 | 56.5 | 6.4× |
+| fosu scalar | 619 | 73.6 | 4.7× |
+| getline+sscanf baseline | 135 | 340 | 1× |
 
 Hitobject-prefix microbenchmark (isolates the SIMD technique from parser
-overhead): **5.1 ns/line AVX2 vs 19.9 ns/line scalar** — 3.9×, roughly
+overhead): **5.2 ns/line AVX2 vs 20.6 ns/line scalar** — 4×, roughly
 19 cycles for a full `x,y,time,type,hitSound` parse.
+
+Homogeneous per-section costs (200k-line single-section corpora, AVX2
+path): circles 14 ns/line, sliders 84 ns/line, timing points 44 ns/line.
+
+A lesson learned the hard way: an earlier synthetic corpus (maps 10–50×
+larger than typical ranked maps, unrealistically sparse timing points)
+showed a *regression* for changes that are a clear win on real maps —
+allocation and code-layout effects dominate at unrealistic map sizes.
+Benchmark against real beatmaps.
 
 ### Apple M3, macOS 26 (Rosetta 2 for the x86 rows)
 
@@ -129,13 +140,31 @@ Amdahl-limited (1.35× on Zen 4) — slider parameters, timing-point doubles,
 and line handling dominate once prefixes are cheap. The next wins are
 listed below.
 
+## Beyond the prefix: SWAR everywhere else
+
+The non-prefix hot paths use branchless SWAR (plain integer ops, portable
+to ARM):
+
+- **Slider control points** (`|x:y|…`): each coordinate's digit-run length
+  comes from an 8-byte nibble-classify + tzcnt, and 1–4 digit values
+  convert with two multiplies — no per-digit loop, no length branch
+  mispredicts. Signs and 5+ digit Aspire values take the general path.
+- **Decimal parsing** (`parse_double`): digit runs are consumed 8 at a
+  time with the three-multiply SWAR reduction; >18 significant digits or
+  exponents delegate to strtod.
+- **Line splitting**: a 32-byte AVX2 newline probe resolves most lines
+  without a memchr call.
+- **Slider pools** are reserved once per map, at the first slider — eager
+  per-map reservation wastes multi-MB allocations on slider-free maps and
+  costs more than the reallocations it avoids.
+
 ## Future work
 
 - NEON port of the prefix fast path (16-byte window + `shrn` movemask
   equivalent) so the technique runs natively on Apple Silicon / ARM
-  servers.
-- SIMD slider control-point parsing (`|x:y` pairs are the current
-  bottleneck on slider-heavy maps).
-- SWAR/SIMD decimal parsing for timing points.
-- Whole-file benchmark against rosu-map and osu!lazer's decoder on a real
-  corpus.
+  servers (the SWAR paths already are portable).
+- Slider body is still ~84 ns/line — profile-guided work on the remaining
+  branch structure and `Slider` store layout.
+- Align the synthetic corpus generator with real-map distributions
+  (timing-point density, map sizes) — see the benchmark lesson above.
+- Whole-file benchmark against rosu-map and osu!lazer's decoder.

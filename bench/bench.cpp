@@ -198,6 +198,7 @@ int main(int argc, char** argv) {
         while (dirent* e = readdir(d)) {
             const size_t n = strlen(e->d_name);
             if (n < 4 || strcmp(e->d_name + n - 4, ".osu") != 0) continue;
+            if (e->d_name[0] == '.') continue;  // macOS AppleDouble files
             auto buf = fosu::read_file_padded((dir + e->d_name).c_str());
             if (!buf) continue;
             raw.emplace_back(buf.data.get(), buf.size);

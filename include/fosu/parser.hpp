@@ -285,6 +285,23 @@ inline void parse_timing_point_line(Beatmap& bm, const char* p, size_t len) {
     bm.timing_points.push_back(tp);
 }
 
+// Slider control point coordinate: overwhelmingly 1-4 plain digits, parsed
+// branchlessly via SWAR. Signs, 5+ digit values, and empty fields take the
+// general path. Returns the advanced pointer, or `p` unchanged on failure.
+inline const char* parse_coord(const char* p, const char* end, int32_t& out) {
+    const uint32_t run = digit_run8(p);
+    if (run - 1 <= 3) {  // 1..4 digits; a run never crosses `end` (the line
+                         // terminator and buffer padding are non-digits)
+        out = static_cast<int32_t>(swar_parse_u32(p, run));
+        return p + run;
+    }
+    int64_t v;
+    const char* q = parse_i64(p, end, v);
+    if (q == p) return p;
+    out = clamp_i32(v);
+    return q;
+}
+
 // Slider params: curveType|x:y|x:y...,slides,length[,edgeSounds,edgeSets][,hitSample]
 inline bool parse_slider_params(Beatmap& bm, HitObject& h, const char* p,
                                 const char* end) {
@@ -293,12 +310,12 @@ inline bool parse_slider_params(Beatmap& bm, HitObject& h, const char* p,
     s.curve_type = *p++;
     s.point_begin = static_cast<uint32_t>(bm.slider_points.size());
     while (p < end && *p == '|') {
-        int64_t px, py;
-        const char* q = parse_i64(p + 1, end, px);
+        int32_t px, py;
+        const char* q = parse_coord(p + 1, end, px);
         if (q == p + 1 || q >= end || *q != ':') return false;
-        const char* r = parse_i64(q + 1, end, py);
+        const char* r = parse_coord(q + 1, end, py);
         if (r == q + 1) return false;
-        bm.slider_points.push_back({clamp_i32(px), clamp_i32(py)});
+        bm.slider_points.push_back({px, py});
         p = r;
     }
     s.point_count =
@@ -332,7 +349,7 @@ inline bool parse_slider_params(Beatmap& bm, HitObject& h, const char* p,
 }
 
 inline void parse_hitobject_line(Beatmap& bm, const char* line, size_t len,
-                                 bool use_simd) {
+                                 size_t bytes_remaining, bool use_simd) {
     bm.hit_objects.emplace_back();
     HitObject& h = bm.hit_objects.back();
     h.end_time = 0;
@@ -363,6 +380,14 @@ inline void parse_hitobject_line(Beatmap& bm, const char* line, size_t len,
     const bool ok = [&] {
         if (h.type & 2) {  // slider
             if (p >= end || *p != ',') return false;
+            // Size the slider pools once, when a map first proves it has
+            // sliders — reserving eagerly per map wastes multi-MB
+            // allocations on slider-free maps, which costs more than the
+            // reallocations it saves.
+            if (bm.sliders.capacity() == 0) {
+                bm.slider_points.reserve(bytes_remaining / 14);
+                bm.sliders.reserve(bytes_remaining / 48);
+            }
             return parse_slider_params(bm, h, p + 1, end);
         }
         if (h.type & 8 || h.type & 128) {  // spinner / mania hold
@@ -409,8 +434,24 @@ inline Beatmap parse(const char* data, size_t size, ParseOptions opts = {}) {
     bool ar_specified = false;
 
     while (p < file_end) {
-        const auto* nl =
-            static_cast<const char*>(memchr(p, '\n', file_end - p));
+        const char* nl;
+#if FOSU_SIMD_X86 && !defined(FOSU_NO_LINE_PROBE)
+        // Most lines fit in one 32-byte probe (the buffer padding contains
+        // no '\n', so hits are always within the file); longer lines fall
+        // through to memchr for the remainder.
+        const auto probe = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
+        const auto nl_mask = static_cast<uint32_t>(_mm256_movemask_epi8(
+            _mm256_cmpeq_epi8(probe, _mm256_set1_epi8('\n'))));
+        if (nl_mask)
+            nl = p + _tzcnt_u32(nl_mask);
+        else if (file_end - p <= 32)
+            nl = nullptr;
+        else
+            nl = static_cast<const char*>(
+                memchr(p + 32, '\n', static_cast<size_t>(file_end - p) - 32));
+#else
+        nl = static_cast<const char*>(memchr(p, '\n', file_end - p));
+#endif
         const char* line_end = nl ? nl : file_end;
         if (line_end > p && line_end[-1] == '\r') --line_end;
         const size_t len = static_cast<size_t>(line_end - p);
@@ -462,7 +503,9 @@ inline Beatmap parse(const char* data, size_t size, ParseOptions opts = {}) {
                 parse_timing_point_line(bm, p, len);
                 break;
             case Section::HitObjects:
-                parse_hitobject_line(bm, p, len, opts.use_simd);
+                parse_hitobject_line(bm, p, len,
+                                     static_cast<size_t>(file_end - p),
+                                     opts.use_simd);
                 break;
             case Section::Unknown:
                 break;

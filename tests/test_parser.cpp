@@ -266,7 +266,55 @@ static void test_malformed() {
     CHECK_EQ(bm.stats.malformed_lines, 5u);
 }
 
-#if FOSU_SIMD_X86
+// Reference: the pre-SWAR byte-loop parse_double, kept verbatim as the
+// behavioral baseline for <=18 significant digit inputs.
+static const char* reference_parse_double(const char* p, const char* end,
+                                          double& out) {
+    const char* start = p;
+    bool neg = false;
+    if (p < end && *p == '-') {
+        neg = true;
+        ++p;
+    }
+    uint64_t mant = 0;
+    int digits = 0;
+    int frac = 0;
+    bool any = false;
+    bool overflow = false;
+    while (p < end && fosu::detail::is_digit(*p)) {
+        any = true;
+        if (digits < 18) {
+            mant = mant * 10 + static_cast<uint64_t>(*p - '0');
+            ++digits;
+        } else {
+            overflow = true;
+        }
+        ++p;
+    }
+    if (p < end && *p == '.') {
+        ++p;
+        while (p < end && fosu::detail::is_digit(*p)) {
+            any = true;
+            if (digits < 18) {
+                mant = mant * 10 + static_cast<uint64_t>(*p - '0');
+                ++digits;
+                ++frac;
+            }
+            ++p;
+        }
+    }
+    if (!any) return start;
+    if (overflow || (p < end && (*p == 'e' || *p == 'E'))) {
+        char* e;
+        out = strtod(start, &e);
+        return e;
+    }
+    double v = static_cast<double>(mant);
+    if (frac) v /= fosu::detail::kPow10[frac];
+    out = neg ? -v : v;
+    return p;
+}
+
 static uint64_t rng_state = 0x243F6A8885A308D3ull;
 static uint64_t rng() {
     rng_state += 0x9E3779B97F4A7C15ull;
@@ -276,6 +324,83 @@ static uint64_t rng() {
     return z ^ (z >> 31);
 }
 
+// Fuzz the SWAR parse_double against the byte-loop reference: results must
+// be bit-identical (identical mantissa accumulation) for <=16 significant
+// digits, and identical to strtod beyond that (both delegate).
+static void test_fuzz_parse_double() {
+    char buf[96];
+    for (int iter = 0; iter < 300000; ++iter) {
+        const int int_digits = 1 + (int)(rng() % 9);
+        const int frac_digits = (int)(rng() % 8);
+        int len = 0;
+        if (rng() % 3 == 0) buf[len++] = '-';
+        for (int i = 0; i < int_digits; ++i)
+            buf[len++] = char('0' + (i == 0 ? rng() % 9 + (int_digits > 1)
+                                            : rng() % 10));
+        if (frac_digits || rng() % 4 == 0) {
+            buf[len++] = '.';
+            for (int i = 0; i < frac_digits; ++i)
+                buf[len++] = char('0' + rng() % 10);
+        }
+        const char* tail = ",4,2\r\n";
+        const int payload = len;
+        for (const char* t = tail; *t; ++t) buf[len++] = *t;
+        memset(buf + len, 0, sizeof(buf) - (size_t)len);
+
+        double got = -1, want = -2;
+        const char* gp =
+            fosu::detail::parse_double(buf, buf + payload, got);
+        const char* wp = reference_parse_double(buf, buf + payload, want);
+        CHECK_EQ(gp - buf, wp - buf);
+        CHECK(got == want);
+        if (g_failures) {
+            printf("  failing double: %.*s\n", payload, buf);
+            return;
+        }
+    }
+    // Long-mantissa inputs delegate to strtod and must match it exactly.
+    const char* long_cases[] = {"342.857142857142857142857",
+                                "123456789012345678901", "0.6999999999999999556"};
+    for (const char* c : long_cases) {
+        std::string padded(c);
+        padded.append(64, '\0');
+        double got = 0;
+        fosu::detail::parse_double(padded.data(), padded.data() + strlen(c), got);
+        CHECK(got == strtod(c, nullptr));
+    }
+}
+
+// Fuzz the SWAR slider coordinate parser against the general path.
+static void test_fuzz_parse_coord() {
+    char buf[64];
+    for (int iter = 0; iter < 300000; ++iter) {
+        int len = 0;
+        const uint64_t kind = rng() % 16;
+        if (kind == 0) buf[len++] = '-';
+        if (kind != 1) {
+            const int digits = 1 + (int)(rng() % (kind < 12 ? 4 : 8));
+            for (int i = 0; i < digits; ++i)
+                buf[len++] = char('0' + rng() % 10);
+        }
+        const int payload = len;
+        buf[len++] = (rng() % 2) ? ':' : '|';
+        memset(buf + len, 0, sizeof(buf) - (size_t)len);
+
+        int32_t got = -777, want = -777;
+        const char* gp = fosu::detail::parse_coord(buf, buf + payload, got);
+        int64_t v;
+        const char* wp = fosu::detail::parse_i64(buf, buf + payload, v);
+        if (wp != buf) want = fosu::detail::clamp_i32(v);
+        CHECK_EQ(gp - buf, wp - buf);
+        CHECK_EQ(got, want);
+        if (g_failures) {
+            printf("  failing coord: %.*s\n", payload, buf);
+            return;
+        }
+    }
+}
+
+#if FOSU_SIMD_X86
 // Generate a value that renders with exactly `digits` decimal digits.
 static uint64_t value_with_digits(int digits, uint64_t max) {
     const uint64_t lo = digits == 1 ? 0 : fosu::detail::kPow10[digits - 1] < 1e19
@@ -342,6 +467,8 @@ int main() {
     test_mania_hold();
     test_aspire_edge_cases();
     test_malformed();
+    test_fuzz_parse_double();
+    test_fuzz_parse_coord();
 #if FOSU_SIMD_X86
     test_fuzz_equivalence();
     printf("SIMD path: enabled\n");
