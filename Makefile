@@ -1,0 +1,51 @@
+CXX ?= clang++
+CXXFLAGS = -std=c++20 -O3 -Wall -Wextra -Iinclude
+
+UNAME_M := $(shell uname -m)
+UNAME_S := $(shell uname -s)
+
+# x86 build: native on x86_64 hosts, cross-compiled + run under Rosetta 2
+# on Apple Silicon (requires macOS 15+ for AVX2 translation).
+X86_FLAGS = -march=x86-64-v3
+ifeq ($(UNAME_S),Darwin)
+ifeq ($(UNAME_M),arm64)
+X86_FLAGS += -target x86_64-apple-macos12
+X86_RUN = arch -x86_64
+endif
+endif
+
+HEADERS = $(wildcard include/fosu/*.hpp)
+
+all: test bench
+
+build:
+	mkdir -p build
+
+# --- native (on arm64 this exercises the scalar path only) ---
+build/test_native: tests/test_parser.cpp $(HEADERS) | build
+	$(CXX) $(CXXFLAGS) $< -o $@
+
+build/bench_native: bench/bench.cpp $(HEADERS) | build
+	$(CXX) $(CXXFLAGS) $< -o $@
+
+# --- x86-64-v3 (AVX2 + BMI fast path) ---
+build/test_x86: tests/test_parser.cpp $(HEADERS) | build
+	$(CXX) $(CXXFLAGS) $(X86_FLAGS) $< -o $@
+
+build/bench_x86: bench/bench.cpp $(HEADERS) | build
+	$(CXX) $(CXXFLAGS) $(X86_FLAGS) $< -o $@
+
+test: build/test_native build/test_x86
+	./build/test_native
+	$(X86_RUN) ./build/test_x86
+
+bench: build/bench_native build/bench_x86
+	$(X86_RUN) ./build/bench_x86 $(BENCH_ARGS)
+
+bench-native: build/bench_native
+	./build/bench_native $(BENCH_ARGS)
+
+clean:
+	rm -rf build
+
+.PHONY: all test bench bench-native clean
