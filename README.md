@@ -123,8 +123,9 @@ Hitobject-prefix microbenchmark (isolates the SIMD technique from parser
 overhead): **5.2 ns/line AVX2 vs 20.6 ns/line scalar** — 4×, roughly
 19 cycles for a full `x,y,time,type,hitSound` parse.
 
-Homogeneous per-section costs (200k-line single-section corpora, AVX2
-path): circles 13 ns/line, sliders 73 ns/line, timing points 37 ns/line.
+Homogeneous per-section costs (AVX2 path): circles 13 ns/line, sliders
+73 ns/line (200k-line synthetic corpora), timing points 29 ns/line
+(measured on the corpus's 6,629 real timing lines, whole-parse).
 
 A lesson learned the hard way: an earlier synthetic corpus (maps 10–50×
 larger than typical ranked maps, unrealistically sparse timing points)
@@ -166,11 +167,17 @@ to ARM) and format knowledge measured from real ranked maps:
   per slider; the trailing edgeSounds/edgeSets/hitSample fields get their
   comma positions from a single 32-byte scan. Signs and 5+ digit Aspire
   values take the general path.
-- **Timing points**: offsets are integers in every editor-emitted file
-  sampled (6.6k real timing points), so they parse as one SWAR run; the
-  up-to-six-small-int tail is extracted branchlessly from one 32-byte
-  delimiter mask instead of six parse calls. Odd shapes (decimal offsets,
-  >27h timestamps) defer to the generic parser.
+- **Timing points**: a fused section loop parses each line in one pass —
+  two 32-byte loads (covering the real-world max line of 39 bytes) serve
+  the newline scan, a comma mask, and a digit-classify mask; seven comma
+  positions come from a blsr/tzcnt chain; every field converts
+  speculatively (integer and decimal beatLength share one branchless
+  instruction stream, sign OR'd into the double's sign bit) and a single
+  accumulated `valid` predicate — including a whole-line purity check,
+  `popcount(nondigits) == commas + dot + minus` — decides. Odd shapes
+  (old 2/7-field formats, decimal offsets, >27h timestamps) defer to the
+  generic parser. Measured 65 -> 29 ns/line on all 6,629 real timing
+  lines of the corpus, integrated.
 - **Decimal parsing** (`parse_double`): digit runs are consumed 8 at a
   time with the three-multiply SWAR reduction; >18 significant digits or
   exponents delegate to strtod.

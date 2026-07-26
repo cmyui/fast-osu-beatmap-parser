@@ -8,8 +8,11 @@
 namespace fosu {
 
 // The parser requires kBufferPadding readable zero bytes past the end of
-// the input so vector loads and strtod never run off the buffer.
-inline constexpr size_t kBufferPadding = 64;
+// the input so vector loads, speculative SWAR reads, and strtod never run
+// off the buffer. 128 bounds the worst-case speculative read of the
+// one-pass timing point parser on garbage input (~90 bytes past a line
+// start near EOF).
+inline constexpr size_t kBufferPadding = 128;
 
 struct FileBuffer {
     std::unique_ptr<char[]> data;

@@ -17,8 +17,9 @@
 //     well-formed input
 //   - 1-2 digit hitSound support (osu! hitsound bitflags go up to 15)
 //
-// Callers must guarantee 64 readable bytes past the end of the buffer
-// (see io.hpp); both paths rely on it to load past short lines safely.
+// Callers must guarantee kBufferPadding readable bytes past the end of
+// the buffer (see io.hpp); all paths rely on it to load past short lines
+// and speculate past field boundaries safely.
 
 #include <array>
 #include <cstddef>
@@ -139,6 +140,11 @@ consteval std::array<LaneMasks, kNPrefixVariants> make_lane_masks() {
 }
 
 inline constexpr auto kLaneMasks = make_lane_masks();
+
+inline uint32_t comma_mask32(__m256i ascii) {
+    return static_cast<uint32_t>(_mm256_movemask_epi8(
+        _mm256_cmpeq_epi8(ascii, _mm256_set1_epi8(','))));
+}
 
 // No unsigned byte compare in AVX2: bias so '0'..'9' map to [-128, -119],
 // making every non-digit byte compare greater.

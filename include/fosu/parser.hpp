@@ -1,5 +1,6 @@
 #pragma once
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -346,70 +347,168 @@ inline void parse_timing_point_line(Beatmap& bm, const char* p, size_t len) {
 }
 
 #if FOSU_SIMD_X86
-// Timing point fast path built on what editor-emitted files guarantee:
-// integer offsets (0 decimal offsets across 6.6k real timing points
-// sampled) and a tail of up to six small integers that fits a 32-byte
-// window — extracted branchlessly from one delimiter mask instead of six
-// parse calls. Unusual shapes defer to the generic parser.
-inline void parse_timing_point_line_fast(Beatmap& bm, const char* p,
-                                         const char* end) {
-    TimingPoint tp{0, 0, 4, 0, 0, 100, true, 0};
-    const char* q = p;
-    const bool neg = *q == '-';
-    q += neg;
-    const uint32_t run = digit_run8(q);
-    if (run == 0 || run > 8 || q[run] == '.') {
-        parse_timing_point_line(bm, p, static_cast<size_t>(end - p));
-        return;
-    }
-    const auto off = static_cast<double>(swar_parse_u64(q, run));
-    tp.time = neg ? -off : off;
-    q += run;
-    // A digit at q means the offset exceeded the 8-byte window (a >27h
-    // timestamp); any other surprise likewise defers to the generic
-    // parser, which owns the malformed-line decision.
-    if (q >= end || *q != ',') {
-        parse_timing_point_line(bm, p, static_cast<size_t>(end - p));
-        return;
-    }
-    const char* r = parse_double(q + 1, end, tp.beat_length);
-    if (r == q + 1) {
-        parse_timing_point_line(bm, p, static_cast<size_t>(end - p));
-        return;
-    }
-    q = r;
-    if (q < end && *q == ',' && end - q <= 32) {
-        ++q;
-        const auto tail_len = static_cast<uint32_t>(end - q);
-        const uint32_t m = nondigit_mask32(
-            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(q)));
-        const uint32_t m1 = _blsr_u32(m);
-        const uint32_t m2 = _blsr_u32(m1);
-        const uint32_t m3 = _blsr_u32(m2);
-        const uint32_t m4 = _blsr_u32(m3);
-        const uint32_t m5 = _blsr_u32(m4);
-        const uint32_t d[6] = {_tzcnt_u32(m),  _tzcnt_u32(m1), _tzcnt_u32(m2),
-                               _tzcnt_u32(m3), _tzcnt_u32(m4), _tzcnt_u32(m5)};
-        uint64_t v[6] = {4, 0, 0, 100, 1, 0};
-        uint32_t start = 0;
-        for (int i = 0; i < 6; ++i) {  // fully unrolled; per-file constant
-                                       // field count keeps this predictable
-            const uint32_t len = d[i] - start;
-            if (start >= tail_len || len - 1 > 7) break;
-            v[i] = swar_parse_u64(q + start, len);
-            start = d[i] + 1;
+// One-pass timing point parse for the editor-emitted 8-field shape.
+// Two preloaded 32-byte vectors cover the whole line (real max: 39
+// bytes); one comma mask and one non-digit mask yield every field
+// boundary; every value is computed speculatively and a single `valid`
+// predicate — accumulated arithmetically, never branched on per field —
+// decides. Structural surprises (old 2/7-field formats, decimal or >8
+// digit offsets, junk bytes) return false to defer to the generic parser.
+//
+// All eight TimingPoint fields are written unconditionally; the caller
+// discards the write by not advancing its cursor when this returns false.
+inline bool fast_parse_timing_point(__m256i a, __m256i b, const char* p,
+                                    size_t len, TimingPoint& tp) {
+    if (len > 64 || len < 15) return false;  // real lines: 20..39 bytes
+    const uint64_t line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
+    const uint64_t commas =
+        (comma_mask32(a) | static_cast<uint64_t>(comma_mask32(b)) << 32) &
+        line_mask;
+    const uint64_t nondig =
+        (nondigit_mask32(a) |
+         static_cast<uint64_t>(nondigit_mask32(b)) << 32) &
+        line_mask;
+
+    // Seven comma positions -> eight fields.
+    const uint64_t m1 = _blsr_u64(commas);
+    const uint64_t m2 = _blsr_u64(m1);
+    const uint64_t m3 = _blsr_u64(m2);
+    const uint64_t m4 = _blsr_u64(m3);
+    const uint64_t m5 = _blsr_u64(m4);
+    const uint64_t m6 = _blsr_u64(m5);
+    const auto c0 = static_cast<uint32_t>(_tzcnt_u64(commas));
+    const auto c1 = static_cast<uint32_t>(_tzcnt_u64(m1));
+    const auto c2 = static_cast<uint32_t>(_tzcnt_u64(m2));
+    const auto c3 = static_cast<uint32_t>(_tzcnt_u64(m3));
+    const auto c4 = static_cast<uint32_t>(_tzcnt_u64(m4));
+    const auto c5 = static_cast<uint32_t>(_tzcnt_u64(m5));
+    const auto c6 = static_cast<uint32_t>(_tzcnt_u64(m6));
+
+    bool valid = _mm_popcnt_u64(commas) == 7;
+
+    // Offset: an integer with 1..8 digits — editor-emitted files never
+    // produce negative or decimal offsets (those defer via the purity
+    // check below). Speculative lengths are clamped into 1..8 so shifts
+    // stay defined; `valid` already rules the clamped cases out.
+    valid &= (c0 - 1) <= 7;
+    tp.time = static_cast<double>(swar_parse_u64_safe(p, ((c0 - 1) & 7) + 1));
+
+    // beatLength: [c0+1, c1), optional leading '-', optional fraction.
+    const char* f = p + c0 + 1;
+    const bool neg = *f == '-';
+    f += neg;
+    const uint32_t flen = c1 - c0 - 1 - neg;
+    // Distance from f to the first non-digit: the '.' if present, else
+    // the comma at c1.
+    const auto int_len = static_cast<uint32_t>(_tzcnt_u64(nondig >> (f - p)));
+    const bool has_dot = int_len < flen;
+    // The purity popcount below counts "one extra non-digit" for the dot;
+    // verify that byte actually is '.' (fuzz-found: any junk byte in the
+    // field would otherwise be accepted as the decimal point).
+    valid &= !has_dot || f[int_len] == '.';
+    const uint32_t frac_len = flen - int_len - has_dot;
+    valid &= (int_len - 1) <= 7;
+    valid &= frac_len <= 13;  // real files: 0 (67%) or 12-13
+    const uint32_t il = ((int_len - 1) & 7) + 1;
+    const uint32_t fl1 = frac_len <= 8 ? frac_len : 8;
+    const uint32_t fl2 = frac_len - fl1;
+    const char* fp = f + il + 1;  // il, not int_len: bounds speculative
+                                  // reads within kBufferPadding on garbage
+    uint64_t mant = swar_parse_u64_safe(f, il);
+    const uint64_t fm1 = fl1 ? swar_parse_u64_safe(fp, fl1) : 0;
+    const uint64_t fm2 = fl2 ? swar_parse_u64_safe(fp + 8, fl2) : 0;
+    mant = mant * kPow10u[fl1] + fm1;
+    mant = mant * kPow10u[fl2 & 7] + fm2;  // fl2 <= 5 when valid
+    double bl =
+        static_cast<double>(mant) / kPow10[frac_len <= 13 ? frac_len : 0];
+    // mant >= 0, so the sign bit can be OR'd in directly (no fp select).
+    bl = std::bit_cast<double>(std::bit_cast<uint64_t>(bl) |
+                               (static_cast<uint64_t>(neg) << 63));
+    tp.beat_length = bl;
+
+    // Whole-line digit purity in one predicate: the only non-digit bytes
+    // allowed are the 7 commas, the optional dot, and the optional minus.
+    valid &= _mm_popcnt_u64(nondig) ==
+             7 + static_cast<int>(has_dot) + static_cast<int>(neg);
+
+    // Six small-int tail fields, straight-line (no arrays, no loop — gcc
+    // spills indexed locals to the stack).
+    const uint32_t t0 = c2 - c1 - 1;
+    const uint32_t t1 = c3 - c2 - 1;
+    const uint32_t t2 = c4 - c3 - 1;
+    const uint32_t t3 = c5 - c4 - 1;
+    const uint32_t t4 = c6 - c5 - 1;
+    const uint32_t t5 = static_cast<uint32_t>(len) - c6 - 1;
+    valid &= ((t0 - 1) | (t1 - 1) | (t2 - 1) | (t3 - 1) | (t4 - 1) |
+              (t5 - 1)) <= 7;
+    tp.meter =
+        static_cast<int32_t>(swar_parse_u64_safe(p + c1 + 1, ((t0 - 1) & 7) + 1));
+    tp.sample_set =
+        static_cast<int32_t>(swar_parse_u64_safe(p + c2 + 1, ((t1 - 1) & 7) + 1));
+    tp.sample_index =
+        static_cast<int32_t>(swar_parse_u64_safe(p + c3 + 1, ((t2 - 1) & 7) + 1));
+    tp.volume =
+        static_cast<int32_t>(swar_parse_u64_safe(p + c4 + 1, ((t3 - 1) & 7) + 1));
+    tp.uninherited = swar_parse_u64_safe(p + c5 + 1, ((t4 - 1) & 7) + 1) != 0;
+    tp.effects =
+        static_cast<uint32_t>(swar_parse_u64_safe(p + c6 + 1, ((t5 - 1) & 7) + 1));
+
+    return valid;
+}
+
+// Fused [TimingPoints] section loop: the same two loads serve the newline
+// scan and the parser, and the section is sized exactly once — the next
+// '[' bounds it, so reserve never over-allocates for short sections nor
+// grows for marathon ones (growth reallocs plus resize's value-init
+// memsets measured worse than the push_back they replaced). Returns the
+// position after the section.
+inline const char* parse_timing_points_section(Beatmap& bm, const char* p,
+                                               const char* file_end) {
+    auto& tps = bm.timing_points;
+    const auto* bracket = static_cast<const char*>(
+        memchr(p, '[', static_cast<size_t>(file_end - p)));
+    const char* section_end = bracket ? bracket : file_end;
+    tps.reserve(tps.size() + static_cast<size_t>(section_end - p) / 17 + 4);
+    while (p < file_end) {
+        const char c = *p;
+        if (c == '\r' || c == '\n') {
+            ++p;
+            continue;
         }
-        tp.meter = static_cast<int32_t>(v[0]);
-        tp.sample_set = static_cast<int32_t>(v[1]);
-        tp.sample_index = static_cast<int32_t>(v[2]);
-        tp.volume = static_cast<int32_t>(v[3]);
-        tp.uninherited = v[4] != 0;
-        tp.effects = static_cast<uint32_t>(v[5]);
-    } else if (q < end && *q == ',') {
-        parse_timing_point_line(bm, p, static_cast<size_t>(end - p));  // oversized tail: generic
-        return;
+        if (c == '[') break;
+
+        const __m256i a =
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
+        const __m256i b =
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + 32));
+        const uint64_t nl =
+            static_cast<uint32_t>(_mm256_movemask_epi8(
+                _mm256_cmpeq_epi8(a, _mm256_set1_epi8('\n')))) |
+            static_cast<uint64_t>(static_cast<uint32_t>(_mm256_movemask_epi8(
+                _mm256_cmpeq_epi8(b, _mm256_set1_epi8('\n')))))
+                << 32;
+        const char* next_line;
+        size_t len;
+        if (nl) {
+            const auto pos = static_cast<uint32_t>(_tzcnt_u64(nl));
+            len = pos - (pos > 0 && p[pos - 1] == '\r');
+            next_line = p + pos + 1;
+        } else {
+            const auto* m = static_cast<const char*>(
+                memchr(p, '\n', static_cast<size_t>(file_end - p)));
+            const char* le = m ? m : file_end;
+            len = static_cast<size_t>(le - p) - (le > p && le[-1] == '\r');
+            next_line = m ? m + 1 : file_end;
+        }
+
+        TimingPoint tp;
+        if (fast_parse_timing_point(a, b, p, len, tp))
+            tps.push_back(tp);
+        else
+            parse_timing_point_line(bm, p, len);
+        p = next_line;
     }
-    bm.timing_points.push_back(tp);
+    return p;
 }
 #endif  // FOSU_SIMD_X86
 
@@ -711,6 +810,14 @@ inline Beatmap parse(const char* data, size_t size, ParseOptions opts = {}) {
                 }
 #endif
             } else if (sec == Section::TimingPoints) {
+#if FOSU_SIMD_X86
+                if (opts.use_simd) {
+                    p = parse_timing_points_section(
+                        bm, nl ? nl + 1 : file_end, file_end);
+                    sec = Section::Unknown;
+                    continue;
+                }
+#endif
                 bm.timing_points.reserve(256);
             }
             goto next_line;
@@ -750,12 +857,6 @@ inline Beatmap parse(const char* data, size_t size, ParseOptions opts = {}) {
                 parse_event_line(bm, p, len);
                 break;
             case Section::TimingPoints:
-#if FOSU_SIMD_X86
-                if (opts.use_simd) {
-                    parse_timing_point_line_fast(bm, p, line_end);
-                    break;
-                }
-#endif
                 parse_timing_point_line(bm, p, len);
                 break;
             case Section::HitObjects:

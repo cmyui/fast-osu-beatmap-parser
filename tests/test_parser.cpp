@@ -419,6 +419,75 @@ static void test_fuzz_parse_coord() {
 }
 
 #if FOSU_SIMD_X86
+// Fuzz the one-pass timing point parser against the generic reference:
+// whenever it accepts a line, every field must be bitwise identical.
+// Shapes: 8-field editor lines plus old 2..7-field forms, decimal and
+// negative offsets, integer and long-fraction beatLengths, and injected
+// junk bytes (a '|' posing as the decimal point caught a real bug here).
+static void test_fuzz_timing_point() {
+    char buf[256];
+    size_t accepted = 0;
+    for (int iter = 0; iter < 400000; ++iter) {
+        int len = 0;
+        const uint64_t shape = rng() % 10;
+        if (shape == 9) buf[len++] = '-';
+        const int od = 1 + (int)(rng() % 11);
+        for (int i = 0; i < od; ++i) buf[len++] = char('0' + rng() % 10);
+        if (shape == 8) {
+            buf[len++] = '.';
+            for (int i = 0; i < 3; ++i) buf[len++] = char('0' + rng() % 10);
+        }
+        buf[len++] = ',';
+        if (rng() % 2) buf[len++] = '-';
+        const int bi = 1 + (int)(rng() % 4);
+        for (int i = 0; i < bi; ++i) buf[len++] = char('0' + rng() % 10);
+        if (rng() % 2) {
+            buf[len++] = '.';
+            const int bf = 1 + (int)(rng() % 15);
+            for (int i = 0; i < bf; ++i) buf[len++] = char('0' + rng() % 10);
+        }
+        const int nf = shape == 7 ? (int)(rng() % 6) : 6;
+        for (int f = 0; f < nf; ++f) {
+            buf[len++] = ',';
+            const int fd = 1 + (int)(rng() % 3);
+            for (int i = 0; i < fd; ++i) buf[len++] = char('0' + rng() % 10);
+        }
+        if (rng() % 3 == 0) {
+            const char junk[] = {'-', '.', ',', 'x', ' ', ':', '|', ','};
+            buf[rng() % (uint64_t)len] = junk[rng() % 8];
+        }
+        memset(buf + len, 0, sizeof(buf) - (size_t)len);
+
+        fosu::TimingPoint tp{};
+        const auto a = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(buf));
+        const auto b =
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(buf + 32));
+        if (!fosu::detail::fast_parse_timing_point(a, b, buf, (size_t)len, tp))
+            continue;
+        ++accepted;
+        fosu::Beatmap ref;
+        fosu::detail::parse_timing_point_line(ref, buf, (size_t)len);
+        CHECK(!ref.timing_points.empty());
+        if (!ref.timing_points.empty()) {
+            const fosu::TimingPoint& w = ref.timing_points[0];
+            CHECK(memcmp(&tp.time, &w.time, 8) == 0);
+            CHECK(memcmp(&tp.beat_length, &w.beat_length, 8) == 0);
+            CHECK_EQ(tp.meter, w.meter);
+            CHECK_EQ(tp.sample_set, w.sample_set);
+            CHECK_EQ(tp.sample_index, w.sample_index);
+            CHECK_EQ(tp.volume, w.volume);
+            CHECK_EQ(tp.uninherited, w.uninherited);
+            CHECK_EQ(tp.effects, w.effects);
+        }
+        if (g_failures) {
+            printf("  failing timing line: %.*s\n", len, buf);
+            return;
+        }
+    }
+    printf("  timing fuzz: fast path accepted %zu lines\n", accepted);
+    CHECK(accepted > 80000);
+}
+
 // Generate a value that renders with exactly `digits` decimal digits.
 static uint64_t value_with_digits(int digits, uint64_t max) {
     const uint64_t lo = digits == 1 ? 0 : fosu::detail::kPow10[digits - 1] < 1e19
@@ -491,6 +560,7 @@ int main() {
     test_fuzz_parse_coord();
 #if FOSU_SIMD_X86
     test_fuzz_equivalence();
+    test_fuzz_timing_point();
     printf("SIMD path: enabled\n");
 #else
     printf("SIMD path: not built (non-x86 target)\n");

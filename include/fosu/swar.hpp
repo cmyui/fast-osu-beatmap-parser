@@ -49,6 +49,17 @@ inline uint32_t swar_parse_u32(const char* p, uint32_t len) {
     return ((c & 0x00FF00FF) * 6553601u) >> 16;  // 100*65536 + 1
 }
 
+// swar_parse_u64 with the shift made defined for ANY len (result is
+// garbage outside 1..8; speculative callers discard it via a validity
+// predicate). The &63 matches shlx hardware masking and costs nothing.
+inline uint64_t swar_parse_u64_safe(const char* p, uint32_t len) {
+    uint64_t c = load_u64_le(p) & 0x0F0F0F0F0F0F0F0Full;
+    c <<= (8 * (8 - len)) & 63;
+    c = (c * 2561ull) >> 8;
+    c = ((c & 0x00FF00FF00FF00FFull) * 6553601ull) >> 16;
+    return ((c & 0x0000FFFF0000FFFFull) * 42949672960001ull) >> 32;
+}
+
 // Convert `len` (1..8) leading digits at `p`.
 inline uint64_t swar_parse_u64(const char* p, uint32_t len) {
     uint64_t c = load_u64_le(p) & 0x0F0F0F0F0F0F0F0Full;
