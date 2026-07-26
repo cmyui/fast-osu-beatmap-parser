@@ -47,6 +47,7 @@ Bytes that don't come from a file (e.g. an HTTP body) parse zero-copy via
 make test          # native + x86-64-v3 test suites (Rosetta on Apple Silicon)
 make bench         # synthetic corpus benchmark
 make bench BENCH_ARGS=/path/to/osu/Songs/dir   # real .osu files
+make bench-pgo BENCH_ARGS=bench/corpus         # profile-guided build (+2-3%)
 ```
 
 ## How the hitobject fast path works
@@ -137,6 +138,10 @@ across interleaved A/B runs (min-taking is robust to neighbor noise).
 | fosu scalar | 630 | 72.4 | 4.7× |
 | getline+sscanf baseline | 135 | 340 | 1× |
 
+(Measured before the Zen 4 tuning flags became the Linux default build;
+`make bench` today builds with them and lands a few percent above these
+figures — see Build notes.)
+
 The headline metric is the fresh-`parse()` row — every call pays its own
 result-object construction, like a caller that keeps the Beatmap. The
 `parse_into` row is the secondary mass-parse metric: the same parser
@@ -170,9 +175,12 @@ Hitobject-prefix microbenchmark (isolates the SIMD technique from parser
 overhead): **4.1 ns/line AVX2 vs 20.6 ns/line scalar** — 5×, roughly
 15 cycles for a full `x,y,time,type,hitSound` parse.
 
-Homogeneous per-section costs (AVX2 path): circles 13 ns/line, sliders
-73 ns/line (200k-line synthetic corpora), timing points 29 ns/line
-(measured on the corpus's 6,629 real timing lines, whole-parse).
+Homogeneous per-section costs (AVX2 path): circles 13 ns/line, timing
+points 29 ns/line (the corpus's 6,629 real timing lines, integrated).
+The slider params portion measures ~42 ns/slider isolated on the
+corpus's 5,127 real slider lines; a dedicated deep-dive (SIMD point
+kernels, fused tail, pool cursor) measured every variant within noise
+of the shipped code — that path is at its floor.
 
 ### What each optimization is worth (ablation audit)
 
@@ -261,18 +269,20 @@ skip it entirely.
 
 | parser | MB/s | ns/object |
 |---|---|---|
-| fosu AVX2 (Rosetta 2 translated) | 586 | 71.1 |
-| fosu scalar (native arm64) | 681 | 61.1 |
-| getline+sscanf baseline (native) | 130 | 320.4 |
+| fosu AVX2 (Rosetta 2 translated) | 629 | 72.5 |
+| fosu AVX2, reused `Beatmap` (Rosetta 2) | 656 | 69.5 |
+| fosu scalar (native arm64) | 509 | 89.6 |
+| getline+sscanf baseline (native) | 134 | 339.5 |
 
-Rosetta numbers are included only to show translation cost — its 256-bit
-ops decompose to 128-bit NEON, which halves the SIMD advantage (2× vs the
-3.9× on real silicon). Don't quote them as x86 performance.
+Rosetta numbers are included only to show translation cost (~2.2× vs the
+same binary on real Zen 4 silicon; 256-bit ops decompose to 128-bit
+NEON). The translated SIMD build now beats the native scalar build even
+through that penalty — which is also the case for the NEON port listed
+under future work.
 
 One more honest caveat: whole-file speedup from the SIMD path is
-Amdahl-limited (1.35× on Zen 4) — slider parameters, timing-point doubles,
-and line handling dominate once prefixes are cheap. The next wins are
-listed below.
+Amdahl-limited (~1.5× on Zen 4) — slider parameters, timing-point doubles,
+and line handling dominate once prefixes are cheap.
 
 ## Beyond the prefix: SWAR + data-fitting everywhere else
 
