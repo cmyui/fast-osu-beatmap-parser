@@ -359,19 +359,19 @@ inline void parse_timing_point_line(Beatmap& bm, const char* p, size_t len) {
 // discards the write by not advancing its cursor when this returns false.
 // always_inline: gcc leaves this out of line otherwise — a call plus
 // per-call constant rebuilds on every timing line (disassembly audit).
-__attribute__((always_inline))
-inline bool fast_parse_timing_point(__m256i a, __m256i b, const char* p,
-                                    size_t len, TimingPoint& tp) {
-    if (len > 64 || len < 15) return false;  // real lines: 20..39 bytes
-    const uint64_t line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
-    const uint64_t commas =
-        (comma_mask32(a) | static_cast<uint64_t>(comma_mask32(b)) << 32) &
-        line_mask;
-    const uint64_t nondig =
-        (nondigit_mask32(a) |
-         static_cast<uint64_t>(nondigit_mask32(b)) << 32) &
-        line_mask;
+// Geometry derived by a successful parse, exported so the section loop's
+// shape cache can replay identically-shaped lines without re-deriving it.
+struct TpGeom {
+    uint8_t c[7];                          // comma positions
+    uint8_t bl_il, bl_fl1, bl_fl2, bl_frac;  // beatLength digit layout
+    uint8_t bl_neg, bl_has_dot;
+};
 
+__attribute__((always_inline))
+inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
+                                           const char* p, size_t len,
+                                           TimingPoint& tp,
+                                           TpGeom* geom = nullptr) {
     // Seven comma positions -> eight fields.
     const uint64_t m1 = _blsr_u64(commas);
     const uint64_t m2 = _blsr_u64(m1);
@@ -456,7 +456,175 @@ inline bool fast_parse_timing_point(__m256i a, __m256i b, const char* p,
     tp.effects =
         static_cast<uint32_t>(swar_parse_u64_safe(p + c6 + 1, ((t5 - 1) & 7) + 1));
 
+    if (geom && valid) {
+        geom->c[0] = static_cast<uint8_t>(c0);
+        geom->c[1] = static_cast<uint8_t>(c1);
+        geom->c[2] = static_cast<uint8_t>(c2);
+        geom->c[3] = static_cast<uint8_t>(c3);
+        geom->c[4] = static_cast<uint8_t>(c4);
+        geom->c[5] = static_cast<uint8_t>(c5);
+        geom->c[6] = static_cast<uint8_t>(c6);
+        geom->bl_il = static_cast<uint8_t>(il);
+        geom->bl_fl1 = static_cast<uint8_t>(fl1);
+        geom->bl_fl2 = static_cast<uint8_t>(fl2);
+        geom->bl_frac = static_cast<uint8_t>(frac_len);
+        geom->bl_neg = neg;
+        geom->bl_has_dot = has_dot;
+    }
     return valid;
+}
+
+// Compatibility entry (tests/fuzzers): computes the masks itself.
+__attribute__((always_inline))
+inline bool fast_parse_timing_point(__m256i a, __m256i b, const char* p,
+                                    size_t len, TimingPoint& tp) {
+    if (len > 64 || len < 15) return false;  // real lines: 20..39 bytes
+    const uint64_t line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
+    const uint64_t commas =
+        (comma_mask32(a) | static_cast<uint64_t>(comma_mask32(b)) << 32) &
+        line_mask;
+    const uint64_t nondig =
+        (nondigit_mask32(a) |
+         static_cast<uint64_t>(nondigit_mask32(b)) << 32) &
+        line_mask;
+    return fast_parse_timing_point_masked(commas, nondig, p, len, tp);
+}
+
+// --- Timing-line shape cache -------------------------------------------
+//
+// A [TimingPoints] section reuses a handful of byte-level line layouts:
+// on the 10k-map production census, the top 8 exact (comma mask, nondigit
+// mask, length) shapes cover a median 98.1% of a file's timing lines. A
+// line whose masks equal an already-accepted shape is structurally
+// identical to it — same comma positions, same dot/minus placement, all
+// other bytes digits — so validation collapses to the key comparison and
+// every field converts at cached offsets. The six 1-2 digit tail fields
+// convert together with one cached-shuffle maddubs when they fit a
+// 16-byte window; wider shapes fall back to cached-offset SWAR.
+struct TpShapeRow {
+    uint64_t commas = 0, nondig = 0;
+    uint32_t len = 0;  // 0 = empty slot (never matches: len >= 15)
+    TpGeom g{};
+    uint8_t simd_tails = 0;
+    alignas(16) int8_t shuf[16];   // gathers tail digits, 2B lanes
+    alignas(16) uint8_t subv[16];  // '0' on digit lanes, 0 on padding
+};
+
+struct TpShapeCache {
+    TpShapeRow rows[16];
+    static uint32_t slot(uint64_t commas) {
+        return static_cast<uint32_t>((commas * 0x9E3779B97F4A7C15ull) >> 60);
+    }
+};
+
+// The masks pin every byte's class (clear nondigit bit == digit, comma
+// bit == literal comma), but not WHICH non-digit character occupies the
+// beatLength's sign/dot slots — a fuzz-found hole. Two byte compares
+// close it; everything else follows from mask equality.
+inline bool tp_shape_match(const TpShapeRow& row, uint64_t commas,
+                           uint64_t nondig, size_t len, const char* p) {
+    if (row.commas != commas || row.nondig != nondig ||
+        row.len != static_cast<uint32_t>(len))
+        return false;
+    const TpGeom& g = row.g;
+    const bool neg_ok = !g.bl_neg || p[g.c[0] + 1] == '-';
+    const bool dot_ok =
+        !g.bl_has_dot || p[g.c[0] + 1 + g.bl_neg + g.bl_il] == '.';
+    return neg_ok && dot_ok;
+}
+
+inline void tp_shape_insert(TpShapeCache& cache, uint64_t commas,
+                            uint64_t nondig, size_t len, const TpGeom& g) {
+    TpShapeRow& r = cache.rows[TpShapeCache::slot(commas)];
+    r.commas = commas;
+    r.nondig = nondig;
+    r.len = static_cast<uint32_t>(len);
+    r.g = g;
+    // Tail SIMD layout: all six fields 1-2 digits and spanning <= 16
+    // bytes from the first tail digit.
+    const uint32_t base = g.c[1] + 1;
+    const uint32_t span = static_cast<uint32_t>(len) - base;
+    uint32_t maxlen = 0;
+    uint8_t lens[6];
+    for (int i = 0; i < 6; ++i) {
+        const uint32_t hi = i < 5 ? g.c[i + 2] : static_cast<uint32_t>(len);
+        lens[i] = static_cast<uint8_t>(hi - g.c[i + 1] - 1);
+        maxlen = lens[i] > maxlen ? lens[i] : maxlen;
+    }
+    r.simd_tails = span <= 16 && maxlen <= 2;
+    if (r.simd_tails) {
+        for (int i = 0; i < 16; ++i) {
+            r.shuf[i] = static_cast<int8_t>(0x80);
+            r.subv[i] = 0;
+        }
+        for (int i = 0; i < 6; ++i) {
+            const uint32_t off = g.c[i + 1] + 1 - base;
+            // lane i bytes {2i, 2i+1} = {tens, ones}, weights {10, 1}
+            for (int d = 0; d < lens[i]; ++d) {
+                r.shuf[2 * i + (2 - lens[i]) + d] =
+                    static_cast<int8_t>(off + d);
+                r.subv[2 * i + (2 - lens[i]) + d] = '0';
+            }
+        }
+    }
+}
+
+// Replays a cached shape. Arithmetic mirrors the one-pass parser exactly,
+// so results are bit-identical (pinned by fuzz).
+inline void tp_shape_convert(const TpShapeRow& r, const char* p,
+                             TimingPoint& tp) {
+    const TpGeom& g = r.g;
+    tp.time = static_cast<double>(swar_parse_u64(p, g.c[0]));
+
+    const char* f = p + g.c[0] + 1 + g.bl_neg;
+    uint64_t mant = swar_parse_u64_safe(f, g.bl_il);
+    const char* fp = f + g.bl_il + 1;
+    const uint64_t fm1 = g.bl_fl1 ? swar_parse_u64_safe(fp, g.bl_fl1) : 0;
+    const uint64_t fm2 =
+        g.bl_fl2 ? swar_parse_u64_safe(fp + 8, g.bl_fl2) : 0;
+    mant = mant * kPow10u[g.bl_fl1] + fm1;
+    mant = mant * kPow10u[g.bl_fl2] + fm2;
+    double bl = static_cast<double>(mant) / kPow10[g.bl_frac];
+    bl = std::bit_cast<double>(std::bit_cast<uint64_t>(bl) |
+                               (static_cast<uint64_t>(g.bl_neg) << 63));
+    tp.beat_length = bl;
+
+    if (r.simd_tails) {
+        const __m128i v = _mm_loadu_si128(
+            reinterpret_cast<const __m128i*>(p + g.c[1] + 1));
+        const __m128i gathered = _mm_shuffle_epi8(
+            v, _mm_load_si128(reinterpret_cast<const __m128i*>(r.shuf)));
+        const __m128i digits = _mm_sub_epi8(
+            gathered,
+            _mm_load_si128(reinterpret_cast<const __m128i*>(r.subv)));
+        const __m128i vals =
+            _mm_maddubs_epi16(digits, _mm_set1_epi16(0x010A));
+        alignas(16) uint16_t t[8];
+        _mm_store_si128(reinterpret_cast<__m128i*>(t), vals);
+        tp.meter = t[0];
+        tp.sample_set = t[1];
+        tp.sample_index = t[2];
+        tp.volume = t[3];
+        tp.uninherited = t[4] != 0;
+        tp.effects = t[5];
+    } else {
+        const uint32_t len = r.len;
+        const uint32_t t0 = g.c[2] - g.c[1] - 1;
+        const uint32_t t1 = g.c[3] - g.c[2] - 1;
+        const uint32_t t2 = g.c[4] - g.c[3] - 1;
+        const uint32_t t3 = g.c[5] - g.c[4] - 1;
+        const uint32_t t4 = g.c[6] - g.c[5] - 1;
+        const uint32_t t5 = len - g.c[6] - 1;
+        tp.meter = static_cast<int32_t>(swar_parse_u64(p + g.c[1] + 1, t0));
+        tp.sample_set =
+            static_cast<int32_t>(swar_parse_u64(p + g.c[2] + 1, t1));
+        tp.sample_index =
+            static_cast<int32_t>(swar_parse_u64(p + g.c[3] + 1, t2));
+        tp.volume = static_cast<int32_t>(swar_parse_u64(p + g.c[4] + 1, t3));
+        tp.uninherited = swar_parse_u64(p + g.c[5] + 1, t4) != 0;
+        tp.effects =
+            static_cast<uint32_t>(swar_parse_u64(p + g.c[6] + 1, t5));
+    }
 }
 
 // Fused [TimingPoints] section loop: the same two loads serve the newline
@@ -472,6 +640,7 @@ inline const char* parse_timing_points_section(Beatmap& bm, const char* p,
         memchr(p, '[', static_cast<size_t>(file_end - p)));
     const char* section_end = bracket ? bracket : file_end;
     tps.reserve(tps.size() + static_cast<size_t>(section_end - p) / 17 + 4);
+    TpShapeCache cache{};
     while (p < file_end) {
         const char c = *p;
         if (c == '\r' || c == '\n') {
@@ -505,10 +674,35 @@ inline const char* parse_timing_points_section(Beatmap& bm, const char* p,
         }
 
         TimingPoint tp;
-        if (fast_parse_timing_point(a, b, p, len, tp))
-            tps.push_back(tp);
-        else
+        if (len <= 64 && len >= 15) [[likely]] {
+            const uint64_t line_mask =
+                len == 64 ? ~0ull : ((1ull << len) - 1);
+            const uint64_t commas =
+                (comma_mask32(a) |
+                 static_cast<uint64_t>(comma_mask32(b)) << 32) &
+                line_mask;
+            const uint64_t nondig =
+                (nondigit_mask32(a) |
+                 static_cast<uint64_t>(nondigit_mask32(b)) << 32) &
+                line_mask;
+            const TpShapeRow& row =
+                cache.rows[TpShapeCache::slot(commas)];
+            if (tp_shape_match(row, commas, nondig, len, p)) {
+                tp_shape_convert(row, p, tp);
+                tps.push_back(tp);
+            } else {
+                TpGeom geom;
+                if (fast_parse_timing_point_masked(commas, nondig, p, len,
+                                                   tp, &geom)) {
+                    tp_shape_insert(cache, commas, nondig, len, geom);
+                    tps.push_back(tp);
+                } else {
+                    parse_timing_point_line(bm, p, len);
+                }
+            }
+        } else {
             parse_timing_point_line(bm, p, len);
+        }
         p = next_line;
     }
     return p;
