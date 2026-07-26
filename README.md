@@ -318,8 +318,19 @@ to ARM) and format knowledge measured from real ranked maps:
 - NEON port of the prefix fast path (16-byte window + `shrn` movemask
   equivalent) so the technique runs natively on Apple Silicon / ARM
   servers (the SWAR paths already are portable).
-- Slider body is still ~84 ns/line — profile-guided work on the remaining
-  branch structure and `Slider` store layout.
-- Align the synthetic corpus generator with real-map distributions
-  (timing-point density, map sizes) — see the benchmark lesson above.
 - Whole-file benchmark against rosu-map and osu!lazer's decoder.
+- PGO train/test split on the popular corpus (train on half, evaluate on
+  the held-out half) to check profile generalization.
+- Workload-level throughput: a file-level parallel parse driver
+  (embarrassingly parallel; per-thread `parse_into` state), and a
+  parse-once binary `Beatmap` cache for repeat workloads (recalc
+  pipelines re-parse the same maps every rework).
+- `[Events]` batch-skipping (~10% of bytes are storyboard lines that get
+  per-line dispatch; worth ~1-2%) — the largest unexploited data-fit item.
+
+Closed with measurements (see the ablation/audit notes above): the
+slider path is at its floor — SIMD point kernels (AVX2 and AVX-512
+compress/expand), a fused speculative tail, and pool-cursor writes all
+measured within noise of the shipped code; explicit line pipelining of
+the hitobjects loop measured 19% *slower* (the fused loop is
+throughput-bound, and the out-of-order core already overlaps lines).
