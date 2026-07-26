@@ -660,33 +660,23 @@ inline bool finish_hitobject(Beatmap& bm, HitObject& h, const char* p,
     return true;
 }
 
+// Scalar-only per-line path; the SIMD build routes [HitObjects] through
+// parse_hitobjects_section instead.
 inline void parse_hitobject_line(Beatmap& bm, const char* line, size_t len,
-                                 size_t bytes_remaining, bool use_simd) {
+                                 size_t bytes_remaining) {
     bm.hit_objects.emplace_back();
     HitObject& h = bm.hit_objects.back();
     h.end_time = 0;
     h.slider = HitObject::kNoSlider;
     h.hit_sample = {};
 
-    int next = -1;
-#if FOSU_SIMD_X86
-    if (use_simd) {
-        uint32_t nl_mask;
-        next = fast_parse_prefix(line, h, nl_mask);
-        if (next >= 0) ++bm.stats.fast_path_lines;
-    }
-#else
-    (void)use_simd;
-#endif
+    const int next = scalar_parse_prefix(line, len, h);
     if (next < 0) {
-        next = scalar_parse_prefix(line, len, h);
-        if (next < 0) {
-            bm.hit_objects.pop_back();
-            ++bm.stats.malformed_lines;
-            return;
-        }
-        ++bm.stats.slow_path_lines;
+        bm.hit_objects.pop_back();
+        ++bm.stats.malformed_lines;
+        return;
     }
+    ++bm.stats.slow_path_lines;
 
     if (!finish_hitobject(bm, h, line + next, line + len, bytes_remaining)) {
         bm.hit_objects.pop_back();
@@ -711,9 +701,7 @@ inline const char* parse_hitobjects_section(Beatmap& bm, const char* p,
 
         bm.hit_objects.emplace_back();
         HitObject& h = bm.hit_objects.back();
-        h.end_time = 0;
-        h.slider = HitObject::kNoSlider;
-        h.hit_sample = {};
+        h.hit_sample = {};  // the fast prefix writes every other field
 
         uint32_t nl_mask;
         const int next = fast_parse_prefix(p, h, nl_mask);
@@ -735,6 +723,8 @@ inline const char* parse_hitobjects_section(Beatmap& bm, const char* p,
             ok = finish_hitobject(bm, h, p + next, line_end,
                                   static_cast<size_t>(file_end - p));
         } else {
+            h.end_time = 0;
+            h.slider = HitObject::kNoSlider;
             const int sn = scalar_parse_prefix(
                 p, static_cast<size_t>(line_end - p), h);
             if (sn >= 0) {
@@ -759,7 +749,8 @@ inline const char* parse_hitobjects_section(Beatmap& bm, const char* p,
 
 // `data` must be followed by kBufferPadding readable zero bytes (io.hpp).
 // String fields of the result view into `data`; keep the buffer alive.
-inline Beatmap parse(const char* data, size_t size, ParseOptions opts = {}) {
+inline Beatmap parse(const char* data, size_t size,
+                     [[maybe_unused]] ParseOptions opts = {}) {
     using namespace detail;
     Beatmap bm;
     const char* p = data;
@@ -861,8 +852,7 @@ inline Beatmap parse(const char* data, size_t size, ParseOptions opts = {}) {
                 break;
             case Section::HitObjects:
                 parse_hitobject_line(bm, p, len,
-                                     static_cast<size_t>(file_end - p),
-                                     opts.use_simd);
+                                     static_cast<size_t>(file_end - p));
                 break;
             case Section::Unknown:
                 break;

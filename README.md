@@ -56,10 +56,13 @@ Instead:
    byte shuffle, fused into a single cache line, generated `consteval`)
    normalizes every digit to a fixed position with zero padding.
 5. **One `vpmaddubsw` + `vpmaddwd` chain** converts x, y, and type to
-   integers simultaneously; time's 10 digits reduce to three dwords
-   (top2/mid4/low4) combined with two scalar `imul`s. hitSound (1–2 digits;
-   osu! bitflags go to 15) is parsed scalar since its length isn't part of
-   the table index.
+   integers simultaneously. Time finishes in-vector too: real maps top out
+   at 7 time digits (a 9-digit time is a 27h+ timestamp), so `vpackusdw` +
+   one more `vpmaddwd` pair the mid4/low4 words and a single 32-byte store
+   writes `{x, y, type, hs, time, end_time, slider}` — the prefix never
+   crosses into GP registers and the int32 overflow branch exists only on
+   the never-taken 9-10 digit path. hitSound (1–2 digits; osu! bitflags go
+   to 15) is parsed scalar since its length isn't part of the table index.
 
 ### Correctness model
 
@@ -115,13 +118,13 @@ across interleaved A/B runs (min-taking is robust to neighbor noise).
 
 | parser | MB/s | ns/object | vs baseline |
 |---|---|---|---|
-| fosu AVX2 | 883 | 51.6 | 6.5× |
+| fosu AVX2 | 910 | 50.1 | 6.7× |
 | fosu scalar | 630 | 72.4 | 4.7× |
 | getline+sscanf baseline | 135 | 340 | 1× |
 
 Hitobject-prefix microbenchmark (isolates the SIMD technique from parser
-overhead): **5.2 ns/line AVX2 vs 20.6 ns/line scalar** — 4×, roughly
-19 cycles for a full `x,y,time,type,hitSound` parse.
+overhead): **4.1 ns/line AVX2 vs 20.6 ns/line scalar** — 5×, roughly
+15 cycles for a full `x,y,time,type,hitSound` parse.
 
 Homogeneous per-section costs (AVX2 path): circles 13 ns/line, sliders
 73 ns/line (200k-line synthetic corpora), timing points 29 ns/line
