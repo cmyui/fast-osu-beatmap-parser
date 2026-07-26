@@ -140,10 +140,24 @@ across interleaved A/B runs (min-taking is robust to neighbor noise).
 The headline metric is the fresh-`parse()` row — every call pays its own
 result-object construction, like a caller that keeps the Beatmap. The
 `parse_into` row is the secondary mass-parse metric: the same parser
-writing into a reused `Beatmap` (vector capacity kept across parses),
-which removes the ~25% of the whole parse that goes to malloc,
-first-touch page faults, and free. Both rows produce bit-identical
-results (whole-corpus checksum cross-checked every run).
+writing into a reused `Beatmap` (vector capacity kept across parses).
+Both rows produce bit-identical results (whole-corpus checksum
+cross-checked every run).
+
+Profiled composition of the fresh-vs-reuse gap: it is entirely glibc
+returning pool pages to the kernel between parses (munmap for large
+chunks, heap-top trim otherwise) and the kernel re-zeroing them on the
+next parse — ~5.6 minor faults per parse; allocator bookkeeping itself
+measured ~0.2%. A fresh-per-parse process can recover the full reuse
+throughput with two mallopts (env vars `MALLOC_MMAP_THRESHOLD_` /
+`MALLOC_TRIM_THRESHOLD_` work too), at the cost of retaining
+high-water-mark memory:
+
+```cpp
+mallopt(M_MMAP_THRESHOLD, 64 << 20);   // large pools stay on the heap
+mallopt(M_TRIM_THRESHOLD, INT_MAX);    // the heap never shrinks
+// fresh parse() measured 900 -> 1236 MB/s with these — equal to reuse.
+```
 
 Hitobject-prefix microbenchmark (isolates the SIMD technique from parser
 overhead): **4.1 ns/line AVX2 vs 20.6 ns/line scalar** — 5×, roughly
