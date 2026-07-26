@@ -1,1 +1,4 @@
+.vscode/
 build/
+bench/corpus/
+bench/corpus-large/

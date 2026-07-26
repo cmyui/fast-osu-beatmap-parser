@@ -1,8 +1,12 @@
+#include <unistd.h>
+
 #include <cinttypes>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
+#include <string_view>
 
 #include <fosu/parser.hpp>
 
@@ -208,6 +212,24 @@ static void test_old_format() {
     CHECK_EQ(bm.hit_objects[0].hitsound, 4u);
 }
 
+static void test_long_timing_offsets() {
+    // Offsets past the 8-byte SWAR window (>27h marathons) must defer to
+    // the generic parser, not vanish as malformed.
+    for (bool simd : {true, false}) {
+        auto bm = parse_str(
+            "osu file format v14\n"
+            "[TimingPoints]\n"
+            "123456789,300.5,4,2,1,60,1,0\n"
+            "4123456789,-50,4,2,1,60,0,0\n",
+            simd);
+        CHECK_EQ(bm.timing_points.size(), 2u);
+        CHECK(bm.timing_points[0].time == 123456789.0);
+        CHECK(bm.timing_points[1].time == 4123456789.0);
+        CHECK_EQ(bm.timing_points[0].volume, 60);
+        CHECK_EQ(bm.stats.malformed_lines, 0u);
+    }
+}
+
 static void test_mania_hold() {
     auto bm = parse_str(
         "osu file format v14\n"
@@ -266,7 +288,55 @@ static void test_malformed() {
     CHECK_EQ(bm.stats.malformed_lines, 5u);
 }
 
-#if FOSU_SIMD_X86
+// Reference: the pre-SWAR byte-loop parse_double, kept verbatim as the
+// behavioral baseline for <=18 significant digit inputs.
+static const char* reference_parse_double(const char* p, const char* end,
+                                          double& out) {
+    const char* start = p;
+    bool neg = false;
+    if (p < end && *p == '-') {
+        neg = true;
+        ++p;
+    }
+    uint64_t mant = 0;
+    int digits = 0;
+    int frac = 0;
+    bool any = false;
+    bool overflow = false;
+    while (p < end && fosu::detail::is_digit(*p)) {
+        any = true;
+        if (digits < 18) {
+            mant = mant * 10 + static_cast<uint64_t>(*p - '0');
+            ++digits;
+        } else {
+            overflow = true;
+        }
+        ++p;
+    }
+    if (p < end && *p == '.') {
+        ++p;
+        while (p < end && fosu::detail::is_digit(*p)) {
+            any = true;
+            if (digits < 18) {
+                mant = mant * 10 + static_cast<uint64_t>(*p - '0');
+                ++digits;
+                ++frac;
+            }
+            ++p;
+        }
+    }
+    if (!any) return start;
+    if (overflow || (p < end && (*p == 'e' || *p == 'E'))) {
+        char* e;
+        out = strtod(start, &e);
+        return e;
+    }
+    double v = static_cast<double>(mant);
+    if (frac) v /= fosu::detail::kPow10[frac];
+    out = neg ? -v : v;
+    return p;
+}
+
 static uint64_t rng_state = 0x243F6A8885A308D3ull;
 static uint64_t rng() {
     rng_state += 0x9E3779B97F4A7C15ull;
@@ -274,6 +344,152 @@ static uint64_t rng() {
     z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
     z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
     return z ^ (z >> 31);
+}
+
+// Fuzz the SWAR parse_double against the byte-loop reference: results must
+// be bit-identical (identical mantissa accumulation) for <=16 significant
+// digits, and identical to strtod beyond that (both delegate).
+static void test_fuzz_parse_double() {
+    char buf[96];
+    for (int iter = 0; iter < 300000; ++iter) {
+        const int int_digits = 1 + (int)(rng() % 9);
+        const int frac_digits = (int)(rng() % 8);
+        int len = 0;
+        if (rng() % 3 == 0) buf[len++] = '-';
+        for (int i = 0; i < int_digits; ++i)
+            buf[len++] = char('0' + (i == 0 ? rng() % 9 + (int_digits > 1)
+                                            : rng() % 10));
+        if (frac_digits || rng() % 4 == 0) {
+            buf[len++] = '.';
+            for (int i = 0; i < frac_digits; ++i)
+                buf[len++] = char('0' + rng() % 10);
+        }
+        const char* tail = ",4,2\r\n";
+        const int payload = len;
+        for (const char* t = tail; *t; ++t) buf[len++] = *t;
+        memset(buf + len, 0, sizeof(buf) - (size_t)len);
+
+        double got = -1, want = -2;
+        const char* gp =
+            fosu::detail::parse_double(buf, buf + payload, got);
+        const char* wp = reference_parse_double(buf, buf + payload, want);
+        CHECK_EQ(gp - buf, wp - buf);
+        CHECK(got == want);
+        if (g_failures) {
+            printf("  failing double: %.*s\n", payload, buf);
+            return;
+        }
+    }
+    // Long-mantissa inputs delegate to strtod and must match it exactly.
+    const char* long_cases[] = {"342.857142857142857142857",
+                                "123456789012345678901", "0.6999999999999999556"};
+    for (const char* c : long_cases) {
+        std::string padded(c);
+        padded.append(64, '\0');
+        double got = 0;
+        fosu::detail::parse_double(padded.data(), padded.data() + strlen(c), got);
+        CHECK(got == strtod(c, nullptr));
+    }
+}
+
+// Fuzz the SWAR slider coordinate parser against the general path.
+static void test_fuzz_parse_coord() {
+    char buf[64];
+    for (int iter = 0; iter < 300000; ++iter) {
+        int len = 0;
+        const uint64_t kind = rng() % 16;
+        if (kind == 0) buf[len++] = '-';
+        if (kind != 1) {
+            const int digits = 1 + (int)(rng() % (kind < 12 ? 4 : 8));
+            for (int i = 0; i < digits; ++i)
+                buf[len++] = char('0' + rng() % 10);
+        }
+        const int payload = len;
+        buf[len++] = (rng() % 2) ? ':' : '|';
+        memset(buf + len, 0, sizeof(buf) - (size_t)len);
+
+        int32_t got = -777, want = -777;
+        const char* gp = fosu::detail::parse_coord(buf, buf + payload, got);
+        int64_t v;
+        const char* wp = fosu::detail::parse_i64(buf, buf + payload, v);
+        if (wp != buf) want = fosu::detail::clamp_i32(v);
+        CHECK_EQ(gp - buf, wp - buf);
+        CHECK_EQ(got, want);
+        if (g_failures) {
+            printf("  failing coord: %.*s\n", payload, buf);
+            return;
+        }
+    }
+}
+
+#if FOSU_SIMD_X86
+// Fuzz the one-pass timing point parser against the generic reference:
+// whenever it accepts a line, every field must be bitwise identical.
+// Shapes: 8-field editor lines plus old 2..7-field forms, decimal and
+// negative offsets, integer and long-fraction beatLengths, and injected
+// junk bytes (a '|' posing as the decimal point caught a real bug here).
+static void test_fuzz_timing_point() {
+    char buf[256];
+    size_t accepted = 0;
+    for (int iter = 0; iter < 400000; ++iter) {
+        int len = 0;
+        const uint64_t shape = rng() % 10;
+        if (shape == 9) buf[len++] = '-';
+        const int od = 1 + (int)(rng() % 11);
+        for (int i = 0; i < od; ++i) buf[len++] = char('0' + rng() % 10);
+        if (shape == 8) {
+            buf[len++] = '.';
+            for (int i = 0; i < 3; ++i) buf[len++] = char('0' + rng() % 10);
+        }
+        buf[len++] = ',';
+        if (rng() % 2) buf[len++] = '-';
+        const int bi = 1 + (int)(rng() % 4);
+        for (int i = 0; i < bi; ++i) buf[len++] = char('0' + rng() % 10);
+        if (rng() % 2) {
+            buf[len++] = '.';
+            const int bf = 1 + (int)(rng() % 15);
+            for (int i = 0; i < bf; ++i) buf[len++] = char('0' + rng() % 10);
+        }
+        const int nf = shape == 7 ? (int)(rng() % 6) : 6;
+        for (int f = 0; f < nf; ++f) {
+            buf[len++] = ',';
+            const int fd = 1 + (int)(rng() % 3);
+            for (int i = 0; i < fd; ++i) buf[len++] = char('0' + rng() % 10);
+        }
+        if (rng() % 3 == 0) {
+            const char junk[] = {'-', '.', ',', 'x', ' ', ':', '|', ','};
+            buf[rng() % (uint64_t)len] = junk[rng() % 8];
+        }
+        memset(buf + len, 0, sizeof(buf) - (size_t)len);
+
+        fosu::TimingPoint tp{};
+        const auto a = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(buf));
+        const auto b =
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(buf + 32));
+        if (!fosu::detail::fast_parse_timing_point(a, b, buf, (size_t)len, tp))
+            continue;
+        ++accepted;
+        fosu::Beatmap ref;
+        fosu::detail::parse_timing_point_line(ref, buf, (size_t)len);
+        CHECK(!ref.timing_points.empty());
+        if (!ref.timing_points.empty()) {
+            const fosu::TimingPoint& w = ref.timing_points[0];
+            CHECK(memcmp(&tp.time, &w.time, 8) == 0);
+            CHECK(memcmp(&tp.beat_length, &w.beat_length, 8) == 0);
+            CHECK_EQ(tp.meter, w.meter);
+            CHECK_EQ(tp.sample_set, w.sample_set);
+            CHECK_EQ(tp.sample_index, w.sample_index);
+            CHECK_EQ(tp.volume, w.volume);
+            CHECK_EQ(tp.uninherited, w.uninherited);
+            CHECK_EQ(tp.effects, w.effects);
+        }
+        if (g_failures) {
+            printf("  failing timing line: %.*s\n", len, buf);
+            return;
+        }
+    }
+    printf("  timing fuzz: fast path accepted %zu lines\n", accepted);
+    CHECK(accepted > 80000);
 }
 
 // Generate a value that renders with exactly `digits` decimal digits.
@@ -315,7 +531,8 @@ static void test_fuzz_equivalence() {
         }
 
         fosu::HitObject fast{}, ref{};
-        const int fn = fosu::detail::fast_parse_prefix(buf, fast);
+        uint32_t nl_mask;
+        const int fn = fosu::detail::fast_parse_prefix(buf, fast, nl_mask);
         const int rn = fosu::detail::scalar_parse_prefix(buf, strlen(buf), ref);
         if (fn < 0) continue;
         ++fast_taken;
@@ -336,14 +553,215 @@ static void test_fuzz_equivalence() {
 }
 #endif
 
+// --- parse_into / read_into reuse ---------------------------------------
+
+static uint64_t fp_mix(uint64_t h, uint64_t v) {
+    h ^= v + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2);
+    return h;
+}
+static uint64_t fp_sv(uint64_t h, std::string_view s) {
+    h = fp_mix(h, s.size());
+    for (char c : s) h = fp_mix(h, static_cast<uint8_t>(c));
+    return h;
+}
+static uint64_t fp_d(uint64_t h, double d) {
+    uint64_t b;
+    memcpy(&b, &d, 8);
+    return fp_mix(h, b);
+}
+
+// Covers every Beatmap field so reused-vs-fresh divergence anywhere shows.
+static uint64_t fingerprint(const fosu::Beatmap& bm) {
+    uint64_t h = 0;
+    h = fp_mix(h, static_cast<uint64_t>(bm.format_version));
+    h = fp_sv(h, bm.audio_filename);
+    h = fp_mix(h, static_cast<uint32_t>(bm.audio_lead_in));
+    h = fp_mix(h, static_cast<uint32_t>(bm.preview_time));
+    h = fp_mix(h, static_cast<uint32_t>(bm.countdown));
+    h = fp_sv(h, bm.sample_set);
+    h = fp_d(h, bm.stack_leniency);
+    h = fp_mix(h, static_cast<uint32_t>(bm.mode));
+    h = fp_mix(h, bm.letterbox_in_breaks);
+    h = fp_mix(h, bm.widescreen_storyboard);
+    h = fp_mix(h, bm.epilepsy_warning);
+    h = fp_mix(h, bm.special_style);
+    h = fp_mix(h, bm.use_skin_sprites);
+    h = fp_mix(h, bm.samples_match_playback_rate);
+    h = fp_mix(h, static_cast<uint32_t>(bm.countdown_offset));
+    h = fp_sv(h, bm.overlay_position);
+    h = fp_sv(h, bm.skin_preference);
+    h = fp_sv(h, bm.bookmarks);
+    h = fp_d(h, bm.distance_spacing);
+    h = fp_mix(h, static_cast<uint32_t>(bm.beat_divisor));
+    h = fp_mix(h, static_cast<uint32_t>(bm.grid_size));
+    h = fp_d(h, bm.timeline_zoom);
+    h = fp_sv(h, bm.title);
+    h = fp_sv(h, bm.title_unicode);
+    h = fp_sv(h, bm.artist);
+    h = fp_sv(h, bm.artist_unicode);
+    h = fp_sv(h, bm.creator);
+    h = fp_sv(h, bm.version);
+    h = fp_sv(h, bm.source);
+    h = fp_sv(h, bm.tags);
+    h = fp_mix(h, static_cast<uint64_t>(bm.beatmap_id));
+    h = fp_mix(h, static_cast<uint64_t>(bm.beatmap_set_id));
+    h = fp_d(h, bm.hp);
+    h = fp_d(h, bm.cs);
+    h = fp_d(h, bm.od);
+    h = fp_d(h, bm.ar);
+    h = fp_d(h, bm.slider_multiplier);
+    h = fp_d(h, bm.slider_tick_rate);
+    h = fp_sv(h, bm.background);
+    h = fp_sv(h, bm.video);
+    h = fp_mix(h, bm.breaks.size());
+    for (const auto& b : bm.breaks) {
+        h = fp_mix(h, static_cast<uint32_t>(b.start));
+        h = fp_mix(h, static_cast<uint32_t>(b.end));
+    }
+    h = fp_mix(h, bm.combo_colours.size());
+    for (uint32_t c : bm.combo_colours) h = fp_mix(h, c);
+    h = fp_mix(h, bm.timing_points.size());
+    for (const auto& tp : bm.timing_points) {
+        h = fp_d(h, tp.time);
+        h = fp_d(h, tp.beat_length);
+        h = fp_mix(h, static_cast<uint32_t>(tp.meter));
+        h = fp_mix(h, static_cast<uint32_t>(tp.sample_set));
+        h = fp_mix(h, static_cast<uint32_t>(tp.sample_index));
+        h = fp_mix(h, static_cast<uint32_t>(tp.volume));
+        h = fp_mix(h, tp.uninherited);
+        h = fp_mix(h, tp.effects);
+    }
+    h = fp_mix(h, bm.hit_objects.size());
+    for (const auto& o : bm.hit_objects) {
+        h = fp_mix(h, static_cast<uint32_t>(o.x));
+        h = fp_mix(h, static_cast<uint32_t>(o.y));
+        h = fp_mix(h, o.type);
+        h = fp_mix(h, o.hitsound);
+        h = fp_mix(h, static_cast<uint32_t>(o.time));
+        h = fp_mix(h, static_cast<uint32_t>(o.end_time));
+        h = fp_mix(h, o.slider);
+        h = fp_sv(h, o.hit_sample);
+    }
+    h = fp_mix(h, bm.sliders.size());
+    for (const auto& s : bm.sliders) {
+        h = fp_mix(h, s.point_begin);
+        h = fp_mix(h, s.point_count);
+        h = fp_mix(h, static_cast<uint32_t>(s.slides));
+        h = fp_d(h, s.length);
+        h = fp_mix(h, static_cast<uint8_t>(s.curve_type));
+        h = fp_sv(h, s.edge_sounds);
+        h = fp_sv(h, s.edge_sets);
+    }
+    h = fp_mix(h, bm.slider_points.size());
+    for (const auto& p : bm.slider_points) {
+        h = fp_mix(h, static_cast<uint32_t>(p.x));
+        h = fp_mix(h, static_cast<uint32_t>(p.y));
+    }
+    h = fp_mix(h, bm.stats.fast_path_lines);
+    h = fp_mix(h, bm.stats.slow_path_lines);
+    h = fp_mix(h, bm.stats.malformed_lines);
+    h = fp_mix(h, bm.stats.storyboard_lines);
+    return h;
+}
+
+static const char* kSmallMap =
+    "osu file format v11\r\n"
+    "[General]\r\n"
+    "AudioFilename: b.mp3\r\n"
+    "Mode: 3\r\n"
+    "[Metadata]\r\n"
+    "Title:Second\r\n"
+    "BeatmapID:42\r\n"
+    "[Difficulty]\r\n"
+    "HPDrainRate:3\r\n"
+    "OverallDifficulty:7\r\n"
+    "[TimingPoints]\r\n"
+    "500,400,4,1,0,80,1,0\r\n"
+    "[HitObjects]\r\n"
+    "100,100,500,1,0\r\n"
+    "256,192,1000,12,0,2000\r\n";
+
+void test_parse_into_reuse() {
+    printf("parse_into reuse\n");
+    fosu::FileBuffer full = fosu::make_padded(kFullMap);
+    fosu::FileBuffer small = fosu::make_padded(kSmallMap);
+    fosu::FileBuffer empty = fosu::make_padded("osu file format v14\r\n");
+
+    fosu::Beatmap bm;
+    fosu::parse_into(full, bm);
+    CHECK_EQ(fingerprint(bm), fingerprint(fosu::parse(full)));
+    const size_t cap_objs = bm.hit_objects.capacity();
+
+    // Shrinking reuse: stale fullmap state must not leak into the result.
+    fosu::parse_into(small, bm);
+    CHECK_EQ(fingerprint(bm), fingerprint(fosu::parse(small)));
+    CHECK(bm.hit_objects.capacity() >= cap_objs);  // capacity kept
+    CHECK(bm.title == "Second");
+    CHECK(bm.background.empty());
+    CHECK_EQ(bm.combo_colours.size(), 0u);
+
+    // Growing reuse.
+    fosu::parse_into(full, bm);
+    CHECK_EQ(fingerprint(bm), fingerprint(fosu::parse(full)));
+
+    // Near-empty file: everything back at defaults.
+    fosu::parse_into(empty, bm);
+    CHECK_EQ(fingerprint(bm), fingerprint(fosu::parse(empty)));
+    CHECK_EQ(bm.hit_objects.size(), 0u);
+    CHECK(std::abs(bm.stack_leniency - 0.7) < 1e-12);
+    CHECK(bm.sample_set == "Normal");
+}
+
+void test_read_into_reuse() {
+    printf("read_into reuse\n");
+    char path[] = "/tmp/fosu_read_into_XXXXXX";
+    const int fd = mkstemp(path);
+    CHECK(fd >= 0);
+    const std::string big(10000, 'A');
+    const std::string little(100, 'B');
+    CHECK_EQ(write(fd, big.data(), big.size()),
+             static_cast<ssize_t>(big.size()));
+    close(fd);
+
+    fosu::FileBuffer buf;
+    CHECK(fosu::read_into(path, buf));
+    CHECK_EQ(buf.size, big.size());
+    CHECK(memcmp(buf.data.get(), big.data(), big.size()) == 0);
+    const char* alloc0 = buf.data.get();
+    const size_t cap0 = buf.capacity;
+
+    FILE* f = fopen(path, "wb");
+    fwrite(little.data(), 1, little.size(), f);
+    fclose(f);
+
+    CHECK(fosu::read_into(path, buf));
+    CHECK_EQ(buf.size, little.size());
+    CHECK(buf.data.get() == alloc0);  // allocation reused
+    CHECK_EQ(buf.capacity, cap0);
+    CHECK(memcmp(buf.data.get(), little.data(), little.size()) == 0);
+    bool pad_zero = true;
+    for (size_t i = 0; i < fosu::kBufferPadding; ++i)
+        pad_zero &= buf.data[buf.size + i] == 0;
+    CHECK(pad_zero);
+
+    unlink(path);
+    CHECK(!fosu::read_into("/nonexistent/fosu-no-such-file", buf));
+}
+
 int main() {
     test_full_map();
     test_old_format();
     test_mania_hold();
     test_aspire_edge_cases();
     test_malformed();
+    test_long_timing_offsets();
+    test_parse_into_reuse();
+    test_read_into_reuse();
+    test_fuzz_parse_double();
+    test_fuzz_parse_coord();
 #if FOSU_SIMD_X86
     test_fuzz_equivalence();
+    test_fuzz_timing_point();
     printf("SIMD path: enabled\n");
 #else
     printf("SIMD path: not built (non-x86 target)\n");

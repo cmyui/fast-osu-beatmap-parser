@@ -1,8 +1,17 @@
 # fast-osu-beatmap-parser (fosu)
 
 A header-only C++20 parser for the `.osu` beatmap format, built around a
-table-driven AVX2 fast path for hitobject lines, a zero-copy design, and a
-lenient scalar fallback so throughput never costs correctness.
+table-driven AVX2 fast path for hitobject lines, a zero-copy design, and
+data-fitting fast paths that exploit what editor-emitted files guarantee.
+
+**Design goal: performance for valid, editor-emitted beatmaps.** This
+project deliberately inverts the usual priority order — robustness against
+hand-edited/adversarial files and code readability are explicit non-goals.
+Format regularities observed in real ranked maps (integer timing offsets,
+key names unique on their first bytes, field-count conventions per format
+version) are treated as free information and exploited directly. Structurally
+surprising lines defer to generic fallback parsers rather than being
+validated up front, so common shapes pay nothing.
 
 The SIMD hitobject technique is based on a prototype by
 [Flamme](https://fla.me), extended here with parallel delimiter extraction,
@@ -14,11 +23,25 @@ around it.
 ```cpp
 #include <fosu/parser.hpp>
 
-auto buf = fosu::read_file_padded("map.osu");   // guarantees 64B zero padding
+auto buf = fosu::read_file_padded("map.osu");   // guarantees 128B zero padding
 fosu::Beatmap bm = fosu::parse(buf);
 // bm.hit_objects, bm.timing_points, bm.sliders, bm.ar, bm.title, ...
 // string_view fields point into `buf` — keep it alive.
+
+// Parse-many loop: reuse both buffers and the steady state allocates
+// nothing (+32% measured on real maps; see Benchmarks).
+fosu::FileBuffer fb;
+fosu::Beatmap bm2;
+for (const char* path : paths) {
+    if (!fosu::read_into(path, fb)) continue;
+    fosu::parse_into(fb, bm2);      // clears bm2, keeps vector capacity
+    consume(bm2);                   // valid until the next parse_into
+}
 ```
+
+Bytes that don't come from a file (e.g. an HTTP body) parse zero-copy via
+`fosu::parse(data, size)` as long as the buffer has `fosu::kBufferPadding`
+(128) readable zero bytes past the end.
 
 ```sh
 make test          # native + x86-64-v3 test suites (Rosetta on Apple Silicon)
@@ -47,10 +70,13 @@ Instead:
    byte shuffle, fused into a single cache line, generated `consteval`)
    normalizes every digit to a fixed position with zero padding.
 5. **One `vpmaddubsw` + `vpmaddwd` chain** converts x, y, and type to
-   integers simultaneously; time's 10 digits reduce to three dwords
-   (top2/mid4/low4) combined with two scalar `imul`s. hitSound (1–2 digits;
-   osu! bitflags go to 15) is parsed scalar since its length isn't part of
-   the table index.
+   integers simultaneously. Time finishes in-vector too: real maps top out
+   at 7 time digits (a 9-digit time is a 27h+ timestamp), so `vpackusdw` +
+   one more `vpmaddwd` pair the mid4/low4 words and a single 32-byte store
+   writes `{x, y, type, hs, time, end_time, slider}` — the prefix never
+   crosses into GP registers and the int32 overflow branch exists only on
+   the never-taken 9-10 digit path. hitSound (1–2 digits; osu! bitflags go
+   to 15) is parsed scalar since its length isn't part of the table index.
 
 ### Correctness model
 
@@ -69,8 +95,8 @@ asserts the invariant *fast path accepts ⇒ results byte-identical to the
 scalar reference*, and the benchmark cross-checks full-corpus checksums
 between both paths on every run.
 
-Both paths require `fosu::kBufferPadding` (64) readable zero bytes past the
-buffer end — `read_file_padded`/`make_padded` provide this.
+Both paths require `fosu::kBufferPadding` (128) readable zero bytes past the
+buffer end — `read_file_padded`/`read_into`/`make_padded` provide this.
 
 ## Format coverage
 
@@ -92,25 +118,144 @@ type syntax (v128+ files), decimal `x,y` on the fast path (falls back).
 
 ## Benchmarks
 
-Synthetic corpus: 40 maps, 3.57 MB, 85,600 hitobjects (60% circles /
-36% sliders / 4% spinners, realistic field-width distributions). Best of 9
-runs, single thread. `make bench` reproduces.
+Real-map corpus (`bench/fetch_corpus.sh`): 17 ranked .osu files spanning
+format v3–v14 — The Unforgiving (13-diff 2012 marathon album, ~500 timing
+points per diff), Freedom Dive, The Big Black, Blue Zenith, and Disco
+Prince (the first ranked map, 2007). 0.82 MB, 17,902 hitobjects, 100%
+taken by the fast path, zero malformed lines. Best of 9 runs, single
+thread. `make bench BENCH_ARGS=bench/corpus` reproduces.
 
 ### AMD EPYC Genoa (Zen 4), Ubuntu 24.04, gcc 13.3
 
-Shared-tenancy VM; runs pinned to one core with `taskset`, best of 5×9
-repetitions (min-taking is robust to neighbor noise, and run-to-run spread
-was <2%).
+Shared-tenancy VM; runs pinned to one core with `taskset`, best-of-reps
+across interleaved A/B runs (min-taking is robust to neighbor noise).
 
 | parser | MB/s | ns/object | vs baseline |
 |---|---|---|---|
-| fosu AVX2 | 862 | 48.3 | 6.3× |
-| fosu scalar | 638 | 65.3 | 4.7× |
-| getline+sscanf baseline | 136 | 305.4 | 1× |
+| fosu AVX2 | 930 | 49.0 | 6.9× |
+| fosu AVX2, reused `Beatmap` (`parse_into`) | 1230 | 37.1 | 9.1× |
+| fosu scalar | 630 | 72.4 | 4.7× |
+| getline+sscanf baseline | 135 | 340 | 1× |
+
+The headline metric is the fresh-`parse()` row — every call pays its own
+result-object construction, like a caller that keeps the Beatmap. The
+`parse_into` row is the secondary mass-parse metric: the same parser
+writing into a reused `Beatmap` (vector capacity kept across parses).
+Both rows produce bit-identical results (whole-corpus checksum
+cross-checked every run).
+
+Profiled composition of the fresh-vs-reuse gap: it is entirely glibc
+returning pool pages to the kernel between parses (munmap for large
+chunks, heap-top trim otherwise) and the kernel re-zeroing them on the
+next parse — ~5.6 minor faults per parse; allocator bookkeeping itself
+measured ~0.2%. A fresh-per-parse process can recover the full reuse
+throughput with two mallopts (env vars `MALLOC_MMAP_THRESHOLD_` /
+`MALLOC_TRIM_THRESHOLD_` work too), at the cost of retaining
+high-water-mark memory:
+
+```cpp
+mallopt(M_MMAP_THRESHOLD, 64 << 20);   // large pools stay on the heap
+mallopt(M_TRIM_THRESHOLD, INT_MAX);    // the heap never shrinks
+// fresh parse() measured 900 -> 1236 MB/s with these — equal to reuse.
+```
+
+These are process-global application policy (they change how the whole
+program's malloc behaves), so fosu never sets them itself — and a
+process that can simply keep a `Beatmap` alive should prefer
+`parse_into`, which achieves the identical effect scoped to one
+object's pools. Non-glibc allocators (jemalloc/tcmalloc/mimalloc)
+return pages lazily and shrink this gap on their own.
 
 Hitobject-prefix microbenchmark (isolates the SIMD technique from parser
-overhead): **5.1 ns/line AVX2 vs 19.9 ns/line scalar** — 3.9×, roughly
-19 cycles for a full `x,y,time,type,hitSound` parse.
+overhead): **4.1 ns/line AVX2 vs 20.6 ns/line scalar** — 5×, roughly
+15 cycles for a full `x,y,time,type,hitSound` parse.
+
+Homogeneous per-section costs (AVX2 path): circles 13 ns/line, sliders
+73 ns/line (200k-line synthetic corpora), timing points 29 ns/line
+(measured on the corpus's 6,629 real timing lines, whole-parse).
+
+### What each optimization is worth (ablation audit)
+
+Each fast path toggled off individually against the full build (July
+2026, same interleaved-rounds methodology). Marginal value on the real
+corpus today: hit_objects reserve estimate **+27%**, deferred slider
+pool reserve **+16%**, one-pass timing parser **+7.8%**, timing fused
+section **+4.5%**, hitobjects fused section **+4.3%** (measured with the
+SIMD prefix retained per-line, so this is fusion itself), SWAR
+coordinate path **+4.2%**. Two pieces measured ~zero: a 32-byte SIMD
+newline probe in the main line loop (deleted — the fused section loops
+had eroded its value to nothing) and the slider-extras 32-byte scan
+(kept pending a larger corpus; its measurement was inside noise).
+
+### The large corpus (popular maps)
+
+`bench/fetch_corpus_large.sh` fetches the second corpus: 167 .osu files
+from the 43 most-played ranked mapsets (all-time playcount via mirror
+APIs, cross-checked between osu.direct and nerinyan; top sets per mode;
+plus the most-played recently-ranked sets for modern file shapes).
+3.86 MB, 70,732 hitobjects, corpus checksum `c16c5c00b51eaa2e`.
+
+A structural census across it validated every data-fitting assumption:
+slider coordinates never exceed 3 digits (0.40% signed), times never
+exceed 6 digits, beat_length fractions never exceed 13 digits, and the
+pool reserve estimates never under-reserve — except one: the
+hit_objects `/24` bytes-per-object divisor under-reserved on exactly one
+file (an old Big Black diff with bare 15-byte lines), which is why the
+divisor is now `/16` (the corpus-wide minimum line + newline). The
+17-file corpus stays as the historical comparison anchor.
+
+A lesson learned the hard way: an earlier synthetic corpus (maps 10–50×
+larger than typical ranked maps, unrealistically sparse timing points)
+showed a *regression* for changes that are a clear win on real maps —
+allocation and code-layout effects dominate at unrealistic map sizes.
+Benchmark against real beatmaps.
+
+### Build notes (from the disassembly audit)
+
+- **gcc over clang**: gcc 13 measures ~6% faster than clang 18 on this
+  code (823-857 vs 879-920 MB/s across interleaved rounds) — and clang
+  with its own PGO does not close the gap, so the difference is codegen
+  quality on intrinsics-heavy code, not branch-layout luck.
+- **Tuning flags are worth +4-6% combined** (now the Linux default in
+  the Makefile): `-mtune=znver4` alone is +3-5% — pure Zen 4 instruction
+  scheduling, same portable x86-64-v3 ISA — plus `-fno-plt` and
+  `-fno-stack-protector` (Ubuntu enables stack-protector-strong by
+  default). `-march=native` measured no better than `-mtune` alone: the
+  extra AVX-512 ISA buys the compiler nothing here.
+- **PGO is worth +2-3% on top**: `make bench-pgo BENCH_ARGS=bench/corpus`
+  trains on the corpus and rebuilds with measured branch probabilities.
+  Full stack (tuning + PGO) peaks at ~970 MB/s fresh / ~1290 MB/s reuse.
+  Header-only libraries can't ship a profile; consumers should train on
+  their own workload.
+- Two audit findings are baked into the source: `HitObject` construction
+  skips `emplace_back()`'s 48-byte zero-fill (the parser writes every
+  field on all paths), and the timing-point fast parser is force-inlined
+  into its section loop (gcc otherwise leaves a per-line call with
+  per-call constant rebuilds).
+
+### I/O strategy (why there's no mmap)
+
+Measured end-to-end (open → bytes → parse → release) on the same corpus,
+hot page cache, min-of-reps per phase: byte acquisition was 16.5% of
+end-to-end with the original stdio path. Three findings now baked into
+`io.hpp`:
+
+- `std::make_unique<char[]>` value-initializes — the old read path
+  memset the whole buffer to zero and then `fread` over it;
+- raw `open`/`fstat`/`read` beats the stdio equivalent by ~2.6 µs/file
+  (FILE allocation, seek-based sizing, buffering logic);
+- **mmap measured 13% slower end-to-end than `read()`** despite the
+  cheapest acquire: per-file `munmap` costs about as much as the entire
+  read copy, and first-touch soft faults land inside the parse loop.
+  `MAP_POPULATE` just moves the fault cost and keeps the munmap bill.
+  Small hot files parsed once sequentially are `read()`'s home turf.
+
+Together: 895 → 951 MB/s end-to-end from the read side alone, on top of
+the `parse_into` gain above. The fixed syscall floor (`open`+`fstat`+
+`close`) is ~3 µs/file on this VM — the remaining I/O cost is not
+attackable without batching (io_uring) or skipping the filesystem, and
+production consumers feeding network bytes through `parse(data, size)`
+skip it entirely.
 
 ### Apple M3, macOS 26 (Rosetta 2 for the x86 rows)
 
@@ -129,13 +274,52 @@ Amdahl-limited (1.35× on Zen 4) — slider parameters, timing-point doubles,
 and line handling dominate once prefixes are cheap. The next wins are
 listed below.
 
+## Beyond the prefix: SWAR + data-fitting everywhere else
+
+The non-prefix hot paths use branchless SWAR (plain integer ops, portable
+to ARM) and format knowledge measured from real ranked maps:
+
+- **Fused [HitObjects] loop**: the section owns its own line iteration, and
+  the prefix's single 32-byte load doubles as the newline scan — a bare
+  5-field circle line (60% of real hitobject lines) is fully parsed,
+  including finding the line end, from one load. No memchr, no separate
+  probe.
+- **Slider control points** (`|x:y|…`): each coordinate's digit-run length
+  comes from an 8-byte nibble-classify + tzcnt, and 1–4 digit values
+  convert with two multiplies — no per-digit loop, no length branch
+  mispredicts. Points write through a raw cursor with one bounds ensure
+  per slider; the trailing edgeSounds/edgeSets/hitSample fields get their
+  comma positions from a single 32-byte scan. Signs and 5+ digit Aspire
+  values take the general path.
+- **Timing points**: a fused section loop parses each line in one pass —
+  two 32-byte loads (covering the real-world max line of 39 bytes) serve
+  the newline scan, a comma mask, and a digit-classify mask; seven comma
+  positions come from a blsr/tzcnt chain; every field converts
+  speculatively (integer and decimal beatLength share one branchless
+  instruction stream, sign OR'd into the double's sign bit) and a single
+  accumulated `valid` predicate — including a whole-line purity check,
+  `popcount(nondigits) == commas + dot + minus` — decides. Odd shapes
+  (old 2/7-field formats, decimal offsets, >27h timestamps) defer to the
+  generic parser. Measured 65 -> 29 ns/line on all 6,629 real timing
+  lines of the corpus, integrated.
+- **Decimal parsing** (`parse_double`): digit runs are consumed 8 at a
+  time with the three-multiply SWAR reduction; >18 significant digits or
+  exponents delegate to strtod.
+- **Sections and keys dispatch on their first bytes**: `[G` can only be
+  `[General]`, `Titl` + one byte distinguishes `Title`/`TitleUnicode`, and
+  the matched key's known length locates the value — no full string
+  compares, no memchr, no trim.
+- **Slider pools** are reserved once per map, at the first slider — eager
+  per-map reservation wastes multi-MB allocations on slider-free maps and
+  costs more than the reallocations it avoids.
+
 ## Future work
 
 - NEON port of the prefix fast path (16-byte window + `shrn` movemask
   equivalent) so the technique runs natively on Apple Silicon / ARM
-  servers.
-- SIMD slider control-point parsing (`|x:y` pairs are the current
-  bottleneck on slider-heavy maps).
-- SWAR/SIMD decimal parsing for timing points.
-- Whole-file benchmark against rosu-map and osu!lazer's decoder on a real
-  corpus.
+  servers (the SWAR paths already are portable).
+- Slider body is still ~84 ns/line — profile-guided work on the remaining
+  branch structure and `Slider` store layout.
+- Align the synthetic corpus generator with real-map distributions
+  (timing-point density, map sizes) — see the benchmark lesson above.
+- Whole-file benchmark against rosu-map and osu!lazer's decoder.

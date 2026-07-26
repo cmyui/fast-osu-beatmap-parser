@@ -198,6 +198,7 @@ int main(int argc, char** argv) {
         while (dirent* e = readdir(d)) {
             const size_t n = strlen(e->d_name);
             if (n < 4 || strcmp(e->d_name + n - 4, ".osu") != 0) continue;
+            if (e->d_name[0] == '.') continue;  // macOS AppleDouble files
             auto buf = fosu::read_file_padded((dir + e->d_name).c_str());
             if (!buf) continue;
             raw.emplace_back(buf.data.get(), buf.size);
@@ -237,6 +238,23 @@ int main(int argc, char** argv) {
         },
         kReps);
     report("fosu (AVX2)", simd, total_bytes, total_objects);
+
+    fosu::Beatmap reused;
+    const auto simd_reuse = run_bench(
+        [&] {
+            uint64_t sum = 0;
+            for (const auto& b : padded) {
+                fosu::parse_into(b, reused, {.use_simd = true});
+                sum ^= checksum(reused);
+            }
+            return sum;
+        },
+        kReps);
+    report("fosu (AVX2, reuse)", simd_reuse, total_bytes, total_objects);
+    if (simd_reuse.check != simd.check) {
+        printf("CHECKSUM MISMATCH between fresh and reused Beatmap!\n");
+        return 1;
+    }
 #endif
 
     const auto scalar = run_bench(
@@ -290,7 +308,8 @@ int main(int argc, char** argv) {
         auto t0 = std::chrono::steady_clock::now();
         for (int it = 0; it < kIters; ++it)
             for (const auto& l : lines) {
-                fosu::detail::fast_parse_prefix(l.data(), h);
+                uint32_t nl_mask;
+                fosu::detail::fast_parse_prefix(l.data(), h, nl_mask);
                 sink += static_cast<uint32_t>(h.time);
             }
         auto t1 = std::chrono::steady_clock::now();
