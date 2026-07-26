@@ -415,6 +415,7 @@ hit objects wins 6.8% there.
   (embarrassingly parallel; per-thread `parse_into` state), and a
   parse-once binary `Beatmap` cache for repeat workloads (recalc
   pipelines re-parse the same maps every rework).
+
 Closed with measurements, so nobody re-treads them: the slider path is
 at its floor (SIMD point kernels, fused speculative tail, pool-cursor
 writes: all within noise); line pipelining −19%; the single-pass
