@@ -132,16 +132,18 @@ across interleaved A/B runs (min-taking is robust to neighbor noise).
 
 | parser | MB/s | ns/object | vs baseline |
 |---|---|---|---|
-| fosu AVX2, reused `Beatmap` (`parse_into`) | 1170 | 38.9 | 8.7× |
 | fosu AVX2 | 910 | 50.1 | 6.7× |
+| fosu AVX2, reused `Beatmap` (`parse_into`) | 1170 | 38.9 | 8.7× |
 | fosu scalar | 630 | 72.4 | 4.7× |
 | getline+sscanf baseline | 135 | 340 | 1× |
 
-The `parse_into` row is the same parser writing into a reused `Beatmap`
-(vector capacity kept across parses): constructing and destroying a fresh
-result object costs ~25% of the entire parse in malloc, first-touch page
-faults, and free. Both rows produce bit-identical results (whole-corpus
-checksum cross-checked every run).
+The headline metric is the fresh-`parse()` row — every call pays its own
+result-object construction, like a caller that keeps the Beatmap. The
+`parse_into` row is the secondary mass-parse metric: the same parser
+writing into a reused `Beatmap` (vector capacity kept across parses),
+which removes the ~25% of the whole parse that goes to malloc,
+first-touch page faults, and free. Both rows produce bit-identical
+results (whole-corpus checksum cross-checked every run).
 
 Hitobject-prefix microbenchmark (isolates the SIMD technique from parser
 overhead): **4.1 ns/line AVX2 vs 20.6 ns/line scalar** — 5×, roughly
