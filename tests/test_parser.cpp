@@ -816,6 +816,60 @@ void test_fuzz_tp_shape_cache() {
 }
 #endif
 
+void test_selective_parsing() {
+    printf("selective parsing\n");
+    fosu::FileBuffer full = fosu::make_padded(kFullMap);
+    const fosu::Beatmap ref = fosu::parse(full);
+
+    for (int simd = 0; simd <= 1; ++simd) {
+        // Difficulty only: correct values there, defaults elsewhere.
+        fosu::Beatmap d = fosu::parse(
+            full, {.use_simd = simd != 0,
+                   .sections = fosu::kSectionDifficulty});
+        CHECK(std::abs(d.od - ref.od) < 1e-12);
+        CHECK(std::abs(d.ar - ref.ar) < 1e-12);
+        CHECK(std::abs(d.hp - ref.hp) < 1e-12);
+        CHECK(std::abs(d.cs - ref.cs) < 1e-12);
+        CHECK(d.title.empty());
+        CHECK_EQ(d.hit_objects.size(), 0u);
+        CHECK_EQ(d.timing_points.size(), 0u);
+        CHECK_EQ(d.combo_colours.size(), 0u);
+
+        // Metadata + Difficulty.
+        fosu::Beatmap md = fosu::parse(
+            full, {.use_simd = simd != 0,
+                   .sections =
+                       fosu::kSectionMetadata | fosu::kSectionDifficulty});
+        CHECK(md.title == ref.title);
+        CHECK_EQ(md.beatmap_id, ref.beatmap_id);
+        CHECK(std::abs(md.od - ref.od) < 1e-12);
+        CHECK_EQ(md.hit_objects.size(), 0u);
+
+        // HitObjects only: everything before it skipped, objects intact.
+        fosu::Beatmap ho = fosu::parse(
+            full, {.use_simd = simd != 0,
+                   .sections = fosu::kSectionHitObjects});
+        CHECK_EQ(ho.hit_objects.size(), ref.hit_objects.size());
+        for (size_t i = 0; i < ho.hit_objects.size(); ++i) {
+            CHECK_EQ(ho.hit_objects[i].x, ref.hit_objects[i].x);
+            CHECK_EQ(ho.hit_objects[i].time, ref.hit_objects[i].time);
+            CHECK_EQ(ho.hit_objects[i].type, ref.hit_objects[i].type);
+        }
+        CHECK(ho.title.empty());
+        CHECK_EQ(ho.timing_points.size(), 0u);
+
+        // Full mask == default behaviour.
+        fosu::Beatmap all = fosu::parse(
+            full, {.use_simd = simd != 0, .sections = fosu::kAllSections});
+        CHECK_EQ(all.hit_objects.size(), ref.hit_objects.size());
+        CHECK(all.title == ref.title);
+        if (g_failures) {
+            printf("  simd=%d\n", simd);
+            return;
+        }
+    }
+}
+
 int main() {
     test_full_map();
     test_old_format();
@@ -825,6 +879,7 @@ int main() {
     test_long_timing_offsets();
     test_parse_into_reuse();
     test_read_into_reuse();
+    test_selective_parsing();
     test_fuzz_parse_double();
     test_fuzz_parse_coord();
 #if FOSU_SIMD_X86

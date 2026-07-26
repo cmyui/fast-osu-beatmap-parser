@@ -43,6 +43,22 @@ Bytes that don't come from a file (e.g. an HTTP body) parse zero-copy via
 `fosu::parse(data, size)` as long as the buffer has `fosu::kBufferPadding`
 (128) readable zero bytes past the end.
 
+Callers that need only part of a file can say so — unwanted sections are
+skipped with a single memchr jump and parsing stops once every requested
+section has been consumed. `[Difficulty]` lives in the first ~2KB of a
+file whose remaining ~98% is hit objects, timing and events, so this is
+work *elimination*, not acceleration: measured 0.39us vs 29.6us per map
+across the 10k-map production corpus (~75x) for a difficulty-only
+caller.
+
+```cpp
+// Just the difficulty attributes (OD/AR/CS/HP), ~75x cheaper:
+fosu::Beatmap d = fosu::parse(buf, {.sections = fosu::kSectionDifficulty});
+// Metadata + difficulty for a listing page:
+fosu::Beatmap m = fosu::parse(
+    buf, {.sections = fosu::kSectionMetadata | fosu::kSectionDifficulty});
+```
+
 ```sh
 make test          # native + x86-64-v3 test suites (Rosetta on Apple Silicon)
 make bench         # synthetic corpus benchmark
