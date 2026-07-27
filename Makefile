@@ -86,8 +86,18 @@ rtl-test: | build
 # Lint only: no C++ build, no simulation. Fast structural check.
 rtl-lint:
 	$(VERILATOR) --lint-only -Wall --top-module fosu_classify_stage $(RTL_SRCS)
+	$(VERILATOR) --lint-only -Wall --top-module and32_demo rtl/examples/and32.sv
+
+# Teaching example (not part of the parser): AND two 32-bit numbers at three
+# levels of interface -- combinational, registered, valid/ready handshake.
+rtl-example: | build
+	$(VERILATOR) --cc --exe --build -j 0 -Wall \
+	  --top-module and32_demo -Mdir build/vexample -o Vtb_and32 \
+	  -CFLAGS "$(RTL_CFLAGS)" \
+	  rtl/examples/and32.sv $(CURDIR)/sim/tb_and32.cpp
+	./build/vexample/Vtb_and32
 
 clean:
 	rm -rf build
 
-.PHONY: all test bench bench-native bench-pgo rtl-test rtl-lint clean
+.PHONY: all test bench bench-native bench-pgo rtl-test rtl-lint rtl-example clean
