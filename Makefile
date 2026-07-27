@@ -59,7 +59,35 @@ bench-pgo: | build
 	$(CXX) $(CXXFLAGS) $(X86_FLAGS) -fprofile-use -fprofile-correction bench/bench.cpp -o build/bench_pgo
 	$(X86_RUN) ./build/bench_pgo $(BENCH_ARGS)
 
+# --- RTL simulation (Verilator) ---
+# Phase 0 of the FPGA port: the byte classifier, verified against the C++
+# parser as golden model on real corpus bytes. Needs `brew install verilator`
+# (or apt); deliberately not part of `all`, since the C++ build must not
+# depend on an RTL toolchain.
+VERILATOR ?= verilator
+RTL_CORPUS ?= bench/corpus-large
+RTL_SRCS = rtl/fosu_classify.sv rtl/fosu_classify_stage.sv
+RTL_CFLAGS = -std=c++20 -O2 -I$(CURDIR)/include
+# On a native x86 host, build the testbench with AVX2 so FOSU_SIMD_X86 is 1
+# and the third leg of the equivalence (RTL vs the shipping AVX2 intrinsics)
+# actually runs. On arm64 the scalar golden model stands alone -- the C++
+# suite already pins scalar == AVX2 there.
+ifeq ($(UNAME_M),x86_64)
+RTL_CFLAGS += -march=x86-64-v3
+endif
+
+rtl-test: | build
+	$(VERILATOR) --cc --exe --build -j 0 -Wall \
+	  --top-module fosu_classify_stage -Mdir build/vsim -o Vtb_classify \
+	  -CFLAGS "$(RTL_CFLAGS)" \
+	  $(RTL_SRCS) $(CURDIR)/sim/tb_classify.cpp
+	./build/vsim/Vtb_classify $(RTL_CORPUS)
+
+# Lint only: no C++ build, no simulation. Fast structural check.
+rtl-lint:
+	$(VERILATOR) --lint-only -Wall --top-module fosu_classify_stage $(RTL_SRCS)
+
 clean:
 	rm -rf build
 
-.PHONY: all test bench bench-native bench-pgo clean
+.PHONY: all test bench bench-native bench-pgo rtl-test rtl-lint clean
