@@ -14,10 +14,11 @@ version) are treated as free information and exploited directly. Structurally
 surprising lines defer to generic fallback parsers rather than being
 validated up front, so common shapes pay nothing.
 
-The SIMD hitobject technique is based on a prototype by
-[Flamme](https://fla.me), extended here with parallel delimiter extraction,
-compile-time mask generation, structural validation, and a full-format parser
-around it.
+fosu is built on an idea and prototype by
+[Flamme](https://github.com/infernalfire72) — the project concept and the
+original SIMD hitobject parser are Flamme's. It is extended here with
+parallel delimiter extraction, compile-time mask generation, structural
+validation, and a full-format parser around the technique.
 
 ## Usage
 
@@ -30,7 +31,7 @@ fosu::Beatmap bm = fosu::parse(buf);
 // string_view fields point into `buf` — keep it alive.
 
 // Parse-many loop: reuse both buffers and the steady state allocates
-// nothing (+32% measured on real maps; see Benchmarks).
+// nothing — the reliable mass-parse path on any allocator (see Benchmarks).
 fosu::FileBuffer fb;
 fosu::Beatmap bm2;
 for (const char* path : paths) {
@@ -159,14 +160,13 @@ across interleaved A/B runs (min-taking is robust to neighbor noise).
 
 | parser | MB/s | ns/object | vs baseline |
 |---|---|---|---|
-| fosu AVX2 | 930 | 49.0 | 6.9× |
-| fosu AVX2, reused `Beatmap` (`parse_into`) | 1230 | 37.1 | 9.1× |
-| fosu scalar | 630 | 72.4 | 4.7× |
-| getline+sscanf baseline | 135 | 340 | 1× |
+| fosu AVX2 | 1256 | 36.3 | 9.2× |
+| fosu AVX2, reused `Beatmap` (`parse_into`) | 1266 | 36.0 | 9.3× |
+| fosu scalar | 736 | 62.0 | 5.4× |
+| getline+sscanf baseline | 136 | 336 | 1× |
 
-(Measured before the Zen 4 tuning flags became the Linux default build;
-`make bench` today builds with them and lands a few percent above these
-figures — see Build notes.)
+(July 2026, current master, the default Linux `make bench` flags with
+gcc 13.3. PGO adds ~5% on top — see Build notes.)
 
 The headline metric is the fresh-`parse()` row — every call pays its own
 result-object construction, like a caller that keeps the Beatmap. The
@@ -175,30 +175,45 @@ writing into a reused `Beatmap` (vector capacity kept across parses).
 Both rows produce bit-identical results (whole-corpus checksum
 cross-checked every run).
 
-Profiled composition of the fresh-vs-reuse gap: it is entirely glibc
-returning pool pages to the kernel between parses (munmap for large
-chunks, heap-top trim otherwise) and the kernel re-zeroing them on the
-next parse — ~5.6 minor faults per parse; allocator bookkeeping itself
-measured ~0.2%. A fresh-per-parse process can recover the full reuse
-throughput with two mallopts (env vars `MALLOC_MMAP_THRESHOLD_` /
-`MALLOC_TRIM_THRESHOLD_` work too), at the cost of retaining
-high-water-mark memory:
+The two rows used to sit 32% apart (930 vs 1230 MB/s), and the gap was
+profiled to be entirely glibc returning pool pages to the kernel
+between parses and the kernel re-zeroing them on the next parse (~5.6
+minor faults per parse; allocator bookkeeping itself measured ~0.2%).
+It then closed by accident. The census-driven reserve fix (`/24` →
+`/16`) pushed the largest per-parse allocation — the biggest corpus
+file's hit_objects vector, ~195 KB — past glibc's 128 KB mmap
+threshold (under `/24` it was ~130 KB: just below). Freeing an mmapped
+chunk trips glibc's *dynamic threshold adaptation*: the mmap threshold
+ratchets up to that chunk's size and the trim threshold doubles it,
+after which every parse's pools come from the heap top and sit below
+the trim threshold when freed. The give-back simply stops. Verified in
+both directions: pinning the thresholds with `GLIBC_TUNABLES` (which
+disables the ratchet) reopens the gap (~745 vs ~1175 MB/s), and the
+pre-`/16` tree rebuilt today measures ~900 MB/s fresh, interleaved
+against current master on the same core minutes apart.
+
+Fresh-parse workloads shouldn't rely on the accident — whether the
+ratchet fires depends on map sizes and the allocator. A process can
+set the same policy deliberately (it is process-global application
+policy, which is why fosu never sets it itself), at the cost of
+retaining high-water-mark memory:
 
 ```cpp
 mallopt(M_MMAP_THRESHOLD, 64 << 20);   // large pools stay on the heap
 mallopt(M_TRIM_THRESHOLD, INT_MAX);    // the heap never shrinks
-// fresh parse() measured 900 -> 1236 MB/s with these — equal to reuse.
+// fresh parse() measured 900 -> 1236 MB/s with these — equal to reuse
+// (measured before the ratchet effect made this the default outcome).
 ```
 
-These are process-global application policy (they change how the whole
-program's malloc behaves), so fosu never sets them itself — and a
-process that can simply keep a `Beatmap` alive should prefer
-`parse_into`, which achieves the identical effect scoped to one
-object's pools. Non-glibc allocators (jemalloc/tcmalloc/mimalloc)
-return pages lazily and shrink this gap on their own.
+— or, scoped and allocator-independent: keep a `Beatmap` alive and use
+`parse_into`, which pins one object's pools regardless of malloc
+policy. That is why reuse stays the recommended mass-parse path even
+now that the fresh row matches it here. Non-glibc allocators
+(jemalloc/tcmalloc/mimalloc) return pages lazily and shrink the gap on
+their own.
 
 Hitobject-prefix microbenchmark (isolates the SIMD technique from parser
-overhead): **4.1 ns/line AVX2 vs 20.6 ns/line scalar** — 5×, roughly
+overhead): **4.1 ns/line AVX2 vs 20.5 ns/line scalar** — 5×, roughly
 15 cycles for a full `x,y,time,type,hitSound` parse.
 
 Per-line-class budgets, measured on homogeneous workloads built from
@@ -258,19 +273,22 @@ Benchmark against real beatmaps.
 
 ### Build notes (from the disassembly audit)
 
-- **gcc over clang**: gcc 13 measures ~6% faster than clang 18 on this
-  code (823-857 vs 879-920 MB/s across interleaved rounds) — and clang
-  with its own PGO does not close the gap, so the difference is codegen
-  quality on intrinsics-heavy code, not branch-layout luck.
+- **gcc over clang**: gcc 13 measures ~4-6% faster than clang 18 on
+  this code (re-verified July 2026: fresh best-of ~1210 vs ~1160 MB/s
+  across interleaved rounds) — and clang with its own PGO did not close
+  the gap when audited, so the difference is codegen quality on
+  intrinsics-heavy code, not branch-layout luck. The Makefile's `CXX`
+  default is clang++; the numbers above are `CXX=g++` builds.
 - **Tuning flags are worth +4-6% combined** (now the Linux default in
   the Makefile): `-mtune=znver4` alone is +3-5% — pure Zen 4 instruction
   scheduling, same portable x86-64-v3 ISA — plus `-fno-plt` and
   `-fno-stack-protector` (Ubuntu enables stack-protector-strong by
   default). `-march=native` measured no better than `-mtune` alone: the
   extra AVX-512 ISA buys the compiler nothing here.
-- **PGO is worth +2-3% on top**: `make bench-pgo BENCH_ARGS=bench/corpus`
-  trains on the corpus and rebuilds with measured branch probabilities.
-  Full stack (tuning + PGO) peaks at ~970 MB/s fresh / ~1290 MB/s reuse.
+- **PGO is worth ~5% on top** (and +14% on the scalar build):
+  `make bench-pgo BENCH_ARGS=bench/corpus` trains on the corpus and
+  rebuilds with measured branch probabilities. Full stack (tuning + PGO)
+  peaks at ~1325 MB/s fresh / ~1355 MB/s reuse.
   Header-only libraries can't ship a profile; consumers should train on
   their own workload.
 - Two audit findings are baked into the source: `HitObject` construction
@@ -319,7 +337,7 @@ through that penalty — which is also the case for the NEON port listed
 under future work.
 
 One more honest caveat: whole-file speedup from the SIMD path is
-Amdahl-limited (~1.5× on Zen 4) — slider parameters, timing-point doubles,
+Amdahl-limited (~1.7× on Zen 4) — slider parameters, timing-point doubles,
 and line handling dominate once prefixes are cheap.
 
 ## Beyond the prefix: SWAR + data-fitting everywhere else
