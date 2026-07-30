@@ -350,17 +350,28 @@ module fosu_engine #(
     logic [WIN-1:0] ver_hit;
     logic           ver_found;
     logic [$clog2(WIN)-1:0] ver_pos;
+    // "osu file format v", 17 bytes, as a function rather than an array literal
+    // so Yosys's frontend accepts it.
+    function automatic [7:0] verpat(input integer j);
+        case (j)
+            0:  verpat = "o";  1:  verpat = "s";  2:  verpat = "u";
+            3:  verpat = " ";  4:  verpat = "f";  5:  verpat = "i";
+            6:  verpat = "l";  7:  verpat = "e";  8:  verpat = " ";
+            9:  verpat = "f";  10: verpat = "o";  11: verpat = "r";
+            12: verpat = "m";  13: verpat = "a";  14: verpat = "t";
+            15: verpat = " ";  16: verpat = "v";
+            default: verpat = 8'h00;
+        endcase
+    endfunction
+
     always_comb begin
         integer i, j;
         logic   m;
-        // "osu file format v" is 17 bytes.
-        localparam byte PAT [0:16] = '{"o","s","u"," ","f","i","l","e"," ",
-                                       "f","o","r","m","a","t"," ","v"};
         for (i = 0; i < WIN; i = i + 1) begin
             m = 1'b1;
             for (j = 0; j < 17; j = j + 1)
                 if ((i + j) >= WIN) m = 1'b0;
-                else if (mem_data[8*(i+j) +: 8] != PAT[j]) m = 1'b0;
+                else if (mem_data[8*(i+j) +: 8] != verpat(j)) m = 1'b0;
             ver_hit[i] = m;
         end
     end
