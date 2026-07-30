@@ -67,7 +67,7 @@ VERILATOR ?= verilator
 RTL_CORPUS ?= bench/corpus-large
 RTL_SRCS = rtl/fosu_classify.sv rtl/fosu_classify_stage.sv \
            rtl/fosu_ffs.sv rtl/fosu_first4.sv rtl/fosu_prefix.sv \
-           rtl/fosu_line_iter.sv
+           rtl/fosu_line_iter.sv rtl/fosu_shift_right.sv rtl/fosu_numscan.sv
 RTL_CFLAGS = -std=c++20 -O2 -I$(CURDIR)/include
 # On a native x86 host, build the testbench with AVX2 so FOSU_SIMD_X86 is 1
 # and the third leg of the equivalence (RTL vs the shipping AVX2 intrinsics)
@@ -77,7 +77,7 @@ ifeq ($(UNAME_M),x86_64)
 RTL_CFLAGS += -march=x86-64-v3
 endif
 
-rtl-test: rtl-test-classify rtl-test-prefix rtl-test-lineiter
+rtl-test: rtl-test-classify rtl-test-prefix rtl-test-lineiter rtl-test-numscan
 
 rtl-test-classify: | build
 	$(VERILATOR) --cc --exe --build -j 0 -Wall \
@@ -100,11 +100,19 @@ rtl-test-lineiter: | build
 	  $(RTL_SRCS) $(CURDIR)/sim/tb_line_iter.cpp
 	./build/vlineiter/Vtb_line_iter $(RTL_CORPUS) $(RTL_LIMIT)
 
+rtl-test-numscan: | build
+	$(VERILATOR) --cc --exe --build -j 0 -Wall \
+	  --top-module fosu_numscan -Mdir build/vnumscan -o Vtb_numscan \
+	  -CFLAGS "$(RTL_CFLAGS)" \
+	  $(RTL_SRCS) $(CURDIR)/sim/tb_numscan.cpp
+	./build/vnumscan/Vtb_numscan $(RTL_CORPUS)
+
 # Lint only: no C++ build, no simulation. Fast structural check.
 rtl-lint:
 	$(VERILATOR) --lint-only -Wall --top-module fosu_classify_stage $(RTL_SRCS)
 	$(VERILATOR) --lint-only -Wall --top-module fosu_prefix $(RTL_SRCS)
 	$(VERILATOR) --lint-only -Wall --top-module fosu_line_iter $(RTL_SRCS)
+	$(VERILATOR) --lint-only -Wall --top-module fosu_numscan $(RTL_SRCS)
 
 # Gate-level cell counts via Yosys -- the "disassembly" of the RTL. Cell names
 # encode design decisions ($_DFF_P_ = no reset, $_SDFF_PN0_ = sync active-low).
@@ -117,4 +125,4 @@ rtl-stat:
 clean:
 	rm -rf build
 
-.PHONY: all test bench bench-native bench-pgo rtl-test rtl-test-classify rtl-test-prefix rtl-test-lineiter rtl-lint rtl-stat clean
+.PHONY: all test bench bench-native bench-pgo rtl-test rtl-test-classify rtl-test-prefix rtl-test-lineiter rtl-test-numscan rtl-lint rtl-stat clean
