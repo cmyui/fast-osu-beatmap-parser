@@ -132,6 +132,8 @@ int main(int argc, char** argv) {
 
     std::printf("engine: key/value + [TimingPoints] + [HitObjects] vs fosu::parse\n");
 
+    // Directed fixtures: shapes that each cost a real debugging session, kept
+    // so a regression fails here rather than 4,000 files into the corpus.
     namespace fs = std::filesystem;
     std::vector<fs::path> files;
     std::error_code ec;
@@ -142,6 +144,19 @@ int main(int argc, char** argv) {
     }
     std::sort(files.begin(), files.end());
     if (limit && files.size() > limit) files.resize(limit);
+
+    // Optional sharding, so a 438 MB corpus can be verified across cores:
+    // SHARD_CNT processes each take every SHARD_CNT-th file. Purely a
+    // wall-clock device -- each shard still checks whole files end to end.
+    if (const char* sc = getenv("SHARD_CNT")) {
+        const size_t cnt = std::stoul(sc);
+        const size_t idx = getenv("SHARD_IDX") ? std::stoul(getenv("SHARD_IDX")) : 0;
+        std::vector<fs::path> mine;
+        for (size_t i = idx; i < files.size(); i += cnt) mine.push_back(files[i]);
+        files.swap(mine);
+        std::printf("  shard      : %zu of %zu, %zu files\n", idx, cnt,
+                    files.size());
+    }
 
     uint64_t bytes = 0;
     size_t nfiles = 0;
