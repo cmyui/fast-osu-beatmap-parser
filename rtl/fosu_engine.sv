@@ -79,6 +79,18 @@ module fosu_engine #(
     output logic [31:0] pt_x,
     output logic [31:0] pt_y,
 
+    // TAG_KV payload: one key/value field.
+    output logic [5:0]  kv_field,
+    output logic [2:0]  kv_vtype,
+    output logic [63:0] kv_i64,
+    output logic        kv_i64_neg,
+    output logic [63:0] kv_mant,
+    output logic [7:0]  kv_frac,
+    output logic        kv_neg,
+    output logic [31:0] kv_str_start,
+    output logic [31:0] kv_str_len,
+    output logic        kv_bool,
+
     // TAG_PUNT / TAG_MALFORMED payload: the line span.
     output logic [31:0] rec_start,
     output logic [31:0] rec_len,
@@ -92,9 +104,16 @@ module fosu_engine #(
     localparam logic [3:0] TAG_HITOBJ    = 4'd4;
     localparam logic [3:0] TAG_SLIDER    = 4'd5;
     localparam logic [3:0] TAG_POINT     = 4'd6;
+    localparam logic [3:0] TAG_KV        = 4'd7;
 
-    localparam logic [3:0] SEC_TIMING = 4'd6;
-    localparam logic [3:0] SEC_HITOBJ = 4'd8;
+    localparam logic [3:0] SEC_GENERAL  = 4'd1;
+    localparam logic [3:0] SEC_EDITOR   = 4'd2;
+    localparam logic [3:0] SEC_METADATA = 4'd3;
+    localparam logic [3:0] SEC_DIFF     = 4'd4;
+    localparam logic [3:0] SEC_TIMING   = 4'd6;
+    localparam logic [3:0] SEC_HITOBJ   = 4'd8;
+
+    localparam logic [7:0] CH_SPACE = 8'h20;
 
     localparam logic [7:0] CH_COMMA = 8'h2C;
     localparam logic [7:0] CH_COLON = 8'h3A;
@@ -135,6 +154,8 @@ module fosu_engine #(
         C_SP_COMMA, C_SP_END, C_SP_SAMPLE,
         C_CI_SAMPLE,
         C_HO_EMIT,
+        // key/value sections
+        C_KV_KEY, C_KV_VAL, C_KV_EMIT,
         C_EMIT, C_FAIL
     } cstate_t;
     cstate_t cstate;
@@ -207,6 +228,39 @@ module fosu_engine #(
     logic [7:0] cur_byte;
     always_comb cur_byte = mem_data[7:0];
 
+    // Key lookup for [General]/[Editor]/[Metadata]/[Difficulty].
+    logic        kv_match;
+    logic [5:0]  kv_field_w;
+    logic [7:0]  kv_key_len;
+    logic [2:0]  kv_vtype_w;
+
+    fosu_kv_key u_kv (
+        .section(li_section),
+        .k4(mem_data[31:0]),
+        .b5(mem_data[47:40]), .b6(mem_data[55:48]),
+        .b7(mem_data[63:56]), .b9(mem_data[79:72]),
+        .match(kv_match), .field_id(kv_field_w),
+        .key_len(kv_key_len), .vtype(kv_vtype_w)
+    );
+
+    // kv working registers.
+    logic [5:0]  kv_field_r;
+    logic [2:0]  kv_vtype_r;
+    logic [63:0] kv_i64_r, kv_mant_r;
+    logic [7:0]  kv_frac_r;
+    logic        kv_neg_r, kv_i64_neg_r, kv_bool_r, kv_emit_r;
+    logic [31:0] kv_str_s_r, kv_str_l_r;
+
+    // Value offset: key_len + 1, plus the single space General/Editor emit.
+    logic [31:0] kv_off, kv_val_len;
+    logic [7:0]  kv_byte_at_off;
+    always_comb begin
+        kv_byte_at_off = mem_data[8*({24'd0, kv_key_len} + 32'd1) +: 8];
+        kv_off = {24'd0, kv_key_len} + 32'd1;
+        if (kv_off < li_len && kv_byte_at_off == CH_SPACE) kv_off = kv_off + 32'd1;
+        kv_val_len = (li_len > kv_off) ? (li_len - kv_off) : 32'd0;
+    end
+
     // Comma search across the window, for the extras scan.
     logic [WIN-1:0] comma_hit;
     logic           cm_found;
@@ -259,12 +313,15 @@ module fosu_engine #(
     // C_SL_EMIT also transfer records, but mid-line, so they do not release it.
     logic term_state;
     always_comb term_state = (cstate == C_EMIT) || (cstate == C_FAIL) ||
-                             (cstate == C_HO_EMIT);
+                             (cstate == C_HO_EMIT) || (cstate == C_KV_EMIT);
 
     always_comb begin
-        rec_valid = term_state || (cstate == C_SL_PT_EMIT) ||
-                    (cstate == C_SL_EMIT);
+        // A key/value line with no recognised key, or a value the C++ would
+        // leave at its default, emits nothing but still finishes the line.
+        rec_valid = (term_state && !(cstate == C_KV_EMIT && !kv_emit_r)) ||
+                    (cstate == C_SL_PT_EMIT) || (cstate == C_SL_EMIT);
         if (cstate == C_FAIL)             rec_tag = TAG_MALFORMED;
+        else if (cstate == C_KV_EMIT)     rec_tag = punt ? TAG_PUNT : TAG_KV;
         else if (cstate == C_SL_PT_EMIT)  rec_tag = TAG_POINT;
         else if (cstate == C_SL_EMIT)     rec_tag = TAG_SLIDER;
         else if (cstate == C_HO_EMIT)     rec_tag = punt ? TAG_PUNT : TAG_HITOBJ;
@@ -303,12 +360,27 @@ module fosu_engine #(
         pt_x            = pt_x_r;
         pt_y            = pt_y_r;
 
+        kv_field        = kv_field_r;
+        kv_vtype        = kv_vtype_r;
+        kv_i64          = kv_i64_r;
+        kv_i64_neg      = kv_i64_neg_r;
+        kv_mant         = kv_mant_r;
+        kv_frac         = kv_frac_r;
+        kv_neg          = kv_neg_r;
+        kv_str_start    = kv_str_s_r;
+        kv_str_len      = kv_str_l_r;
+        kv_bool         = kv_bool_r;
+
         // Release the line once content parsing has finished with it, or
         // immediately for sections not yet handled here.
         li_ready = 1'b0;
         if (li_valid && !content_busy) begin
             li_ready = !(li_kind == 2'd2 &&
-                         (li_section == SEC_TIMING || li_section == SEC_HITOBJ));
+                         (li_section == SEC_TIMING || li_section == SEC_HITOBJ ||
+                          ((li_section == SEC_GENERAL ||
+                            li_section == SEC_EDITOR ||
+                            li_section == SEC_METADATA ||
+                            li_section == SEC_DIFF) && li_len >= 32'd5)));
         end else if (term_state && rec_ready) begin
             li_ready = 1'b1;
         end
@@ -337,6 +409,17 @@ module fosu_engine #(
                         sl_ez_s_r      <= 32'd0;
                         sl_ez_l_r      <= 32'd0;
                         cstate         <= C_HO_PREFIX;
+                    end else if (li_valid && li_kind == 2'd2 &&
+                        (li_section == SEC_GENERAL ||
+                         li_section == SEC_EDITOR ||
+                         li_section == SEC_METADATA ||
+                         li_section == SEC_DIFF) && li_len >= 32'd5) begin
+                        // The C++ requires len >= 5 before looking at a key.
+                        cursor    <= li_start;
+                        line_stop <= li_start + li_len;
+                        punt      <= 1'b0;
+                        kv_emit_r <= 1'b0;
+                        cstate    <= C_KV_KEY;
                     end else if (li_valid && li_kind == 2'd2 &&
                         li_section == SEC_TIMING) begin
                         cursor       <= li_start;
@@ -665,6 +748,66 @@ module fosu_engine #(
 
                 C_HO_EMIT: begin
                     if (rec_ready) cstate <= C_IDLE;
+                end
+
+
+                // ---------------- key/value sections ----------------
+                // The window still sits on the line start here, so the key
+                // matcher and the value offset are both available.
+                C_KV_KEY: begin
+                    if (!kv_match) begin
+                        cstate <= C_KV_EMIT;          // unknown key: no record
+                    end else begin
+                        kv_field_r <= kv_field_w;
+                        kv_vtype_r <= kv_vtype_w;
+                        kv_str_s_r <= li_start + kv_off;
+                        kv_str_l_r <= kv_val_len;
+                        cursor     <= li_start + kv_off;
+                        line_stop  <= li_start + li_len;
+                        cstate     <= C_KV_VAL;
+                    end
+                end
+
+                C_KV_VAL: begin
+                    kv_emit_r <= 1'b1;
+                    case (kv_vtype_r)
+                        3'd0: begin                    // string: the raw span
+                            cstate <= C_KV_EMIT;
+                        end
+                        3'd3: begin                    // bool: v[0] == '1'
+                            kv_bool_r <= (kv_str_l_r != 32'd0) &&
+                                         (cur_byte == 8'h31);
+                            cstate    <= C_KV_EMIT;
+                        end
+                        3'd1, 3'd4: begin              // int32 / int64
+                            // parse_i32_field/parse_i64 keep the default when
+                            // nothing parses, so emit nothing in that case.
+                            if (!ns_int_any || !int_fits || ns_int_run_full) begin
+                                kv_emit_r <= 1'b0;
+                                if (ns_int_run_full) punt <= 1'b1;
+                            end else begin
+                                kv_i64_r     <= ns_val19;
+                                kv_i64_neg_r <= ns_neg;
+                            end
+                            cstate <= C_KV_EMIT;
+                        end
+                        default: begin                 // double
+                            if (!ns_dec_any || !dec_fits) begin
+                                kv_emit_r <= 1'b0;
+                            end else if (ns_needs_host) begin
+                                punt <= 1'b1;
+                            end else begin
+                                kv_mant_r <= ns_mant;
+                                kv_frac_r <= ns_frac;
+                                kv_neg_r  <= ns_neg;
+                            end
+                            cstate <= C_KV_EMIT;
+                        end
+                    endcase
+                end
+
+                C_KV_EMIT: begin
+                    if (rec_ready || !kv_emit_r) cstate <= C_IDLE;
                 end
 
                 C_EMIT, C_FAIL: begin

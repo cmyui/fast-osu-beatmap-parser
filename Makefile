@@ -68,7 +68,7 @@ RTL_CORPUS ?= bench/corpus-large
 RTL_SRCS = rtl/fosu_classify.sv rtl/fosu_classify_stage.sv \
            rtl/fosu_ffs.sv rtl/fosu_first4.sv rtl/fosu_prefix.sv \
            rtl/fosu_line_iter.sv rtl/fosu_shift_right.sv rtl/fosu_numscan.sv \
-           rtl/fosu_engine.sv
+           rtl/fosu_kv_key.sv rtl/fosu_engine.sv
 RTL_CFLAGS = -std=c++20 -O2 -I$(CURDIR)/include
 # On a native x86 host, build the testbench with AVX2 so FOSU_SIMD_X86 is 1
 # and the third leg of the equivalence (RTL vs the shipping AVX2 intrinsics)

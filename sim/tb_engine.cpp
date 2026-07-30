@@ -35,12 +35,13 @@ constexpr int TAG_PUNT = 3;
 constexpr int TAG_HITOBJ = 4;
 constexpr int TAG_SLIDER = 5;
 constexpr int TAG_POINT = 6;
+constexpr int TAG_KV = 7;
 
 const std::string* g_file = nullptr;
 uint64_t g_cycles = 0;
 int g_fail = 0;
 uint64_t g_tp = 0, g_punt = 0, g_malformed = 0;
-uint64_t g_ho = 0, g_sl = 0, g_pt = 0, g_ho_punt = 0;
+uint64_t g_ho = 0, g_sl = 0, g_pt = 0, g_ho_punt = 0, g_kv = 0;
 
 void serve_mem(Vfosu_engine* dut) {
     uint8_t w[kWin];
@@ -122,7 +123,7 @@ int main(int argc, char** argv) {
     dut->clk = 0;
     dut->rec_ready = 1;
 
-    std::printf("engine [TimingPoints] + [HitObjects] vs fosu::parse\n");
+    std::printf("engine: key/value + [TimingPoints] + [HitObjects] vs fosu::parse\n");
 
     namespace fs = std::filesystem;
     std::vector<fs::path> files;
@@ -149,6 +150,14 @@ int main(int argc, char** argv) {
         fosu::Beatmap ref = fosu::parse(padded);
 
         g_file = &raw;
+        // Start from the C++ defaults, then apply what the RTL emits: any field
+        // the RTL never mentions must therefore still match the reference.
+        fosu::Beatmap acc;
+        bool ar_seen = false;
+        // String fields are held as owned strings: assigning a string_view from
+        // a temporary into `acc` would dangle.
+        std::string sfield[40];
+        bool sset[40] = {false};
         std::vector<TP> got;
         std::vector<HO> got_ho;
         std::vector<SL> got_sl;
@@ -168,7 +177,10 @@ int main(int argc, char** argv) {
         cycle(dut);
         dut->start = 0;
 
-        const uint64_t budget = raw.size() / kWin + raw.size() / 4 + 100000;
+        // A slider control point costs ~5 cycles for as few as 4 bytes
+        // ("|1:1"), so the budget has to be several cycles per byte -- a file
+        // with a 22k-point slider is legitimately slow, not hung.
+        const uint64_t budget = raw.size() * 4 + 500000;
         uint64_t spent = 0;
         while (!dut->done && spent < budget) {
             serve_mem(dut);
@@ -273,6 +285,57 @@ int main(int argc, char** argv) {
                     pending_pts.clear();
                     have_pending_sl = false;
                     ++g_ho;
+                } else if (dut->rec_tag == TAG_KV) {
+                    const std::string sv =
+                        raw.substr(dut->kv_str_start, dut->kv_str_len);
+                    const int64_t iv = dut->kv_i64_neg
+                        ? -static_cast<int64_t>(dut->kv_i64)
+                        : static_cast<int64_t>(dut->kv_i64);
+                    const int32_t i32 = fosu::detail::clamp_i32(iv);
+                    const double dv = rebuild(dut->kv_mant, dut->kv_frac,
+                                              dut->kv_neg);
+                    const bool bv = dut->kv_bool != 0;
+                    switch (dut->kv_field) {
+                        case 1:  sfield[1] = sv; sset[1] = true; break;
+                        case 2:  acc.audio_lead_in = i32; break;
+                        case 3:  acc.preview_time = i32; break;
+                        case 4:  acc.countdown_offset = i32; break;
+                        case 5:  acc.countdown = i32; break;
+                        case 6:  sfield[6] = sv; sset[6] = true; break;
+                        case 7:  acc.samples_match_playback_rate = bv; break;
+                        case 8:  acc.stack_leniency = dv; break;
+                        case 9:  acc.mode = i32; break;
+                        case 10: acc.letterbox_in_breaks = bv; break;
+                        case 11: acc.widescreen_storyboard = bv; break;
+                        case 12: acc.epilepsy_warning = bv; break;
+                        case 13: acc.special_style = bv; break;
+                        case 14: acc.use_skin_sprites = bv; break;
+                        case 15: sfield[15] = sv; sset[15] = true; break;
+                        case 16: sfield[16] = sv; sset[16] = true; break;
+                        case 17: sfield[17] = sv; sset[17] = true; break;
+                        case 18: acc.distance_spacing = dv; break;
+                        case 19: acc.beat_divisor = i32; break;
+                        case 20: acc.grid_size = i32; break;
+                        case 21: acc.timeline_zoom = dv; break;
+                        case 22: sfield[22] = sv; sset[22] = true; break;
+                        case 23: sfield[23] = sv; sset[23] = true; break;
+                        case 24: sfield[24] = sv; sset[24] = true; break;
+                        case 25: sfield[25] = sv; sset[25] = true; break;
+                        case 26: sfield[26] = sv; sset[26] = true; break;
+                        case 27: sfield[27] = sv; sset[27] = true; break;
+                        case 28: sfield[28] = sv; sset[28] = true; break;
+                        case 29: sfield[29] = sv; sset[29] = true; break;
+                        case 30: acc.beatmap_id = iv; break;
+                        case 31: acc.beatmap_set_id = iv; break;
+                        case 32: acc.hp = dv; break;
+                        case 33: acc.cs = dv; break;
+                        case 34: acc.od = dv; break;
+                        case 35: acc.ar = dv; ar_seen = true; break;
+                        case 36: acc.slider_multiplier = dv; break;
+                        case 37: acc.slider_tick_rate = dv; break;
+                        default: break;
+                    }
+                    ++g_kv;
                 } else if (dut->rec_tag == TAG_MALFORMED) {
                     // The C++ pops the object and discards any slider points it
                     // had already written.
@@ -402,6 +465,53 @@ int main(int argc, char** argv) {
             }
         }
 
+        // --- scalar Beatmap fields from the key/value sections ---
+        // The C++ mirrors OD into AR when no ApproachRate line appeared.
+        if (!ar_seen) acc.ar = acc.od;
+        {
+            auto sfail = [&](const char* what) {
+                if (g_fail < 8)
+                    std::printf("KV MISMATCH %s: %s\n",
+                                f.filename().string().c_str(), what);
+                ++g_fail;
+            };
+            #define CHK_S(field) if (acc.field != ref.field) sfail(#field);
+            #define CHK_D(field) if (d_to_bits(acc.field) != \
+                                    d_to_bits(ref.field)) sfail(#field);
+            auto chk_str = [&](int fid, std::string_view refv,
+                               const char* dflt, const char* what) {
+                const std::string want(refv);
+                const std::string got = sset[fid] ? sfield[fid]
+                                                  : std::string(dflt);
+                if (got != want) sfail(what);
+            };
+            chk_str(1,  ref.audio_filename,  "",       "audio_filename");
+            chk_str(6,  ref.sample_set,      "Normal", "sample_set");
+            chk_str(15, ref.overlay_position, "",      "overlay_position");
+            chk_str(16, ref.skin_preference, "",       "skin_preference");
+            chk_str(17, ref.bookmarks,       "",       "bookmarks");
+            chk_str(22, ref.title,           "",       "title");
+            chk_str(23, ref.title_unicode,   "",       "title_unicode");
+            chk_str(24, ref.artist,          "",       "artist");
+            chk_str(25, ref.artist_unicode,  "",       "artist_unicode");
+            chk_str(26, ref.creator,         "",       "creator");
+            chk_str(27, ref.version,         "",       "version");
+            chk_str(28, ref.source,          "",       "source");
+            chk_str(29, ref.tags,            "",       "tags");
+            CHK_S(audio_lead_in) CHK_S(preview_time)
+            CHK_S(countdown) CHK_S(mode)
+            CHK_S(letterbox_in_breaks) CHK_S(widescreen_storyboard)
+            CHK_S(epilepsy_warning) CHK_S(special_style) CHK_S(use_skin_sprites)
+            CHK_S(samples_match_playback_rate) CHK_S(countdown_offset)
+            CHK_S(beat_divisor) CHK_S(grid_size)
+            CHK_S(beatmap_id) CHK_S(beatmap_set_id)
+            CHK_D(stack_leniency) CHK_D(distance_spacing) CHK_D(timeline_zoom)
+            CHK_D(hp) CHK_D(cs) CHK_D(od) CHK_D(ar)
+            CHK_D(slider_multiplier) CHK_D(slider_tick_rate)
+            #undef CHK_S
+            #undef CHK_D
+        }
+
         bytes += raw.size();
         ++nfiles;
         if (g_fail > 8) break;
@@ -411,13 +521,14 @@ int main(int argc, char** argv) {
                 static_cast<unsigned long long>(bytes));
     std::printf("  records    : %llu timing points (%llu punted), "
                 "%llu hit objects (%llu punted), %llu sliders, %llu points, "
-                "%llu malformed\n",
+                "%llu kv fields, %llu malformed\n",
                 static_cast<unsigned long long>(g_tp),
                 static_cast<unsigned long long>(g_punt),
                 static_cast<unsigned long long>(g_ho),
                 static_cast<unsigned long long>(g_ho_punt),
                 static_cast<unsigned long long>(g_sl),
                 static_cast<unsigned long long>(g_pt),
+                static_cast<unsigned long long>(g_kv),
                 static_cast<unsigned long long>(g_malformed));
     if (bytes)
         std::printf("  throughput : %.2f bytes/cycle simulated\n",
