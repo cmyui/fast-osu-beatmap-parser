@@ -335,6 +335,13 @@ int main(int argc, char** argv) {
                         case 37: acc.slider_tick_rate = dv; break;
                         default: break;
                     }
+                    if (getenv("KVDBG"))
+                        std::printf("  KV field=%u vtype=%u str=\"%s\" i64=%lld "
+                                    "mant=%llu frac=%u\n",
+                                    dut->kv_field, dut->kv_vtype, sv.c_str(),
+                                    (long long)iv,
+                                    (unsigned long long)dut->kv_mant,
+                                    dut->kv_frac);
                     ++g_kv;
                 } else if (dut->rec_tag == TAG_MALFORMED) {
                     // The C++ pops the object and discards any slider points it

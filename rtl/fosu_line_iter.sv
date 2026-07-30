@@ -37,8 +37,13 @@ module fosu_line_iter #(
     input  wire [31:0]  file_len,
 
     // Combinational window read: WIN bytes at mem_addr, zero past file_len.
-    // A parent may steal this port while holding rec_valid, since scan_ptr and
-    // line_begin are stable whenever this module is stalled.
+    //
+    // A parent MAY steal this port while a record is being held -- but only
+    // because the record's contents are LATCHED first (state S_CLASS below).
+    // They used to be combinational functions of this window, which meant a
+    // parent repointing the port silently rewrote them: a metadata line whose
+    // value begins with '[' ("Title:[Yuru Fuwa Jukai Girl]") got reclassified
+    // as a section header mid-parse and corrupted the section register.
     output logic [31:0] mem_addr,
     input  wire [8*WIN-1:0] mem_data,
 
@@ -74,8 +79,17 @@ module fosu_line_iter #(
     localparam logic [7:0] CH_SLASH  = 8'h2F;
     localparam logic [7:0] CH_LBRACK = 8'h5B;
 
-    typedef enum logic [1:0] { S_IDLE, S_SCAN, S_EMIT, S_DONE } state_t;
+    typedef enum logic [2:0] {
+        S_IDLE, S_SCAN, S_CLASS, S_EMIT, S_DONE
+    } state_t;
     state_t state;
+
+    // Latched classification: valid from S_EMIT onward, independent of whatever
+    // the shared window happens to show.
+    logic [3:0]  sec_r;
+    logic [1:0]  kind_r;
+    logic [31:0] len_r;
+    logic        emit_r;
 
     logic [31:0] line_begin;   // first byte of the current line
     logic [31:0] scan_ptr;     // window position while hunting the newline
@@ -110,7 +124,8 @@ module fosu_line_iter #(
     );
 
     always_comb begin
-        mem_addr = (state == S_EMIT) ? line_begin : scan_ptr;
+        // S_CLASS is the one cycle where the window must sit on the line start.
+        mem_addr = (state == S_CLASS) ? line_begin : scan_ptr;
     end
 
     // ---------------------------------------------------------------------
@@ -182,16 +197,15 @@ module fosu_line_iter #(
         end
     end
 
-    // Record outputs are combinational functions of the state and cursors:
-    // data transfers on any cycle where rec_valid and rec_ready are both high.
+    // Record outputs come from the latched classification, so they are stable
+    // for as long as the consumer needs -- including while it borrows the
+    // memory port. Transfer still happens on valid && ready.
     always_comb begin
-        rec_valid   = (state == S_EMIT) && emit_this;
+        rec_valid   = (state == S_EMIT) && emit_r;
         rec_start   = line_begin;
-        rec_len     = body_len;
-        rec_kind    = kind;
-        // A header line reports the section it selects; content reports the
-        // section it belongs to.
-        rec_section = (kind == 2'd0) ? hdr_section : section;
+        rec_len     = len_r;
+        rec_kind    = kind_r;
+        rec_section = sec_r;
     end
 
     always_ff @(posedge clk) begin
@@ -218,26 +232,37 @@ module fosu_line_iter #(
                     if (nl_in_file) begin
                         line_end   <= end_at_nl;
                         next_begin <= nl_abs + 32'd1;
-                        state      <= S_EMIT;
+                        state      <= S_CLASS;
                     end else if (at_last_window) begin
                         // No newline before EOF: the last line ends at EOF.
                         line_end   <= end_at_eof;
                         next_begin <= file_len;
-                        state      <= S_EMIT;
+                        state      <= S_CLASS;
                     end else begin
                         prev_last <= win[WIN-1];
                         scan_ptr  <= scan_ptr + WIN;
                     end
                 end
 
+                // One cycle owning the port to characterise the line.
+                S_CLASS: begin
+                    kind_r  <= kind;
+                    len_r   <= body_len;
+                    emit_r  <= emit_this;
+                    sec_r   <= (kind == 2'd0) ? hdr_section : section;
+                    // The section register updates here too, so it is settled
+                    // before the consumer can perturb the window.
+                    if (kind == 2'd0 && body_len >= 3) section <= hdr_section;
+                    state   <= S_EMIT;
+                end
+
                 S_EMIT: begin
                     // Advance only once the record has actually transferred.
-                    // rec_valid is combinational (see below), so a consumer
-                    // that holds rec_ready high still sees every record --
-                    // registering valid here would skip records for such a
-                    // consumer, which is the classic handshake bug.
-                    if (!emit_this || rec_ready) begin
-                        if (kind == 2'd0 && body_len >= 3) section <= hdr_section;
+                    // rec_valid is combinational, so a consumer that holds
+                    // rec_ready high still sees every record -- registering
+                    // valid here would skip records for such a consumer, which
+                    // is the classic handshake bug.
+                    if (!emit_r || rec_ready) begin
                         if (next_begin >= file_len) begin
                             state <= S_DONE;
                         end else begin
