@@ -129,6 +129,7 @@ std::vector<Rec> run_rtl(Vfosu_line_iter* dut, const std::string& content,
 
     dut->rst_n = 0;
     dut->start = 0;
+    dut->rec_ready = 1;   // always ready: exercises the no-stall path
     dut->file_len = 0;
     for (int i = 0; i < 3; ++i) cycle(dut);
     dut->rst_n = 1;
@@ -137,9 +138,13 @@ std::vector<Rec> run_rtl(Vfosu_line_iter* dut, const std::string& content,
     cycle(dut);
     dut->start = 0;
 
+    // rec_valid is combinational, so it is sampled before each edge: a record
+    // transfers on any cycle where valid and ready are both high.
     uint64_t spent = 0;
     while (!dut->done && spent < cycle_budget) {
-        if (dut->rec_valid)
+        serve_mem(dut);
+        dut->eval();
+        if (dut->rec_valid && dut->rec_ready)
             out.push_back(Rec{dut->rec_start, dut->rec_len,
                               static_cast<uint8_t>(dut->rec_kind),
                               static_cast<uint8_t>(dut->rec_section)});
@@ -147,11 +152,6 @@ std::vector<Rec> run_rtl(Vfosu_line_iter* dut, const std::string& content,
         ++spent;
         ++g_cycles;
     }
-    // `done` and a final record can land on the same edge.
-    if (dut->rec_valid)
-        out.push_back(Rec{dut->rec_start, dut->rec_len,
-                          static_cast<uint8_t>(dut->rec_kind),
-                          static_cast<uint8_t>(dut->rec_section)});
     return out;
 }
 

@@ -37,10 +37,15 @@ module fosu_line_iter #(
     input  wire [31:0]  file_len,
 
     // Combinational window read: WIN bytes at mem_addr, zero past file_len.
+    // A parent may steal this port while holding rec_valid, since scan_ptr and
+    // line_begin are stable whenever this module is stalled.
     output logic [31:0] mem_addr,
     input  wire [8*WIN-1:0] mem_data,
 
-    // One record per non-empty line.
+    // One record per non-empty line. Held until rec_ready, so a downstream
+    // content parser can take as many cycles as a line needs -- the same
+    // valid/ready contract every block here speaks.
+    input  wire         rec_ready,
     output logic        rec_valid,
     output logic [3:0]  rec_section,  // matches C++ enum class Section
     output logic [1:0]  rec_kind,     // 0 = header, 1 = comment, 2 = content
@@ -177,16 +182,25 @@ module fosu_line_iter #(
         end
     end
 
+    // Record outputs are combinational functions of the state and cursors:
+    // data transfers on any cycle where rec_valid and rec_ready are both high.
+    always_comb begin
+        rec_valid   = (state == S_EMIT) && emit_this;
+        rec_start   = line_begin;
+        rec_len     = body_len;
+        rec_kind    = kind;
+        // A header line reports the section it selects; content reports the
+        // section it belongs to.
+        rec_section = (kind == 2'd0) ? hdr_section : section;
+    end
+
     always_ff @(posedge clk) begin
         if (!rst_n) begin
             state     <= S_IDLE;
-            rec_valid <= 1'b0;
             done      <= 1'b0;
             busy      <= 1'b0;
             section   <= SEC_NONE;
         end else begin
-            rec_valid <= 1'b0;
-
             case (state)
                 S_IDLE: begin
                     done <= 1'b0;
@@ -217,24 +231,21 @@ module fosu_line_iter #(
                 end
 
                 S_EMIT: begin
-                    if (emit_this) begin
-                        rec_valid   <= 1'b1;
-                        rec_start   <= line_begin;
-                        rec_len     <= body_len;
-                        rec_kind    <= kind;
-                        // A header line reports the section it selects; content
-                        // reports the section it belongs to.
-                        rec_section <= (kind == 2'd0) ? hdr_section : section;
-                    end
-                    if (kind == 2'd0 && body_len >= 3) section <= hdr_section;
-
-                    if (next_begin >= file_len) begin
-                        state <= S_DONE;
-                    end else begin
-                        line_begin <= next_begin;
-                        scan_ptr   <= next_begin;
-                        prev_last  <= 8'h00;
-                        state      <= S_SCAN;
+                    // Advance only once the record has actually transferred.
+                    // rec_valid is combinational (see below), so a consumer
+                    // that holds rec_ready high still sees every record --
+                    // registering valid here would skip records for such a
+                    // consumer, which is the classic handshake bug.
+                    if (!emit_this || rec_ready) begin
+                        if (kind == 2'd0 && body_len >= 3) section <= hdr_section;
+                        if (next_begin >= file_len) begin
+                            state <= S_DONE;
+                        end else begin
+                            line_begin <= next_begin;
+                            scan_ptr   <= next_begin;
+                            prev_last  <= 8'h00;
+                            state      <= S_SCAN;
+                        end
                     end
                 end
 
