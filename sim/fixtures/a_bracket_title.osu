@@ -1,0 +1,11 @@
+osu file format v14
+
+[Metadata]
+Title:[bracket]
+TitleUnicode:[bracket]
+Artist:A
+BeatmapID:1
+
+[Difficulty]
+HPDrainRate:5
+ApproachRate:9

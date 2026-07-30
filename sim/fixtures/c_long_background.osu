@@ -1,0 +1,7 @@
+osu file format v14
+
+[Events]
+0,0,"a_very_long_background_filename_that_exceeds_one_window_width.jpg",0,0
+2,10,20
+Sprite,Background,Centre,"x.png",0,0
+ F,0,1,2

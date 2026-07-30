@@ -1,0 +1,6 @@
+osu file format v14
+
+[Colours]
+SliderBorder:1,2,3
+Combo1 : 255,192,0
+Combo2:0,0,0
