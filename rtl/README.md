@@ -50,8 +50,31 @@ flow (TinyTapeout) available, which is worth more than the syntax.
 |---|---|
 | `fosu_classify.sv` | combinational byte classifier — `nondigit`/`comma`/`newline` masks, `WIDTH` lanes in parallel |
 | `fosu_classify_stage.sv` | the same logic behind one row of flip-flops: a pipeline stage with a `valid` tag |
+| `fosu_ffs.sv` | find-first-set via prefix-OR (log depth, not a borrow chain) |
 | `fosu_first4.sv` | positions of the first four set bits — the `blsr`/`tzcnt` chain, as a parallel-prefix rank network |
+| `fosu_shift_right.sv` | barrel shifter, so "count digits from offset k" becomes "from 0" |
 | `fosu_prefix.sv` | `x,y,time,type,hitSound` → integer fields; bit-exact and domain-exact vs the AVX2 path |
+| `fosu_numscan.sv` | the one shared numeric scanner: serves `parse_i64` and `parse_double` from the same window |
+| `fosu_kv_key.sv` | the C++ 4-byte key dispatch as a mux; all 37 key/value fields |
+| `fosu_line_iter.sv` | cursor-based line iteration + section dispatch, over a valid/ready handshake |
+| `fosu_engine.sv` | the parser: composes the above and parses every section |
+
+### How the doubles come out exact
+
+`TimingPoint.time`/`beat_length`, `Slider.length`, break times and the decimal
+key/value fields are all C++ `double`. There is no floating-point unit in this
+design and none is needed. `parse_double` finishes with exactly two operations:
+
+```cpp
+double v = (double)mant;  if (frac) v /= kPow10[frac];  out = neg ? -v : v;
+```
+
+so the RTL emits `(mant, frac, neg)` — *parse_double's own inputs* — and the host
+performs those two operations. The result is **bit-identical**, and the
+testbench compares raw 64-bit patterns rather than tolerances. Values the C++
+itself hands to `strtod` (over 18 significant digits, or an exponent) are not
+approximated either: the line is emitted as a PUNT record carrying its span and
+the host parses it, the same division of labour as the C++ scalar fallback.
 
 ### What the prefix core does *not* need
 
