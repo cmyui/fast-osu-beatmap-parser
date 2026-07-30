@@ -147,23 +147,21 @@ Four inversions that account for most of the confusion:
 - **Phase 1b — pipeline the prefix core.** Split the 99 combinational levels
   across register stages and re-measure. Natural boundaries:
   classify+positions / digit selection / conversion+validate.
-- **Phase 2 — streaming skeleton.** 16 B/cycle ingest, the realignment barrel
-  shifter (fixed-width bus -> variable-length line records; typically the
-  timing bottleneck in any wire-speed parser), line framer, section FSM.
-  Note the framer owns line termination: the prefix harness had to model this
-  explicitly, because the SIMD path treats CR/LF as terminators while the
-  scalar reference does not, and only a framer that ends lines at the newline
-  makes the two agree.
-- **Phase 3 — full format.** Timing points, the slider point sub-pipeline (the
-  rate limiter, exactly as on CPU), key/value fields for
-  General/Metadata/Difficulty, and a punt-to-host record for structurally odd
-  lines -- the scalar fallback, in silicon. Target: >=8 bytes/cycle sustained.
-  - Open design question: `TimingPoint.time`/`beat_length` and `Slider.length`
-    are C++ `double`. Exact decimal->binary64 conversion in hardware needs wide
-    integer work for no benefit here, so the intended design is to emit the
-    decimal mantissa and exponent as integers and let the host finish the float
-    conversion -- parse the structure in silicon, defer the FP. That also keeps
-    the golden-model diff exact on integers instead of approximate on floats.
+- **Phase 2 — line iteration and section dispatch (done).** Cursor-based, over a
+  memory-resident buffer, 1:1 with the C++ line loop on the full 10k corpus:
+  10,011 files, 437,853,165 bytes, 11,298,709 lines.
+- **Phase 3 — all sections (done).** `[TimingPoints]`, `[HitObjects]` (circles,
+  sliders with control points and extras, spinners, mania holds), the four
+  key/value sections, `[Events]` (background, video, breaks, storyboard counts),
+  `[Colours]`, and the format-version line. Every field `fosu::parse` fills is
+  produced and diffed, doubles compared as raw 64-bit patterns.
+- **Phase 3b — throughput.** The engine currently sustains ~3.2 bytes/cycle in
+  simulation. That is a *behavioural* design: one memory port shared between the
+  line iterator and the content parser, a combinational read whose latency is
+  not pipelined in, and a control-point walk costing ~5 cycles per point. The
+  work to raise it is known and independent of correctness -- register the
+  memory path, give the iterator its own port so line scanning overlaps content
+  parsing, and widen the point walk.
 - **Phase 4 — silicon.** Synthesize for Kria KV260 (Zynq UltraScale+), read
   real timing reports, split stages until 300-400 MHz closes, DMA to the ARM
   side, and measure joules per beatmap.
