@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <deque>
 #include <vector>
 
 #include "Vfosu_engine.h"
@@ -164,6 +165,9 @@ int main(int argc, char** argv) {
         // a temporary into `acc` would dangle.
         std::string sfield[40];
         bool sset[40] = {false};
+        // Punted lines are finished by the C++. Their buffers must outlive the
+        // parse because string_view fields point into them.
+        std::deque<fosu::FileBuffer> punt_bufs;
         std::string ev_bg, ev_video;
         bool ev_bg_set = false, ev_video_set = false;
         std::vector<std::pair<int32_t,int32_t>> got_breaks;
@@ -217,9 +221,56 @@ int main(int argc, char** argv) {
                     // hardware. Its result still has to land in order.
                     const std::string body =
                         raw.substr(dut->rec_start, dut->rec_len);
-                    auto pb = fosu::make_padded(body);
+                    punt_bufs.push_back(fosu::make_padded(body));
+                    auto& pb = punt_bufs.back();
                     fosu::Beatmap one;
-                    if (dut->rec_section == 6) {
+                    const int psec = dut->rec_section;
+                    if (psec == 1) {
+                        fosu::detail::parse_general_line(acc, pb.data.get(),
+                                                         body.size());
+                    } else if (psec == 2) {
+                        fosu::detail::parse_editor_line(acc, pb.data.get(),
+                                                        body.size());
+                    } else if (psec == 3) {
+                        fosu::detail::parse_metadata_line(acc, pb.data.get(),
+                                                          body.size());
+                    } else if (psec == 4) {
+                        fosu::detail::parse_difficulty_line(acc, pb.data.get(),
+                                                            body.size(), ar_seen);
+                    } else if (psec == 5) {
+                        fosu::Beatmap ev;
+                        fosu::detail::parse_event_line(ev, pb.data.get(),
+                                                       body.size());
+                        if (!ev.background.empty()) {
+                            ev_bg = std::string(ev.background);
+                            ev_bg_set = true;
+                        }
+                        if (!ev.video.empty()) {
+                            ev_video = std::string(ev.video);
+                            ev_video_set = true;
+                        }
+                        for (auto& b : ev.breaks)
+                            got_breaks.emplace_back(b.start, b.end);
+                        got_story += ev.stats.storyboard_lines;
+                    } else if (psec == 7) {
+                        std::string_view k, v;
+                        fosu::Beatmap co;
+                        if (fosu::detail::split_kv(pb.data.get(), body.size(),
+                                                   k, v))
+                            fosu::detail::parse_colour_kv(co, k, v);
+                        for (uint32_t c : co.combo_colours)
+                            got_colours.push_back(c);
+                    } else if (psec == 0) {
+                        const std::string_view line(pb.data.get(), body.size());
+                        const size_t vpos = line.find("osu file format v");
+                        if (vpos != std::string_view::npos) {
+                            int64_t vv;
+                            const char* vp = pb.data.get() + vpos + 17;
+                            if (fosu::detail::parse_i64(
+                                    vp, pb.data.get() + body.size(), vv) != vp)
+                                got_version = static_cast<int>(vv);
+                        }
+                    } else if (psec == 6) {
                         fosu::detail::parse_timing_point_line(one, pb.data.get(),
                                                               body.size());
                         if (one.timing_points.size() == 1) {

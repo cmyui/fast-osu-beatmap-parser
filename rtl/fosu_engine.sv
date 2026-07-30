@@ -186,7 +186,8 @@ module fosu_engine #(
         // key/value sections
         C_KV_KEY, C_KV_VAL, C_KV_EMIT,
         // [Events]
-        C_EV_HEAD, C_EV_C2, C_EV_C3, C_EV_TRIM_L, C_EV_TRIM_R, C_EV_STR_EMIT,
+        C_EV_HEAD, C_EV_C2, C_EV_C3, C_EV_TRIM_L, C_EV_TRIM_R,
+        C_EV_Q1, C_EV_Q2, C_EV_STR_EMIT,
         C_BR_START, C_BR_COMMA, C_BR_END, C_BR_EMIT, C_STORY_EMIT,
         // [Colours]
         C_CO_COLON, C_CO_KEYTRIM, C_CO_VALTRIM, C_CO_VAL, C_CO_SEP, C_CO_EMIT,
@@ -213,7 +214,10 @@ module fosu_engine #(
         else if (cstate == C_SL_SCAN)  mem_addr = ex_scan;
         else if (cstate == C_EV_C2 ||
                  cstate == C_EV_C3)    mem_addr = scan2;
-        else if (cstate == C_EV_TRIM_R) mem_addr = ev_s_r;
+        else if (cstate == C_EV_TRIM_L ||
+                 cstate == C_EV_Q1)     mem_addr = ev_s_r;
+        else if (cstate == C_EV_TRIM_R ||
+                 cstate == C_EV_Q2)     mem_addr = ev_e_last;
         else                           mem_addr = cursor;
     end
 
@@ -308,6 +312,8 @@ module fosu_engine #(
     logic        br_s_neg_r, br_e_neg_r;
     logic        ev_is_video_r;
     logic [31:0] ev_s_r, ev_e_r;          // filename span, exclusive end
+    logic        ev_q1;                   // first byte of the span is '"'
+    logic [31:0] ev_e_last;               // address of the span's last byte
     logic [23:0] co_rgb_r;
     logic [1:0]  co_idx;
     logic [31:0] ver_value_r;
@@ -382,30 +388,16 @@ module fosu_engine #(
     // trim() + strip_quotes() over the span [ev_s_r, ev_e_r) with the window
     // pointed at ev_s_r, which C_EV_TRIM_R arranges. Only reached when the span
     // fits the window; longer ones are punted.
+    // trim() then strip_quotes() over [ev_s_r, ev_e_r). Done a byte at a time
+    // from each end rather than requiring the span to fit a window: real
+    // filenames routinely exceed 64 bytes (one corpus background is 69), so a
+    // window-sized shortcut would punt the common case.
     logic [31:0] ev_span;
-    logic [31:0] tr_lead, tr_trail;      // offsets within the window
-    logic [31:0] ev_s_trim, ev_e_trim;
-    logic        ev_quoted;
+    logic        ev_ws_head;
     always_comb begin
-        integer i;
-        ev_span = (ev_e_r > ev_s_r) ? (ev_e_r - ev_s_r) : 32'd0;
-
-        tr_lead = ev_span;               // all-whitespace collapses to empty
-        for (i = WIN - 1; i >= 0; i = i - 1)
-            if (i < ev_span && nonws[i]) tr_lead = i;
-
-        tr_trail = 32'd0;                // exclusive end within the window
-        for (i = 0; i < WIN; i = i + 1)
-            if (i < ev_span && nonws[i]) tr_trail = i + 1;
-
-        ev_s_trim = ev_s_r + tr_lead;
-        ev_e_trim = ev_s_r + tr_trail;
-        if (ev_e_trim < ev_s_trim) ev_e_trim = ev_s_trim;
-
-        // strip_quotes: both ends must be '"' and the span at least 2 long.
-        ev_quoted = ((ev_e_trim - ev_s_trim) >= 32'd2) &&
-                    (mem_data[8*tr_lead +: 8] == CH_QUOTE) &&
-                    (mem_data[8*(tr_trail - 32'd1) +: 8] == CH_QUOTE);
+        ev_span    = (ev_e_r > ev_s_r) ? (ev_e_r - ev_s_r) : 32'd0;
+        ev_e_last  = (ev_e_r > 32'd0) ? (ev_e_r - 32'd1) : 32'd0;
+        ev_ws_head = (cur_byte == CH_SPACE) || (cur_byte == CH_TAB);
     end
 
     // Scanner outputs the remaining section parsers will consume. Sunk
@@ -1060,24 +1052,27 @@ module fosu_engine #(
                     end
                 end
 
-                // trim() then strip_quotes(), both in one cycle when the span
-                // fits the window -- which it does for any real filename.
+                // trim(): leading then trailing whitespace, one byte per cycle.
                 C_EV_TRIM_L: begin
-                    if ((ev_e_r - ev_s_r) > WIN) begin
-                        punt   <= 1'b1;
-                        cstate <= C_EV_STR_EMIT;
-                    end else begin
-                        cstate <= C_EV_TRIM_R;
-                    end
+                    if (ev_span != 32'd0 && ev_ws_head) ev_s_r <= ev_s_r + 32'd1;
+                    else                                cstate <= C_EV_TRIM_R;
                 end
 
                 C_EV_TRIM_R: begin
-                    if (ev_quoted) begin
-                        ev_s_r <= ev_s_trim + 32'd1;
-                        ev_e_r <= ev_e_trim - 32'd1;
-                    end else begin
-                        ev_s_r <= ev_s_trim;
-                        ev_e_r <= ev_e_trim;
+                    if (ev_span != 32'd0 && ev_ws_head) ev_e_r <= ev_e_r - 32'd1;
+                    else                                cstate <= C_EV_Q1;
+                end
+
+                // strip_quotes(): both ends must be '"' and the span >= 2.
+                C_EV_Q1: begin
+                    ev_q1  <= (cur_byte == CH_QUOTE);
+                    cstate <= C_EV_Q2;
+                end
+
+                C_EV_Q2: begin
+                    if (ev_q1 && (cur_byte == CH_QUOTE) && ev_span >= 32'd2) begin
+                        ev_s_r <= ev_s_r + 32'd1;
+                        ev_e_r <= ev_e_r - 32'd1;
                     end
                     cstate <= C_EV_STR_EMIT;
                 end
