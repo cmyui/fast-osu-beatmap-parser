@@ -6,9 +6,9 @@
 // is being parsed the iterator is stalled, so its address outputs are stable
 // and the engine steals the port for its own cursor.
 //
-// Currently implemented: [TimingPoints]. Other sections are accepted and
-// released untouched, which keeps line iteration verified end to end while the
-// remaining section parsers land.
+// Currently implemented: [TimingPoints] and [HitObjects]. The key/value
+// sections, [Events] and [Colours] are accepted and released untouched, which
+// keeps line iteration verified end to end while they land.
 //
 // Every numeric field goes through the one shared fosu_numscan instance, at
 // whatever offset the cursor currently sits. Values the C++ would hand to
@@ -52,6 +52,33 @@ module fosu_engine #(
     output logic        tp_uninherited,
     output logic [31:0] tp_effects,
 
+    // TAG_HITOBJ payload.
+    output logic [31:0] ho_x,
+    output logic [31:0] ho_y,
+    output logic [31:0] ho_time,
+    output logic [31:0] ho_type,
+    output logic [31:0] ho_hitsound,
+    output logic [31:0] ho_end_time,
+    output logic        ho_has_slider,
+    output logic [31:0] ho_sample_start,
+    output logic [31:0] ho_sample_len,
+
+    // TAG_SLIDER payload. `length` is emitted as parse_double's inputs, like
+    // the timing fields.
+    output logic [7:0]  sl_curve_type,
+    output logic [31:0] sl_slides,
+    output logic [63:0] sl_len_mant,
+    output logic [7:0]  sl_len_frac,
+    output logic        sl_len_neg,
+    output logic [31:0] sl_es_start,
+    output logic [31:0] sl_es_len,
+    output logic [31:0] sl_esets_start,
+    output logic [31:0] sl_esets_len,
+
+    // TAG_POINT payload: one slider control point.
+    output logic [31:0] pt_x,
+    output logic [31:0] pt_y,
+
     // TAG_PUNT / TAG_MALFORMED payload: the line span.
     output logic [31:0] rec_start,
     output logic [31:0] rec_len,
@@ -62,10 +89,16 @@ module fosu_engine #(
     localparam logic [3:0] TAG_TIMING    = 4'd1;
     localparam logic [3:0] TAG_MALFORMED = 4'd2;
     localparam logic [3:0] TAG_PUNT      = 4'd3;
+    localparam logic [3:0] TAG_HITOBJ    = 4'd4;
+    localparam logic [3:0] TAG_SLIDER    = 4'd5;
+    localparam logic [3:0] TAG_POINT     = 4'd6;
 
     localparam logic [3:0] SEC_TIMING = 4'd6;
+    localparam logic [3:0] SEC_HITOBJ = 4'd8;
 
     localparam logic [7:0] CH_COMMA = 8'h2C;
+    localparam logic [7:0] CH_COLON = 8'h3A;
+    localparam logic [7:0] CH_PIPE  = 8'h7C;
 
     // ---------------------------------------------------------------------
     // Line source.
@@ -90,8 +123,19 @@ module fosu_engine #(
     // Content cursor and the shared numeric scanner, which always looks at
     // the current cursor.
     // ---------------------------------------------------------------------
-    typedef enum logic [2:0] {
-        C_IDLE, C_TIME, C_COMMA1, C_BL, C_REST_COMMA, C_REST_VAL, C_EMIT, C_FAIL
+    typedef enum logic [4:0] {
+        C_IDLE,
+        // [TimingPoints]
+        C_TIME, C_COMMA1, C_BL, C_REST_COMMA, C_REST_VAL,
+        // [HitObjects]: prefix, then one of three tails
+        C_HO_PREFIX,
+        C_SL_COMMA, C_SL_CURVE, C_SL_PIPE, C_SL_X, C_SL_COLON, C_SL_Y,
+        C_SL_PT_EMIT, C_SL_SLIDES_COMMA, C_SL_SLIDES, C_SL_LEN_COMMA,
+        C_SL_LEN, C_SL_EXTRA, C_SL_SCAN, C_SL_EMIT,
+        C_SP_COMMA, C_SP_END, C_SP_SAMPLE,
+        C_CI_SAMPLE,
+        C_HO_EMIT,
+        C_EMIT, C_FAIL
     } cstate_t;
     cstate_t cstate;
 
@@ -102,7 +146,14 @@ module fosu_engine #(
     logic        content_busy;
     always_comb content_busy = (cstate != C_IDLE);
 
-    always_comb mem_addr = content_busy ? cursor : li_addr;
+    // The extras scan walks its own pointer across windows, so it owns the
+    // read port while it runs -- otherwise comma positions would be reported
+    // relative to `cursor` while being interpreted relative to `ex_scan`.
+    always_comb begin
+        if (!content_busy)             mem_addr = li_addr;
+        else if (cstate == C_SL_SCAN)  mem_addr = ex_scan;
+        else                           mem_addr = cursor;
+    end
 
     logic        ns_neg, ns_int_any, ns_dec_any, ns_has_exp, ns_needs_host;
     logic        ns_int_run_full, ns_has_dot;
@@ -119,8 +170,54 @@ module fosu_engine #(
         .dec_len(ns_dec_len)
     );
 
+    // The hitobject prefix core, looking at the window at the cursor. Its
+    // domain is identical to the C++ fast path (verified separately on 270k
+    // candidates); a line it rejects is punted to the host rather than
+    // re-implementing the lenient scalar fallback in silicon.
+    logic        px_ok;
+    logic [31:0] px_x, px_y, px_time, px_type, px_hs;
+    logic [7:0]  px_next;
+    logic [31:0] px_nlmask_unused;
+
+    fosu_prefix #(.WINDOW(32), .BYTES(WIN)) u_prefix (
+        .bytes_in(mem_data),
+        .ok(px_ok), .x(px_x), .y(px_y), .time_ms(px_time),
+        .obj_type(px_type), .hitsound(px_hs), .next_off(px_next),
+        .newline_mask(px_nlmask_unused)
+    );
+
+    // Hitobject working state.
+    logic [31:0] ho_x_r, ho_y_r, ho_time_r, ho_type_r, ho_hs_r, ho_end_r;
+    logic [31:0] ho_smp_start_r, ho_smp_len_r;
+    logic        ho_is_slider_r;
+    logic [7:0]  sl_curve_r;
+    logic [31:0] sl_slides_r;
+    logic [63:0] sl_len_mant_r;
+    logic [7:0]  sl_len_frac_r;
+    logic        sl_len_neg_r;
+    logic [31:0] sl_es_s_r, sl_es_l_r, sl_ez_s_r, sl_ez_l_r;
+    logic [31:0] pt_x_r, pt_y_r;
+
+    // Extra-field comma scan (edgeSounds / edgeSets / hitSample). A monster
+    // slider's extras can be thousands of bytes, so this walks windows the same
+    // way the line iterator hunts newlines.
+    logic [31:0] ex_scan, ex_base, ex_c0;
+    logic        ex_have_c0;
+
     logic [7:0] cur_byte;
     always_comb cur_byte = mem_data[7:0];
+
+    // Comma search across the window, for the extras scan.
+    logic [WIN-1:0] comma_hit;
+    logic           cm_found;
+    logic [$clog2(WIN)-1:0] cm_pos;
+    always_comb begin
+        integer i;
+        for (i = 0; i < WIN; i = i + 1)
+            comma_hit[i] = (mem_data[8*i +: 8] == CH_COMMA);
+    end
+    fosu_ffs #(.WIDTH(WIN)) u_findcomma (
+        .mask(comma_hit), .pos(cm_pos), .found(cm_found));
 
     // Scanner outputs the remaining section parsers will consume. Sunk
     // explicitly so lint stays strict instead of being globally relaxed.
@@ -158,10 +255,20 @@ module fosu_engine #(
     // rest[6] = {4,0,0,100,1,0}.
     logic [31:0] rest0, rest1, rest2, rest3, rest4, rest5;
 
+    // A line is "finished" in one of the terminal states. C_SL_PT_EMIT and
+    // C_SL_EMIT also transfer records, but mid-line, so they do not release it.
+    logic term_state;
+    always_comb term_state = (cstate == C_EMIT) || (cstate == C_FAIL) ||
+                             (cstate == C_HO_EMIT);
+
     always_comb begin
-        rec_valid   = (cstate == C_EMIT) || (cstate == C_FAIL);
-        rec_tag     = (cstate == C_EMIT) ? (punt ? TAG_PUNT : TAG_TIMING)
-                                        : TAG_MALFORMED;
+        rec_valid = term_state || (cstate == C_SL_PT_EMIT) ||
+                    (cstate == C_SL_EMIT);
+        if (cstate == C_FAIL)             rec_tag = TAG_MALFORMED;
+        else if (cstate == C_SL_PT_EMIT)  rec_tag = TAG_POINT;
+        else if (cstate == C_SL_EMIT)     rec_tag = TAG_SLIDER;
+        else if (cstate == C_HO_EMIT)     rec_tag = punt ? TAG_PUNT : TAG_HITOBJ;
+        else                              rec_tag = punt ? TAG_PUNT : TAG_TIMING;
         rec_start   = li_start;
         rec_len     = li_len;
         rec_section = li_section;
@@ -173,12 +280,36 @@ module fosu_engine #(
         tp_uninherited  = (rest4 != 32'd0);
         tp_effects      = rest5;
 
+        ho_x            = ho_x_r;
+        ho_y            = ho_y_r;
+        ho_time         = ho_time_r;
+        ho_type         = ho_type_r;
+        ho_hitsound     = ho_hs_r;
+        ho_end_time     = ho_end_r;
+        ho_has_slider   = ho_is_slider_r;
+        ho_sample_start = ho_smp_start_r;
+        ho_sample_len   = ho_smp_len_r;
+
+        sl_curve_type   = sl_curve_r;
+        sl_slides       = sl_slides_r;
+        sl_len_mant     = sl_len_mant_r;
+        sl_len_frac     = sl_len_frac_r;
+        sl_len_neg      = sl_len_neg_r;
+        sl_es_start     = sl_es_s_r;
+        sl_es_len       = sl_es_l_r;
+        sl_esets_start  = sl_ez_s_r;
+        sl_esets_len    = sl_ez_l_r;
+
+        pt_x            = pt_x_r;
+        pt_y            = pt_y_r;
+
         // Release the line once content parsing has finished with it, or
         // immediately for sections not yet handled here.
         li_ready = 1'b0;
         if (li_valid && !content_busy) begin
-            li_ready = !(li_kind == 2'd2 && li_section == SEC_TIMING);
-        end else if ((cstate == C_EMIT || cstate == C_FAIL) && rec_ready) begin
+            li_ready = !(li_kind == 2'd2 &&
+                         (li_section == SEC_TIMING || li_section == SEC_HITOBJ));
+        end else if (term_state && rec_ready) begin
             li_ready = 1'b1;
         end
     end
@@ -193,6 +324,20 @@ module fosu_engine #(
             case (cstate)
                 C_IDLE: begin
                     if (li_valid && li_kind == 2'd2 &&
+                        li_section == SEC_HITOBJ) begin
+                        cursor         <= li_start;
+                        line_stop      <= li_start + li_len;
+                        punt           <= 1'b0;
+                        ho_end_r       <= 32'd0;
+                        ho_is_slider_r <= 1'b0;
+                        ho_smp_start_r <= 32'd0;
+                        ho_smp_len_r   <= 32'd0;
+                        sl_es_s_r      <= 32'd0;
+                        sl_es_l_r      <= 32'd0;
+                        sl_ez_s_r      <= 32'd0;
+                        sl_ez_l_r      <= 32'd0;
+                        cstate         <= C_HO_PREFIX;
+                    end else if (li_valid && li_kind == 2'd2 &&
                         li_section == SEC_TIMING) begin
                         cursor       <= li_start;
                         line_stop    <= li_start + li_len;
@@ -288,6 +433,238 @@ module fosu_engine #(
                         rest_idx <= rest_idx + 3'd1;
                         cstate   <= C_REST_COMMA;
                     end
+                end
+
+
+                // ---------------- [HitObjects] ----------------
+                // The prefix core's accepted domain equals the C++ fast path's.
+                // A rejection would fall to the lenient scalar parser in the
+                // C++ (negatives, 4+ digit coords, decimal coords); rather than
+                // duplicate that leniency in silicon, the line goes to the host.
+                C_HO_PREFIX: begin
+                    if (!px_ok || ({24'd0, px_next} > li_len)) begin
+                        punt   <= 1'b1;
+                        cstate <= C_HO_EMIT;
+                    end else begin
+                        ho_x_r    <= px_x;
+                        ho_y_r    <= px_y;
+                        ho_time_r <= px_time;
+                        ho_type_r <= px_type;
+                        ho_hs_r   <= px_hs;
+                        cursor    <= cursor + {24'd0, px_next};
+                        // type bit 1 = slider, bit 3 = spinner, bit 7 = hold.
+                        if (px_type[1])                    cstate <= C_SL_COMMA;
+                        else if (px_type[3] || px_type[7]) cstate <= C_SP_COMMA;
+                        else                               cstate <= C_CI_SAMPLE;
+                    end
+                end
+
+                // --- slider: curveType|x:y|...,slides,length[,extras] ---
+                C_SL_COMMA: begin
+                    if (remain == 0 || cur_byte != CH_COMMA) cstate <= C_FAIL;
+                    else begin
+                        cursor <= cursor + 32'd1;
+                        cstate <= C_SL_CURVE;
+                    end
+                end
+
+                C_SL_CURVE: begin
+                    // parse_slider_params rejects an empty parameter list.
+                    if (remain == 0) cstate <= C_FAIL;
+                    else begin
+                        sl_curve_r     <= cur_byte;
+                        ho_is_slider_r <= 1'b1;
+                        cursor         <= cursor + 32'd1;
+                        cstate         <= C_SL_PIPE;
+                    end
+                end
+
+                C_SL_PIPE: begin
+                    if (remain != 0 && cur_byte == CH_PIPE) begin
+                        cursor <= cursor + 32'd1;
+                        cstate <= C_SL_X;
+                    end else begin
+                        cstate <= C_SL_SLIDES_COMMA;
+                    end
+                end
+
+                // parse_coord: equivalent to parse_i64 with clamp_i32.
+                C_SL_X: begin
+                    if (!ns_int_any || !int_fits || ns_int_run_full) begin
+                        cstate <= C_FAIL;
+                    end else begin
+                        pt_x_r <= clamp_i32(ns_neg, ns_val19);
+                        cursor <= cursor + {24'd0, ns_int_len};
+                        cstate <= C_SL_COLON;
+                    end
+                end
+
+                C_SL_COLON: begin
+                    if (remain == 0 || cur_byte != CH_COLON) cstate <= C_FAIL;
+                    else begin
+                        cursor <= cursor + 32'd1;
+                        cstate <= C_SL_Y;
+                    end
+                end
+
+                C_SL_Y: begin
+                    if (!ns_int_any || !int_fits || ns_int_run_full) begin
+                        cstate <= C_FAIL;
+                    end else begin
+                        pt_y_r <= clamp_i32(ns_neg, ns_val19);
+                        cursor <= cursor + {24'd0, ns_int_len};
+                        cstate <= C_SL_PT_EMIT;
+                    end
+                end
+
+                C_SL_PT_EMIT: begin
+                    if (rec_ready) cstate <= C_SL_PIPE;
+                end
+
+                C_SL_SLIDES_COMMA: begin
+                    if (remain == 0 || cur_byte != CH_COMMA) cstate <= C_FAIL;
+                    else begin
+                        cursor <= cursor + 32'd1;
+                        cstate <= C_SL_SLIDES;
+                    end
+                end
+
+                // slides is a bare integer of 1..7 digits: the C++ takes
+                // digit_run8 (capped at 8) and rejects when run-1 > 6, so an
+                // 8-or-more digit run fails. No sign is accepted here.
+                C_SL_SLIDES: begin
+                    if (ns_nd_int == 8'd0 || ns_nd_int > 8'd7 || ns_neg ||
+                        ({24'd0, ns_nd_int} > remain)) begin
+                        cstate <= C_FAIL;
+                    end else begin
+                        sl_slides_r <= ns_val19[31:0];
+                        cursor      <= cursor + {24'd0, ns_nd_int};
+                        cstate      <= C_SL_LEN_COMMA;
+                    end
+                end
+
+                C_SL_LEN_COMMA: begin
+                    if (remain == 0 || cur_byte != CH_COMMA) cstate <= C_FAIL;
+                    else begin
+                        cursor <= cursor + 32'd1;
+                        cstate <= C_SL_LEN;
+                    end
+                end
+
+                C_SL_LEN: begin
+                    if (!ns_dec_any || !dec_fits) begin
+                        cstate <= C_FAIL;
+                    end else if (ns_needs_host) begin
+                        punt   <= 1'b1;
+                        cstate <= C_HO_EMIT;
+                    end else begin
+                        sl_len_mant_r <= ns_mant;
+                        sl_len_frac_r <= ns_frac;
+                        sl_len_neg_r  <= ns_neg;
+                        cursor        <= cursor + {24'd0, ns_dec_len};
+                        cstate        <= C_SL_EXTRA;
+                    end
+                end
+
+                // The three optional extras are positional, split by up to two
+                // commas over whatever remains of the line.
+                C_SL_EXTRA: begin
+                    if (remain == 0 || cur_byte != CH_COMMA) begin
+                        cstate <= C_SL_EMIT;
+                    end else begin
+                        ex_base    <= cursor + 32'd1;
+                        ex_scan    <= cursor + 32'd1;
+                        ex_have_c0 <= 1'b0;
+                        cursor     <= cursor + 32'd1;
+                        cstate     <= C_SL_SCAN;
+                    end
+                end
+
+                C_SL_SCAN: begin
+                    if (cm_found && (ex_scan + {26'd0, cm_pos}) < line_stop) begin
+                        if (!ex_have_c0) begin
+                            ex_c0      <= ex_scan + {26'd0, cm_pos};
+                            ex_have_c0 <= 1'b1;
+                            ex_scan    <= ex_scan + {26'd0, cm_pos} + 32'd1;
+                        end else begin
+                            // Both commas found: extras are fully determined.
+                            sl_es_s_r      <= ex_base;
+                            sl_es_l_r      <= ex_c0 - ex_base;
+                            sl_ez_s_r      <= ex_c0 + 32'd1;
+                            sl_ez_l_r      <= (ex_scan + {26'd0, cm_pos}) -
+                                              (ex_c0 + 32'd1);
+                            ho_smp_start_r <= ex_scan + {26'd0, cm_pos} + 32'd1;
+                            ho_smp_len_r   <= line_stop -
+                                              (ex_scan + {26'd0, cm_pos} + 32'd1);
+                            cstate         <= C_SL_EMIT;
+                        end
+                    end else if ((ex_scan + WIN) >= line_stop) begin
+                        // Ran out of line: fewer than two commas present.
+                        if (!ex_have_c0) begin
+                            sl_es_s_r <= ex_base;
+                            sl_es_l_r <= line_stop - ex_base;
+                        end else begin
+                            sl_es_s_r <= ex_base;
+                            sl_es_l_r <= ex_c0 - ex_base;
+                            sl_ez_s_r <= ex_c0 + 32'd1;
+                            sl_ez_l_r <= line_stop - (ex_c0 + 32'd1);
+                        end
+                        cstate <= C_SL_EMIT;
+                    end else begin
+                        ex_scan <= ex_scan + WIN;
+                    end
+                end
+
+                C_SL_EMIT: begin
+                    if (rec_ready) cstate <= C_HO_EMIT;
+                end
+
+                // --- spinner / mania hold: ,endTime[,:]hitSample ---
+                C_SP_COMMA: begin
+                    if (remain == 0 || cur_byte != CH_COMMA) cstate <= C_FAIL;
+                    else begin
+                        cursor <= cursor + 32'd1;
+                        cstate <= C_SP_END;
+                    end
+                end
+
+                C_SP_END: begin
+                    if (!ns_int_any || !int_fits || ns_int_run_full) begin
+                        cstate <= C_FAIL;
+                    end else begin
+                        ho_end_r <= clamp_i32(ns_neg, ns_val19);
+                        cursor   <= cursor + {24'd0, ns_int_len};
+                        cstate   <= C_SP_SAMPLE;
+                    end
+                end
+
+                // A hold separates its sample with ':' and a spinner with ','.
+                // Anything else leaves hit_sample empty.
+                C_SP_SAMPLE: begin
+                    if (ho_type_r[7] && remain != 0 && cur_byte == CH_COLON) begin
+                        ho_smp_start_r <= cursor + 32'd1;
+                        ho_smp_len_r   <= line_stop - (cursor + 32'd1);
+                    end else if (remain != 0 && cur_byte == CH_COMMA) begin
+                        ho_smp_start_r <= cursor + 32'd1;
+                        ho_smp_len_r   <= line_stop - (cursor + 32'd1);
+                    end else begin
+                        ho_smp_start_r <= 32'd0;
+                        ho_smp_len_r   <= 32'd0;
+                    end
+                    cstate <= C_HO_EMIT;
+                end
+
+                // --- circle: optional trailing hitSample ---
+                C_CI_SAMPLE: begin
+                    if (remain != 0 && cur_byte == CH_COMMA) begin
+                        ho_smp_start_r <= cursor + 32'd1;
+                        ho_smp_len_r   <= line_stop - (cursor + 32'd1);
+                    end
+                    cstate <= C_HO_EMIT;
+                end
+
+                C_HO_EMIT: begin
+                    if (rec_ready) cstate <= C_IDLE;
                 end
 
                 C_EMIT, C_FAIL: begin

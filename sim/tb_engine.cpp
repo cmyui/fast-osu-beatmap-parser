@@ -32,11 +32,15 @@ constexpr int kWin = 64;
 constexpr int TAG_TIMING = 1;
 constexpr int TAG_MALFORMED = 2;
 constexpr int TAG_PUNT = 3;
+constexpr int TAG_HITOBJ = 4;
+constexpr int TAG_SLIDER = 5;
+constexpr int TAG_POINT = 6;
 
 const std::string* g_file = nullptr;
 uint64_t g_cycles = 0;
 int g_fail = 0;
 uint64_t g_tp = 0, g_punt = 0, g_malformed = 0;
+uint64_t g_ho = 0, g_sl = 0, g_pt = 0, g_ho_punt = 0;
 
 void serve_mem(Vfosu_engine* dut) {
     uint8_t w[kWin];
@@ -77,6 +81,21 @@ double rebuild(uint64_t mant, unsigned frac, bool neg) {
     return neg ? -v : v;
 }
 
+struct HO {
+    int32_t x, y, time, end_time;
+    uint32_t type, hitsound;
+    bool has_slider;
+    std::string sample;
+};
+
+struct SL {
+    char curve_type;
+    int32_t slides;
+    double length;
+    std::string edge_sounds, edge_sets;
+    std::vector<std::pair<int32_t,int32_t>> points;
+};
+
 struct TP {
     double time, beat_length;
     int32_t meter, sample_set, sample_index, volume;
@@ -103,7 +122,7 @@ int main(int argc, char** argv) {
     dut->clk = 0;
     dut->rec_ready = 1;
 
-    std::printf("engine [TimingPoints] vs fosu::parse\n");
+    std::printf("engine [TimingPoints] + [HitObjects] vs fosu::parse\n");
 
     namespace fs = std::filesystem;
     std::vector<fs::path> files;
@@ -131,6 +150,13 @@ int main(int argc, char** argv) {
 
         g_file = &raw;
         std::vector<TP> got;
+        std::vector<HO> got_ho;
+        std::vector<SL> got_sl;
+        // Points accumulate per object and only commit with their slider: a
+        // mid-walk failure makes the C++ resize the pool back and drop them.
+        std::vector<std::pair<int32_t,int32_t>> pending_pts;
+        SL pending_sl{};
+        bool have_pending_sl = false;
 
         dut->rst_n = 0;
         dut->start = 0;
@@ -165,20 +191,93 @@ int main(int argc, char** argv) {
                 } else if (dut->rec_tag == TAG_PUNT) {
                     // The host finishes this line, exactly as it would in
                     // hardware. Its result still has to land in order.
-                    fosu::Beatmap one;
                     const std::string body =
                         raw.substr(dut->rec_start, dut->rec_len);
                     auto pb = fosu::make_padded(body);
-                    fosu::detail::parse_timing_point_line(one, pb.data.get(),
-                                                          body.size());
-                    if (one.timing_points.size() == 1) {
-                        const auto& t = one.timing_points[0];
-                        got.push_back(TP{t.time, t.beat_length, t.meter,
-                                         t.sample_set, t.sample_index, t.volume,
-                                         t.uninherited, t.effects});
+                    fosu::Beatmap one;
+                    if (dut->rec_section == 6) {
+                        fosu::detail::parse_timing_point_line(one, pb.data.get(),
+                                                              body.size());
+                        if (one.timing_points.size() == 1) {
+                            const auto& t = one.timing_points[0];
+                            got.push_back(TP{t.time, t.beat_length, t.meter,
+                                             t.sample_set, t.sample_index,
+                                             t.volume, t.uninherited,
+                                             t.effects});
+                        }
+                        ++g_punt;
+                    } else {
+                        fosu::detail::parse_hitobject_line(one, pb.data.get(),
+                                                           body.size(),
+                                                           body.size());
+                        if (one.hit_objects.size() == 1) {
+                            const auto& o = one.hit_objects[0];
+                            HO h{};
+                            h.x = o.x; h.y = o.y; h.time = o.time;
+                            h.end_time = o.end_time; h.type = o.type;
+                            h.hitsound = o.hitsound;
+                            h.has_slider = o.slider != fosu::HitObject::kNoSlider;
+                            h.sample = std::string(o.hit_sample);
+                            got_ho.push_back(h);
+                            if (h.has_slider && !one.sliders.empty()) {
+                                const auto& sr = one.sliders[o.slider];
+                                SL sl{};
+                                sl.curve_type = sr.curve_type;
+                                sl.slides = sr.slides;
+                                sl.length = sr.length;
+                                sl.edge_sounds = std::string(sr.edge_sounds);
+                                sl.edge_sets = std::string(sr.edge_sets);
+                                for (uint32_t k = 0; k < sr.point_count; ++k)
+                                    sl.points.emplace_back(
+                                        one.slider_points[sr.point_begin + k].x,
+                                        one.slider_points[sr.point_begin + k].y);
+                                got_sl.push_back(sl);
+                            }
+                            ++g_ho;
+                        }
+                        ++g_ho_punt;
                     }
-                    ++g_punt;
+                    pending_pts.clear();
+                    have_pending_sl = false;
+                } else if (dut->rec_tag == TAG_POINT) {
+                    pending_pts.emplace_back(static_cast<int32_t>(dut->pt_x),
+                                             static_cast<int32_t>(dut->pt_y));
+                    ++g_pt;
+                } else if (dut->rec_tag == TAG_SLIDER) {
+                    pending_sl = SL{};
+                    pending_sl.curve_type = static_cast<char>(dut->sl_curve_type);
+                    pending_sl.slides = static_cast<int32_t>(dut->sl_slides);
+                    pending_sl.length = rebuild(dut->sl_len_mant,
+                                                dut->sl_len_frac,
+                                                dut->sl_len_neg);
+                    pending_sl.edge_sounds =
+                        raw.substr(dut->sl_es_start, dut->sl_es_len);
+                    pending_sl.edge_sets =
+                        raw.substr(dut->sl_esets_start, dut->sl_esets_len);
+                    pending_sl.points = pending_pts;
+                    have_pending_sl = true;
+                    ++g_sl;
+                } else if (dut->rec_tag == TAG_HITOBJ) {
+                    HO h{};
+                    h.x = static_cast<int32_t>(dut->ho_x);
+                    h.y = static_cast<int32_t>(dut->ho_y);
+                    h.time = static_cast<int32_t>(dut->ho_time);
+                    h.end_time = static_cast<int32_t>(dut->ho_end_time);
+                    h.type = dut->ho_type;
+                    h.hitsound = dut->ho_hitsound;
+                    h.has_slider = dut->ho_has_slider != 0;
+                    h.sample = raw.substr(dut->ho_sample_start,
+                                          dut->ho_sample_len);
+                    got_ho.push_back(h);
+                    if (have_pending_sl) got_sl.push_back(pending_sl);
+                    pending_pts.clear();
+                    have_pending_sl = false;
+                    ++g_ho;
                 } else if (dut->rec_tag == TAG_MALFORMED) {
+                    // The C++ pops the object and discards any slider points it
+                    // had already written.
+                    pending_pts.clear();
+                    have_pending_sl = false;
                     ++g_malformed;
                 }
             }
@@ -228,6 +327,81 @@ int main(int argc, char** argv) {
                 break;
             }
         }
+        // --- hit objects ---
+        if (got_ho.size() != ref.hit_objects.size()) {
+            if (g_fail < 8)
+                std::printf("HO COUNT MISMATCH %s: rtl %zu, ref %zu\n",
+                            f.filename().string().c_str(), got_ho.size(),
+                            ref.hit_objects.size());
+            ++g_fail;
+        }
+        const size_t hn = std::min(got_ho.size(), ref.hit_objects.size());
+        for (size_t i = 0; i < hn; ++i) {
+            const auto& a = got_ho[i];
+            const auto& b = ref.hit_objects[i];
+            const bool bslider = b.slider != fosu::HitObject::kNoSlider;
+            if (a.x != b.x || a.y != b.y || a.time != b.time ||
+                a.type != b.type || a.hitsound != b.hitsound ||
+                a.end_time != b.end_time || a.has_slider != bslider ||
+                a.sample != std::string(b.hit_sample)) {
+                if (g_fail < 8)
+                    std::printf("HO MISMATCH %s index %zu\n"
+                                "  rtl x=%d y=%d t=%d type=%u hs=%u end=%d "
+                                "slider=%d sample=\"%s\"\n"
+                                "  ref x=%d y=%d t=%d type=%u hs=%u end=%d "
+                                "slider=%d sample=\"%s\"\n",
+                                f.filename().string().c_str(), i, a.x, a.y,
+                                a.time, a.type, a.hitsound, a.end_time,
+                                a.has_slider, a.sample.c_str(), b.x, b.y, b.time,
+                                b.type, b.hitsound, b.end_time, bslider,
+                                std::string(b.hit_sample).c_str());
+                ++g_fail;
+                break;
+            }
+        }
+
+        // --- sliders (and their control points) ---
+        if (got_sl.size() != ref.sliders.size()) {
+            if (g_fail < 8)
+                std::printf("SLIDER COUNT MISMATCH %s: rtl %zu, ref %zu\n",
+                            f.filename().string().c_str(), got_sl.size(),
+                            ref.sliders.size());
+            ++g_fail;
+        }
+        const size_t sn = std::min(got_sl.size(), ref.sliders.size());
+        for (size_t i = 0; i < sn; ++i) {
+            const auto& a = got_sl[i];
+            const auto& b = ref.sliders[i];
+            bool bad = a.curve_type != b.curve_type || a.slides != b.slides ||
+                       d_to_bits(a.length) != d_to_bits(b.length) ||
+                       a.edge_sounds != std::string(b.edge_sounds) ||
+                       a.edge_sets != std::string(b.edge_sets) ||
+                       a.points.size() != b.point_count;
+            if (!bad)
+                for (uint32_t k = 0; k < b.point_count; ++k)
+                    if (a.points[k].first != ref.slider_points[b.point_begin+k].x ||
+                        a.points[k].second != ref.slider_points[b.point_begin+k].y) {
+                        bad = true;
+                        break;
+                    }
+            if (bad) {
+                if (g_fail < 8)
+                    std::printf("SLIDER MISMATCH %s index %zu\n"
+                                "  rtl curve=%c slides=%d len=%.17g pts=%zu "
+                                "es=\"%s\" esets=\"%s\"\n"
+                                "  ref curve=%c slides=%d len=%.17g pts=%u "
+                                "es=\"%s\" esets=\"%s\"\n",
+                                f.filename().string().c_str(), i, a.curve_type,
+                                a.slides, a.length, a.points.size(),
+                                a.edge_sounds.c_str(), a.edge_sets.c_str(),
+                                b.curve_type, b.slides, b.length, b.point_count,
+                                std::string(b.edge_sounds).c_str(),
+                                std::string(b.edge_sets).c_str());
+                ++g_fail;
+                break;
+            }
+        }
+
         bytes += raw.size();
         ++nfiles;
         if (g_fail > 8) break;
@@ -235,10 +409,15 @@ int main(int argc, char** argv) {
 
     std::printf("  corpus     : %zu files, %llu bytes\n", nfiles,
                 static_cast<unsigned long long>(bytes));
-    std::printf("  records    : %llu timing points, %llu punted to host, "
+    std::printf("  records    : %llu timing points (%llu punted), "
+                "%llu hit objects (%llu punted), %llu sliders, %llu points, "
                 "%llu malformed\n",
                 static_cast<unsigned long long>(g_tp),
                 static_cast<unsigned long long>(g_punt),
+                static_cast<unsigned long long>(g_ho),
+                static_cast<unsigned long long>(g_ho_punt),
+                static_cast<unsigned long long>(g_sl),
+                static_cast<unsigned long long>(g_pt),
                 static_cast<unsigned long long>(g_malformed));
     if (bytes)
         std::printf("  throughput : %.2f bytes/cycle simulated\n",
@@ -250,6 +429,6 @@ int main(int argc, char** argv) {
         std::printf("FAIL: %d mismatches\n", g_fail);
         return 1;
     }
-    std::printf("PASS: timing points bit-identical to fosu::parse\n");
+    std::printf("PASS: timing points and hit objects bit-identical to fosu::parse\n");
     return 0;
 }
