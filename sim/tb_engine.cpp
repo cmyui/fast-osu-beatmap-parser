@@ -36,12 +36,18 @@ constexpr int TAG_HITOBJ = 4;
 constexpr int TAG_SLIDER = 5;
 constexpr int TAG_POINT = 6;
 constexpr int TAG_KV = 7;
+constexpr int TAG_BREAK = 8;
+constexpr int TAG_EVSTR = 9;
+constexpr int TAG_STORY = 10;
+constexpr int TAG_COLOUR = 11;
+constexpr int TAG_VERSION = 12;
 
 const std::string* g_file = nullptr;
 uint64_t g_cycles = 0;
 int g_fail = 0;
 uint64_t g_tp = 0, g_punt = 0, g_malformed = 0;
 uint64_t g_ho = 0, g_sl = 0, g_pt = 0, g_ho_punt = 0, g_kv = 0;
+uint64_t g_br = 0, g_ev = 0, g_story = 0, g_col = 0, g_ver = 0;
 
 void serve_mem(Vfosu_engine* dut) {
     uint8_t w[kWin];
@@ -158,6 +164,12 @@ int main(int argc, char** argv) {
         // a temporary into `acc` would dangle.
         std::string sfield[40];
         bool sset[40] = {false};
+        std::string ev_bg, ev_video;
+        bool ev_bg_set = false, ev_video_set = false;
+        std::vector<std::pair<int32_t,int32_t>> got_breaks;
+        std::vector<uint32_t> got_colours;
+        int got_version = 14;
+        uint64_t got_story = 0;
         std::vector<TP> got;
         std::vector<HO> got_ho;
         std::vector<SL> got_sl;
@@ -343,6 +355,31 @@ int main(int argc, char** argv) {
                                     (unsigned long long)dut->kv_mant,
                                     dut->kv_frac);
                     ++g_kv;
+                } else if (dut->rec_tag == TAG_BREAK) {
+                    // The C++ truncates the parsed double to int64 and clamps.
+                    const double a = rebuild(dut->br_s_mant, dut->br_s_frac,
+                                             dut->br_s_neg);
+                    const double b = rebuild(dut->br_e_mant, dut->br_e_frac,
+                                             dut->br_e_neg);
+                    got_breaks.emplace_back(
+                        fosu::detail::clamp_i32(static_cast<int64_t>(a)),
+                        fosu::detail::clamp_i32(static_cast<int64_t>(b)));
+                    ++g_br;
+                } else if (dut->rec_tag == TAG_EVSTR) {
+                    const std::string v =
+                        raw.substr(dut->ev_str_start, dut->ev_str_len);
+                    if (dut->ev_is_video) { ev_video = v; ev_video_set = true; }
+                    else                  { ev_bg = v;    ev_bg_set = true; }
+                    ++g_ev;
+                } else if (dut->rec_tag == TAG_STORY) {
+                    ++got_story;
+                    ++g_story;
+                } else if (dut->rec_tag == TAG_COLOUR) {
+                    got_colours.push_back(dut->co_rgb);
+                    ++g_col;
+                } else if (dut->rec_tag == TAG_VERSION) {
+                    got_version = static_cast<int>(dut->ver_value);
+                    ++g_ver;
                 } else if (dut->rec_tag == TAG_MALFORMED) {
                     // The C++ pops the object and discards any slider points it
                     // had already written.
@@ -519,6 +556,38 @@ int main(int argc, char** argv) {
             #undef CHK_D
         }
 
+        // --- events, colours, format version ---
+        {
+            auto sfail2 = [&](const char* what) {
+                if (g_fail < 8)
+                    std::printf("EVT MISMATCH %s: %s\n",
+                                f.filename().string().c_str(), what);
+                ++g_fail;
+            };
+            if ((ev_bg_set ? ev_bg : std::string()) !=
+                std::string(ref.background)) sfail2("background");
+            if ((ev_video_set ? ev_video : std::string()) !=
+                std::string(ref.video)) sfail2("video");
+            if (got_version != ref.format_version) sfail2("format_version");
+            if (got_breaks.size() != ref.breaks.size()) sfail2("break count");
+            else
+                for (size_t i = 0; i < got_breaks.size(); ++i)
+                    if (got_breaks[i].first != ref.breaks[i].start ||
+                        got_breaks[i].second != ref.breaks[i].end) {
+                        sfail2("break value");
+                        break;
+                    }
+            if (got_colours.size() != ref.combo_colours.size())
+                sfail2("colour count");
+            else
+                for (size_t i = 0; i < got_colours.size(); ++i)
+                    if (got_colours[i] != ref.combo_colours[i]) {
+                        sfail2("colour value");
+                        break;
+                    }
+            if (got_story != ref.stats.storyboard_lines) sfail2("storyboard count");
+        }
+
         bytes += raw.size();
         ++nfiles;
         if (g_fail > 8) break;
@@ -528,7 +597,8 @@ int main(int argc, char** argv) {
                 static_cast<unsigned long long>(bytes));
     std::printf("  records    : %llu timing points (%llu punted), "
                 "%llu hit objects (%llu punted), %llu sliders, %llu points, "
-                "%llu kv fields, %llu malformed\n",
+                "%llu kv, %llu breaks, %llu evstr, %llu story, %llu colours, "
+                "%llu ver, %llu malformed\n",
                 static_cast<unsigned long long>(g_tp),
                 static_cast<unsigned long long>(g_punt),
                 static_cast<unsigned long long>(g_ho),
@@ -536,6 +606,11 @@ int main(int argc, char** argv) {
                 static_cast<unsigned long long>(g_sl),
                 static_cast<unsigned long long>(g_pt),
                 static_cast<unsigned long long>(g_kv),
+                static_cast<unsigned long long>(g_br),
+                static_cast<unsigned long long>(g_ev),
+                static_cast<unsigned long long>(g_story),
+                static_cast<unsigned long long>(g_col),
+                static_cast<unsigned long long>(g_ver),
                 static_cast<unsigned long long>(g_malformed));
     if (bytes)
         std::printf("  throughput : %.2f bytes/cycle simulated\n",

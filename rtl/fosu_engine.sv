@@ -91,6 +91,24 @@ module fosu_engine #(
     output logic [31:0] kv_str_len,
     output logic        kv_bool,
 
+    // TAG_BREAK payload (as parse_double inputs; the host truncates to int).
+    output logic [63:0] br_s_mant,
+    output logic [7:0]  br_s_frac,
+    output logic        br_s_neg,
+    output logic [63:0] br_e_mant,
+    output logic [7:0]  br_e_frac,
+    output logic        br_e_neg,
+
+    // TAG_EVSTR payload: background (kind 0) or video (kind 1) filename span,
+    // already trimmed and unquoted.
+    output logic        ev_is_video,
+    output logic [31:0] ev_str_start,
+    output logic [31:0] ev_str_len,
+
+    // TAG_COLOUR / TAG_VERSION payload.
+    output logic [23:0] co_rgb,
+    output logic [31:0] ver_value,
+
     // TAG_PUNT / TAG_MALFORMED payload: the line span.
     output logic [31:0] rec_start,
     output logic [31:0] rec_len,
@@ -105,15 +123,26 @@ module fosu_engine #(
     localparam logic [3:0] TAG_SLIDER    = 4'd5;
     localparam logic [3:0] TAG_POINT     = 4'd6;
     localparam logic [3:0] TAG_KV        = 4'd7;
+    localparam logic [3:0] TAG_BREAK     = 4'd8;
+    localparam logic [3:0] TAG_EVSTR     = 4'd9;   // background / video span
+    localparam logic [3:0] TAG_STORY     = 4'd10;  // storyboard line counted
+    localparam logic [3:0] TAG_COLOUR    = 4'd11;
+    localparam logic [3:0] TAG_VERSION   = 4'd12;
 
     localparam logic [3:0] SEC_GENERAL  = 4'd1;
     localparam logic [3:0] SEC_EDITOR   = 4'd2;
     localparam logic [3:0] SEC_METADATA = 4'd3;
     localparam logic [3:0] SEC_DIFF     = 4'd4;
+    localparam logic [3:0] SEC_NONE     = 4'd0;
+    localparam logic [3:0] SEC_EVENTS   = 4'd5;
     localparam logic [3:0] SEC_TIMING   = 4'd6;
+    localparam logic [3:0] SEC_COLOURS  = 4'd7;
     localparam logic [3:0] SEC_HITOBJ   = 4'd8;
 
     localparam logic [7:0] CH_SPACE = 8'h20;
+    localparam logic [7:0] CH_TAB   = 8'h09;
+    localparam logic [7:0] CH_USCR  = 8'h5F;   // '_'
+    localparam logic [7:0] CH_QUOTE = 8'h22;
 
     localparam logic [7:0] CH_COMMA = 8'h2C;
     localparam logic [7:0] CH_COLON = 8'h3A;
@@ -142,7 +171,7 @@ module fosu_engine #(
     // Content cursor and the shared numeric scanner, which always looks at
     // the current cursor.
     // ---------------------------------------------------------------------
-    typedef enum logic [4:0] {
+    typedef enum logic [5:0] {
         C_IDLE,
         // [TimingPoints]
         C_TIME, C_COMMA1, C_BL, C_REST_COMMA, C_REST_VAL,
@@ -156,6 +185,15 @@ module fosu_engine #(
         C_HO_EMIT,
         // key/value sections
         C_KV_KEY, C_KV_VAL, C_KV_EMIT,
+        // [Events]
+        C_EV_HEAD, C_EV_C2, C_EV_C3, C_EV_TRIM_L, C_EV_TRIM_R, C_EV_STR_EMIT,
+        C_BR_START, C_BR_COMMA, C_BR_END, C_BR_EMIT, C_STORY_EMIT,
+        // [Colours]
+        C_CO_COLON, C_CO_KEYTRIM, C_CO_VALTRIM, C_CO_VAL, C_CO_SEP, C_CO_EMIT,
+        // "osu file format v" line
+        C_VER_FIND, C_VER_VAL, C_VER_EMIT,
+        // Line consumed with nothing to report -- still has to be released.
+        C_DROP,
         C_EMIT, C_FAIL
     } cstate_t;
     cstate_t cstate;
@@ -173,6 +211,9 @@ module fosu_engine #(
     always_comb begin
         if (!content_busy)             mem_addr = li_addr;
         else if (cstate == C_SL_SCAN)  mem_addr = ex_scan;
+        else if (cstate == C_EV_C2 ||
+                 cstate == C_EV_C3)    mem_addr = scan2;
+        else if (cstate == C_EV_TRIM_R) mem_addr = ev_s_r;
         else                           mem_addr = cursor;
     end
 
@@ -261,6 +302,22 @@ module fosu_engine #(
         kv_val_len = (li_len > kv_off) ? (li_len - kv_off) : 32'd0;
     end
 
+    // Event / colour / version working state.
+    logic [63:0] br_s_mant_r, br_e_mant_r;
+    logic [7:0]  br_s_frac_r, br_e_frac_r;
+    logic        br_s_neg_r, br_e_neg_r;
+    logic        ev_is_video_r;
+    logic [31:0] ev_s_r, ev_e_r;          // filename span, exclusive end
+    logic [23:0] co_rgb_r;
+    logic [1:0]  co_idx;
+    logic [31:0] ver_value_r;
+    logic [31:0] scan2;                   // generic comma/colon scan pointer
+
+    // Colon search, for [Colours] key/value splitting.
+    logic [WIN-1:0] colon_hit;
+    logic           cl_found;
+    logic [$clog2(WIN)-1:0] cl_pos;
+
     // Comma search across the window, for the extras scan.
     logic [WIN-1:0] comma_hit;
     logic           cm_found;
@@ -272,6 +329,84 @@ module fosu_engine #(
     end
     fosu_ffs #(.WIDTH(WIN)) u_findcomma (
         .mask(comma_hit), .pos(cm_pos), .found(cm_found));
+
+    always_comb begin
+        integer i;
+        for (i = 0; i < WIN; i = i + 1)
+            colon_hit[i] = (mem_data[8*i +: 8] == CH_COLON);
+    end
+    fosu_ffs #(.WIDTH(WIN)) u_findcolon (
+        .mask(colon_hit), .pos(cl_pos), .found(cl_found));
+
+    // "osu file format v" search over the window: the version line is the
+    // first line of the file, so a single window is enough in practice; a line
+    // longer than the window with no match is punted.
+    logic [WIN-1:0] ver_hit;
+    logic           ver_found;
+    logic [$clog2(WIN)-1:0] ver_pos;
+    always_comb begin
+        integer i, j;
+        logic   m;
+        // "osu file format v" is 17 bytes.
+        localparam byte PAT [0:16] = '{"o","s","u"," ","f","i","l","e"," ",
+                                       "f","o","r","m","a","t"," ","v"};
+        for (i = 0; i < WIN; i = i + 1) begin
+            m = 1'b1;
+            for (j = 0; j < 17; j = j + 1)
+                if ((i + j) >= WIN) m = 1'b0;
+                else if (mem_data[8*(i+j) +: 8] != PAT[j]) m = 1'b0;
+            ver_hit[i] = m;
+        end
+    end
+    fosu_ffs #(.WIDTH(WIN)) u_findver (
+        .mask(ver_hit), .pos(ver_pos), .found(ver_found));
+
+    // Leading/trailing whitespace trim over a span that fits inside the window,
+    // which is the case for every filename and colour value in practice. A span
+    // longer than the window is punted rather than approximated.
+    logic [WIN-1:0] nonws;
+    always_comb begin
+        integer i;
+        logic [7:0] b;
+        for (i = 0; i < WIN; i = i + 1) begin
+            b = mem_data[8*i +: 8];
+            nonws[i] = (b != CH_SPACE) && (b != CH_TAB);
+        end
+    end
+
+    logic [$clog2(WIN)-1:0] lead_pos;
+    logic                   lead_found;
+    fosu_ffs #(.WIDTH(WIN)) u_lead (
+        .mask(nonws), .pos(lead_pos), .found(lead_found));
+
+    // trim() + strip_quotes() over the span [ev_s_r, ev_e_r) with the window
+    // pointed at ev_s_r, which C_EV_TRIM_R arranges. Only reached when the span
+    // fits the window; longer ones are punted.
+    logic [31:0] ev_span;
+    logic [31:0] tr_lead, tr_trail;      // offsets within the window
+    logic [31:0] ev_s_trim, ev_e_trim;
+    logic        ev_quoted;
+    always_comb begin
+        integer i;
+        ev_span = (ev_e_r > ev_s_r) ? (ev_e_r - ev_s_r) : 32'd0;
+
+        tr_lead = ev_span;               // all-whitespace collapses to empty
+        for (i = WIN - 1; i >= 0; i = i - 1)
+            if (i < ev_span && nonws[i]) tr_lead = i;
+
+        tr_trail = 32'd0;                // exclusive end within the window
+        for (i = 0; i < WIN; i = i + 1)
+            if (i < ev_span && nonws[i]) tr_trail = i + 1;
+
+        ev_s_trim = ev_s_r + tr_lead;
+        ev_e_trim = ev_s_r + tr_trail;
+        if (ev_e_trim < ev_s_trim) ev_e_trim = ev_s_trim;
+
+        // strip_quotes: both ends must be '"' and the span at least 2 long.
+        ev_quoted = ((ev_e_trim - ev_s_trim) >= 32'd2) &&
+                    (mem_data[8*tr_lead +: 8] == CH_QUOTE) &&
+                    (mem_data[8*(tr_trail - 32'd1) +: 8] == CH_QUOTE);
+    end
 
     // Scanner outputs the remaining section parsers will consume. Sunk
     // explicitly so lint stays strict instead of being globally relaxed.
@@ -313,15 +448,29 @@ module fosu_engine #(
     // C_SL_EMIT also transfer records, but mid-line, so they do not release it.
     logic term_state;
     always_comb term_state = (cstate == C_EMIT) || (cstate == C_FAIL) ||
-                             (cstate == C_HO_EMIT) || (cstate == C_KV_EMIT);
+                             (cstate == C_HO_EMIT) || (cstate == C_KV_EMIT) ||
+                             (cstate == C_EV_STR_EMIT) ||
+                             (cstate == C_STORY_EMIT) ||
+                             (cstate == C_BR_EMIT) || (cstate == C_CO_EMIT) ||
+                             (cstate == C_VER_EMIT) || (cstate == C_DROP);
 
     always_comb begin
-        // A key/value line with no recognised key, or a value the C++ would
-        // leave at its default, emits nothing but still finishes the line.
-        rec_valid = (term_state && !(cstate == C_KV_EMIT && !kv_emit_r)) ||
+        // A line can finish with nothing to report: an unrecognised key, a
+        // value the C++ would leave at its default, a colour line that is not
+        // "Combo", an event with no filename. Those reach a terminal state so
+        // the line is RELEASED, but assert no record. Returning straight to
+        // C_IDLE instead deadlocks: only a terminal state raises li_ready, so
+        // the iterator would keep offering the same line forever.
+        rec_valid = (term_state && cstate != C_DROP &&
+                     !(cstate == C_KV_EMIT && !kv_emit_r)) ||
                     (cstate == C_SL_PT_EMIT) || (cstate == C_SL_EMIT);
         if (cstate == C_FAIL)             rec_tag = TAG_MALFORMED;
         else if (cstate == C_KV_EMIT)     rec_tag = punt ? TAG_PUNT : TAG_KV;
+        else if (cstate == C_EV_STR_EMIT) rec_tag = punt ? TAG_PUNT : TAG_EVSTR;
+        else if (cstate == C_STORY_EMIT)  rec_tag = TAG_STORY;
+        else if (cstate == C_BR_EMIT)     rec_tag = punt ? TAG_PUNT : TAG_BREAK;
+        else if (cstate == C_CO_EMIT)     rec_tag = punt ? TAG_PUNT : TAG_COLOUR;
+        else if (cstate == C_VER_EMIT)    rec_tag = punt ? TAG_PUNT : TAG_VERSION;
         else if (cstate == C_SL_PT_EMIT)  rec_tag = TAG_POINT;
         else if (cstate == C_SL_EMIT)     rec_tag = TAG_SLIDER;
         else if (cstate == C_HO_EMIT)     rec_tag = punt ? TAG_PUNT : TAG_HITOBJ;
@@ -371,12 +520,26 @@ module fosu_engine #(
         kv_str_len      = kv_str_l_r;
         kv_bool         = kv_bool_r;
 
+        br_s_mant       = br_s_mant_r;
+        br_s_frac       = br_s_frac_r;
+        br_s_neg        = br_s_neg_r;
+        br_e_mant       = br_e_mant_r;
+        br_e_frac       = br_e_frac_r;
+        br_e_neg        = br_e_neg_r;
+        ev_is_video     = ev_is_video_r;
+        ev_str_start    = ev_s_r;
+        ev_str_len      = (ev_e_r > ev_s_r) ? (ev_e_r - ev_s_r) : 32'd0;
+        co_rgb          = co_rgb_r;
+        ver_value       = ver_value_r;
+
         // Release the line once content parsing has finished with it, or
         // immediately for sections not yet handled here.
         li_ready = 1'b0;
         if (li_valid && !content_busy) begin
             li_ready = !(li_kind == 2'd2 &&
                          (li_section == SEC_TIMING || li_section == SEC_HITOBJ ||
+                          li_section == SEC_EVENTS || li_section == SEC_COLOURS ||
+                          li_section == SEC_NONE ||
                           ((li_section == SEC_GENERAL ||
                             li_section == SEC_EDITOR ||
                             li_section == SEC_METADATA ||
@@ -420,6 +583,26 @@ module fosu_engine #(
                         punt      <= 1'b0;
                         kv_emit_r <= 1'b0;
                         cstate    <= C_KV_KEY;
+                    end else if (li_valid && li_kind == 2'd2 &&
+                        li_section == SEC_EVENTS) begin
+                        cursor    <= li_start;
+                        line_stop <= li_start + li_len;
+                        punt      <= 1'b0;
+                        cstate    <= C_EV_HEAD;
+                    end else if (li_valid && li_kind == 2'd2 &&
+                        li_section == SEC_COLOURS) begin
+                        cursor    <= li_start;
+                        line_stop <= li_start + li_len;
+                        punt      <= 1'b0;
+                        co_rgb_r  <= 24'd0;
+                        co_idx    <= 2'd0;
+                        cstate    <= C_CO_COLON;
+                    end else if (li_valid && li_kind == 2'd2 &&
+                        li_section == SEC_NONE) begin
+                        cursor    <= li_start;
+                        line_stop <= li_start + li_len;
+                        punt      <= 1'b0;
+                        cstate    <= C_VER_FIND;
                     end else if (li_valid && li_kind == 2'd2 &&
                         li_section == SEC_TIMING) begin
                         cursor       <= li_start;
@@ -808,6 +991,229 @@ module fosu_engine #(
 
                 C_KV_EMIT: begin
                     if (rec_ready || !kv_emit_r) cstate <= C_IDLE;
+                end
+
+
+                // ---------------- [Events] ----------------
+                // Indented lines are storyboard commands. Otherwise the first
+                // field must be one of "0"/"1"/"2"/"Video"/"Break", all at most
+                // 5 bytes, so its comma is within the first 6 -- and every
+                // other shape (no comma at all, or an unrecognised first field)
+                // lands on the same storyboard counter.
+                C_EV_HEAD: begin
+                    if (remain == 0 || cur_byte == CH_SPACE ||
+                        cur_byte == CH_USCR) begin
+                        cstate <= C_STORY_EMIT;
+                    end else if (!cm_found || {26'd0, cm_pos} >= 32'd6 ||
+                                 {26'd0, cm_pos} >= remain) begin
+                        cstate <= C_STORY_EMIT;
+                    end else if ({26'd0, cm_pos} == 32'd1 &&
+                                 (cur_byte == 8'h30 || cur_byte == 8'h31)) begin
+                        ev_is_video_r <= (cur_byte == 8'h31);
+                        cursor        <= cursor + 32'd2;
+                        scan2         <= cursor + 32'd2;
+                        cstate        <= C_EV_C2;
+                    end else if ({26'd0, cm_pos} == 32'd1 &&
+                                 cur_byte == 8'h32) begin
+                        cursor <= cursor + 32'd2;
+                        cstate <= C_BR_START;
+                    end else if ({26'd0, cm_pos} == 32'd5 &&
+                                 mem_data[39:0] == {8'h6F,8'h65,8'h64,8'h69,8'h56}) begin
+                        ev_is_video_r <= 1'b1;      // "Video"
+                        cursor        <= cursor + 32'd6;
+                        scan2         <= cursor + 32'd6;
+                        cstate        <= C_EV_C2;
+                    end else if ({26'd0, cm_pos} == 32'd5 &&
+                                 mem_data[39:0] == {8'h6B,8'h61,8'h65,8'h72,8'h42}) begin
+                        cursor <= cursor + 32'd6;   // "Break"
+                        cstate <= C_BR_START;
+                    end else begin
+                        cstate <= C_STORY_EMIT;
+                    end
+                end
+
+                // Second comma: the filename starts after it. Absent means the
+                // C++ returns without touching the field.
+                C_EV_C2: begin
+                    if (cm_found && (scan2 + {26'd0, cm_pos}) < line_stop) begin
+                        ev_s_r <= scan2 + {26'd0, cm_pos} + 32'd1;
+                        scan2  <= scan2 + {26'd0, cm_pos} + 32'd1;
+                        cstate <= C_EV_C3;
+                    end else if ((scan2 + WIN) >= line_stop) begin
+                        cstate <= C_DROP;
+                    end else begin
+                        scan2 <= scan2 + WIN;
+                    end
+                end
+
+                // Third comma bounds the filename; without one it runs to the
+                // end of the line.
+                C_EV_C3: begin
+                    if (cm_found && (scan2 + {26'd0, cm_pos}) < line_stop) begin
+                        ev_e_r <= scan2 + {26'd0, cm_pos};
+                        cstate <= C_EV_TRIM_L;
+                    end else if ((scan2 + WIN) >= line_stop) begin
+                        ev_e_r <= line_stop;
+                        cstate <= C_EV_TRIM_L;
+                    end else begin
+                        scan2 <= scan2 + WIN;
+                    end
+                end
+
+                // trim() then strip_quotes(), both in one cycle when the span
+                // fits the window -- which it does for any real filename.
+                C_EV_TRIM_L: begin
+                    if ((ev_e_r - ev_s_r) > WIN) begin
+                        punt   <= 1'b1;
+                        cstate <= C_EV_STR_EMIT;
+                    end else begin
+                        cstate <= C_EV_TRIM_R;
+                    end
+                end
+
+                C_EV_TRIM_R: begin
+                    if (ev_quoted) begin
+                        ev_s_r <= ev_s_trim + 32'd1;
+                        ev_e_r <= ev_e_trim - 32'd1;
+                    end else begin
+                        ev_s_r <= ev_s_trim;
+                        ev_e_r <= ev_e_trim;
+                    end
+                    cstate <= C_EV_STR_EMIT;
+                end
+
+                C_EV_STR_EMIT: begin
+                    if (rec_ready) cstate <= C_IDLE;
+                end
+
+                C_STORY_EMIT: begin
+                    if (rec_ready) cstate <= C_IDLE;
+                end
+
+                // --- breaks: 2,start,end (both parse_double) ---
+                C_BR_START: begin
+                    if (!ns_dec_any || !dec_fits) begin
+                        cstate <= C_DROP;           // C++ returns, no break
+                    end else if (ns_needs_host) begin
+                        punt   <= 1'b1;
+                        cstate <= C_BR_EMIT;
+                    end else begin
+                        br_s_mant_r <= ns_mant;
+                        br_s_frac_r <= ns_frac;
+                        br_s_neg_r  <= ns_neg;
+                        cursor      <= cursor + {24'd0, ns_dec_len};
+                        cstate      <= C_BR_COMMA;
+                    end
+                end
+
+                C_BR_COMMA: begin
+                    if (remain == 0 || cur_byte != CH_COMMA) cstate <= C_DROP;
+                    else begin
+                        cursor <= cursor + 32'd1;
+                        cstate <= C_BR_END;
+                    end
+                end
+
+                C_BR_END: begin
+                    if (!ns_dec_any || !dec_fits) begin
+                        cstate <= C_DROP;
+                    end else if (ns_needs_host) begin
+                        punt   <= 1'b1;
+                        cstate <= C_BR_EMIT;
+                    end else begin
+                        br_e_mant_r <= ns_mant;
+                        br_e_frac_r <= ns_frac;
+                        br_e_neg_r  <= ns_neg;
+                        cstate      <= C_BR_EMIT;
+                    end
+                end
+
+                C_BR_EMIT: begin
+                    if (rec_ready) cstate <= C_IDLE;
+                end
+
+                // ---------------- [Colours] ----------------
+                // split_kv finds ':', trims both sides and requires a non-empty
+                // key; parse_colour_kv then wants the key to start with "Combo".
+                C_CO_COLON: begin
+                    if (!cl_found || {26'd0, cl_pos} >= li_len) begin
+                        cstate <= C_DROP;
+                    end else if (!lead_found || {26'd0, lead_pos} >= {26'd0, cl_pos}) begin
+                        cstate <= C_DROP;           // empty key
+                    end else if (li_len > WIN) begin
+                        punt   <= 1'b1;
+                        cstate <= C_CO_EMIT;
+                    end else if (({26'd0, cl_pos} - {26'd0, lead_pos}) < 32'd5 ||
+                                 mem_data[8*{26'd0, lead_pos} +: 40] !=
+                                     {8'h6F,8'h62,8'h6D,8'h6F,8'h43}) begin
+                        // parse_colour_kv wants k.substr(0,5) == "Combo"; a
+                        // shorter key can never match it.
+                        cstate <= C_DROP;
+                    end else begin
+                        cursor <= cursor + {26'd0, cl_pos} + 32'd1;
+                        cstate <= C_CO_VALTRIM;
+                    end
+                end
+
+                C_CO_VALTRIM: begin
+                    // Skip the spaces trim() would have removed.
+                    if (remain != 0 && (cur_byte == CH_SPACE || cur_byte == CH_TAB))
+                        cursor <= cursor + 32'd1;
+                    else
+                        cstate <= C_CO_VAL;
+                end
+
+                C_CO_VAL: begin
+                    if (!ns_int_any || !int_fits || ns_int_run_full) begin
+                        cstate <= C_DROP;           // C++ returns, no colour
+                    end else begin
+                        co_rgb_r <= {co_rgb_r[15:0], ns_val19[7:0]};
+                        cursor   <= cursor + {24'd0, ns_int_len};
+                        co_idx   <= co_idx + 2'd1;
+                        cstate   <= (co_idx == 2'd2) ? C_CO_EMIT : C_CO_SEP;
+                    end
+                end
+
+                C_CO_SEP: begin
+                    if (remain == 0) cstate <= C_DROP;
+                    else if (cur_byte == CH_COMMA) cursor <= cursor + 32'd1;
+                    else if (cur_byte == CH_SPACE) cursor <= cursor + 32'd1;
+                    else cstate <= C_CO_VAL;
+                end
+
+                C_CO_EMIT: begin
+                    if (rec_ready) cstate <= C_IDLE;
+                end
+
+                // ---------------- "osu file format vN" ----------------
+                C_VER_FIND: begin
+                    if (ver_found) begin
+                        cursor <= cursor + {26'd0, ver_pos} + 32'd17;
+                        cstate <= C_VER_VAL;
+                    end else if (li_len > WIN) begin
+                        punt   <= 1'b1;
+                        cstate <= C_VER_EMIT;
+                    end else begin
+                        cstate <= C_DROP;
+                    end
+                end
+
+                C_VER_VAL: begin
+                    if (!ns_int_any || !int_fits || ns_int_run_full) begin
+                        cstate <= C_DROP;
+                    end else begin
+                        ver_value_r <= ns_neg ? (~ns_val19[31:0] + 32'd1)
+                                              : ns_val19[31:0];
+                        cstate      <= C_VER_EMIT;
+                    end
+                end
+
+                C_VER_EMIT: begin
+                    if (rec_ready) cstate <= C_IDLE;
+                end
+
+                C_DROP: begin
+                    cstate <= C_IDLE;
                 end
 
                 C_EMIT, C_FAIL: begin
