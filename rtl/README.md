@@ -92,6 +92,37 @@ variable-length field a fixed set of muxes with unused high digits forced to
 zero — no normalization step at all. The hardware port is *simpler* than the
 code it replaces.
 
+### Verified 1:1 on the full production corpus
+
+`fosu::parse` is the reference; every field it fills is produced by the RTL and
+diffed, with doubles compared as **raw 64-bit patterns** rather than tolerances.
+Run across 8 shards on the benchmark box:
+
+| | count |
+|---|---|
+| files | 10,011 |
+| bytes | 437,853,165 |
+| hit objects | 8,730,940 |
+| sliders | 2,673,764 |
+| slider control points | 6,136,191 |
+| timing points | 1,158,886 |
+| key/value fields | 294,997 |
+| storyboard lines counted | 891,818 |
+| combo colours | 36,494 |
+| background / video strings | 11,319 |
+| breaks | 8,142 |
+| format-version lines | 10,011 |
+| malformed lines | 9 |
+| lines deferred to the host | 7 |
+
+**Zero mismatches.** The hit-object total matches the corpus census exactly. The
+7 deferred lines are decimals with more than 18 significant digits — the same
+values the C++ itself hands to `strtod` — emitted as PUNT records carrying their
+span, which is the scalar fallback's job done in the same division of labour.
+
+`make rtl-test-engine RTL_CORPUS=<dir>`, or `RTL_CORPUS=sim/fixtures` for the
+one-second regression set.
+
 ### Measured (Yosys, generic 2-input gate mapping)
 
 | version | cells | longest path |
