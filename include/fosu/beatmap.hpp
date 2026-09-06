@@ -38,16 +38,30 @@ struct HitObject {
 struct SliderPoint {
     int32_t x;
     int32_t y;
+
+    // Default construction leaves x and y indeterminate: the parser sizes
+    // the point pool with resize() and then writes every element, so the
+    // value-initialization a plain aggregate would get is pure waste
+    // (measured ~3% of parse time). SliderPoint{} is therefore NOT
+    // zeroed; write SliderPoint{0, 0}.
+    SliderPoint() {}
+    SliderPoint(int32_t x_, int32_t y_) : x(x_), y(y_) {}
 };
 
 struct Slider {
     uint32_t point_begin;  // range into Beatmap::slider_points
     uint32_t point_count;  // control points, excluding the head position
     int32_t slides;        // 1 = no repeats
-    double length;         // pixel length
     char curve_type;       // 'B', 'C', 'L', 'P'
+    double length;         // pixel length
     std::string_view edge_sounds;  // raw "2|0|0" (parse on demand)
     std::string_view edge_sets;    // raw "0:0|0:0|0:0"
+
+    // See HitObject::uninit_t: the parser emplaces a Slider and fills
+    // every field in place. Slider{} still zero-initializes.
+    struct uninit_t {};
+    Slider() = default;
+    explicit Slider(uninit_t) {}
 };
 
 struct TimingPoint {
