@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=77", "wheel", "cffi>=1.17"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fosu"
+version = "0.1.0"
+description = "Fast native osu! beatmap parsing with owned Python results"
+readme = "docs/python.md"
+requires-python = ">=3.10"
+dependencies = ["cffi>=1.17", "typing-extensions>=4.6; python_version < '3.12'"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: C++",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+]
+
+[project.optional-dependencies]
+numpy = ["numpy>=1.26"]
+test = ["pytest>=8", "numpy>=1.26"]
+
+[project.urls]
+Repository = "https://github.com/cmyui/fast-osu-beatmap-parser"
+
+[tool.setuptools]
+package-dir = {"" = "python"}
+packages = ["fosu"]
+
+[tool.setuptools.package-data]
+fosu = ["*.pyi", "py.typed"]
+
+[tool.cibuildwheel]
+build = "cp310-*"
+skip = "*-musllinux* *-win* *-manylinux_i686 *-macosx_x86_64"
+test-requires = ["pytest>=8", "numpy>=1.26"]
+test-command = "python -m pytest {project}/tests/test_python.py && FOSU_FORCE_SCALAR=1 python -m pytest {project}/tests/test_python.py"
+
+[tool.cibuildwheel.linux]
+archs = ["x86_64"]
+manylinux-x86_64-image = "manylinux_2_28"
+
+[tool.cibuildwheel.macos]
+archs = ["arm64"]
+environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }

@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -80,6 +81,7 @@ int main() {
     assert(fosu_parse(h, nullptr, 1, FOSU_ALL) == FOSU_INVALID_ARGUMENT);
     assert(!fosu_get_view(h));
     assert(fosu_parse_file(h, "/fosu-file-does-not-exist.osu", FOSU_ALL) == FOSU_IO_ERROR);
+    assert(errno == ENOENT);
     assert(!fosu_get_view(h));
     assert(fosu_parse(h, nullptr, 0, FOSU_ALL) == FOSU_OK);
     assert(fosu_parse(h, "", SIZE_MAX, FOSU_ALL) == FOSU_INVALID_ARGUMENT);

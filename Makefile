@@ -126,6 +126,14 @@ test-c-api: build/test_c_api
 	./build/test_c_api
 ifeq ($(UNAME_S),Linux)
 	python3 tests/test_library_exports.py build/libfosu.$(LIB_EXT) $(LIB_EXPORT_FLAGS)
+	./build/test_c_api_io
+endif
+
+ifeq ($(UNAME_S),Linux)
+build/test_c_api_io: tests/test_c_api_io.cpp build/libfosu.$(LIB_EXT) | build
+	$(CXX) $(CXXFLAGS) $< -Lbuild -lfosu -Wl,-rpath,$(abspath build) -o $@
+
+test-c-api: build/test_c_api_io
 endif
 
 cffi: lib

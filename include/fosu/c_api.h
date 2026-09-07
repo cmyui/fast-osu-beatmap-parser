@@ -160,6 +160,7 @@ FOSU_API void fosu_free(fosu_handle* handle);
 // Copies data into owned, padded storage. Capacity is reused across calls.
 // Input must be a valid editor-emitted beatmap smaller than 4 GiB minus 134 B.
 FOSU_API int fosu_parse(fosu_handle* handle, const char* data, size_t size, uint32_t sections);
+// On FOSU_IO_ERROR, errno identifies the failing operation (EIO for early EOF).
 FOSU_API int fosu_parse_file(fosu_handle* handle, const char* path, uint32_t sections);
 // NULL before a successful parse, or after a failed parse.
 FOSU_API const fosu_view* fosu_get_view(const fosu_handle* handle);
