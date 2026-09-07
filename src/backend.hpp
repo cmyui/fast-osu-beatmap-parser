@@ -13,4 +13,5 @@ struct Backend {
 };
 const Backend& scalar_backend();
 const Backend& avx2_backend();
+const Backend& neon_backend();
 }  // namespace fosu_dispatch

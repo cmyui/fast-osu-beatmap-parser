@@ -375,14 +375,15 @@ def test_backend_selection():
     from fosu._native import lib
 
     # Each import has a fresh selection, independent of the parent test process.
-    for backend in ("auto", "scalar", "avx2", "invalid"):
+    for backend in ("auto", "scalar", "avx2", "neon", "invalid"):
         available = backend == "auto" or bool(lib.fosu_backend_available(backend.encode()))
         result = subprocess.run([sys.executable, "-c", code],
                                 env=dict(os.environ, FOSU_BACKEND=backend),
                                 capture_output=True, text=True)
         assert (result.returncode == 0) == available, result.stderr
         if available:
-            expected = ("avx2" if lib.fosu_backend_available(b"avx2") else "scalar") if backend == "auto" else backend
+            expected = ("avx2" if lib.fosu_backend_available(b"avx2") else
+                        "neon" if lib.fosu_backend_available(b"neon") else "scalar") if backend == "auto" else backend
             assert result.stdout.strip() == expected
         else:
             assert "ImportError: FOSU_BACKEND" in result.stderr

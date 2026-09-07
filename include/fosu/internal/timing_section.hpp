@@ -12,7 +12,7 @@ inline void parse_timing_point_line(Map& bm, const char* p, size_t len) {
     else ++bm.stats.malformed_lines;
 }
 
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
 
 // Fused [TimingPoints] section loop: the same two loads serve the newline
 // scan and the parser, and the section is sized exactly once — the next
@@ -32,10 +32,13 @@ inline const char* parse_timing_points_section(Map& bm, const char* p,
     const char* section_end = bracket ? bracket : file_end;
     tps.reserve(tps.size() + static_cast<size_t>(section_end - p) / 17 + 4);
     TpShapeCache cache{};
-    const __m256i k_nl = bcast256(kByteNewline);
-    const __m256i k_comma = bcast256(kByteComma);
-    const __m256i k_bias = bcast256(kByteBias);
-    const __m256i k_thr = bcast256(kByteThreshold);
+#if FOSU_SIMD_X86
+    const ByteVector k_nl = bcast256(kByteNewline), k_comma = bcast256(kByteComma),
+                     k_bias = bcast256(kByteBias), k_thr = bcast256(kByteThreshold);
+#else
+    const ByteVector k_nl = broadcast_byte('\n'), k_comma = broadcast_byte(','),
+                     k_bias = broadcast_byte(80), k_thr = broadcast_byte(-119);
+#endif
     // Direct mode writes each point into the reserved capacity and publishes
     // the count at the end; the portable mode falls back to push_back.
     TP* w = tps.data() + tps.size();
@@ -43,15 +46,12 @@ inline const char* parse_timing_points_section(Map& bm, const char* p,
     TP local;
     uint32_t malformed = 0;
     while (p < file_end) {
-        const __m256i a =
-            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
-        const __m256i b =
-            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + 32));
+        const Bytes32 a = load32(p);
+        const Bytes32 b = load32(p + 32);
         const uint64_t nl =
-            static_cast<uint32_t>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(a, k_nl))) |
-            static_cast<uint64_t>(static_cast<uint32_t>(
-                _mm256_movemask_epi8(_mm256_cmpeq_epi8(b, k_nl)))) << 32;
-        const char* nlp = nl ? p + _tzcnt_u64(nl) : find_newline32(p + 64, file_end, k_nl);
+            equal_mask32(a, k_nl) |
+            static_cast<uint64_t>(equal_mask32(b, k_nl)) << 32;
+        const char* nlp = nl ? p + trailing_zeros(nl) : find_newline32(p + 64, file_end, k_nl);
         const char* next_line = nlp + (nlp < file_end);
         const char* line_end = nlp - (nlp > p && nlp[-1] == '\r');
         const auto len = static_cast<size_t>(line_end - p);
@@ -70,9 +70,8 @@ inline const char* parse_timing_points_section(Map& bm, const char* p,
         if (len - 15 <= 64 - 15) [[likely]] {
             const uint64_t line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
             const uint64_t commas =
-                (static_cast<uint32_t>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(a, k_comma))) |
-                 static_cast<uint64_t>(static_cast<uint32_t>(
-                     _mm256_movemask_epi8(_mm256_cmpeq_epi8(b, k_comma)))) << 32) &
+                (equal_mask32(a, k_comma) |
+                 static_cast<uint64_t>(equal_mask32(b, k_comma)) << 32) &
                 line_mask;
             const uint64_t nondig =
                 (nondigit_mask32(a, k_bias, k_thr) |
@@ -114,6 +113,6 @@ inline const char* parse_timing_points_section(Map& bm, const char* p,
     bm.stats.malformed_lines += malformed;
     return p;
 }
-#endif  // FOSU_SIMD_X86
+#endif  // FOSU_SIMD
 
 }  // namespace fosu::internal

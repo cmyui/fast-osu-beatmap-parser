@@ -40,7 +40,8 @@ int main(int argc, char** argv) {
         }
         assert(h);
         const char* expected = !strcmp(requested, "auto") ?
-            (fosu_backend_available("avx2") ? "avx2" : "scalar") : requested;
+            (fosu_backend_available("avx2") ? "avx2" :
+             fosu_backend_available("neon") ? "neon" : "scalar") : requested;
         assert(!strcmp(fosu_backend_name(), expected));
         constexpr char input[] = "[Metadata]\nTitle:dispatch\n[HitObjects]\n1,2,3,1,0\n";
         assert(fosu_parse(h, input, sizeof(input)-1, FOSU_ALL) == FOSU_OK);

@@ -21,6 +21,12 @@ void check(fosu_handle* h, const std::string& input, uint32_t sections = FOSU_AL
     assert(v && v->source_size == input.size());
     auto padded = fosu::make_padded(input);
     auto expected = fosu::parse(padded, {.sections = sections});
+    // Runtime dispatch may choose scalar even when this reference was compiled
+    // with SIMD (for example under Rosetta). Only path counters differ.
+    if (!strcmp(fosu_backend_name(), "scalar")) {
+        expected.stats.slow_path_lines += expected.stats.fast_path_lines;
+        expected.stats.fast_path_lines = 0;
+    }
     std::string a, b;
     fosu_dump::dump(expected, a);
     fosu_dump::dump(CApiView(*v), b);

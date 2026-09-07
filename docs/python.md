@@ -162,13 +162,14 @@ boolean on Python records. `curve_type` is a one-byte NumPy string and a Python
 ## CPU selection and development
 
 The wheel contains one native extension. Its C API selects AVX2 once on
-x86-64-v3 CPUs with OS XMM/YMM support, otherwise scalar. Linux AVX2 scheduling
-remains tuned for Zen 4. Apple Silicon currently uses scalar; the published
-Zen 4 timings do not describe its performance.
+x86-64-v3 CPUs with OS XMM/YMM support, or NEON on AArch64, otherwise scalar.
+Linux AVX2 scheduling remains tuned for Zen 4. Apple Silicon uses native NEON
+fast paths.
 
-`fosu.backend` reports `"scalar"` or `"avx2"`. To force a backend, set
-`FOSU_BACKEND=scalar` or `FOSU_BACKEND=avx2` before importing. Unsupported or
-unknown requests raise `ImportError`; `auto` restores automatic selection.
+`fosu.backend` reports `"scalar"`, `"avx2"` or `"neon"`. To force a backend, set
+`FOSU_BACKEND=scalar`, `FOSU_BACKEND=avx2` or `FOSU_BACKEND=neon` before
+importing. Unsupported or unknown requests raise `ImportError`; `auto` restores
+automatic selection.
 `FOSU_FORCE_SCALAR=1` remains a shorthand when `FOSU_BACKEND` is unset.
 Selection stays fixed for that loaded extension. Each C API call forwards to
 the selected implementation; there are no per-record dispatch branches.

@@ -52,7 +52,7 @@ inline void parse_event_line(Map& bm, const char* p, size_t len) {
     }
 }
 
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
 // Fused [Events] section loop. Storyboard command lines — indented, and
 // ~12% of all lines in the popular corpus — are counted and skipped on
 // their first byte; every line finds its end with vector compares (two
@@ -70,21 +70,15 @@ inline const char* parse_events_section(Map& bm, const char* p,
         }
         if (c == '[') break;
 
-        const __m256i a =
-            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
-        const __m256i b =
-            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + 32));
-        const uint64_t nl =
-            static_cast<uint32_t>(_mm256_movemask_epi8(
-                _mm256_cmpeq_epi8(a, _mm256_set1_epi8('\n')))) |
-            static_cast<uint64_t>(static_cast<uint32_t>(_mm256_movemask_epi8(
-                _mm256_cmpeq_epi8(b, _mm256_set1_epi8('\n')))))
-                << 32;
+        const Bytes32 a = load32(p);
+        const Bytes32 b = load32(p + 32);
+        const uint64_t nl = equal_mask32(a, broadcast_byte('\n')) |
+            (uint64_t(equal_mask32(b, broadcast_byte('\n'))) << 32);
         const char* line = p;
         const char* next_line;
         const char* line_end;
         if (nl) {
-            line_end = p + _tzcnt_u64(nl);
+            line_end = p + trailing_zeros(nl);
             next_line = line_end + 1;
         } else {
             const auto* m = static_cast<const char*>(memchr(
@@ -109,6 +103,6 @@ inline const char* parse_events_section(Map& bm, const char* p,
     bm.stats.storyboard_lines += storyboard_lines;
     return p;
 }
-#endif  // FOSU_SIMD_X86
+#endif  // FOSU_SIMD
 
 }  // namespace fosu::internal

@@ -95,7 +95,46 @@ static void test_fuzz_parse_coord() {
     }
 }
 
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
+// Every byte value at every lane: SIMD masks must preserve exact positions,
+// including NUL, high-bit bytes and the boundary between vector registers.
+static void test_byte_masks() {
+    using namespace fosu::internal;
+    alignas(32) char text[32];
+    for (unsigned lane = 0; lane < 32; ++lane) {
+        for (unsigned value = 0; value < 256; ++value) {
+            memset(text, '5', sizeof(text));
+            text[lane] = static_cast<char>(value);
+            const auto v = load32(text);
+            const uint32_t bit = uint32_t(1) << lane;
+            CHECK_EQ(nondigit_mask32(v), value >= '0' && value <= '9' ? 0u : bit);
+            CHECK_EQ(comma_mask32(v), value == ',' ? bit : 0u);
+            CHECK_EQ(equal_mask32(v, broadcast_byte('\n')), value == '\n' ? bit : 0u);
+        }
+    }
+}
+
+static void test_prefix_shapes() {
+    using namespace fosu::internal;
+    for (unsigned x = 1; x <= 3; ++x)
+    for (unsigned y = 1; y <= 3; ++y)
+    for (unsigned t = 1; t <= 10; ++t)
+    for (unsigned type = 1; type <= 3; ++type)
+    for (const char* sound : {"0", "15"}) {
+        std::string line = std::string(x, '1') + ',' + std::string(y, '2') + ',' +
+            std::string(t, '1') + ',' + std::string(type, '3') + ',' + sound;
+        const auto len = line.size();
+        line.append(fosu::kBufferPadding, '\0');
+        fosu::HitObject fast{}, scalar{};
+        uint32_t newline;
+        CHECK_EQ(fast_parse_prefix(line.data(), fast, newline), int(len));
+        CHECK_EQ(scalar_parse_prefix(line.data(), len, scalar), int(len));
+        CHECK_EQ(fast.x, scalar.x); CHECK_EQ(fast.y, scalar.y);
+        CHECK_EQ(fast.time, scalar.time); CHECK_EQ(fast.type, scalar.type);
+        CHECK_EQ(fast.hitsound, scalar.hitsound); CHECK_EQ(newline, 0u);
+    }
+}
+
 // Fuzz the one-pass timing point parser against the generic reference:
 // whenever it accepts a line, every field must be bitwise identical.
 // Shapes: 8-field editor lines plus old 2..7-field forms, decimal and
@@ -136,9 +175,9 @@ static void test_fuzz_timing_point() {
         memset(buf + len, 0, sizeof(buf) - (size_t)len);
 
         fosu::TimingPoint tp{};
-        const auto a = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(buf));
+        const auto a = fosu::internal::load32(buf);
         const auto b =
-            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(buf + 32));
+            fosu::internal::load32(buf + 32);
         if (!fosu::internal::fast_parse_timing_point(a, b, buf, (size_t)len, tp))
             continue;
         ++accepted;
@@ -226,7 +265,7 @@ static void test_fuzz_equivalence() {
 }
 #endif
 
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
 // Shape-cache equivalence: any line whose (comma, nondigit, len) key
 // matches a cached shape must (a) be accepted by the reference parser and
 // (b) convert bit-identically through tp_shape_convert.
@@ -259,10 +298,10 @@ void test_fuzz_tp_shape_cache() {
             buf[rnd() % len] = muts[rnd() % 14];
         if (rnd() % 8 == 0) cache = TpShapeCache{};  // section reset
         if (len > 64 || len < 15) continue;
-        const __m256i a =
-            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(buf));
-        const __m256i b =
-            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(buf + 32));
+        const auto a =
+            fosu::internal::load32(buf);
+        const auto b =
+            fosu::internal::load32(buf + 32);
         const uint64_t line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
         const uint64_t commas =
             (comma_mask32(a) | uint64_t(comma_mask32(b)) << 32) & line_mask;
@@ -296,7 +335,9 @@ void test_fuzz_tp_shape_cache() {
 int main() {
     test_fuzz_parse_double();
     test_fuzz_parse_coord();
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
+    test_byte_masks();
+    test_prefix_shapes();
     test_fuzz_equivalence();
     test_fuzz_timing_point();
     test_fuzz_tp_shape_cache();

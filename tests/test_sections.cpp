@@ -143,7 +143,7 @@ static void test_all_sections() {
         CHECK(bare.hit_sample.empty());
 
         CHECK_EQ(bm.stats.malformed_lines, 0u);
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
         if (simd) CHECK_EQ(bm.stats.fast_path_lines, 6u);
 #endif
     }
@@ -229,7 +229,7 @@ static void test_aspire_edge_cases() {
     CHECK_EQ(bm.slider_points[s.point_begin].x, -64);
     CHECK_EQ(bm.slider_points[s.point_begin].y, -32);
     CHECK_EQ(bm.stats.malformed_lines, 1u);
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
     CHECK_EQ(bm.stats.fast_path_lines, 1u);  // only the slider line is regular
 #endif
 }

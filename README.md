@@ -86,7 +86,7 @@ reads; C++ byte buffers need **128 readable zero bytes after the logical end**.
 File helpers, the C API and Python supply that padding. See the
 [full input contract](docs/compatibility.md) before integrating a consumer.
 The compiled library and Python package select AVX2 on supported x86-64 CPUs
-and otherwise use scalar code. Header-only C++ uses the caller’s compile flags;
+or NEON on AArch64, with scalar fallback. Header-only C++ uses the caller’s compile flags;
 the one-shot binary targets Zen 4. Measurements are
 bounded to the documented corpus and host; see [performance](docs/performance.md).
 

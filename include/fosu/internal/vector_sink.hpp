@@ -136,7 +136,7 @@ inline const char* parse_hitobjects_section(Map& bm, const char* p, const char* 
                                             bool use_simd) {
     VectorSink<Map> sink(bm, static_cast<size_t>(file_end - p));
     const HitConsts k;
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
     if (use_simd) p = parse_hitobject_lines(sink, p, file_end, k);
     else
 #else

@@ -2,10 +2,12 @@
 
 Include `fosu/parser.hpp` and compile as C++20. There is no library to link.
 On the measured Linux/Zen 4 host, GCC with `-O3 -march=x86-64-v3 -mtune=znver4`
-is the baseline. `make` also uses `-fno-plt -fno-stack-protector` for its Linux
-benchmark and shared-library targets. Applications own their build policy.
-Without AVX2/BMI compile flags the parser uses its scalar path; there is no
-runtime CPU dispatch.
+is the baseline. Native Linux AVX2 builds also use `-fno-plt -fno-stack-protector`.
+Applications own their build policy.
+The header-only parser uses AVX2/BMI when enabled by the compiler, or NEON on
+AArch64, with scalar fallback. Define `FOSU_DISABLE_SIMD` for scalar parser
+kernels. This interface has no runtime CPU dispatch; compiled C++ callers can
+use the [C ABI](c-api.md) for automatic backend selection.
 
 ## Ownership and reuse
 
