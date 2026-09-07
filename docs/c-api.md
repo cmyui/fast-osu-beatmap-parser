@@ -5,15 +5,16 @@ provides `fosu.parse_file(path)` and manages ownership automatically. This page
 documents the lower-level C interface.
 
 ```sh
-make lib test-c-api CXX=g++
+cmake -S . -B build/native -DCMAKE_CXX_COMPILER=g++
+cmake --build build/native --target check -j4
 ```
 
-This builds `build/release-avx2-bundled/libfosu.so` on Linux x86-64 or
-`build/release-scalar-shared/libfosu.dylib` on Apple Silicon. See
+This builds `build/native/libfosu.so` on Linux x86-64 or
+`build/native/libfosu.dylib` on Apple Silicon. See
 [build configurations](build.md) for all targets.
 `include/fosu/c_api.h` is a C-compatible header. The default Linux x86-64 build
 requires **x86-64-v3 (including AVX2 and BMI)** and is tuned for Zen 4; it has no
-CPU dispatch. Use `ISA=scalar` for a scalar build. Native Apple
+CPU dispatch. Use `-DFOSU_ISA=scalar` for a scalar build. Native Apple
 Silicon builds use the scalar parser.
 
 On Linux the default build bundles private copies of the C++ runtime and
@@ -23,9 +24,9 @@ allocators), but the library uses its own `operator new`/`delete`, so a host's
 C++ replacement operators and `std::set_new_handler` state do not apply. The header-only C++ interface retains
 its caller's runtime and operators.
 
-To link the system C++ runtime instead, rebuild with
-`make lib test-c-api LIB_RUNTIME=shared CXX=g++`. macOS uses the system runtime.
-`make test-c-api` also checks Linux exports, dependencies and allocation-failure
+To link the system C++ runtime instead, configure with
+`-DFOSU_BUNDLE_RUNTIME=OFF` and rebuild. macOS uses the system runtime.
+The `check` target also checks Linux exports, dependencies and allocation-failure
 translation in a resource-limited child process.
 
 ## Minimal C usage
@@ -50,8 +51,8 @@ int main(int argc, char **argv) {
 }
 ```
 
-Compile on Linux with `cc -Iinclude examples/c_example.c -Lbuild/release-avx2-bundled -lfosu
--Wl,-rpath,"$PWD/build/release-avx2-bundled" -o build/example`. Check the ABI version before accessing
+Compile on Linux with `cc -Iinclude examples/c_example.c -Lbuild/native -lfosu
+-Wl,-rpath,"$PWD/build/native" -o build/example`. Check the ABI version before accessing
 records. Version 2 defines the current structs, including double timestamps.
 Incompatible struct changes require a version bump and rebuilding bindings.
 

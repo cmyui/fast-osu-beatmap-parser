@@ -88,10 +88,11 @@ These commands use GCC/Linux x86-64. See [build configurations](build.md) for
 other architectures and sanitizer/portable builds.
 
 ```sh
-make -j4 CXX=g++ CC=gcc bench-build references oneshot
-b=build/release-avx2-bundled
+cmake -S . -B build/native -G Ninja -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
+cmake --build build/native --target bench-build references oneshot -j4
+b=build/native
 corpus=/path/to/maps
-make CXX=g++ test test-oneshot
+cmake --build "$b" --target check check-oneshot -j4
 "$b/validate_corpus" "$corpus" "$b/numeric_oracle.so"
 python3 tests/verify_stream.py "$b/reference_native" "$b/reference_c_api" "$corpus"
 python3 tests/verify_stream.py "$b/reference_native" "$b/fosu_oneshot" "$corpus"
@@ -116,7 +117,8 @@ but are not representative performance evidence:
 
 ```sh
 "$b/generate_corpus" build/smoke-corpus  # requires a new output directory
-make CXX=g++ CORPUS=build/smoke-corpus REPS=2 bench
+"$b/library_compare" build/smoke-corpus 2 "$b/library_native.so" "$b/library_c_api.so" > "$b/library.csv"
+python3 bench/summarize.py "$b/library.csv"
 ```
 
 ## Library and Python comparisons
@@ -125,7 +127,7 @@ make CXX=g++ CORPUS=build/smoke-corpus REPS=2 bench
 # Fresh and reused C++/C ABI results, rotated within each map.
 # run.py saves raw CSV plus command/build/corpus metadata in .csv.json.
 taskset -c 3 python3 bench/run.py --output build/library.csv --corpus "$corpus" \
-  --config "$b/config.json" -- \
+  --config "$b/compile_commands.json" --config "$b/CMakeCache.txt" -- \
   "$b/library_compare" "$corpus" 9 "$b/library_native.so" "$b/library_c_api.so"
 python3 bench/summarize.py build/library.csv
 
@@ -156,7 +158,7 @@ taskset -c 3 python3 bench/library_first_compare.py "$corpus" \
   "$b/library_first" "$b/c_api_first" --limit 500 --reps 3 > build/first.csv
 python3 bench/summarize.py build/first.csv
 
-make CXX=g++ "$b/oneshot_process"
+cmake --build "$b" --target oneshot_process
 taskset -c 3 "$b/oneshot_process" "$corpus" 0 3 \
   /path/to/baseline/fosu_oneshot "$b/fosu_oneshot" > build/process.csv
 python3 bench/summarize.py build/process.csv
@@ -183,7 +185,7 @@ C ABI with `-DFOSU_ARENA_NO_HUGEPAGE` or the executable with
 GCC profile-guided optimization is an explicit experiment:
 
 ```sh
-taskset -c 3 make CXX=g++ CORPUS="$corpus" bench-pgo
+CXX=g++ taskset -c 3 sh bench/library_pgo.sh "$corpus"
 ```
 
 It trains on sorted file indices 0,5,10,... and evaluates on the other 80%.

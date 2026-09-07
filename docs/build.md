@@ -1,69 +1,98 @@
 # Building and checking fosu
 
 The header-only C++ interface needs no build step: add `include` to your include
-path and compile as C++20. The Makefile builds the C ABI and development tools.
-The Python package uses its own setuptools/CFFI build (see [Python](python.md)).
+path and compile as C++20. CMake 3.26+ builds the C ABI, development tools, and
+Python extensions. Python installations invoke CMake through scikit-build-core;
+CFFI generates the wrapper source and does not compile it independently.
 
 Public headers live directly under `include/fosu/`. The `internal/` directory
 contains their numeric conversion, section parsing, SIMD, and storage
 implementation; the public headers include these automatically.
 
 ```sh
-make                     # C ABI shared library only
-make -j4 test            # native parser, C ABI, ownership and failure checks
-make -j4 bench-build     # benchmark programs; does not run measurements
-make -j4 references      # independent canonical writers and corpus checks
+cmake -S . -B build/native -G Ninja
+cmake --build build/native -j4                       # C ABI shared library
+cmake --build build/native --target check -j4        # build and run native tests
+cmake --build build/native --target bench-build references -j4
 ```
 
-Clang is the default compiler. Set `CXX=g++ CC=gcc` to use GCC. Compiler
-commands, flags and compiler versions are recorded in `config.json` alongside
-the binaries; each successful output records that configuration in `.build.json`.
-Changes rebuild that output even after a partial build or within a single
-filesystem timestamp tick.
-Changing headers also rebuilds their dependents.
+Ninja is optional; omit `-G Ninja` to use CMake's default generator. CMake selects
+the compiler from the environment. To choose explicitly, configure with
+`-DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc`. Use a separate build directory
+when changing compilers or target architectures.
+
+CMake tracks compiler flags, source and header dependencies. Effective commands
+are available in `build/native/compile_commands.json`, configuration in
+`CMakeCache.txt`, and verbose output with `cmake --build build/native --verbose`.
+Tests and benchmark programs are built only when their targets are requested.
 
 ## Configurations
 
-Outputs live under `build/<profile>-<isa>-<runtime>/`. `BUILD_DIR=...` selects
-another directory, which still tracks its effective commands. `make clean`
-removes only the selected configuration.
-
-| Option | Choices | Default |
+| CMake option | Choices | Default |
 |---|---|---|
-| `PROFILE` | `release`, `portable`, `debug`, `sanitize` | `release` |
-| `ISA` | `avx2`, `scalar` | AVX2 on x86-64, scalar elsewhere |
-| `LIB_RUNTIME` | `bundled`, `shared` | Bundled on Linux; shared on macOS and sanitizer builds |
+| `CMAKE_BUILD_TYPE` | `Release`, `Debug` | `Release` |
+| `FOSU_ISA` | `auto`, `avx2`, `scalar` | AVX2 on x86-64 targets, scalar elsewhere |
+| `FOSU_PORTABLE_VECTORS` | `ON`, `OFF` | `OFF` |
+| `FOSU_SANITIZE` | `ON`, `OFF` | `OFF` |
+| `FOSU_BUNDLE_RUNTIME` | `ON`, `OFF` | On for native Linux release builds and release wheels; off for local Python source builds, macOS and sanitizers |
 
-Release uses `-O3`. Portable keeps release optimization but uses public vector
-operations. Debug uses `-O0 -g` and libstdc++ debug containers. Sanitize uses
-`-O1 -g`, ASan, UBSan, float-cast checks and vector annotations. Tests keep
-assertions enabled even if user flags contain `-DNDEBUG`.
+Release C++ uses `-O3`; C benchmark launchers use `-O2`. Debug uses `-O0 -g` and
+libstdc++ debug containers. Portable vectors use public vector operations.
+Sanitizers use `-O1 -g`, ASan, UBSan, float-cast checks and vector annotations.
+Tests keep assertions enabled. Standard `CMAKE_CXX_FLAGS`, `CMAKE_C_FLAGS`, and
+linker flag variables accept additional compiler options.
 
-AVX2 builds target **x86-64-v3**, with Zen 4 scheduling, `-fno-plt` and
+Native AVX2 builds target **x86-64-v3**, with Zen 4 scheduling, `-fno-plt` and
 `-fno-stack-protector` on Linux. Scalar x86 builds target baseline x86-64;
 Apple Silicon builds use the native scalar path. These are compile-time choices
-for C/C++; only the Python wheels select an ISA at runtime. A header-only
-consumer controls its own optimization and hardening flags.
+for C/C++; only the Python package selects a variant at runtime. Python AVX2
+modules retain their narrower `-mavx2 -mbmi -mbmi2` flags and Linux Zen 4 tuning;
+both Python variants use `-O3 -g0`, and Linux variants use `-fno-plt`.
+A header-only consumer controls its own optimization and hardening flags.
 
 ```sh
-make CXX=g++ ISA=scalar test
-make CXX=g++ PROFILE=portable test-parser
-make CXX=g++ PROFILE=debug test-parser
-make CXX=clang++ PROFILE=sanitize test
-make CXX=clang++ PROFILE=sanitize fuzz-smoke FUZZ_SECONDS=60
-make LIB_RUNTIME=shared test-c-api
-make test-rosetta         # optional x86-64 build/run on Apple Silicon
+cmake -S . -B build/scalar -DFOSU_ISA=scalar
+cmake --build build/scalar --target check -j4
+cmake -S . -B build/debug -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/debug --target test-binaries -j4
+ctest --test-dir build/debug -L parser --output-on-failure
+cmake -S . -B build/sanitize -DFOSU_SANITIZE=ON -DCMAKE_CXX_COMPILER=clang++
+cmake --build build/sanitize --target check fuzz-smoke -j4
 ```
 
-Rosetta testing requires AVX2 translation support (macOS 15+). Ordinary macOS
-checks use the native architecture. The sanitizer profile skips the C ABI
-address-space-limit test because ASan reserves a large virtual address range,
-and the exact export-list check because instrumentation adds symbols;
-release checks cover that failure path. Use Clang for libFuzzer.
+`-DFOSU_FUZZ_SECONDS=60` controls the fuzz smoke duration; libFuzzer requires
+Clang. Sanitizer builds skip Linux address-space-limit and exact export-list
+checks; release builds cover those cases. Ordinary macOS checks use native ARM.
+For Rosetta testing, configure a separate build with
+`-DCMAKE_SYSTEM_PROCESSOR=x86_64 -DCMAKE_SYSTEM_NAME=Darwin
+-DCMAKE_OSX_ARCHITECTURES=x86_64 -DFOSU_ISA=avx2
+-DCMAKE_CROSSCOMPILING_EMULATOR="arch;-x86_64"`; AVX2 translation needs macOS 15+.
 
-`CXXFLAGS`, `CFLAGS`, `CPPFLAGS` and `LDFLAGS` accept normal compiler overrides.
-The selected ISA/profile flags are appended to `CXXFLAGS`. `CPPFLAGS` supplied
-on the command line must include `-Iinclude`.
+## Installed CMake consumers
+
+```sh
+cmake --install build/native --prefix "$HOME/.local"
+python3 tests/test_build.py build/native
+```
+
+Downstream projects can use `find_package(fosu CONFIG REQUIRED)` with
+`CMAKE_PREFIX_PATH` pointing at the installation. Link `fosu::headers` for the
+header-only C++ API, or `fosu::fosu` for the compiled C ABI. The header-only target
+sets the include directory and C++20 requirement without imposing CPU flags.
+
+## Python packages
+
+```sh
+python3 -m pip install .
+python3 -m build                 # source archive, then wheel from that archive
+```
+
+Build isolation supplies scikit-build-core, CFFI, and a suitable CMake/Ninja when
+needed. An installed C/C++ compiler and Python development headers are required
+for source builds. The wheel contains the same scalar and AVX2 modules on x86-64,
+or the scalar module on Apple Silicon, using the CPython 3.10+ stable ABI.
+`FOSU_BUNDLE_RUNTIME=1` bundles the Linux C++ runtime; cibuildwheel enables this
+by default. `CMAKE_ARGS` or pip's `-Ccmake.define.NAME=VALUE` can configure CMake.
 
 ## One-shot process
 
@@ -72,44 +101,33 @@ custom entrypoint, syscall and runtime settings stay in `oneshot/build.sh`.
 They are never applied to the library or Python extension.
 
 ```sh
-make CXX=g++ oneshot test-oneshot
-build/release-avx2-bundled/fosu_oneshot map.osu > map.fosu
+cmake -S . -B build/native
+cmake --build build/native --target check-oneshot -j4
+build/native/fosu_oneshot map.osu > map.fosu
 python3 oneshot/decode.py < map.fosu
 ```
 
-The production target is Zen 4. To test on an x86-64-v3 CI runner:
-
-```sh
-make CXX=g++ ONESHOT_FLAGS=-march=x86-64-v3 test-oneshot
-```
-
-`ONESHOT_CXX` selects its GCC executable; `ONESHOT_FLAGS` appends diagnostic or
-ISA overrides. The syscall runtime is intentionally specific to this target.
+The production target is Zen 4. For x86-64-v3 CI runners configure with
+`-DFOSU_ONESHOT_FLAGS=-march=x86-64-v3`. `FOSU_ONESHOT_CXX` selects GCC and
+`FOSU_ONESHOT_FLAGS` appends diagnostic or ISA overrides.
 
 ## Test responsibilities
 
-- `test_build.py`: compiler-flag changes, partial builds and idle reuse.
+- `test_build.py`: installed header-only and compiled CMake targets.
 - `test_numeric.cpp`: bounded conversion, prefix and timing-shape equivalence.
-- `test_sections.cpp`: metadata, object kinds, omitted-section defaults and section selection.
-- `test_storage.cpp`: growth, lifetime, shrinking/growing result reuse, stale-state reset and both record layouts.
+- `test_sections.cpp`: metadata, object kinds, omitted sections and selection.
+- `test_storage.cpp`: growth, lifetime, reuse and both record layouts.
 - `test_hardening.cpp` and `fuzz_parser.cpp`: malformed input and scalar/SIMD parity.
-- C ABI tests: all field values, independent/concurrent handles, failures,
-  recycling, unload, and late host exit callbacks.
+- C ABI tests: field values, concurrency, failures, recycling and unload.
 - Python tests: installed API, ownership, errors, array views and generated types.
-- `test_oneshot*.py`: complete stream equality, I/O boundaries and explicit limits.
+- `test_oneshot*.py`: complete stream equality, I/O boundaries and limits.
 - `test_official.py`: acceptance against the pinned official legacy decoder.
 
-Each parser test defines its own input beside its assertions. Section omission,
-selection, and reuse are separate cases, so their expected behavior can be read
-without following shared beatmap fixtures.
+Each parser test defines its own input beside its assertions. The canonical
+dump checks representation equality; the official decoder is the acceptance
+reference. See [compatibility](compatibility.md).
 
-`tests/support/canonical_dump.hpp` independently serializes all logical fields,
-float bits, counters and pool indices. It is a test oracle for equality between
-representations, not the authority on valid osu! input. The official decoder
-harness lives in `tests/reference/official`; see [compatibility](compatibility.md).
-
-CI exercises these profiles on Linux and native Apple Silicon. Official-reference
-checks install the Python package from its source archive. Wheel builds
-run the installed suite on CPython 3.10; downloaded wheels are tested again on
-CPython 3.14. Both automatic CPU selection and forced scalar imports are tested.
-CI produces GitHub artifacts and does not publish packages to PyPI.
+CI exercises Linux and native Apple Silicon, including sanitizer builds.
+Official checks install from the source archive. Wheels are tested on CPython
+3.10 and 3.14 with both automatic selection and forced scalar imports. CI uploads
+GitHub artifacts and does not publish packages to PyPI.
