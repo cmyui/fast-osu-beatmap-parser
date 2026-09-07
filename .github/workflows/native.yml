@@ -16,22 +16,30 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - run: python3 tests/test_build.py
-      - run: make -j2 CXX=g++ test
-      - run: make -j2 CXX=g++ ISA=scalar test
-      - run: make -j2 CXX=g++ PROFILE=portable test-parser
-      - run: make -j2 CXX=g++ PROFILE=debug test-parser
-      - run: make -j2 CXX=clang++ PROFILE=sanitize test
-      - run: make CXX=clang++ PROFILE=sanitize fuzz-smoke
-      - name: Check complete one-shot output and resource limits
-        run: make -j2 CXX=g++ ONESHOT_FLAGS=-march=x86-64-v3 test-oneshot
-      - name: Build and exercise benchmark tools
+      - run: cmake -S . -B build/native -G Ninja -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DFOSU_ONESHOT_FLAGS=-march=x86-64-v3
+      - run: cmake --build build/native --target check bench-build references check-oneshot oneshot_process -j2
+      - run: python3 tests/test_build.py build/native
+      - name: Check scalar, public vectors, and debug containers
         run: |
-          make -j2 CXX=g++ bench-build references build/release-avx2-bundled/oneshot_process
-          build/release-avx2-bundled/generate_corpus build/smoke-corpus
-          make CXX=g++ CORPUS=build/smoke-corpus REPS=2 bench
-          build/release-avx2-bundled/validate_corpus build/smoke-corpus build/release-avx2-bundled/numeric_oracle.so
-          python3 bench/library_first_compare.py build/smoke-corpus build/release-avx2-bundled/library_first build/release-avx2-bundled/c_api_first --limit 2 --reps 1 > build/first.csv
+          cmake -S . -B build/scalar -G Ninja -DFOSU_ISA=scalar -DCMAKE_CXX_COMPILER=g++
+          cmake --build build/scalar --target check -j2
+          cmake -S . -B build/portable -G Ninja -DFOSU_PORTABLE_VECTORS=ON -DCMAKE_CXX_COMPILER=g++
+          cmake --build build/portable --target test-binaries -j2
+          ctest --test-dir build/portable -L parser --output-on-failure
+          cmake -S . -B build/debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=g++
+          cmake --build build/debug --target test-binaries -j2
+          ctest --test-dir build/debug -L parser --output-on-failure
+      - name: Sanitizers and fuzzing
+        run: |
+          cmake -S . -B build/sanitize -G Ninja -DFOSU_SANITIZE=ON -DCMAKE_CXX_COMPILER=clang++
+          cmake --build build/sanitize --target check fuzz-smoke -j2
+      - name: Exercise benchmark and corpus tools
+        run: |
+          build/native/generate_corpus build/smoke-corpus
+          build/native/library_compare build/smoke-corpus 2 build/native/library_native.so build/native/library_c_api.so > build/library.csv
+          python3 bench/summarize.py build/library.csv
+          build/native/validate_corpus build/smoke-corpus build/native/numeric_oracle.so
+          python3 bench/library_first_compare.py build/smoke-corpus build/native/library_first build/native/c_api_first --limit 2 --reps 1 > build/first.csv
           python3 bench/summarize.py build/first.csv
 
   native-macos:
@@ -40,8 +48,11 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - run: make -j3 test bench-build references
-      - run: make -j3 PROFILE=sanitize test
+      - run: cmake -S . -B build/native -G Ninja
+      - run: cmake --build build/native --target check bench-build references -j3
+      - run: python3 tests/test_build.py build/native
+      - run: cmake -S . -B build/sanitize -G Ninja -DFOSU_SANITIZE=ON
+      - run: cmake --build build/sanitize --target check -j3
 
   official-acceptance:
     runs-on: ubuntu-24.04

@@ -21,7 +21,7 @@ parser.add_argument(
     action="append",
     type=Path,
     default=[],
-    help="build config.json, repeat for variants",
+    help="CMake compile_commands.json or CMakeCache.txt; repeat for each input",
 )
 parser.add_argument("command", nargs=argparse.REMAINDER)
 args = parser.parse_args()
@@ -57,7 +57,12 @@ metadata = {
         "bytes": size,
         "sha256": digest.hexdigest(),
     },
-    "configs": {str(path): json.loads(path.read_text()) for path in args.config},
+    "configs": {
+        str(path): json.loads(path.read_text())
+        if path.suffix == ".json"
+        else path.read_text()
+        for path in args.config
+    },
     "environment": {k: v for k, v in os.environ.items() if k.startswith("FOSU_")},
 }
 try:
@@ -70,7 +75,7 @@ except (OSError, subprocess.CalledProcessError):
 # Never silently overwrite previous evidence.
 args.output.parent.mkdir(parents=True, exist_ok=True)
 with args.output.open("x") as out:
-    result = subprocess.run(command, stdout=out)
+    result = subprocess.run(command, stdout=out, check=False)
 metadata["exit_status"] = result.returncode
 args.output.with_suffix(args.output.suffix + ".json").write_text(
     json.dumps(metadata, indent=2) + "\n"

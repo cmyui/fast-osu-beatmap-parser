@@ -49,8 +49,8 @@ baselines; intentional correctness fixes are accounted for separately. See
 references.
 
 ```sh
-make                       # build the C ABI library
-make -j4 test              # native correctness and storage checks
+cmake -S . -B build/native
+cmake --build build/native --target check -j4  # library and native checks
 ```
 
 See [builds and checks](docs/build.md) for compiler/ISA profiles, sanitizers,

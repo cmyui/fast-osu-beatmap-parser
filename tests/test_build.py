@@ -1,34 +1,44 @@
-"""Changed flags must rebuild each output, even after a partial build."""
-import json
-import os
-from pathlib import Path
+"""Installed CMake targets work without access to the source checkout."""
+
 import subprocess
+import sys
 import tempfile
+from pathlib import Path
 
-Path('build').mkdir(exist_ok=True)
-with tempfile.TemporaryDirectory(prefix='config-test-', dir='build') as temp:
-    out = Path(temp)
-    binary = out / 'library_first'
-    config = out / 'config.json'
-
-    def make(target, optimization):
-        subprocess.run(['make', f'BUILD_DIR={out}', f'CXXFLAGS=-std=c++20 {optimization}',
-                        'CFLAGS=-O2', str(out / target)], check=True)
-
-    make('library_first', '-O1')
-    before = binary.stat().st_mtime_ns
-    make('library_first', '-O1')
-    assert binary.stat().st_mtime_ns == before, 'identical build recompiled'
-    # Change the shared config while building another output, then make its
-    # timestamp indistinguishable from the old binary. The per-output command
-    # record must still cause recompilation, without sleeps or clock assumptions.
-    make('c_api_first', '-O2')
-    os.utime(config, ns=(before, before))
-    make('library_first', '-O2')
-    assert binary.stat().st_mtime_ns != before, 'partial build hid a flag change'
-    recorded = json.loads(binary.with_suffix('.build.json').read_text())
-    assert '-O2' in recorded['compile']
-    before = binary.stat().st_mtime_ns
-    make('library_first', '-O1')
-    assert binary.stat().st_mtime_ns != before, 'restoring flags reused a stale binary'
-print('Build configuration: idle reuse, partial builds and changed flags passed')
+build = Path(sys.argv[1]).resolve()
+with tempfile.TemporaryDirectory(prefix="fosu-consumer-") as temp:
+    root = Path(temp)
+    prefix = root / "install"
+    subprocess.run(
+        ["cmake", "--install", str(build), "--prefix", str(prefix)], check=True
+    )
+    (root / "CMakeLists.txt").write_text("""cmake_minimum_required(VERSION 3.26)
+project(consumer LANGUAGES C CXX)
+find_package(fosu CONFIG REQUIRED)
+add_executable(headers main.cpp)
+target_link_libraries(headers PRIVATE fosu::headers)
+add_executable(c_api main.c)
+target_link_libraries(c_api PRIVATE fosu::fosu)
+""")
+    (root / "main.cpp").write_text("""#include <fosu/parser.hpp>
+int main() { auto map = fosu::parse(nullptr, 0); return map.hit_objects.size(); }
+""")
+    (root / "main.c").write_text("""#include <fosu/c_api.h>
+int main(void) { fosu_handle* h = fosu_new(); if (!h) return 1;
+fosu_free(h); return fosu_abi_version() != FOSU_ABI_VERSION; }
+""")
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(root),
+            "-B",
+            str(root / "build"),
+            f"-DCMAKE_PREFIX_PATH={prefix}",
+        ],
+        check=True,
+    )
+    subprocess.run(["cmake", "--build", str(root / "build")], check=True)
+    for name in ("headers", "c_api"):
+        subprocess.run([str(root / "build" / name)], check=True)
+print("Installed header-only and C ABI CMake consumers passed")

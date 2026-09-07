@@ -1,6 +1,5 @@
-"""Compile the same C ABI into self-contained scalar and AVX2 extensions."""
+"""Generate CFFI wrappers; CMake owns all compilation and linking."""
 
-import os
 import re
 import sys
 from pathlib import Path
@@ -9,7 +8,7 @@ from cffi import FFI
 
 ROOT = Path(__file__).resolve().parents[1]
 header = (ROOT / "include/fosu/c_api.h").read_text()
-header = re.sub(r"#ifdef __cplusplus\n.*?#endif", "", header, flags=re.S)
+header = re.sub(r"#ifdef __cplusplus\n.*?#endif", "", header, flags=re.DOTALL)
 header = "\n".join(
     line
     for line in header.splitlines()
@@ -22,27 +21,6 @@ header = header.replace("FOSU_API ", "")
 def builder(variant: str) -> FFI:
     ffi = FFI()
     ffi.cdef(header + "\nint fosu_python_has_avx2(void);\n")
-    flags = ["-std=c++20", "-O3", "-g0", "-fvisibility=hidden"]
-    link = []
-    if variant == "avx2":
-        # The runtime guard checks exactly these extra instruction sets.
-        flags += ["-mavx2", "-mbmi", "-mbmi2"]
-        if sys.platform == "linux":
-            flags += ["-mtune=znver4"]
-    if sys.platform == "linux":
-        flags += ["-fno-plt"]
-        # Many distributions install static C++ archives separately. Ordinary
-        # source builds use the system runtime; release wheels bundle it.
-        if (
-            os.environ.get("FOSU_BUNDLE_RUNTIME", os.environ.get("CIBUILDWHEEL", "0"))
-            == "1"
-        ):
-            link += ["-static-libstdc++", "-static-libgcc"]
-        link += ["-Wl,--exclude-libs,ALL", f"-Wl,--version-script=python/{variant}.map"]
-    elif sys.platform == "darwin":
-        link += [f"-Wl,-exported_symbol,_PyInit__native_{variant}"]
-    else:
-        raise RuntimeError("fosu currently supports Linux and macOS")
     ffi.set_source(
         f"fosu._native_{variant}",
         """#include <fosu/c_api.h>
@@ -57,16 +35,12 @@ extern "C" int fosu_python_has_avx2(void) {
 #endif
 }
 """,
-        sources=[f"python/native_{variant}.cpp"],
-        include_dirs=["include"],
-        source_extension=".cpp",
-        extra_compile_args=flags,
-        extra_link_args=link,
-        py_limited_api=True,
-        define_macros=[("Py_LIMITED_API", "0x030A0000")],
     )
     return ffi
 
 
-scalar = builder("scalar")
-avx2 = builder("avx2")
+if __name__ == "__main__":
+    variant, output = sys.argv[1:]
+    if variant not in ("scalar", "avx2"):
+        raise ValueError("unknown native variant")
+    builder(variant).emit_c_code(output)

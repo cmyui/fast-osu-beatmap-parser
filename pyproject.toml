@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=77", "wheel", "cffi>=1.17"]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core>=0.10", "cffi>=1.17"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "fosu"
@@ -24,12 +24,11 @@ test = ["pytest>=8", "numpy>=1.26"]
 [project.urls]
 Repository = "https://github.com/cmyui/fast-osu-beatmap-parser"
 
-[tool.setuptools]
-package-dir = {"" = "python"}
-packages = ["fosu"]
-
-[tool.setuptools.package-data]
-fosu = ["*.pyi", "py.typed"]
+[tool.scikit-build]
+cmake.version = ">=3.26"
+wheel.packages = ["python/fosu"]
+wheel.py-api = "cp310"
+sdist.exclude = ["build", "dist", "tests/reference/official/bin", "tests/reference/official/obj"]
 
 [tool.cibuildwheel]
 build = "cp310-*"
