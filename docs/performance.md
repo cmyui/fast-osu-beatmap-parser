@@ -48,73 +48,13 @@ load, compiler layout and the number of loaded modules affect absolute times.
 All file benchmarks warm the kernel file cache before timing. A fresh process
 is not a cold disk read; CPU caches and predictors are not explicitly flushed.
 
-## Validation branch hints
-
-The parser marks 19 existing rejection branches `[[unlikely]]`: final object
-rollback, invalid slider fields, invalid sample fields, integer overflow and
-failed or out-of-range numeric conversion. This guides compiler layout without
-removing checks. Entry into a fallback for unusual valid syntax remains
-unhinted. The baseline below is `ad9e002`, after the kernel/arena combination.
-
-Initial separate C++ ablations on the full corpus measured approximately 0.7%
-for final rollback hints, 0.8% for slider rejection hints, 2.6% for numeric
-rejection hints and 0.4% for sample/tail rejection hints. These effects are not
-additive; all groups together performed best. Numeric-only hints did not
-improve the Python minimum-latency measurements, so the packaged interface was
-measured before selecting the complete set.
-
-Confirmations alternate variants within each file/repetition and repeat with
-the starting order reversed. C++ and C ABI use all 10,000 files and nine
-repetitions. Figures retain the mean-minimum (observed-mean) convention above.
-
-| Fresh-result boundary / starting order | Before hints | With hints |
-|---|---:|---:|
-| C++, A/B | 19.211 (21.179) | **18.545 (20.535)** |
-| C++, B/A | 19.381 (21.690) | **18.714 (21.019)** |
-| C ABI, A/B | 20.292 (22.886) | **19.947 (22.738)** |
-| C ABI, B/A | 20.460 (23.480) | **20.045 (23.013)** |
-
-This is a repeatable 3.4–3.5% reduction in C++ mean minima and 1.7–2.0% for
-the C ABI on the measured GCC/Zen 4 configuration.
-
-Warm Python confirmation uses all 10,000 files and seven repetitions, also in
-both starting orders:
-
-| Call / starting order | Before hints | With hints |
-|---|---:|---:|
-| `parse(bytes)`, A/B | 23.512 (27.026) | **23.085 (26.324)** |
-| `parse(bytes)`, B/A | 23.827 (27.329) | **23.372 (26.881)** |
-| `parse_file(path)`, A/B | 30.506 (34.343) | **30.048 (33.744)** |
-| `parse_file(path)`, B/A | 30.871 (34.857) | **30.384 (33.628)** |
-
-Mean minima improve 1.8–1.9% for bytes and 1.5–1.6% for file calls.
-
-Fresh Python interpreters, 500 evenly spaced files × three repetitions with
-baseline/numeric-only/all-hints rotating, measured the first file call at
-135.465 (150.273) µs before and 135.128 (148.817) µs with all hints. This does
-not establish a material first-call improvement. Whole-process mean minima
-remain about 15.4 ms. Bytecode-cache state is matched with CPython 3.11.15.
-
-The complete one-shot process, 10,000 files × three rotating repetitions,
-measures 164.56 (186.19) µs before and 164.26 (184.39) µs with hints, with
-6.5 minor faults per run in both. This does not establish a material
-end-to-end improvement.
-
-Native, C ABI and one-shot canonical output each match the compatible
-baseline byte-for-byte on all 10,000 files, retaining SHA-256
-`334598db4c426ce5e99ba49cb9c4e3c038f88cb5424586ecd718207ec482edad`.
-All 1,395 official-decoder fixtures agree in SIMD and scalar modes. Native,
-C ABI lifecycle, sanitizer, one-shot boundary/resource-limit and 18 Python
-package tests also pass; Python tests run in both SIMD and scalar modes.
-
 ## Kernel and arena measurements
 
 The baseline is the compatible parser at `a9d7693`. The two independent
 optimization attempts are `9676109` and `a10ac66`; the combined implementation
 at `164d554` uses their best measured pieces plus storage-lifetime fixes.
-The tables in this section precede the branch hints measured above. All four
-preserve the baseline's complete output on this corpus. Release `33aa2c0` predates
-correctness fixes and is not an identical-work baseline.
+All four preserve the baseline's complete output on this corpus. Release
+`33aa2c0` predates correctness fixes and is not an identical-work baseline.
 
 ### C++: 10,000 files, nine repetitions, no PGO
 

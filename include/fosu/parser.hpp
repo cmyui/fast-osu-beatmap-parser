@@ -10,7 +10,7 @@
 #include <type_traits>
 
 #include "beatmap.hpp"
-#include "hitobject_prefix.hpp"
+#include "detail/prefix.hpp"
 #include "detail/timing.hpp"
 #include "detail/slider.hpp"
 #include "detail/metadata.hpp"
