@@ -23,6 +23,24 @@ static void check(const std::string& text) {
 }
 
 int main() {
+    // The short sample shortcut must reject every non-digit/separator byte,
+    // including high-bit bytes. Full parsing may accept other spellings via
+    // its bounded fallback; all representations must still agree.
+    for (size_t pos = 0; pos < 8; ++pos) {
+        for (unsigned byte = 0; byte < 256; ++byte) {
+            std::string sample = "0:1:2:3:";
+            sample[pos] = static_cast<char>(byte);
+            auto padded = fosu::make_padded(sample);
+            const bool exact_shape = pos % 2 ? byte == ':' : byte >= '0' && byte <= '9';
+            assert(fosu::detail::short_sample(padded.data.get()) == exact_shape);
+            check("[HitObjects]\n1,2,3,1,0," + sample);
+        }
+    }
+    // Circle precedence applies even when slider/spinner/hold bits are set.
+    for (int type : {1, 3, 9, 129, 255}) {
+        const std::string line = "[HitObjects]\n1,2,3," + std::to_string(type) + ",0,0:1:2:3:";
+        for (const std::string ending : {"", "\n", "\r\n"}) check(line + ending);
+    }
     assert(fosu::parse(nullptr, 0).hit_objects.empty());
     assert(fosu::parse(fosu::make_padded({})).hit_objects.empty());
     auto embedded = fosu::make_padded(

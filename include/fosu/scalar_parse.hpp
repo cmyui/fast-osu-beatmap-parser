@@ -153,6 +153,9 @@ inline bool is_numeric_space(char c) {
 }
 
 inline const char* skip_numeric_space(const char* p, const char* end) {
+    // The input is padded even at end. Digits and field separators take one
+    // byte comparison; uncommon control/space bytes use the bounded loop.
+    if (static_cast<unsigned char>(*p) > 32) return p;
     while (p < end && is_numeric_space(*p)) ++p;
     return p;
 }
@@ -175,8 +178,9 @@ inline const char* parse_osu_int(const char* p, const char* end, int64_t& out) {
 inline const char* parse_osu_double(const char* p, const char* end, double& out,
                                    double limit = INT32_MAX) {
     const char* first = skip_numeric_space(p, end);
-    const char* q = parse_double(first, end, out);
-    if (q == first || out < -limit || out > limit) return p;
+    const char* q = parse_double_impl<bounded_double>(first, end, out);
+    // One absolute-value bound also rejects infinities and NaN.
+    if (q == first || !(std::abs(out) <= limit)) return p;
     return skip_numeric_space(q, end);
 }
 
@@ -189,7 +193,7 @@ inline const char* parse_osu_float(const char* p, const char* end, float& out,
     }
     const auto r = fast_float::from_chars(first, end, out);
     if (r.ec != std::errc() && !(r.ec == std::errc::result_out_of_range && out == 0)) return p;
-    if (!std::isfinite(out) || out < -limit || out > limit) return p;
+    if (!(std::abs(out) <= limit)) return p;
     return skip_numeric_space(r.ptr, end);
 }
 

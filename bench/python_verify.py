@@ -47,8 +47,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("reference", type=Path)
     parser.add_argument("corpus", type=Path)
+    parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--shard-count", type=int, default=1)
     args = parser.parse_args()
-    files = sorted(args.corpus.glob("*.osu"))
+    if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
+        parser.error("shard index must be in [0, shard-count), with a positive shard count")
+    files = sorted(args.corpus.glob("*.osu"))[args.shard_index::args.shard_count]
     assert files, "empty corpus"
     for count, path in enumerate(files, 1):
         ref = decode(subprocess.check_output([str(args.reference.resolve()), str(path)]))

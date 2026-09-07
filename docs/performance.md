@@ -15,32 +15,115 @@ observed means and means of per-file minima are reported. Minima estimate an
 uninterrupted run; they are not a latency guarantee or a replacement for the
 observed distribution. The date and result boundary matter when comparing runs.
 
-There are three separate measurements:
+Library and application-call performance are the primary targets. Keep these
+timing boundaries separate:
 
-1. **Process lifetime:** `posix_spawn` through `wait4`, including input I/O,
+1. **In-process parsing:** modules are loaded once; padded input is acquired
+   before timing. Each current file is parsed repeatedly, rotating modules and
+   fresh/reused result modes. Fresh mode includes result destruction; reuse
+   retains capacity. Input is generally cache-resident. DSO entry points keep
+   the complete result observable to the compiler. C ABI calls additionally
+   include input copying, padding and view publication. Python calls include
+   ownership wrappers and release; full traversal into Python objects is extra.
+2. **First library use:** a fresh process reads a file and times its first C++
+   parse, excluding startup, read and destruction. A separate C driver times
+   `dlopen` through read/parse/view/free/`dlclose`; that broader interval includes
+   library loading and I/O. Fresh Python measurements report import, first
+   `parse_file` call and full interpreter lifetime separately.
+3. **Process lifetime:** `posix_spawn` through `wait4`, including input I/O,
    allocation, parsing, output writes and exit. Each repetition uses a fresh
    process. The harness rotates binaries within every file/repetition and sends
    stdout to `/dev/null`; consumer decoding and disk persistence are excluded.
    It reads each input before timing, making input resident in the kernel file
    cache. CPU caches/predictors are not explicitly flushed.
-2. **In-process parsing:** modules are loaded once; padded input is acquired
-   before timing. Each current file is parsed repeatedly, rotating modules and
-   fresh/reused result modes. Fresh mode includes result destruction; reuse
-   retains capacity. Input is generally cache-resident. DSO entry points keep
-   the complete result observable to the compiler.
-3. **First library use:** a fresh process reads a file and times its first C++
-   parse, excluding startup, read and destruction. A separate C driver times
-   `dlopen` through read/parse/view/free/`dlclose`; that broader interval includes
-   library loading and I/O. Neither includes Python interpreter startup.
 
-## Current compatibility measurements (0.2.0)
+## Current measurements (0.2.0)
 
-September 7, 2026; previous release `33aa2c0` versus the current implementation,
+September 7, 2026; the official-acceptance baseline `a9d7693` versus the optimized
+implementation. Both implement the same parsing behavior and produce identical
+complete output on the 10,000-file corpus. GCC 13.3, x86-64-v3 with Zen 4 tuning,
+no PGO unless specified. Each paired benchmark rotates candidates within every
+file/repetition on CPU 3. Times are microseconds: **mean of per-file minima**,
+with the mean of all runs in parentheses.
+
+### Application calls
+
+All 10,000 files, five repetitions. The C++ and C ABI rows share one paired run;
+Python has a separate paired run using CPython 3.11.15 and locally built wheels
+with private C++ runtimes bundled. The C ABI benchmark modules use the loaded
+system runtime; loading is outside this interval.
+
+| Workload | Acceptance baseline | Optimized | Reduction in mean minima |
+|---|---:|---:|---:|
+| C++ fresh result | 23.198 (26.730) | **21.816 (25.118)** | 6.0% |
+| C++ reused result | 21.622 (24.467) | **20.248 (22.857)** | 6.4% |
+| C ABI fresh handle | 24.130 (27.642) | **23.123 (26.529)** | 4.2% |
+| C ABI reused handle | 22.680 (25.484) | **21.667 (24.347)** | 4.5% |
+| Python `fosu.parse(bytes)` | 26.944 (30.568) | **25.737 (29.127)** | 4.5% |
+| Python `fosu.parse_file(path)` | 33.563 (37.603) | **32.227 (35.777)** | 4.0% |
+
+Python calls create a result, read `len(beatmap.hit_objects)` and release it.
+Imports occur before timing and file contents are resident. These are ordinary
+owned API calls; they do not materialize each field as a Python object.
+The C++ fresh-result throughput is 1.85 GB/s using the sum of file minima.
+That is a measurement on this corpus and host, not a guaranteed rate.
+
+The retained changes validate common sample fields in parallel, complete common
+circles directly, remove duplicate numeric bounds, and shorten whitespace checks.
+AVX-512 VBMI/VL builds also use one byte permutation and 8,640 bytes of prefix
+masks in place of two permutations and 17,280 bytes of masks. In a separate
+paired full-corpus build comparison, x86-64-v3 measured 21.283 µs fresh versus
+21.593 µs for the complete `-march=znver4` build. The default library/Python ISA
+therefore remains x86-64-v3; enabling AVX-512 is optional. Compare rows within a
+run: module count, allocator state and shared-host interference move absolute
+times.
+
+### Profile-guided application builds
+
+A separate four-module run trains each implementation on 2,000 files (sorted
+indices 0, 5, 10, …) and evaluates only the other 8,000 files, five repetitions.
+No evaluation file enters training.
+
+| C++ build | Fresh result | Reused result |
+|---|---:|---:|
+| Acceptance baseline, unprofiled | 23.099 (26.539) | 21.397 (24.116) |
+| Acceptance baseline, PGO | 21.736 (24.723) | 20.236 (22.685) |
+| Optimized, unprofiled | 21.353 (24.527) | 19.975 (22.388) |
+| Optimized, PGO | **20.264 (23.180)** | **18.932 (21.143)** |
+
+With both builds profiled, the optimized parser remains 6.8% faster fresh and
+6.4% faster reused. PGO adds about 5% over the optimized unprofiled build in
+this run. These profiles describe the benchmark application's C++ call site;
+the distributed Python package is not built with these profiles. Train an
+application at its own call sites before relying on the same benefit.
+
+### First use and complete processes
+
+First-use comparisons take an evenly spaced 1,000-file subset, with five
+repetitions for C++ and three for Python. Complete one-shot processes cover all
+10,000 files with three repetitions and write identical FOSUDMP5 streams.
+
+| Boundary | Acceptance baseline | Optimized |
+|---|---:|---:|
+| First C++ parse, excludes startup/read/destruction | 74.087 (82.680) | 71.949 (79.399) |
+| First Python `parse_file`, excludes import | 167.310 (181.344) | 165.979 (180.570) |
+| Python import | 5240.034 (5452.667) | 5238.150 (5457.009) |
+| Complete Python interpreter/import/parse/release/exit | 15750.929 (16253.511) | 15754.094 (16259.247) |
+| Complete native one-shot process and output | 167.42 (186.43) | **164.02 (182.64)** |
+
+Python startup is effectively unchanged; the benefit is in application calls.
+The one-shot improvement is 2.0%, with 6.5 minor faults at file minima for both
+versions. It includes the complete output write, but not a consumer decoding
+the stream. No host memory-policy settings were changed for these comparisons.
+
+### Earlier compatibility cost
+
+An earlier paired run compared release `33aa2c0` with acceptance baseline `a9d7693`,
 GCC 13.3, no PGO. Each paired benchmark rotates candidates within every
 file/repetition on CPU 3. All 10,000 corpus files are included. Times are
 microseconds; parentheses contain means of all runs.
 
-| Workload | Previous release | Current |
+| Workload | Previous release | Acceptance baseline |
 |---|---:|---:|
 | C++ fresh result, five repetitions | 19.634 (22.011) | 22.519 (25.639) |
 | C++ reused result, five repetitions | 18.704 (20.354) | 21.112 (23.441) |
@@ -51,9 +134,8 @@ spellings use parallel integer digit checks; unusual fields use the complete
 bounded conversion. Both paths enforce the same acceptance policy. These
 results compare different parsing behavior, not identical-output implementations.
 
-The current table covers C++ calls. Earlier process, C API and Python results
-below predate this validation policy and do not establish its performance at
-those boundaries.
+These numbers precede the optimization above. They measure the cost of adopting
+the official validation rules; the optimized comparison holds those rules fixed.
 
 ### Python measurement procedure
 
@@ -71,27 +153,30 @@ taskset -c 3 python bench/python_first_compare.py /path/to/corpus \
 ### Verification coverage
 
 - Exact canonical output matches between the hosted and one-shot writers on
-  all 10,000 files. The reference SHA-256 is
+  all 10,000 files, also byte-for-byte against acceptance baseline `a9d7693`.
+  The reference SHA-256 is
   `334598db4c426ce5e99ba49cb9c4e3c038f88cb5424586ecd718207ec482edad`.
 - Both Python file and bytes entry points match every public field on all
   10,000 files, including floating-point bits, raw strings, pool indices and
   counters. The tested extensions bundle private C++ runtimes; dependency
   inspection confirms no dynamic `libstdc++` or `libgcc_s` dependency.
 - Scalar/SIMD record comparisons and the independent numeric-conversion
-  reference pass on that set and on a broader 23,618-file cache: 792,921,673
-  bytes and 14,995,892 hitobjects. The cache is not independently labeled as an
-  Aspire/unranked evaluation set. Its host-local manifest SHA-256 is
-  `e1acf6c79fe9c68cb5fe35ba21aa444fa289cd74d7e85ae564b3e56dc0390181`.
+  reference pass under sanitizers, including the optional AVX-512 build, on that
+  set and on a broader 23,625-file cache: 793,187,718 bytes and 15,001,177
+  hitobjects. The cache is growing and is not independently labeled as an
+  Aspire/unranked evaluation set.
 - The actual official legacy decoder at pinned revision `48c4800e` agrees on
   completion, rejected-line counts and retained object counts for all 10,000
-  maps (six rejected lines) and the 23,618-file cache (70 rejected lines).
+  maps (six rejected lines) and an earlier 23,618-file cache snapshot (70 rejected lines).
   The 1,395 synthetic fixtures also match in scalar and SIMD configurations.
   This checks acceptance, not complete gameplay-value equivalence. See the
   [official reference harness](compatibility.md#sources-of-truth).
 - Native, C ABI, Python, I/O-failure, allocation-failure and one-shot boundary
   checks pass. Clang ASan/UBSan/float-cast-overflow checks and a 61-second,
-  473,537-run mutation fuzz smoke test pass. Fuzz duration is a measured test
-  budget, not a proof that all malformed inputs are safe.
+  869,125-run AVX2 mutation fuzz smoke test pass; a separate 61-second AVX-512
+  run completes 918,972 mutations. Exhaustive single-byte sample mutations
+  check rejection of non-digits and misplaced separators. Fuzz duration is a
+  measured test budget, not a proof that all malformed inputs are safe.
 
 After widening the previous stream's integer timestamp representation, exactly
 32 maps differ from the previous release: 453 slider lengths across 25 maps
@@ -254,6 +339,11 @@ done
 python3 bench/python_verify.py build/oneshot_reference /path/to/corpus
 ```
 
+For bounded verification jobs, `bench/python_verify.py` also accepts
+`--shard-count N --shard-index I`. Indices are zero-based; run every index from
+0 through N-1 against the same unchanged corpus to cover the complete set.
+Sharding does not reduce which public fields or entry points are checked.
+
 For a previous release, export its **whole tree** into a separate directory
 and build its own reference/serializer there. Do not compile today's serializer
 against old record declarations. The cross-format comparison widens v4 integer
@@ -377,6 +467,11 @@ inside that benchmark only; leave it unset for the default first-parse result.
 
 ## Choices tested
 
+- Paired-coordinate SIMD conversion was about 0.5% slower than the existing
+  slider-point path in a full-corpus library comparison and was not retained.
+  Moving unusual sample/edge validation into cold, non-inlined functions was
+  about 1.3% slower for the library, despite a small process-time improvement;
+  the library result determined that choice.
 - Shared numeric kernels and compile-time record policies retained library
   throughput. Shared hitobject framing improved the paired hosted result by
   about 2%, while one-shot time was unchanged. Slider storage/rollback remains

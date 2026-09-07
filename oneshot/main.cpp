@@ -438,7 +438,7 @@ bool parse_slider_params(const char* p, const char* end, sv& hs) {
         const char* q = parse_slider_length(p + 1, length);
         if (!q) q = fosu::detail::parse_osu_double(p + 1, end, length, 131072);
         if (q != p + 1) q = fosu::detail::skip_numeric_space(q, end);
-        if (q == p + 1 || (q < end && *q != ',') || length > 131072 || length < -131072) { keep_orphans(w0, npts); return false; }
+        if (q == p + 1 || (q < end && *q != ',')) { keep_orphans(w0, npts); return false; }
         p = q;
     }
     sv edge_sounds{}, edge_sets{};
@@ -520,6 +520,11 @@ struct StreamHits {
     }
     bool finish(HO& h, const char* p, const char* end, size_t) {
         return finish_hitobject(h, p, end);
+    }
+    void finish_circle_sample8(HO& h, const char* sample) {
+        h.hs_len = 8;
+        memcpy(g_out, sample, 8);
+        g_out += 8;
     }
     void commit(HO&) { ++S.n_hitobjects; }
     void rollback(HO& h) { g_out = reinterpret_cast<char*>(&h); }

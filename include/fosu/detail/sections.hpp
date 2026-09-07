@@ -1,10 +1,10 @@
 #pragma once
-#include "prefix.hpp"
+#include "object_tail.hpp"
 
 namespace fosu::detail {
 #if FOSU_SIMD_X86
 // Shared framing and prefix dispatch. The sink is selected at compile time;
-// its four hooks retain each representation's allocation and rollback rules.
+// its hooks retain each representation's allocation and rollback rules.
 template <typename Sink>
 inline const char* parse_hitobject_lines(Sink& sink, const char* p, const char* file_end) {
     uint32_t fast_lines = 0;
@@ -33,7 +33,15 @@ inline const char* parse_hitobject_lines(Sink& sink, const char* p, const char* 
         bool ok;
         if (next >= 0) {
             ++fast_lines;
-            ok = sink.finish(h, p + next, line_end, static_cast<size_t>(file_end - p));
+            // The prefix already supplied all circle fields. Validate the
+            // common sample once and publish its known length directly.
+            if ((h.type & 1) && line_end == p + next + 9 && p[next] == ',' &&
+                short_sample(p + next + 1)) {
+                sink.finish_circle_sample8(h, p + next + 1);
+                ok = true;
+            } else {
+                ok = sink.finish(h, p + next, line_end, static_cast<size_t>(file_end - p));
+            }
         } else {
             h.end_time = 0;
             h.slider = Sink::HitObject::kNoSlider;

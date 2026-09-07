@@ -28,7 +28,8 @@ inline const char* parse_coord(const char* p, const char* end, int32_t& out) {
 // the same SWAR pieces parse_double accumulates and divided by the same
 // power of ten, so the result is bit-identical. Returns nullptr for any
 // other shape (sign, exponent, longer or empty numbers) so the caller can
-// run parse_double. The line terminator and buffer padding are non-digits,
+// run parse_double. Values above the official length bound also defer.
+// The line terminator and buffer padding are non-digits,
 // so the digit run can never cross the end of the line.
 inline const char* parse_slider_length(const char* p, double& out) {
     const __m256i v =
@@ -49,6 +50,7 @@ inline const char* parse_slider_length(const char* p, double& out) {
     if (mant > kMaxExactDoubleInteger) return nullptr;
     double d = static_cast<double>(mant);
     if (fl) d /= kPow10[fl];
+    if (d > 131072) return nullptr;
     out = d;
     const char* q = has_dot ? fp + fl : p + il;
     return *q == 'e' || *q == 'E' ? nullptr : q;

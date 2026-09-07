@@ -17,6 +17,18 @@ jobs:
         with:
           persist-credentials: false
       - run: make CXX=g++ test test-c-api
+      - name: Compile and check the optional AVX-512 prefix
+        run: |
+          g++ -std=c++20 -O3 -Iinclude -march=x86-64-v3 -mavx512vl -mavx512vbmi tests/test_parser.cpp -o build/test_avx512
+          g++ -x c++ -o build/has_avx512 - <<'CPP'
+          int main() {
+              return !(__builtin_cpu_supports("avx512f") &&
+                       __builtin_cpu_supports("avx512bw") &&
+                       __builtin_cpu_supports("avx512vl") &&
+                       __builtin_cpu_supports("avx512vbmi"));
+          }
+          CPP
+          if build/has_avx512; then build/test_avx512; else echo 'AVX-512 execution skipped on this CPU'; fi
       - run: make CXX=clang++ test-sanitize fuzz-smoke
 
   official-acceptance:

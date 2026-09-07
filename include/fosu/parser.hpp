@@ -311,7 +311,7 @@ inline bool parse_slider_params(Map& bm, typename Map::HitObject& h, const char*
         const char* q = parse_osu_double(p + 1, end, s.length, 131072);
 #endif
         if (q != p + 1) q = skip_numeric_space(q, end);
-        if (q == p + 1 || (q < end && *q != ',') || s.length > 131072 || s.length < -131072) {
+        if (q == p + 1 || (q < end && *q != ',')) {
             sliders.pop_back();
             return false;
         }
@@ -434,6 +434,9 @@ struct MaterializedHits {
     }
     bool finish(HitObject& h, const char* p, const char* end, size_t remaining) {
         return finish_hitobject(bm, h, p, end, remaining);
+    }
+    void finish_circle_sample8(HitObject& h, const char* sample) {
+        h.hit_sample = bm.view({sample, 8});
     }
     void commit(HitObject&) {}
     void rollback(HitObject&) { bm.hit_objects.pop_back(); }

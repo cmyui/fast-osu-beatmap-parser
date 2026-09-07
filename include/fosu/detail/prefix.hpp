@@ -143,6 +143,24 @@ consteval std::array<LaneMasks, kNPrefixVariants> make_lane_masks() {
 
 inline constexpr auto kLaneMasks = make_lane_masks();
 
+#if defined(__AVX512VBMI__) && defined(__AVX512VL__)
+struct alignas(32) ByteLaneMasks { uint8_t index[32]; };
+consteval std::array<ByteLaneMasks, kNPrefixVariants> make_byte_lane_masks() {
+    std::array<ByteLaneMasks, kNPrefixVariants> out{};
+    for (size_t i = 0; i < out.size(); ++i) {
+        const auto& row = kLaneMasks[i];
+        const uint8_t first_comma = static_cast<uint8_t>(i / 90 + 1);
+        for (int b = 0; b < 32; ++b) {
+            const int slot = row.shuf[b];
+            out[i].index[b] = slot < 0 ? first_comma
+                : static_cast<uint8_t>(row.perm[(b / 16) * 4 + slot / 4] * 4 + slot % 4);
+        }
+    }
+    return out;
+}
+inline constexpr auto kByteLaneMasks = make_byte_lane_masks();
+#endif
+
 inline uint32_t comma_mask32(__m256i ascii) {
     return static_cast<uint32_t>(_mm256_movemask_epi8(
         _mm256_cmpeq_epi8(ascii, _mm256_set1_epi8(','))));
@@ -167,7 +185,13 @@ inline uint32_t nondigit_mask32(__m256i ascii) {
 // fields before running the scalar fallback.
 template <typename H>
 inline int fast_parse_prefix(__m256i ascii, const char* line, H& h) {
+#if defined(__AVX512VBMI__) && defined(__AVX512VL__)
+    // Saturation makes the validated comma zero, so empty digit positions
+    // can select it without a separate zeroing mask.
+    const __m256i digits = _mm256_subs_epu8(ascii, _mm256_set1_epi8('0'));
+#else
     const __m256i digits = _mm256_sub_epi8(ascii, _mm256_set1_epi8('0'));
+#endif
 
     const uint32_t mask = nondigit_mask32(ascii);
 
@@ -194,6 +218,10 @@ inline int fast_parse_prefix(__m256i ascii, const char* line, H& h) {
           line[p3] == ','))
         return -1;
 
+#if defined(__AVX512VBMI__) && defined(__AVX512VL__)
+    const __m256i placed = _mm256_permutexvar_epi8(
+        _mm256_load_si256(reinterpret_cast<const __m256i*>(kByteLaneMasks[index].index)), digits);
+#else
     const LaneMasks& lm = kLaneMasks[index];
     const __m256i perm =
         _mm256_load_si256(reinterpret_cast<const __m256i*>(lm.perm));
@@ -201,6 +229,7 @@ inline int fast_parse_prefix(__m256i ascii, const char* line, H& h) {
         _mm256_load_si256(reinterpret_cast<const __m256i*>(lm.shuf));
     const __m256i placed =
         _mm256_shuffle_epi8(_mm256_permutevar8x32_epi32(digits, perm), shuf);
+#endif
 
     const __m256i pair_weights = _mm256_setr_epi8(
         0, 100, 10, 1, 0, 100, 10, 1, 0, 100, 10, 1, 0, 0, 0, 0,

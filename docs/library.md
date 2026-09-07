@@ -6,6 +6,11 @@ is the baseline. `make` also uses `-fno-plt -fno-stack-protector` for its Linux
 benchmark and shared-library targets. Applications own their build policy.
 Without AVX2/BMI compile flags the parser uses its scalar path; there is no
 runtime CPU dispatch.
+When AVX-512 VBMI/VL are enabled at compile time, the prefix converter uses
+byte permutations with a smaller lookup table. Enabling more instruction sets
+does not guarantee a faster complete parse; compare builds on the application
+workload. The default library and Python AVX2 builds retain their existing CPU
+requirements.
 
 ## Ownership and reuse
 

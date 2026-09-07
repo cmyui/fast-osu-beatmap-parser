@@ -1,16 +1,22 @@
 # fosu — fast osu! beatmap parsing
 
-A C++20 parser for legacy `.osu` beatmap files. Its primary target is
-**one fresh Linux process → read one original beatmap → parse → write the complete
-result → exit**. It also provides a header-only C++ library and a small C ABI for
-in-process callers, plus an installable Python package backed by CFFI.
+A C++20 parser for legacy `.osu` beatmap files, focused on **maximum parsing
+performance with reliable behavior for application callers**. Use the
+header-only C++ library, a small C ABI, or an installable Python package backed
+by CFFI. Acceptance and rejection rules are tested against the official osu!
+legacy decoder.
+
+A separate Linux executable measures the complete single-map process:
+**launch → read the original beatmap → parse → write the complete result → exit**.
+It shares parser kernels with the library and provides a process-lifetime
+benchmark and a binary output interface.
 
 | Interface | Result | Use |
 |---|---|---|
-| [One-shot executable](oneshot/README.md) | Complete binary stream on stdout | Lowest measured process lifetime on Linux/Zen 4 |
 | [C++ library](docs/library.md) | `Beatmap` with vectors and borrowed strings | Direct parsing in a C++ application |
 | [C API](docs/c-api.md) | Handle-owned input and contiguous arrays | C and other FFI callers |
 | [Python package](docs/python.md) | Owned `Beatmap` with named fields and records | Python apps; optional zero-copy NumPy arrays |
+| [One-shot executable](oneshot/README.md) | Complete binary stream on stdout | Complete process benchmarking and serialized output on Linux/Zen 4 |
 
 The native representations are checked on a fixed corpus of **10,000
 ranked/approved maps, 402,593,897 bytes**, and a broader cache corpus. Comparisons
@@ -54,8 +60,12 @@ section selection and NumPy access.
 One AVX2 load classifies the hitobject prefix `x,y,time,type,hitSound` and
 finds its newline. Delimiter positions select a compile-time permutation and
 shuffle table; multiply-add instructions convert several fields together.
+Builds with AVX-512 VBMI/VL use a single byte permutation and smaller masks.
 The result lands directly in its final record. Unusual shapes take a scalar
 fallback, including signed/wide coordinates and fractional timestamps.
+Common hit-sample fields are validated in parallel; unusual spellings use the
+same bounded numeric rules. Circles with a validated eight-byte sample can be
+completed directly in their final representation.
 
 Timing-point lines reuse their delimiter geometry within the current section.
 Slider points are written through a cursor, with vector/SWAR decimal conversion
