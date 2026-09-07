@@ -1,5 +1,6 @@
 """Compile the same C ABI into self-contained scalar and AVX2 extensions."""
 from pathlib import Path
+import os
 import re
 import sys
 from cffi import FFI
@@ -25,7 +26,11 @@ def builder(variant):
             flags += ["-mtune=znver4"]
     if sys.platform == "linux":
         flags += ["-fno-plt"]
-        link += ["-static-libstdc++", "-static-libgcc", "-Wl,--exclude-libs,ALL",
+        # Many distributions install static C++ archives separately. Ordinary
+        # source builds use the system runtime; release wheels bundle it.
+        if os.environ.get("FOSU_BUNDLE_RUNTIME", os.environ.get("CIBUILDWHEEL", "0")) == "1":
+            link += ["-static-libstdc++", "-static-libgcc"]
+        link += ["-Wl,--exclude-libs,ALL",
                  f"-Wl,--version-script=python/{variant}.map"]
     elif sys.platform == "darwin":
         link += [f"-Wl,-exported_symbol,_PyInit__native_{variant}"]

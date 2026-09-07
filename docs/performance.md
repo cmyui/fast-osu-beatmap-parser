@@ -99,8 +99,9 @@ PGO results above are for the hosted library, with matching training/use builds.
 
 ## Python package
 
-The package uses the same unprofiled C API, compiled with GCC 13.3 for
-AVX2/BMI1/BMI2 and Zen 4 scheduling. On CPython 3.12, a paired run over all
+The locally built package uses the same unprofiled C API, compiled with GCC
+13.3 for AVX2/BMI1/BMI2 and Zen 4 scheduling, with its private runtime bundled.
+On CPython 3.12, a paired run over all
 10,000 maps with five repetitions per file measured:
 
 | Python call boundary | Mean of all runs, µs | Mean of file minima, µs |
@@ -119,6 +120,12 @@ adds conversion and iteration work; these timings do not include that traversal.
 The package adds convenience and ownership to the current parser, with no new
 parser-kernel speedup over the C++ measurements above.
 
+A separate run of the distributable manylinux wheel (built with GCC 14.2.1)
+measured 24.41 µs from bytes and 30.26 µs from a file, against 22.45/28.08 µs
+through raw CFFI in that same run. These are means of all runs at the same
+boundary; both builds place the Python ownership overhead near 2 µs. The
+10,000-file exact comparison also covers the distributable Linux wheel.
+
 For cold Python use, a separate 100-file subset with three fresh interpreters
 per file compared otherwise identical Linux wheels. The private bundled C++
 runtime took 5.13 ms to import `fosu`, versus 6.00 ms with the system runtime;
@@ -132,7 +139,7 @@ Python intervals are distinct from the warmed-call table and from the one-shot
 native executable's process time.
 
 ```sh
-python -m pip install -e '.[test]'
+FOSU_BUNDLE_RUNTIME=1 python -m pip install -e '.[test]'
 taskset -c 5 python bench/python_compare.py /path/to/corpus --reps 5
 python bench/python_verify.py build/master_reference /path/to/corpus
 
@@ -141,9 +148,10 @@ taskset -c 5 python bench/python_first_compare.py /path/to/corpus \
   /path/to/extracted-bundled-wheel /path/to/extracted-system-wheel --limit 100 --reps 3
 ```
 
-To build the system-runtime comparison, omit `-static-libstdc++` and
-`-static-libgcc` from `python/build_ffi.py` in a separate source copy, then build
-both wheels with the same compiler. Keep symbol hiding enabled in both builds.
+Build the runtime comparison wheels from clean source copies using the same
+compiler, with `FOSU_BUNDLE_RUNTIME=1 python -m build` for the bundled variant
+and `FOSU_BUNDLE_RUNTIME=0 python -m build` for the system-runtime variant.
+The build always keeps symbol hiding enabled.
 The Python verifier checks both bytes and file entry points against the
 canonical reference: all fields, raw string bytes, floating-point bits, pool
 indices and parser counters match on all 10,000 files. Package tests additionally

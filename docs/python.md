@@ -31,6 +31,10 @@ A source checkout is also installable with `python -m pip install .`; this
 requires a C++20 compiler. Build a source archive and wheel with
 `python -m pip install build` followed by `python -m build`. Linux builds use
 GCC; macOS builds use Apple Clang. Build dependencies are installed by pip.
+Linux source builds use the system C++ runtime. To bundle it as the release
+wheels do, install your compiler's static runtime archives and run
+`FOSU_BUNDLE_RUNTIME=1 python -m pip install .`. On distributions that split
+the archives into a separate package, install that package first.
 
 NumPy is optional: `python -m pip install numpy`. Importing `fosu` does not
 import NumPy.
@@ -152,9 +156,10 @@ there is no per-parse dispatch. The optimized variant requires AVX2, BMI1,
 BMI2 and POPCNT, with Linux scheduling tuned for Zen 4. Apple Silicon uses the
 scalar variant; the published Zen 4 timings do not describe its performance.
 Set `FOSU_FORCE_SCALAR=1` before importing for a scalar check.
-Linux extensions bundle a private C++ runtime to reduce first-import cost;
+Linux release wheels bundle a private C++ runtime to reduce first-import cost;
 only their Python initialization symbols are exported. macOS uses the system
 C++ runtime. Neither uses the standalone executable's custom runtime.
+`FOSU_BUNDLE_RUNTIME=0` disables bundling for a custom wheel build.
 The ordinary C++ library and standalone C API keep their existing build policy.
 
 ```sh
