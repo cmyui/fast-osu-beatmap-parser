@@ -33,7 +33,91 @@ There are three separate measurements:
    `dlopen` through read/parse/view/free/`dlclose`; that broader interval includes
    library loading and I/O. Neither includes Python interpreter startup.
 
-## Current measurements
+## Current compatibility measurements (0.2.0)
+
+September 7, 2026; previous release `33aa2c0` versus the current implementation,
+GCC 13.3, no PGO. Each paired benchmark rotates candidates within every
+file/repetition on CPU 3. All 10,000 corpus files are included. Times are
+microseconds; parentheses contain means of all runs.
+
+| Workload | Previous release | Current |
+|---|---:|---:|
+| Complete one-shot process, three repetitions | 159.81 (176.50) | 163.04 (180.46) |
+| C++ fresh result, five repetitions | 20.116 (22.892) | 19.989 (22.706) |
+| C++ reused result, five repetitions | 18.825 (20.787) | 18.756 (20.634) |
+| C API fresh result, five repetitions | 20.961 (23.681) | 21.174 (24.124) |
+| C API reused result, five repetitions | 19.951 (21.935) | 19.930 (22.070) |
+
+Native parsing is effectively unchanged at this resolution. Complete process
+time is about 2% higher while delivering wider timestamp records and corrected
+numeric values. Process p50/p99 of file minima are 149.55/284.00 µs before and
+152.35/292.94 µs after; minor faults rise from 5.4 to 6.5. These binaries emit
+different stream versions (FOSUDMP4/FOSUDMP5), so this measures the cost of the
+compatibility changes rather than identical-output implementations. The host's
+64/128/256 KiB transparent-huge-page sizes are configured for `madvise`.
+
+### Python calls
+
+CPython 3.11.15, locally built GCC 13.3 wheels with the private runtime bundled,
+all 10,000 files, five repetitions per file, fresh results including destruction.
+Imports and input acquisition are outside the timed bytes call; file data is
+resident. This comparison measures the owned Python API, without converting
+records into another library's object hierarchy.
+
+| Python boundary | Previous release, µs | Current, µs |
+|---|---:|---:|
+| `fosu.parse(bytes)` plus object count | 23.261 (26.328) | 23.548 (26.759) |
+| `fosu.parse_file(path)` plus object count | 30.321 (33.550) | 30.663 (34.032) |
+
+The compatibility changes add about 0.3 µs to the mean of file minima in this
+run. These are warmed application calls, not fresh Python process times.
+
+A separate 1,000-file evenly spaced subset uses three fresh interpreters per
+file, rotating packages. Previous/current first `parse_file` calls take
+149.26/157.61 µs at the mean of file minima (161.23/170.51 µs across all runs).
+Import takes 5.098/5.104 ms; the complete Python launch/import/parse/release/exit
+interval is 15.294/15.313 ms (15.707/15.756 ms across all runs). Loading and
+first-touch costs dominate this interval; it is distinct from warmed calls.
+
+To reproduce the paired Python comparisons, build each revision into its own
+wheel directory with `FOSU_BUNDLE_RUNTIME=1`, extract into separate package
+directories, then run with CFFI installed in the driver environment:
+
+```sh
+taskset -c 3 python bench/python_versions.py /path/to/corpus \
+  /path/to/previous-wheel /path/to/current-wheel --reps 5
+taskset -c 3 python bench/python_first_compare.py /path/to/corpus \
+  /path/to/previous-wheel /path/to/current-wheel --limit 1000 --reps 3
+```
+
+### Verification coverage
+
+- Exact canonical output matches between the hosted and one-shot writers on
+  all 10,000 files. The reference SHA-256 is
+  `a4861554d5647abdefc6a973afd106023264bc30a50fa94268b2f3ede8f97b42`.
+- Both Python file and bytes entry points match every public field on all
+  10,000 files, including floating-point bits, raw strings, pool indices and
+  counters. The tested extensions bundle private C++ runtimes; dependency
+  inspection confirms no dynamic `libstdc++` or `libgcc_s` dependency.
+- Scalar/SIMD record comparisons and the independent numeric-conversion
+  reference pass on that set and on a broader 23,615-file cache: 792,845,936
+  bytes and 14,994,226 hitobjects. The cache is not independently labeled as an
+  Aspire/unranked evaluation set. Its host-local manifest SHA-256 is
+  `d6adfc43cec71502d576c86c8093fe7afd1d48f97f957d4b6dd34b2d73928aff`.
+- Native, C ABI, Python, I/O-failure, allocation-failure and one-shot boundary
+  checks pass. Clang ASan/UBSan/float-cast-overflow checks and a 61-second,
+  553,823-run mutation fuzz smoke test pass. Fuzz duration is a measured test
+  budget, not a proof that all malformed inputs are safe.
+
+After widening the previous stream's integer timestamp representation, exactly
+28 maps differ from the previous release: 453 slider lengths across 25 maps
+are corrected by one ULP, and seven inherited NaN timing points across three
+maps are preserved instead of skipped. The latter also removes seven malformed
+counts. Every other field matches. The independent numeric reference and
+[official decoding rules](compatibility.md#sources-of-truth) support those
+corrections; previous-release equality is not the definition of correctness.
+
+## Earlier 0.1.0 measurements
 
 September 2026, complete corpus, three fresh processes per file, rotating
 binaries within each repetition. Times are microseconds.
@@ -49,7 +133,8 @@ binaries within each repetition. Times are microseconds.
 The Fable comparison is a process baseline using its older stream format;
 FOSUDMP4 additionally preserves explicit point-pool indices and a framing
 footer. It is not an identical-output comparison. Exact verification uses the
-master reference emitting FOSUDMP4. The final executable is 61,680 bytes.
+master reference emitting FOSUDMP4. That executable is 61,680 bytes; these results precede the current numeric
+corrections and timestamp representation.
 
 For library parsing, the following paired run uses 8,000 evaluation files,
 five repetitions per file, with modules and fresh/reused modes rotated.
@@ -97,7 +182,7 @@ training runtime have different GCC control-flow counters from the
 freestanding runtime. They cannot be treated as valid profiles for that binary.
 PGO results above are for the hosted library, with matching training/use builds.
 
-## Python package
+## Earlier Python package measurements
 
 The locally built package uses the same unprofiled C API, compiled with GCC
 13.3 for AVX2/BMI1/BMI2 and Zen 4 scheduling, with its private runtime bundled.
@@ -141,7 +226,7 @@ native executable's process time.
 ```sh
 FOSU_BUNDLE_RUNTIME=1 python -m pip install -e '.[test]'
 taskset -c 5 python bench/python_compare.py /path/to/corpus --reps 5
-python bench/python_verify.py build/master_reference /path/to/corpus
+python bench/python_verify.py build/oneshot_reference /path/to/corpus
 
 # Extract each wheel into its own directory, with cffi installed in the driver.
 taskset -c 5 python bench/python_first_compare.py /path/to/corpus \
@@ -159,46 +244,74 @@ cover buffer inputs, lazy views, section selection, Unicode and embedded NULs,
 errors, threading, scalar selection and ownership through NumPy view chains.
 Installed wheels are tested on CPython 3.10 and 3.14 on Linux and Apple Silicon.
 
-## Reproduce exact equality
+## Verification and regression comparison
 
-Use the same compiler ISA for reference and candidate: disabling SIMD changes
-fast/slow path counters even when parsed values agree. `oneshot/dump.hpp`
-serializes every logical field and pool index, raw string bytes and floating
-bits, including unreferenced points and all counters. The standalone writer
-is independent of that serializer. The Python decoder additionally validates
-record framing, counts and complete non-overlapping point-pool coverage.
+`oneshot/dump.hpp` serializes every logical field and pool index, raw string
+bytes and float bits, including unreferenced points and all counters. The
+standalone writer is independent of that serializer. Its Python decoder also
+checks framing, counts and non-overlapping point-pool coverage. Same-version
+representations must agree exactly; an old release is a regression baseline
+whose intentional corrections require separate accounting.
 
 ```sh
 make test test-c-api oneshot build/c_api_reference CXX=g++
-
-# Export the independently selected reference; this does not change checkout.
-mkdir -p build/master
-# 4100573 is the master revision used for the published evaluation.
-git archive 4100573 include | tar -x -C build/master
-g++ -std=c++20 -O3 -march=x86-64-v3 -Ibuild/master/include \
-  bench/oneshot_reference.cpp -o build/master_reference
-
-python3 tests/test_oneshot.py build/master_reference \
-  build/fosu_oneshot build/oneshot_reference build/c_api_reference
+make test-sanitize fuzz-smoke CXX=clang++
+python3 tests/test_oneshot.py build/oneshot_reference \
+  build/fosu_oneshot build/c_api_reference
 python3 tests/test_oneshot_limits.py build/fosu_oneshot
-
-for candidate in build/fosu_oneshot build/oneshot_reference build/c_api_reference; do
-  python3 bench/oneshot_verify.py build/master_reference "$candidate" \
+for candidate in build/fosu_oneshot build/c_api_reference; do
+  python3 bench/oneshot_verify.py build/oneshot_reference "$candidate" \
     /path/to/corpus --expected-files 10000
 done
+python3 bench/python_verify.py build/oneshot_reference /path/to/corpus
 ```
 
-All three comparisons pass on the complete evaluation set, with canonical
-SHA-256 `1205239dba452b50055eaebaf42457c9bab1d09f5a78f66067169f14775352d6`.
-The digest includes sorted filenames and output bytes. The test suite also
-covers scalar/AVX2 equivalence, timing geometry fuzzing, reuse, selective
-parsing, empty input, page-edge padding, wide coordinates, saturated times,
-legacy timing growth, orphan indices, embedded `TRLR` bytes, multi-flush output,
-large trailers, missing files and explicit standalone capacity exits. C ABI
-tests cover borrowed-view lifetimes, default strings, padding, field equality,
-self-buffer input, errors, successful file reads and independent handles.
-Native Apple Silicon, Rosetta AVX2 and Linux tests pass; the CFFI/NumPy example
-has been built and run on macOS and Linux.
+For a previous release, export its **whole tree** into a separate directory
+and build its own reference/serializer there. Do not compile today's serializer
+against old record declarations. The cross-format comparison widens v4 integer
+timestamps to v5 doubles, but still compares all other float bits and fields:
+
+```sh
+mkdir -p build/previous
+# Replace the revision with the release being evaluated.
+git archive 33aa2c0 | tar -x -C build/previous
+make -C build/previous oneshot CXX=g++
+python3 bench/oneshot_verify.py build/previous/build/oneshot_reference \
+  build/oneshot_reference /path/to/corpus --previous-format \
+  --report build/regression-differences.json
+```
+
+The command returns failure if differences exist, and the optional report
+collects all affected files. Do not erase discrepancies by rounding floats or
+omitting fields. [Compatibility](compatibility.md) documents the independent
+references and intentional numeric behavior. Keep detailed corpus reports on
+the corpus host; publish aggregate results without private maps or play data.
+
+To compare scalar and SIMD fields under sanitizers on a broader local corpus:
+
+```sh
+clang++ -std=c++20 -O1 -g -Iinclude -mavx2 -mbmi -mbmi2 \
+  -fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=all \
+  tests/validate_corpus.cpp -ldl -o build/validate_corpus
+build/validate_corpus /path/to/maps
+```
+
+An optional independently converted numeric reference uses libc `strtod` over
+bounded copies. It retains the framing/storage code, so it isolates numeric
+conversion correctness rather than validating the entire format independently:
+
+```sh
+clang++ -std=c++20 -O1 -g -Iinclude -fPIC -fvisibility=hidden -shared \
+  -fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=all \
+  bench/numeric_oracle.cpp -o build/numeric_oracle.so
+build/validate_corpus /path/to/maps ./build/numeric_oracle.so
+```
+
+This compares every serialized field except fast/slow path counters, which
+necessarily differ. It checks two output representations and reports malformed
+record counts. `fuzz-smoke` starts with synthetic numeric/format seeds and
+mutates full files plus forced timing/hitobject sections. The native CI job
+runs these checks independently of wheel installation tests.
 
 ## Process benchmark
 
@@ -206,7 +319,7 @@ has been built and run on macOS and Linux.
 make oneshot CXX=g++
 sh oneshot/build.sh build/fosu_oneshot_4k -DABLATE_NO_MADVISE
 taskset -c 5 build/oneshot_process /path/to/corpus 0 3 \
-  build/master_reference build/fosu_oneshot build/fosu_oneshot_4k > build/process.csv
+  build/previous/build/fosu_oneshot build/fosu_oneshot build/fosu_oneshot_4k > build/process.csv
 python3 bench/oneshot_summary.py build/process.csv
 ```
 
@@ -216,7 +329,7 @@ candidates must accept a single input path and exit successfully. The `_4k`
 variant omits the huge-page request; it does not modify host settings. See
 [one-shot setup](../oneshot/README.md) for the optional multi-size THP policy.
 
-The master reference emits the same complete stream, but its growing
+The hosted reference emits the same complete stream, but its growing
 `std::string` serializer is intentionally straightforward. Its output cost is
 not a lower bound on native result delivery. Older parse-and-exit numbers
 without output and older stream versions do different work and should be

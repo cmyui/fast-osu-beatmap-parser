@@ -46,26 +46,24 @@ template <typename H>
 inline int scalar_parse_prefix(const char* line, size_t len, H& h) {
     const char* p = line;
     const char* end = line + len;
-    int64_t v[5];
-    for (int i = 0; i < 5; ++i) {
-        const char* q = parse_i64(p, end, v[i]);
-        if (q == p) return -1;
-        p = q;
-        if (p < end && *p == '.') {  // stable/lazer parse these as floats
-            ++p;
-            while (p < end && is_digit(*p)) ++p;
-        }
-        if (i < 4) {
-            if (p >= end || *p != ',') return -1;
-            ++p;
-        }
+    double values[3];
+    for (int i = 0; i < 3; ++i) {
+        const char* q = parse_double(p, end, values[i]);
+        if (q == p || q >= end || *q != ',') return -1;
+        p = q + 1;
     }
-    if (p < end && *p != ',') return -1;
-    h.x = clamp_i32(v[0]);
-    h.y = clamp_i32(v[1]);
-    h.time = clamp_i32(v[2]);
-    h.type = static_cast<uint32_t>(v[3]);
-    h.hitsound = static_cast<uint32_t>(v[4]);
+    int64_t type, sound;
+    const char* q = parse_i64(p, end, type);
+    if (q == p || q >= end || *q != ',') return -1;
+    p = q + 1;
+    q = parse_i64(p, end, sound);
+    if (q == p || (q < end && *q != ',')) return -1;
+    p = q;
+    h.x = clamp_coord(values[0]);
+    h.y = clamp_coord(values[1]);
+    h.time = clamp_time(values[2]);
+    h.type = static_cast<uint32_t>(type);
+    h.hitsound = static_cast<uint32_t>(sound);
     return static_cast<int>(p - line);
 }
 
@@ -210,47 +208,29 @@ inline int fast_parse_prefix(__m256i ascii, const char* line, H& h) {
 
     static_assert(offsetof(H, x) == 0 && offsetof(H, y) == 4 &&
                       offsetof(H, type) == 8 && offsetof(H, hitsound) == 12 &&
-                      offsetof(H, time) == 16 &&
-                      offsetof(H, end_time) == 20 &&
-                      offsetof(H, slider) == 24 &&
-                      sizeof(H) >= 32,
-                  "the fast path finishes the prefix with one 32-byte store");
-    if (p2 - p1 - 1 <= 8) {
-        // Real maps top out at 7 time digits (a 9-digit time is a 27h+
-        // timestamp), so the 1e8 word of `dwords` is zero and an 8-digit
-        // value cannot overflow int32. Time is finished in-vector —
-        // packus saturates the <=9999 dwords losslessly to words, one
-        // more madd pairs mid4*1e4+lo4 — and a single 32-byte store
-        // writes {x, y, type, hs=0, time, end_time=0, slider=kNoSlider,
-        // pad}: the result never crosses into GP registers and the
-        // overflow branch disappears (measured: -11% branch misses on the
-        // real-object workload from the freed predictor slot).
-        const __m256i packed = _mm256_packus_epi32(dwords, dwords);
-        const __m256i time_weights = _mm256_setr_epi16(
-            1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 10000, 1, 0, 0, 0, 0);
-        // combined dwords: [x, type, y, 0 | 0, time, 0, 0]
-        const __m256i combined = _mm256_madd_epi16(packed, time_weights);
-        const __m256i arrange = _mm256_setr_epi32(0, 2, 1, 3, 5, 3, 3, 3);
-        const __m256i arranged =
-            _mm256_permutevar8x32_epi32(combined, arrange);
-        const __m256i no_slider = _mm256_setr_epi32(0, 0, 0, 0, 0, 0, -1, 0);
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(&h),
-                            _mm256_blend_epi32(arranged, no_slider, 0x40));
+                      offsetof(H, time) == 16 && offsetof(H, end_time) == 24,
+                  "the fast path stores numeric fields directly");
+    _mm_storeu_si128(reinterpret_cast<__m128i*>(&h), _mm256_castsi256_si128(dwords));
+    const __m128i thi = _mm256_extracti128_si256(dwords, 1);
+    if (p2 - p1 <= 9) [[likely]] {
+        // Up to eight time digits fit in signed int32. Combine and widen in
+        // SIMD registers, then store {time, 0.0} without scalar extraction.
+        const __m128i packed = _mm_packus_epi32(thi, thi);
+        const __m128i combined = _mm_madd_epi16(
+            packed, _mm_setr_epi16(0, 0, 10000, 1, 0, 0, 0, 0));
+        const __m128i pair = _mm_shuffle_epi32(combined, _MM_SHUFFLE(0, 0, 0, 1));
+        _mm_storeu_pd(reinterpret_cast<double*>(reinterpret_cast<char*>(&h) + 16),
+                      _mm_cvtepi32_pd(pair));
     } else {
-        // 9-10 digit times: reassemble in GP registers with the overflow
-        // check. Callers re-initialize end_time/slider on rejection.
-        _mm_storeu_si128(reinterpret_cast<__m128i*>(&h),
-                         _mm256_castsi256_si128(dwords));
-        const __m128i thi = _mm256_extracti128_si256(dwords, 1);
         const uint64_t t =
             static_cast<uint32_t>(_mm_extract_epi32(thi, 1)) * 100000000ull +
             static_cast<uint32_t>(_mm_extract_epi32(thi, 2)) * 10000ull +
             static_cast<uint32_t>(_mm_extract_epi32(thi, 3));
         if (t > INT32_MAX) return -1;
-        h.time = static_cast<int32_t>(t);
+        h.time = static_cast<double>(t);
         h.end_time = 0;
-        h.slider = H::kNoSlider;
     }
+    h.slider = H::kNoSlider;
 
     const auto d1 = static_cast<uint8_t>(line[p3 + 1] - '0');
     if (d1 > 9) return -1;

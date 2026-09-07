@@ -15,8 +15,8 @@ struct HitObject {
     int32_t y;
     uint32_t type;
     uint32_t hitsound;
-    int32_t time;
-    int32_t end_time;      // spinners and mania holds; 0 otherwise
+    double time;
+    double end_time;      // spinners and mania holds; 0 otherwise
     uint32_t slider;       // index into Beatmap::sliders, or kNoSlider
     std::string_view hit_sample;
 
@@ -24,7 +24,7 @@ struct HitObject {
 
     // Tag construction that skips value-init: the parser writes every
     // field on both the fast and fallback paths, so emplace_back()'s
-    // 48-byte zero-fill per object is pure waste (measured in the
+    // 56-byte zero-fill per object is pure waste (measured in the
     // disassembly audit). HitObject{} still zero-initializes.
     struct uninit_t {};
     HitObject() = default;
@@ -78,8 +78,8 @@ struct TimingPoint {
 };
 
 struct Break {
-    int32_t start;
-    int32_t end;
+    double start;
+    double end;
 };
 
 struct ParseStats {

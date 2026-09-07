@@ -16,15 +16,14 @@
 #include <cstdint>
 
 #include "runtime.hpp"
+#define FASTFLOAT_ASSERT(x) ((void)0)
+#define FASTFLOAT_DEBUG_ASSERT(x) ((void)0)
 #include <fosu/detail/prefix.hpp>
 #include <fosu/detail/timing.hpp>
 #include <fosu/detail/slider.hpp>
 #include <fosu/detail/metadata.hpp>
 #include <fosu/detail/sections.hpp>
-
-#define FASTFLOAT_ASSERT(x) ((void)0)
-#define FASTFLOAT_DEBUG_ASSERT(x) ((void)0)
-#include "third_party/fast_float.h"
+#include <fosu/detail/section_names.hpp>
 
 namespace {
 
@@ -68,7 +67,7 @@ inline void put_i64(i64 v);
 inline void put_f64(double v);
 inline void put_str(sv s);
 
-// Shared numeric kernels; the executable supplies its freestanding fallback.
+// Shared bounded numeric kernels.
 using fosu::detail::load_u32_le;
 using fosu::detail::load_u64_le;
 using fosu::detail::digit_run8;
@@ -82,24 +81,15 @@ using fosu::detail::clamp_i32;
 using fosu::detail::kPow10;
 using fosu::detail::kPow10u;
 
-// strtod replacement for the rare general case (>18 digits or exponent):
-// fast_float is correctly rounded like glibc's strtod, so results agree.
-inline const char* strtod_like(const char* start, const char* end, double& out) {
-    const auto r = fast_float::from_chars(start, end, out);
-    if (r.ec != std::errc()) { out = 0; return start; }
-    return r.ptr;
-}
+using fosu::detail::parse_double;
+using fosu::detail::clamp_time;
 
-inline const char* parse_double(const char* p, const char* end, double& out) {
-    return fosu::detail::parse_double_impl<strtod_like>(p, end, out);
-}
-
-// Both output representations use the library's prefix kernel. The first
-// 32 bytes have the same numeric layout; the last word is the sample length.
-struct HO {
+// Both output representations use the library's prefix kernel. Numeric fields
+// have the library layout; the final word is the sample length.
+struct __attribute__((packed)) HO {
     i32 x, y;
     u32 type, hitsound;
-    i32 time, end_time;
+    double time, end_time;
     u32 slider, hs_len;
     static constexpr u32 kNoSlider = 0xFFFFFFFF;
 };
@@ -117,7 +107,7 @@ struct __attribute__((packed)) TPRec {
     u32 effects;
 };
 static_assert(sizeof(TPRec) == 37);
-struct Break { i32 start, end; };
+struct Break { double start, end; };
 
 struct State : fosu::BeatmapHeader {
     u32 malformed_lines = 0, storyboard_lines = 0, fast_path_lines = 0, slow_path_lines = 0;
@@ -182,9 +172,9 @@ void flush() {
 // Guarantees n contiguous bytes at g_out (a record is written after one
 // ensure, so a flush never splits it).
 inline void ensure(size_t n) {
-    if (__builtin_expect(g_out + n > g_out_end, 0)) {
+    if (__builtin_expect(n > static_cast<size_t>(g_out_end - g_out), 0)) {
         flush();
-        if (g_out + n > g_out_end) {
+        if (n > static_cast<size_t>(g_out_end - g_out)) {
             const size_t len = (n + (1u << 20) + 4095) & ~size_t(4095);
             g_out_begin = g_out = static_cast<char*>(rt::mmap(nullptr, len, 3, 0x22));
             if (reinterpret_cast<uintptr_t>(g_out_begin) >= uintptr_t(-4095)) rt::exit(1);
@@ -212,7 +202,7 @@ using fosu::detail::kMetadata;
 using fosu::detail::kDifficulty;
 template <size_t N>
 inline void parse_kv_line(const fosu::detail::KvEntry (&table)[N], const char* p, size_t len) {
-    S.ar_specified |= fosu::detail::parse_kv_line<parse_double>(S, table, p, len);
+    S.ar_specified |= fosu::detail::parse_kv_line<parse_double>(S, table, p, len, &S.malformed_lines);
 }
 
 inline sv strip_quotes(sv v) {
@@ -241,11 +231,11 @@ void parse_event_line(const char* p, size_t len) {
     } else if (sv_eq(f0, "2") || sv_eq(f0, "Break")) {
         double start, stop;
         const char* q = parse_double(rest, end, start);
-        if (q == rest || q >= end || *q != ',') return;
+        if (q == rest || q >= end || *q != ',') { ++S.malformed_lines; return; }
         const char* r = parse_double(q + 1, end, stop);
-        if (r == q + 1) return;
+        if (r == q + 1 || r != end) { ++S.malformed_lines; return; }
         if (g->n_breaks == kBreaksInline + (1u << 15)) rt::exit(6);
-        break_at(g->n_breaks++) = {clamp_i32(static_cast<i64>(start)), clamp_i32(static_cast<i64>(stop))};
+        break_at(g->n_breaks++) = {clamp_time(start), clamp_time(stop)};
     } else {
         ++S.storyboard_lines;
     }
@@ -292,32 +282,9 @@ inline TPRec& tp_slot() {
 inline void tp_commit() { S.tp_out += sizeof(TPRec); ++S.tp_blocks[S.n_tp_blocks - 1].n; }
 
 void parse_timing_point_line(const char* p, size_t len) {
-    const char* end = p + len;
     TPRec& tp = tp_slot();
-    double time, beat_length;
-    const char* q = parse_double(p, end, time);
-    if (q == p) { ++S.malformed_lines; return; }
-    p = q;
-    if (p >= end || *p != ',') { ++S.malformed_lines; return; }
-    q = parse_double(++p, end, beat_length);
-    if (q == p) { ++S.malformed_lines; return; }
-    p = q;
-    tp.time = time;
-    tp.beat_length = beat_length;
-    i64 rest[6] = {4, 0, 0, 100, 1, 0};
-    for (auto& field : rest) {
-        if (p >= end || *p != ',') break;
-        q = parse_i64(++p, end, field);
-        if (q == p) break;
-        p = q;
-    }
-    tp.meter = clamp_i32(rest[0]);
-    tp.sample_set = clamp_i32(rest[1]);
-    tp.sample_index = clamp_i32(rest[2]);
-    tp.volume = clamp_i32(rest[3]);
-    tp.uninherited = rest[4] != 0;
-    tp.effects = static_cast<u32>(rest[5]);
-    tp_commit();
+    if (fosu::detail::parse_timing_fields(p, p + len, tp)) tp_commit();
+    else ++S.malformed_lines;
 }
 
 using fosu::detail::TpGeom;
@@ -383,6 +350,7 @@ const char* parse_timing_points_section(const char* p, const char* file_end) {
             len = static_cast<size_t>(le - p) - (le > p && le[-1] == '\r');
             next_line = m ? m + 1 : file_end;
         }
+        if (len >= 2 && c == '/' && p[1] == '/') { p = next_line; continue; }
         if (len <= 64 && len >= 15) [[likely]] {
             const u64 line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
             const u64 commas = (comma_mask32(a) | static_cast<u64>(comma_mask32(b)) << 32) & line_mask;
@@ -414,7 +382,7 @@ using fosu::detail::parse_coord;
 using fosu::detail::parse_slider_length;
 using fosu::detail::parse_slider_points;
 
-struct Pt { i32 x, y; };
+struct __attribute__((packed)) Pt { i32 x, y; };
 
 // The library leaves a failed slider line's points in its pool once the
 // point loop has finished; they are part of the output (trailer).
@@ -453,14 +421,22 @@ bool parse_slider_params(const char* p, const char* end, sv& hs) {
     if (p >= end || *p != ',') { keep_orphans(w0, npts); return false; }
     ++p;
     const u32 srun = digit_run8(p);
-    if (srun - 1 > 6) { keep_orphans(w0, npts); return false; }
-    const auto slides = static_cast<i32>(swar_parse_u64(p, srun));
-    p += srun;
+    i32 slides;
+    if (srun - 1 <= 6) {
+        slides = static_cast<i32>(swar_parse_u64(p, srun));
+        p += srun;
+    } else {
+        i64 value;
+        const char* next = parse_i64(p, end, value);
+        if (next == p) { keep_orphans(w0, npts); return false; }
+        slides = clamp_i32(value);
+        p = next;
+    }
     if (p >= end || *p != ',') { keep_orphans(w0, npts); return false; }
     double length;
     const char* q = parse_slider_length(p + 1, length);
     if (!q) q = parse_double(p + 1, end, length);
-    if (q == p + 1) { keep_orphans(w0, npts); return false; }
+    if (q == p + 1 || (q < end && *q != ',')) { keep_orphans(w0, npts); return false; }
     p = q;
     sv edge_sounds{}, edge_sets{};
     hs = {};
@@ -506,6 +482,7 @@ bool parse_slider_params(const char* p, const char* end, sv& hs) {
 // Everything after the prefix; appends the slider block (if any) and the
 // hit_sample bytes, sets h.slider / h.hs_len / h.end_time as the library.
 bool finish_hitobject(HO& h, const char* p, const char* end) {
+    if (p < end && *p != ',') return false;
     if (h.type & 2) {
         if (p >= end || *p != ',') return false;
         sv hs;
@@ -519,10 +496,10 @@ bool finish_hitobject(HO& h, const char* p, const char* end) {
     sv hs{};
     if (h.type & 8 || h.type & 128) {
         if (p >= end || *p != ',') return false;
-        i64 t;
-        const char* q = parse_i64(p + 1, end, t);
-        if (q == p + 1) return false;
-        h.end_time = clamp_i32(t);
+        double t;
+        const char* q = parse_double(p + 1, end, t);
+        if (q == p + 1 || (q < end && *q != ',' && *q != ':')) return false;
+        h.end_time = clamp_time(t);
         p = q;
         if ((h.type & 128) && p < end && *p == ':') ++p;
         else if (p < end && *p == ',') ++p;
@@ -593,19 +570,9 @@ const char* parse_events_section(const char* p, const char* file_end) {
 }
 
 // ---------------------------------------------------------------- sections / main loop
-enum class Section : u8 { None, General, Editor, Metadata, Difficulty, Events, TimingPoints, Colours, HitObjects, Unknown };
+using fosu::detail::Section;
 inline Section match_section(const char* p, size_t len) {
-    if (len < 3) return Section::Unknown;
-    switch (p[1]) {
-        case 'G': return Section::General;
-        case 'E': return p[2] == 'd' ? Section::Editor : Section::Events;
-        case 'M': return Section::Metadata;
-        case 'D': return Section::Difficulty;
-        case 'T': return Section::TimingPoints;
-        case 'C': return Section::Colours;
-        case 'H': return Section::HitObjects;
-        default: return Section::Unknown;
-    }
+    return fosu::detail::match_section({p, len});
 }
 inline const char* find_version_tag(const char* p, size_t len) {
     static constexpr char tag[] = "osu file format v";
@@ -622,6 +589,7 @@ void parse(const char* data, size_t size) {
     if (size >= 3 && static_cast<u8>(p[0]) == 0xEF && static_cast<u8>(p[1]) == 0xBB && static_cast<u8>(p[2]) == 0xBF) p += 3;
     Section sec = Section::None;
     while (p < file_end) {
+        if (*p == '\r' || *p == '\n') { ++p; continue; }
         const char* nl = static_cast<const char*>(memchr(p, '\n', file_end - p));
         const char* line_end = nl ? nl : file_end;
         if (line_end > p && line_end[-1] == '\r') --line_end;
@@ -651,7 +619,7 @@ void parse(const char* data, size_t size) {
             case Section::None: {
                 if (const char* vp = find_version_tag(p, len)) {
                     i64 ver;
-                    if (parse_i64(vp, line_end, ver) != vp) S.format_version = static_cast<int>(ver);
+                    if (parse_i64(vp, line_end, ver) != vp) S.format_version = clamp_i32(ver);
                 }
                 break;
             }
@@ -678,7 +646,7 @@ void emit_trailer() {
     const size_t need = 4 + 12 + 4 + 8 * 6 + 4 * 6 + 8 * 16 + 8 * 2 + 64 +
                         S.audio_filename.size() + S.sample_set.size() + S.overlay_position.size() + S.skin_preference.size() + S.bookmarks.size() +
                         S.title.size() + S.title_unicode.size() + S.artist.size() + S.artist_unicode.size() + S.creator.size() + S.version.size() +
-                        S.source.size() + S.tags.size() + S.background.size() + S.video.size() + 4 + 8 * g->n_breaks + 4 + 4 * g->n_colours + 4 +
+                        S.source.size() + S.tags.size() + S.background.size() + S.video.size() + 4 + 16 * g->n_breaks + 4 + 4 * g->n_colours + 4 +
                         tp_bytes + 8 + 22 * 4 + 20 + size_t(S.n_orphans) * 12;
     ensure(need);
     const char* trailer_begin = g_out;
@@ -727,7 +695,7 @@ void emit_trailer() {
     put_str(S.background);
     put_str(S.video);
     put_u32(g->n_breaks);
-    for (u32 i = 0; i < g->n_breaks; ++i) { put_i32(break_at(i).start); put_i32(break_at(i).end); }
+    for (u32 i = 0; i < g->n_breaks; ++i) { put_f64(break_at(i).start); put_f64(break_at(i).end); }
     put_u32(g->n_colours);
     for (u32 i = 0; i < g->n_colours; ++i) put_u32(colour_at(i));
     u32 ntp = 0;
@@ -774,7 +742,7 @@ constexpr uintptr_t kArenaBaseFar = 0x100000000000ull;
     const long ssize = rt::fstat_size(static_cast<int>(fd));
     if (ssize < 0) rt::exit(1);
     const auto size = static_cast<size_t>(ssize);
-    if (size > UINT32_MAX - 128u) rt::exit(6);
+    if (size > 64u * 1024u * 1024u) rt::exit(6);
     const size_t est = size + 128 + size + size / 4 + size / 8 + 8192;
     size_t offset = 64u << 10;
     while (offset < est && offset < (1u << 20)) offset <<= 1;
@@ -815,7 +783,7 @@ constexpr uintptr_t kArenaBaseFar = 0x100000000000ull;
 #ifdef ABLATE_AFTER_READ
     rt::exit(0);
 #endif
-    put_raw("FOSUDMP4", 8);
+    put_raw("FOSUDMP5", 8);
     parse(arena, got);
     emit_trailer();
 #ifdef ABLATE_NO_WRITE

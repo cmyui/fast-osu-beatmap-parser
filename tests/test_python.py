@@ -123,7 +123,7 @@ def test_numpy_buffers_and_lifetimes():
         owner = weakref.ref(bm._owner)
         array = bm.hit_objects.to_numpy()
         assert array["time"].tolist() == [x.time for x in bm.hit_objects]
-        assert array.dtype.itemsize == 40
+        assert array.dtype.itemsize == 48
         assert array["slider_index"][0] == fosu.NO_SLIDER
         sample = array["hit_sample"][0]
         assert bytes(bm.text[int(sample["offset"]):int(sample["offset"] + sample["length"])]) == b"0:0:0:0:"
@@ -246,3 +246,36 @@ def test_stubs_cover_the_public_properties():
         properties = {n for n, v in vars(cls).items() if isinstance(v, property)}
         declared = {n.name for n in classes[name].body if isinstance(n, ast.FunctionDef)}
         assert properties <= declared, (name, properties - declared)
+
+
+def test_fractional_times_and_malformed_numeric_fields():
+    import math
+    bm = fosu.parse(
+        b'[Metadata]\nTitle:ok\nTitlX:no\n[MetadataFake]\nTitle:no\n'
+        b'[Difficulty]\nApproachRate:1e309\n'
+        b'[TimingPoints]\n0,500\n1,NaN,4,2,1,100,0,0\n2,NaN,4,2,1,100,1,0\n'
+        b'[HitObjects]\n256.5,192,1000.5,1,0\n1,2,2000.25,8,0,3000.75\n'
+        b'1,2,4000.5,128,0,5000.75:0:0:0:0:\n'
+        b'1,2,6000,2,0,B|1.5:2.5,1,2.5e2\n'
+        b'1,2,NaN,1,0\n1,2,3,1,0\x00junk\n'
+        b'[Events]\n2,1.25,9.75\n')
+    assert bm.title == 'ok' and bm.ar == 5
+    assert len(bm.timing_points) == 2
+    assert math.isnan(bm.timing_points[1].beat_length)
+    assert not bm.timing_points[1].uninherited
+    assert [h.time for h in bm.hit_objects] == [1000.5, 2000.25, 4000.5, 6000]
+    assert [h.end_time for h in bm.hit_objects] == [0, 3000.75, 5000.75, 0]
+    assert bm.hit_objects[0].x == 256
+    assert bm.sliders[0].length == 250
+    assert [(p.x, p.y) for p in bm.sliders[0].points] == [(1, 2)]
+    assert (bm.breaks[0].start, bm.breaks[0].end) == (1.25, 9.75)
+    assert bm.stats.malformed_lines == 4
+    assert bm.hit_objects.to_numpy()['time'].dtype.kind == 'f'
+
+
+def test_file_size_limit(tmp_path):
+    path = tmp_path / 'oversize.osu'
+    with path.open('wb') as f:
+        f.truncate(64 * 1024 * 1024 + 1)
+    with pytest.raises(ValueError):
+        fosu.parse_file(path)

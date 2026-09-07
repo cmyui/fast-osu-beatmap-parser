@@ -10,7 +10,8 @@
 #define FOSU_API
 #endif
 
-#define FOSU_ABI_VERSION 1
+#define FOSU_ABI_VERSION 2
+#define FOSU_MAX_INPUT_SIZE (64u * 1024u * 1024u)
 #define FOSU_NO_SLIDER 0xFFFFFFFFu
 
 // Offsets address the backing text returned by fosu_get_view. Empty strings
@@ -22,7 +23,7 @@ typedef struct fosu_string_ref {
 typedef struct fosu_hit_object {
     int32_t x, y;
     uint32_t type, hitsound;
-    int32_t time, end_time;
+    double time, end_time;
     uint32_t slider, reserved;
     fosu_string_ref hit_sample;
 #ifdef __cplusplus
@@ -66,7 +67,7 @@ typedef struct fosu_timing_point {
 #endif
 } fosu_timing_point;
 
-typedef struct fosu_break { int32_t start, end; } fosu_break;
+typedef struct fosu_break { double start, end; } fosu_break;
 
 typedef struct fosu_stats {
     uint32_t fast_path_lines, slow_path_lines, malformed_lines, storyboard_lines;
@@ -158,7 +159,8 @@ FOSU_API uint32_t fosu_abi_version(void);
 FOSU_API fosu_handle* fosu_new(void);
 FOSU_API void fosu_free(fosu_handle* handle);
 // Copies data into owned, padded storage. Capacity is reused across calls.
-// Input must be a valid editor-emitted beatmap smaller than 4 GiB minus 134 B.
+// Input is capped at FOSU_MAX_INPUT_SIZE bytes. Malformed records are counted
+// and skipped; unknown sections/keys are ignored. This is not a ranking validator.
 FOSU_API int fosu_parse(fosu_handle* handle, const char* data, size_t size, uint32_t sections);
 // On FOSU_IO_ERROR, errno identifies the failing operation (EIO for early EOF).
 FOSU_API int fosu_parse_file(fosu_handle* handle, const char* path, uint32_t sections);

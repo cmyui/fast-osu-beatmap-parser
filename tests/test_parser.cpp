@@ -288,53 +288,14 @@ static void test_malformed() {
     CHECK_EQ(bm.stats.malformed_lines, 5u);
 }
 
-// Reference: the pre-SWAR byte-loop parse_double, kept verbatim as the
-// behavioral baseline for <=18 significant digit inputs.
+// Independent numeric oracle: libc conversion over a bounded copy, rather
+// than a second copy of the parser's mantissa arithmetic.
 static const char* reference_parse_double(const char* p, const char* end,
                                           double& out) {
-    const char* start = p;
-    bool neg = false;
-    if (p < end && *p == '-') {
-        neg = true;
-        ++p;
-    }
-    uint64_t mant = 0;
-    int digits = 0;
-    int frac = 0;
-    bool any = false;
-    bool overflow = false;
-    while (p < end && fosu::detail::is_digit(*p)) {
-        any = true;
-        if (digits < 18) {
-            mant = mant * 10 + static_cast<uint64_t>(*p - '0');
-            ++digits;
-        } else {
-            overflow = true;
-        }
-        ++p;
-    }
-    if (p < end && *p == '.') {
-        ++p;
-        while (p < end && fosu::detail::is_digit(*p)) {
-            any = true;
-            if (digits < 18) {
-                mant = mant * 10 + static_cast<uint64_t>(*p - '0');
-                ++digits;
-                ++frac;
-            }
-            ++p;
-        }
-    }
-    if (!any) return start;
-    if (overflow || (p < end && (*p == 'e' || *p == 'E'))) {
-        char* e;
-        out = strtod(start, &e);
-        return e;
-    }
-    double v = static_cast<double>(mant);
-    if (frac) v /= fosu::detail::kPow10[frac];
-    out = neg ? -v : v;
-    return p;
+    std::string bounded(p, end);
+    char* next;
+    out = strtod(bounded.c_str(), &next);
+    return std::isfinite(out) ? p + (next - bounded.c_str()) : p;
 }
 
 static uint64_t rng_state = 0x243F6A8885A308D3ull;
@@ -346,9 +307,8 @@ static uint64_t rng() {
     return z ^ (z >> 31);
 }
 
-// Fuzz the SWAR parse_double against the byte-loop reference: results must
-// be bit-identical (identical mantissa accumulation) for <=16 significant
-// digits, and identical to strtod beyond that (both delegate).
+// Compare decimal conversion against libc, including significands that
+// require correct rounding rather than rounding an intermediate integer.
 static void test_fuzz_parse_double() {
     char buf[96];
     for (int iter = 0; iter < 300000; ++iter) {
@@ -380,7 +340,7 @@ static void test_fuzz_parse_double() {
             return;
         }
     }
-    // Long-mantissa inputs delegate to strtod and must match it exactly.
+    // The bounded fast_float fallback must agree with the independent libc result.
     const char* long_cases[] = {"342.857142857142857142857",
                                 "123456789012345678901", "0.6999999999999999556"};
     for (const char* c : long_cases) {

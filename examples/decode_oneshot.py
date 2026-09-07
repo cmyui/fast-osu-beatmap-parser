@@ -1,4 +1,4 @@
-"""Decode a FOSUDMP4 stream into Python values, including the complete point pool.
+"""Decode a FOSUDMP4/FOSUDMP5 stream into Python values, including the complete point pool.
 
     build/fosu_oneshot map.osu | python3 examples/decode_oneshot.py
 
@@ -37,8 +37,9 @@ class Reader:
 
 
 def decode(data):
-    if len(data) < 36 or data[:8] != b'FOSUDMP4':
-        raise ValueError('not a FOSUDMP4 stream')
+    if len(data) < 36 or data[:8] not in (b'FOSUDMP4', b'FOSUDMP5'):
+        raise ValueError('not a FOSUDMP4/FOSUDMP5 stream')
+    time_code = 'd' if data[:8] == b'FOSUDMP5' else 'i'
     trailer_size = struct.unpack('<Q', data[-8:])[0]
     start = len(data) - 8 - trailer_size
     if start < 8:
@@ -66,7 +67,7 @@ def decode(data):
     r.fields(m, 'q', 'beatmap_id beatmap_set_id')
     r.fields(m, 'd', 'hp cs od ar slider_multiplier slider_tick_rate')
     r.fields(m, 's', 'background video')
-    breaks = [struct.unpack('<ii', r.take(8)) for _ in range(r.value('I'))]
+    breaks = [(r.value(time_code), r.value(time_code)) for _ in range(r.value('I'))]
     colours = [r.value('I') for _ in range(r.value('I'))]
     timing = []
     for _ in range(r.value('I')):
@@ -96,7 +97,7 @@ def decode(data):
         h = {}
         r.fields(h, 'i', 'x y')
         r.fields(h, 'I', 'type hitsound')
-        r.fields(h, 'i', 'time end_time')
+        r.fields(h, time_code, 'time end_time')
         r.fields(h, 'I', 'slider')
         sample_size = r.value('I')
         if h['slider'] != 0xFFFFFFFF:

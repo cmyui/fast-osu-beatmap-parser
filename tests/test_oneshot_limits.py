@@ -16,4 +16,7 @@ with tempfile.TemporaryDirectory(prefix='fosu-limits-') as temp:
         path.write_bytes(data)
         result = subprocess.run([binary, str(path)], stdout=subprocess.DEVNULL)
         assert result.returncode == code, (len(data), code, result.returncode)
-print('Standalone timing-section, break and colour limits passed')
+    with path.open('wb') as f:
+        f.truncate(64 * 1024 * 1024 + 1)
+    assert subprocess.run([binary, str(path)], stdout=subprocess.DEVNULL).returncode == 6
+print('Standalone input, timing-section, break and colour limits passed')

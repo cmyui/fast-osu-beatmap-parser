@@ -22,7 +22,8 @@ struct fosu_handle {
 
 namespace {
 constexpr size_t kExtra = fosu::kBufferPadding + 6;  // "Normal" default sample set
-constexpr size_t kMaxInput = UINT32_MAX - kExtra;
+constexpr size_t kMaxInput = FOSU_MAX_INPUT_SIZE;
+static_assert(kMaxInput == fosu::kMaxInputSize);
 
 void reserve(fosu_handle& h, size_t size) {
     if (h.input.capacity < size + kExtra) {
@@ -120,7 +121,7 @@ extern "C" const fosu_view* fosu_get_view(const fosu_handle* h) {
 extern "C" int fosu_parse(fosu_handle* h, const char* data, size_t size, uint32_t sections) {
     if (!h) return FOSU_INVALID_ARGUMENT;
     h->valid = false;
-    if ((!data && size) || size > kMaxInput) return FOSU_INVALID_ARGUMENT;
+    if ((!data && size) || size > kMaxInput || (sections & ~FOSU_ALL)) return FOSU_INVALID_ARGUMENT;
     try {
         if (h->input.capacity < size + kExtra) {
             // Copy before releasing the old buffer: data may view that buffer.
@@ -139,7 +140,7 @@ extern "C" int fosu_parse(fosu_handle* h, const char* data, size_t size, uint32_
 extern "C" int fosu_parse_file(fosu_handle* h, const char* path, uint32_t sections) {
     if (!h) return FOSU_INVALID_ARGUMENT;
     h->valid = false;
-    if (!path) return FOSU_INVALID_ARGUMENT;
+    if (!path || (sections & ~FOSU_ALL)) return FOSU_INVALID_ARGUMENT;
     const int fd = open(path, O_RDONLY);
     if (fd < 0) return FOSU_IO_ERROR;
     struct stat st;

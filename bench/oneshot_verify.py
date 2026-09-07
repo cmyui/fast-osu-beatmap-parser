@@ -4,28 +4,68 @@ import hashlib
 import pathlib
 import subprocess
 import sys
+import struct
+import json
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "examples"))
+from decode_oneshot import decode
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("reference", type=pathlib.Path)
 parser.add_argument("candidate", type=pathlib.Path)
 parser.add_argument("corpus", type=pathlib.Path)
 parser.add_argument("--expected-files", type=int)
+parser.add_argument("--previous-format", action="store_true",
+                    help="compare v4/v5 fields, widening legacy integer timestamps to doubles")
+parser.add_argument("--report", type=pathlib.Path,
+                    help="collect all mismatches in a host-local report instead of stopping at the first")
 args = parser.parse_args()
 ref, candidate = str(args.reference.resolve()), str(args.candidate.resolve())
 files = sorted(args.corpus.glob("*.osu"))
 if not files or (args.expected_files is not None and len(files) != args.expected_files):
     parser.error(f"unexpected corpus size: {len(files)}")
 digest = hashlib.sha256()
+mismatches = []
+
+
+def canonical(data):
+    values = decode(data)
+    for h in values['hit_objects']:
+        h['time'], h['end_time'] = float(h['time']), float(h['end_time'])
+    values['breaks'] = [tuple(map(float, b)) for b in values['breaks']]
+
+    def bits(value):
+        if isinstance(value, float):
+            return ('float64', struct.pack('<d', value))
+        if isinstance(value, dict):
+            return {k: bits(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return tuple(bits(v) for v in value)
+        return value
+    return bits(values)
+
 for i, path in enumerate(files, 1):
     expected = subprocess.check_output([ref, str(path)])
     if not expected:
         raise RuntimeError(f"Reference emitted no values for {path.name}")
     actual = subprocess.check_output([candidate, str(path)])
-    if expected != actual:
+    equal = canonical(expected) == canonical(actual) if args.previous_format else expected == actual
+    if not equal:
         offset = next((i for i, (a, b) in enumerate(zip(expected, actual)) if a != b), min(len(expected), len(actual)))
         print('MISMATCH', path.name, 'offset', offset, 'lengths', len(expected), len(actual), flush=True)
-        sys.exit(1)
+        if args.report is None:
+            sys.exit(1)
+        a, b = canonical(expected), canonical(actual)
+        mismatches.append({'file': path.name,
+                           'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+                           'fields': [key for key in a if a[key] != b[key]]})
     digest.update(path.name.encode() + b'\0' + expected)
     if i % 2000 == 0:
         print('verified', i, flush=True)
-print('Exact equality:', len(files), 'files; all fields, string bytes, float bits, pool indices and stats; sha256', digest.hexdigest())
+if args.report:
+    args.report.write_text(json.dumps({'files': len(files), 'mismatches': mismatches,
+                                      'reference_sha256': digest.hexdigest()}, indent=2) + '\n')
+if mismatches:
+    print('Mismatches:', len(mismatches), 'of', len(files))
+    sys.exit(1)
+print('Exact field equality' if args.previous_format else 'Exact byte equality', len(files),
+      'files; string bytes, float bits, pool indices and stats; reference sha256', digest.hexdigest())

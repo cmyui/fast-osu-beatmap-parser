@@ -1,6 +1,6 @@
 # fosu — fast osu! beatmap parsing
 
-A C++20 parser for valid, editor-emitted `.osu` files. Its primary target is
+A C++20 parser for legacy `.osu` beatmap files. Its primary target is
 **one fresh Linux process → read one original beatmap → parse → write the complete
 result → exit**. It also provides a header-only C++ library and a small C ABI for
 in-process callers, plus an installable Python package backed by CFFI.
@@ -12,14 +12,13 @@ in-process callers, plus an installable Python package backed by CFFI.
 | [C API](docs/c-api.md) | Handle-owned input and contiguous arrays | C and other FFI callers |
 | [Python package](docs/python.md) | Owned `Beatmap` with named fields and records | Python apps; optional zero-copy NumPy arrays |
 
-The native representations are checked against master on a fixed corpus of **10,000
-ranked/approved maps, 402,593,897 bytes**. Equality includes strings, raw float
-bits, every pool entry and index, and all four parser counters. Addresses,
-allocation capacities and C++ padding are excluded. See
-[measurements and reproduction](docs/performance.md) for timing boundaries,
-compiler choices, exact verification and host configuration.
-Both Python entry points are also checked field by field against the native
-reference across that corpus.
+The native representations are checked on a fixed corpus of **10,000
+ranked/approved maps, 402,593,897 bytes**, and a broader cache corpus. Comparisons
+cover strings, raw float bits, every pool entry/index and parser counters.
+Prior releases are regression baselines; intentional correctness fixes are
+accounted for separately. See [compatibility](docs/compatibility.md) for the
+parsing contract and independent references, and
+[performance](docs/performance.md) for measured boundaries and reproduction.
 
 ```cpp
 #include <fosu/parser.hpp>
@@ -56,7 +55,7 @@ One AVX2 load classifies the hitobject prefix `x,y,time,type,hitSound` and
 finds its newline. Delimiter positions select a compile-time permutation and
 shuffle table; multiply-add instructions convert several fields together.
 The result lands directly in its final record. Unusual shapes take a scalar
-fallback, including signed or wide coordinates and saturating integer times.
+fallback, including signed/wide coordinates and fractional timestamps.
 
 Timing-point lines reuse their delimiter geometry within the current section.
 Slider points are written through a cursor, with vector/SWAR decimal conversion
@@ -81,11 +80,13 @@ missing ApproachRate defaults are handled. Hit samples and slider edge fields
 remain raw strings. Storyboard command bodies are counted and skipped;
 lazer's newer per-segment curve syntax is outside this parser's scope.
 
-The parser targets real beatmaps, not hostile-input validation. Fast paths use
-editor-format regularities and speculative reads; C++ byte buffers need **128
-readable zero bytes after the logical end**. File helpers and the C API supply
-that padding. A scalar build works without AVX2; the default Linux x86-64
-library target requires x86-64-v3, while the one-shot binary targets Zen 4.
+Malformed numeric records are skipped and counted; this is not a strict
+playability validator. Inputs are limited to 64 MiB. Fast paths use speculative
+reads; C++ byte buffers need **128 readable zero bytes after the logical end**.
+File helpers, the C API and Python supply that padding. See the
+[full input contract](docs/compatibility.md) before integrating a consumer.
+A scalar build works without AVX2; the default Linux x86-64 library target
+requires x86-64-v3, while the one-shot binary targets Zen 4.
 
 The project concept and original SIMD hitobject prototype are by
 [Flamme](https://github.com/infernalfire72). The implementation extends that

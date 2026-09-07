@@ -104,12 +104,18 @@ int main() {
     // A sparse file and a child-only address-space limit avoid touching RAM.
     char large_path[] = "/tmp/fosu-c-api-oom-XXXXXX";
     int large_fd = mkstemp(large_path);
-    assert(large_fd >= 0 && ftruncate(large_fd, 512ul << 20) == 0);
+    assert(large_fd >= 0 && ftruncate(large_fd, FOSU_MAX_INPUT_SIZE + 1ul) == 0);
+    auto* limited = fosu_new();
+    assert(limited);
+    assert(fosu_parse_file(limited, large_path, FOSU_ALL) == FOSU_INVALID_ARGUMENT);
+    assert(!fosu_get_view(limited));
+    fosu_free(limited);
+    assert(ftruncate(large_fd, FOSU_MAX_INPUT_SIZE) == 0);
     close(large_fd);
     pid_t child = fork();
     assert(child >= 0);
     if (child == 0) {
-        rlimit limit{128ul << 20, 128ul << 20};
+        rlimit limit{64ul << 20, 64ul << 20};
         if (setrlimit(RLIMIT_AS, &limit)) _exit(2);
         auto* own = fosu_new();
         if (!own || fosu_parse(own, map.data(), map.size(), FOSU_ALL) != FOSU_OK) _exit(3);

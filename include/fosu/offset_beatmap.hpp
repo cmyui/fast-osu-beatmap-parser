@@ -27,7 +27,7 @@ struct OffsetRecords {
     }
 };
 struct OffsetBeatmap : BasicBeatmap<OffsetRecords> {};
-static_assert(sizeof(fosu_hit_object) == 40 && sizeof(fosu_slider) == 40);
+static_assert(sizeof(fosu_hit_object) == 48 && sizeof(fosu_slider) == 40);
 static_assert(sizeof(fosu_point) == 8 && sizeof(fosu_timing_point) == 40);
 
 }  // namespace fosu

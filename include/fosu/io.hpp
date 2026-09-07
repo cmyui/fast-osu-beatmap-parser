@@ -4,18 +4,22 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cstdint>
 #include <cstring>
+#include <cerrno>
+#include <stdexcept>
 #include <memory>
 #include <string_view>
 
 namespace fosu {
 
 // The parser requires kBufferPadding readable zero bytes past the end of
-// the input so vector loads, speculative SWAR reads, and strtod never run
+// the input so vector loads and speculative SWAR reads never run
 // off the buffer. 128 bounds the worst-case speculative read of the
 // one-pass timing point parser on garbage input (~90 bytes past a line
 // start near EOF).
 inline constexpr size_t kBufferPadding = 128;
+inline constexpr size_t kMaxInputSize = 64u * 1024u * 1024u;
 
 struct FileBuffer {
     std::unique_ptr<char[]> data;
@@ -34,25 +38,36 @@ struct FileBuffer {
 // padding needs zeroing. mmap measured 13% slower end-to-end than read()
 // on the real-map corpus: per-file munmap alone costs about as much as
 // the entire read copy, plus soft page faults during the parse.
-// Returns false when the file cannot be opened or sized.
+// Returns false on an I/O error or an input larger than kMaxInputSize.
 inline bool read_into(const char* path, FileBuffer& buf) {
     buf.size = 0;
     const int fd = open(path, O_RDONLY);
     if (fd < 0) return false;
     struct stat st;
-    if (fstat(fd, &st) != 0 || st.st_size < 0) {
+    const int stat_result = fstat(fd, &st);
+    if (stat_result != 0 || st.st_size < 0) {
+        const int error = stat_result ? errno : EIO;
         close(fd);
+        errno = error;
         return false;
+    }
+    if (static_cast<uint64_t>(st.st_size) > kMaxInputSize) {
+        close(fd); errno = EFBIG; return false;
     }
     const size_t len = static_cast<size_t>(st.st_size);
     if (buf.capacity < len + kBufferPadding) {
-        buf.data.reset(new char[len + kBufferPadding]);  // default-init: no memset
+        try { buf.data.reset(new char[len + kBufferPadding]); }
+        catch (...) { close(fd); throw; }
         buf.capacity = len + kBufferPadding;
     }
     size_t got = 0;
     while (got < len) {
         const ssize_t r = read(fd, buf.data.get() + got, len - got);
-        if (r <= 0) break;
+        if (r < 0 && errno == EINTR) continue;
+        if (r <= 0) {
+            const int error = r < 0 ? errno : EIO;
+            close(fd); errno = error; return false;
+        }
         got += static_cast<size_t>(r);
     }
     close(fd);
@@ -63,16 +78,17 @@ inline bool read_into(const char* path, FileBuffer& buf) {
 
 inline FileBuffer read_file_padded(const char* path) {
     FileBuffer buf;
-    read_into(path, buf);
+    if (!read_into(path, buf)) return {};
     return buf;
 }
 
 // For tests/benchmarks: copy an in-memory string into a padded buffer.
 inline FileBuffer make_padded(std::string_view content) {
+    if (content.size() > kMaxInputSize) throw std::length_error("beatmap input exceeds 64 MiB");
     FileBuffer buf;
     buf.data.reset(new char[content.size() + kBufferPadding]);
     buf.capacity = content.size() + kBufferPadding;
-    memcpy(buf.data.get(), content.data(), content.size());
+    if (!content.empty()) memcpy(buf.data.get(), content.data(), content.size());
     memset(buf.data.get() + content.size(), 0, kBufferPadding);
     buf.size = content.size();
     return buf;

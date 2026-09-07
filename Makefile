@@ -20,7 +20,7 @@ X86_RUN = arch -x86_64
 endif
 endif
 
-HEADERS = $(wildcard include/fosu/*.hpp include/fosu/detail/*.hpp include/fosu/*.h)
+HEADERS = $(wildcard include/fosu/*.hpp include/fosu/detail/*.hpp include/fosu/detail/*.h include/fosu/*.h)
 
 all: test bench
 
@@ -44,9 +44,28 @@ build/bench_x86: bench/bench.cpp $(HEADERS) | build
 build/coldstart_x86: bench/coldstart.cpp $(HEADERS) | build
 	$(CXX) $(CXXFLAGS) $(X86_FLAGS) $< -o $@
 
-test: build/test_native build/test_x86
+build/test_hardening: tests/test_hardening.cpp oneshot/dump.hpp $(HEADERS) | build
+	$(CXX) $(CXXFLAGS) $(LIB_ARCH_FLAGS) $< -o $@
+
+test: build/test_native build/test_x86 build/test_hardening
 	./build/test_native
 	$(X86_RUN) ./build/test_x86
+	./build/test_hardening
+
+SANITIZERS = -fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=all
+build/test_sanitize: tests/test_hardening.cpp oneshot/dump.hpp $(HEADERS) | build
+	$(CXX) -std=c++20 -O1 -g -Iinclude $(LIB_ARCH_FLAGS) $(SANITIZERS) $< -o $@
+
+test-sanitize: build/test_sanitize
+	./build/test_sanitize
+
+build/fuzz_parser: tests/fuzz_parser.cpp oneshot/dump.hpp $(HEADERS) | build
+	$(CXX) -std=c++20 -O1 -g -Iinclude $(LIB_ARCH_FLAGS) $(SANITIZERS) -fsanitize=fuzzer $< -o $@
+
+fuzz-smoke: build/fuzz_parser
+	mkdir -p build/fuzz-corpus
+	cp tests/fuzz-seeds/*.osu build/fuzz-corpus/
+	./build/fuzz_parser build/fuzz-corpus -dict=tests/parser.dict -max_total_time=60 -max_len=65536 -artifact_prefix=build/
 
 bench: build/bench_native build/bench_x86
 	$(X86_RUN) ./build/bench_x86 $(BENCH_ARGS)
@@ -69,7 +88,7 @@ bench-pgo: | build
 # are confined to this target; library callers choose their own flags.
 ONESHOT_CXX ?= g++
 
-build/fosu_oneshot: oneshot/main.cpp oneshot/runtime.hpp oneshot/third_party/fast_float.h $(HEADERS) | build
+build/fosu_oneshot: oneshot/main.cpp oneshot/runtime.hpp include/fosu/detail/fast_float.h $(HEADERS) | build
 	CXX=$(ONESHOT_CXX) sh oneshot/build.sh $@
 
 build/oneshot_reference: bench/oneshot_reference.cpp oneshot/dump.hpp $(HEADERS) | build
@@ -142,4 +161,4 @@ cffi: lib
 clean:
 	rm -rf build
 
-.PHONY: all test bench bench-native bench-pgo coldstart oneshot lib test-c-api cffi clean
+.PHONY: all test test-sanitize fuzz-smoke bench bench-native bench-pgo coldstart oneshot lib test-c-api cffi clean

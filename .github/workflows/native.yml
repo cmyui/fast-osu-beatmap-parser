@@ -1,0 +1,20 @@
+name: Native parser checks
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: make CXX=g++ test test-c-api
+      - run: make CXX=clang++ test-sanitize fuzz-smoke
