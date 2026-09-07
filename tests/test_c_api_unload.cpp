@@ -45,7 +45,9 @@ bool mapped(uintptr_t address) {
 #else
     unsigned char residency;
     errno = 0;
-    int result = mincore(reinterpret_cast<void*>(address),
+    const auto page_size = static_cast<uintptr_t>(getpagesize());
+    const auto page = address & ~(page_size - 1);
+    int result = mincore(reinterpret_cast<void*>(page),
                          static_cast<size_t>(getpagesize()), &residency);
     require(result == 0 || errno == ENOMEM, "mincore failed unexpectedly");
     return result == 0;
