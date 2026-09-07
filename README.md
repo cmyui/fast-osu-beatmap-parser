@@ -144,15 +144,15 @@ All numbers come from real ranked beatmaps. Three corpora, three roles:
 |---|---|---|---|---|---|
 | historical (`bench/fetch_corpus.sh`) | 17 | 0.82 MB | 17,902 | `e7f15a16a8370431` | continuity anchor — every number ever reported |
 | popular (`bench/fetch_corpus_large.sh`) | 167 | 3.86 MB | 70,732 | `c16c5c00b51eaa2e` | most-played ranked sets, census + validation |
-| production | 10,011 | 438 MB | 8,730,940 | `272b2f66dcd5f90a` | ranked maps by a private server's playcounts (contains play data, not distributed) — the adjudicator |
+| production | 10,000 | 403 MB | 8,070,196 | `31999b0f474ecd4a` | the 10,000 most-played ranked/approved maps on a private server (contains play data, not distributed; rebuilt September 2026 from its object store, so the July set's `272b2f66dcd5f90a` is superseded) — the adjudicator |
 
 The historical corpus: The Unforgiving (13-diff 2012 marathon album,
 ~500 timing points per diff), Freedom Dive, The Big Black, Blue Zenith,
 and Disco Prince (the first ranked map, 2007); 100% fast-path, zero
 malformed lines. Best of 9 runs, single thread; `make bench
 BENCH_ARGS=bench/corpus` reproduces. The production corpus parses at
-~1.4–1.5 GB/s fresh even though 438 MB cannot fit in L3 — the parser
-streams from DRAM without becoming memory-bound.
+1517 MB/s fresh / 1563 reuse / 924 scalar even though 403 MB cannot fit
+in L3 — the parser streams from DRAM without becoming memory-bound.
 
 ### AMD EPYC Genoa (Zen 4), Ubuntu 24.04, gcc 13.3
 
@@ -353,7 +353,9 @@ popular corpus, Zen 4 VM:
 | first parse in a fresh process | 41 | 560 | 12.3 |
 | best of 8 further parses, same process | 13 | 1650 | 0 |
 
-Three times slower, and the gap is not the parser's code. Controlled
+(On the production corpus, whose files average 40 KB: 64.6 µs/file cold
+at 19.4 faults vs 22.0 µs warm, 2.9×.) Three times slower, and the gap
+is not the parser's code. Controlled
 experiments (`FOSU_COLD_MODE=prefault,warmcode,ptable,pcode`, measured
 before the September changes, 46.8 µs total) decompose it:
 
