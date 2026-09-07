@@ -35,17 +35,17 @@ __attribute__((noinline))
 inline bool parse_slider(Sink& sink, typename Sink::HitObject& h, const char* p,
                          const char* end, const HitConsts& k) {
     using Point = typename Sink::Point;
-    if (p >= end) return false;
+    if (p >= end) [[unlikely]] return false;
     const char curve_type = *p++;
     // A point costs at least four bytes ("|x:y"), which bounds the count;
     // the pair fast path also needs a second slot.
     Point* const w0 = sink.point_slot(static_cast<size_t>(end - p) / 4 + 2);
     Point* w = w0;
-    if (!parse_slider_points(p, end, w, k)) {
+    if (!parse_slider_points(p, end, w, k)) [[unlikely]] {
         sink.slider_rollback(w0, w, false);
         return false;
     }
-    if (p >= end || *p != ',') {
+    if (p >= end || *p != ',') [[unlikely]] {
         sink.slider_rollback(w0, w, true);
         return false;
     }
@@ -68,7 +68,7 @@ inline bool parse_slider(Sink& sink, typename Sink::HitObject& h, const char* p,
         } else {
             int64_t wide;
             const char* next = parse_osu_int(p, end, wide);
-            if (next == p) {
+            if (next == p) [[unlikely]] {
                 sink.slider_rollback(w0, w, true);
                 return false;
             }
@@ -76,7 +76,7 @@ inline bool parse_slider(Sink& sink, typename Sink::HitObject& h, const char* p,
             p = next;
         }
     }
-    if (slides > 9000 || (p < end && *p != ',')) {
+    if (slides > 9000 || (p < end && *p != ',')) [[unlikely]] {
         sink.slider_rollback(w0, w, true);
         return false;
     }
@@ -90,7 +90,7 @@ inline bool parse_slider(Sink& sink, typename Sink::HitObject& h, const char* p,
 #endif
         if (q != p + 1) q = skip_numeric_space(q, end);
         // Both numeric paths have already enforced the official length bound.
-        if (q == p + 1 || (q < end && *q != ',')) {
+        if (q == p + 1 || (q < end && *q != ',')) [[unlikely]] {
             sink.slider_rollback(w0, w, true);
             return false;
         }
@@ -149,7 +149,7 @@ inline bool parse_slider(Sink& sink, typename Sink::HitObject& h, const char* p,
             hs = extra[2].data(); hs_len = extra[2].size();
         }
     }
-    if (!valid_sample({hs, hs_len}, true) || !valid_edge_sets({eb, eb_len}, slides)) {
+    if (!valid_sample({hs, hs_len}, true) || !valid_edge_sets({eb, eb_len}, slides)) [[unlikely]] {
         sink.slider_rollback(w0, w, true);
         return false;
     }
@@ -213,7 +213,7 @@ inline const char* parse_hitobject_lines_scalar(Sink& sink, const char* p,
         if (!ignored_line(p, line_end)) {
             auto& h = sink.begin(static_cast<size_t>(line_end - p));
             if (slow_hitobject_line(sink, h, p, line_end, k)) sink.commit(h);
-            else { sink.rollback(h); ++sink.stats().malformed_lines; }
+            else [[unlikely]] { sink.rollback(h); ++sink.stats().malformed_lines; }
         }
         p = next_line;
     }
@@ -284,7 +284,7 @@ inline const char* parse_hitobject_lines(Sink& sink, const char* p, const char* 
                 ok = slow_hitobject_line(sink, h, p, line_end, k);
             }
             if (ok) sink.commit(h);
-            else { sink.rollback(h); ++malformed; }
+            else [[unlikely]] { sink.rollback(h); ++malformed; }
         } else {
             const char c = *p;
             if (c == '\r' || c == '\n') { ++p; continue; }
@@ -292,7 +292,7 @@ inline const char* parse_hitobject_lines(Sink& sink, const char* p, const char* 
             if (!ignored_line(p, line_end)) {
                 auto& h = sink.begin(len);
                 if (slow_hitobject_line(sink, h, p, line_end, k)) sink.commit(h);
-                else { sink.rollback(h); ++malformed; }
+                else [[unlikely]] { sink.rollback(h); ++malformed; }
             }
         }
         p = next_line;

@@ -40,7 +40,7 @@ inline bool valid_sample(std::string_view sample, bool banks_only = false) {
     for (int i = 0; i < (banks_only ? 2 : 4); ++i) {
         int64_t value;
         const char* q = parse_osu_int(p, end, value);
-        if (q == p || (q < end && *q != ':')) return false;
+        if (q == p || (q < end && *q != ':')) [[unlikely]] return false;
         if (q == end) return i >= 1;
         p = q + 1;
     }
@@ -73,7 +73,7 @@ inline bool valid_edge_sets(std::string_view sets, int32_t slides) {
         }
         const auto* separator = static_cast<const char*>(memchr(p, '|', end - p));
         const char* next = separator ? separator : end;
-        if (!valid_sample({p, static_cast<size_t>(next - p)})) return false;
+        if (!valid_sample({p, static_cast<size_t>(next - p)})) [[unlikely]] return false;
         if (!separator) break;
         p = next + 1;
     }
@@ -92,10 +92,10 @@ inline bool parse_object_tail(H& h, const char* p, const char* end,
             sample = {};
             return true;
         }
-        if (p == end || *p != ',') return false;
+        if (p == end || *p != ',') [[unlikely]] return false;
         double time;
         const char* q = parse_osu_double(p + 1, end, time);
-        if (q == p + 1 || (q < end && *q != ',' && !(hold && *q == ':'))) return false;
+        if (q == p + 1 || (q < end && *q != ',' && !(hold && *q == ':'))) [[unlikely]] return false;
         h.end_time = time;
         p = q;
         if (hold && p < end && *p == ',') p = end;
