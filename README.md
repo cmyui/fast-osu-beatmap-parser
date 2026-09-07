@@ -387,6 +387,18 @@ configuration. The `read()` that precedes the parse pays the same bill
 for the file buffer: ~20 µs for a 22.5 KB file, 12 faults plus four
 syscalls.
 
+### One map per process: `speedrun/`
+
+For the "spawn a process, parse one map, exit" case the parse call is a
+small part of the bill: the obvious program (dynamic libstdc++, `parse`,
+dump to stdout) takes ~1149 µs per map on the production corpus, of
+which ~35 µs is parsing. `speedrun/` is the same parser as a
+freestanding static binary — no libc, one arena, output streamed from
+the SIMD stores, multi-size THP folios — at **169 µs per map** against
+an exec+exit floor of ~105 µs, producing byte-identical output on all
+10,000 maps. Design, harness and the measured ladder are in
+[speedrun/README.md](speedrun/README.md).
+
 ### Apple M3, macOS 26 (Rosetta 2 for the x86 rows)
 
 | parser | MB/s | ns/object |
