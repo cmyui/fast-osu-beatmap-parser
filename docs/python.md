@@ -176,6 +176,9 @@ the selected implementation; there are no per-record dispatch branches.
 Linux release wheels bundle a private C++ runtime to reduce first-import cost;
 only the Python initialization symbol is exported. macOS uses the system
 C++ runtime. Neither uses the standalone executable's custom runtime.
+Extensions use the [compiled-target hardening policy](build.md#hardening), and
+CI checks Linux protections in the installed wheel. Bundled runtime fixes
+require a rebuilt wheel.
 `FOSU_BUNDLE_RUNTIME=0` disables bundling for a custom wheel build.
 The ordinary C++ library and standalone C API use the [native build configurations](build.md).
 

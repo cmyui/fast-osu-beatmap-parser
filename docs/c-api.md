@@ -40,8 +40,11 @@ its caller's runtime and operators.
 
 To link the system C++ runtime instead, configure with
 `-DFOSU_BUNDLE_RUNTIME=OFF` and rebuild. macOS uses the system runtime.
-The `check` target also checks Linux exports, dependencies and allocation-failure
-translation in a resource-limited child process.
+Bundled runtime fixes require rebuilding and distributing the library; updating
+the host's shared C++ runtime does not update the private copy.
+The [compiled-target hardening policy](build.md#hardening) applies to all backends.
+The `check` target also checks Linux binary protections, exports, dependencies
+and allocation-failure translation in a resource-limited child process.
 
 ## Minimal C usage
 
