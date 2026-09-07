@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 #include <string_view>
 #include "prefix.hpp"
 
@@ -82,33 +83,36 @@ inline bool valid_edge_sets(std::string_view sets, int32_t slides) {
 
 // Circle precedence, omitted hold endpoints and spinner separators follow
 // ConvertHitObjectParser. Raw timestamps remain unshifted/unclamped.
-template <typename H>
-inline bool parse_object_tail(H& h, const char* p, const char* end,
-                              std::string_view& sample) {
-    if (!(h.type & 1) && (h.type & (8 | 128))) {
-        const bool hold = !(h.type & 8);
+struct ObjectTail {
+    double end_time;
+    std::string_view sample;
+};
+
+inline std::optional<ObjectTail> parse_object_tail(uint32_t type, double start_time,
+                                                  const char* p, const char* end) {
+    double end_time = 0;
+    if (!(type & 1) && (type & (8 | 128))) {
+        const bool hold = !(type & 8);
         if (hold && (p == end || (p + 1 == end && *p == ','))) {
-            h.end_time = h.time;
-            sample = {};
-            return true;
+            return ObjectTail{start_time, {}};
         }
-        if (p == end || *p != ',') [[unlikely]] return false;
+        if (p == end || *p != ',') [[unlikely]] return std::nullopt;
         double time;
         const char* q = parse_osu_double(p + 1, end, time);
-        if (q == p + 1 || (q < end && *q != ',' && !(hold && *q == ':'))) [[unlikely]] return false;
-        h.end_time = time;
+        if (q == p + 1 || (q < end && *q != ',' && !(hold && *q == ':'))) [[unlikely]] return std::nullopt;
+        end_time = time;
         p = q;
         if (hold && p < end && *p == ',') p = end;
         else if (p < end) ++p;
     } else if (p < end) ++p;
     if (end - p == 8 && short_sample(p)) {
-        sample = {p, 8};
-        return true;
+        return ObjectTail{end_time, {p, 8}};
     }
     const auto* comma = static_cast<const char*>(memchr(p, ',', end - p));
     const char* sample_end = comma ? comma : end;
-    sample = {p, static_cast<size_t>(sample_end - p)};
-    return valid_sample(sample);
+    const std::string_view sample{p, static_cast<size_t>(sample_end - p)};
+    if (!valid_sample(sample)) return std::nullopt;
+    return ObjectTail{end_time, sample};
 }
 
 } // namespace fosu::internal

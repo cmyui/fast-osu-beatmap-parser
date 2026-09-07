@@ -2,10 +2,17 @@
 
 #include <array>
 #include <cstddef>
+#include <optional>
 
 #include "prefix.hpp"
 
 namespace fosu::internal {
+
+template <typename Point>
+struct WrittenSliderPoints {
+    const char* next;
+    Point* points_end;
+};
 
 // Slider control point coordinate: overwhelmingly 1-4 plain digits, parsed
 // branchlessly via SWAR. Signs, 5+ digit values, and empty fields take the
@@ -112,12 +119,11 @@ inline uint32x4_t convert_point(uint8x16_t src, uint32_t xl, uint32_t yl, const 
 // window, with no data-dependent loop exit: both are converted speculatively
 // and the second is kept only when it is present and well-formed. Most
 // sliders have one or two points, so this replaces a mispredicted loop exit
-// per slider. Returns the count written (0: the first point is not
-// editor-shaped, leaving `p` and `w` for the general loop) and moves `p` to
-// the byte after the last written point. The caller guarantees room for two
-// points at `w`.
+// per slider. Returns the input and output positions after the written
+// points; both are unchanged if the first point is not editor-shaped.
+// The caller guarantees room for two points at `w`.
 template <typename Point>
-inline uint32_t parse_point_pair(const char*& p, Point* w, const HitConsts& k) {
+inline WrittenSliderPoints<Point> write_point_pair(const char* p, Point* w, const HitConsts& k) {
     const Bytes32 v = load32(p);
     const uint32_t nd = nondigit_mask32(v, k.bias, k.thr);
     const auto colon = equal_mask32(v, k.colon);
@@ -141,7 +147,7 @@ inline uint32_t parse_point_pair(const char*& p, Point* w, const HitConsts& k) {
     const bool ok2 = ((pipe >> end1) & 1) & (((xl2 - 1) | (yl2 - 1)) <= 3) &
                      ((colon >> (end1 + 1 + c2)) & 1) &
                      ((static_cast<uint64_t>(sep) >> end2) & 1);
-    if (!ok1) return 0;
+    if (!ok1) return {p, w};
     static_assert(sizeof(Point) == 8 && offsetof(Point, x) == 0 && offsetof(Point, y) == 4);
 #if FOSU_SIMD_X86
     _mm_storel_epi64(reinterpret_cast<__m128i*>(w),
@@ -154,19 +160,20 @@ inline uint32_t parse_point_pair(const char*& p, Point* w, const HitConsts& k) {
     vst1_u32(reinterpret_cast<uint32_t*>(w + 1), vget_low_u32(convert_point(
         vld1q_u8(reinterpret_cast<const uint8_t*>(p + end1)), c2, d2, k)));
 #endif
-    p += ok2 ? end2 : end1;
-    return 1 + ok2;
+    return {p + (ok2 ? end2 : end1), w + 1 + ok2};
 }
 #endif
 
-// Parses the "|x:y|x:y..." control points at `p` into `w`, leaving `p` on
-// the byte after the last point (normally ','). `w` must have room for one
-// point per four remaining line bytes plus two.
+// Writes the "|x:y|x:y..." control points into their final storage. Returns
+// the next input/output positions, or nullopt if the whole point list must
+// be discarded. `w` needs room for one point per four line bytes plus two.
 template <typename Point>
-inline bool parse_slider_points(const char*& p, const char* end, Point*& w,
-                                [[maybe_unused]] const HitConsts& k) {
+inline std::optional<WrittenSliderPoints<Point>> write_slider_points(
+    const char* p, const char* end, Point* w, [[maybe_unused]] const HitConsts& k) {
 #if FOSU_SIMD
-    w += parse_point_pair(p, w, k);
+    const auto pair = write_point_pair(p, w, k);
+    p = pair.next;
+    w = pair.points_end;
     // Third and later points (long Bezier sliders): one 16-byte load per
     // point classifies a whole pair. Anything else (signs, longer values,
     // empty fields) leaves the loop for the general one.
@@ -205,18 +212,18 @@ inline bool parse_slider_points(const char*& p, const char* end, Point*& w,
         // A coord ending at the line end reads the terminator from the
         // padded buffer, never ':' — no explicit q < end check needed.
         if (q == p + 1 || *q != ':') {
-            return false;
+            return std::nullopt;
         }
         const char* r = parse_coord(q + 1, end, py);
         if (r == q + 1) {
-            return false;
+            return std::nullopt;
         }
         w->x = px;
         w->y = py;
         ++w;
         p = r;
     }
-    return true;
+    return WrittenSliderPoints<Point>{p, w};
 }
 
 }  // namespace fosu::internal

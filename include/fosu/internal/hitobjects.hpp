@@ -22,7 +22,7 @@
 
 #include "object_tail.hpp"
 #include "prefix.hpp"
-#include "slider.hpp"
+#include "slider_fields.hpp"
 
 namespace fosu::internal {
 
@@ -33,136 +33,34 @@ namespace fosu::internal {
 // rejection leaves earlier state intact; a failed point list is dropped.
 template <typename Sink>
 __attribute__((noinline))
-inline bool parse_slider(Sink& sink, typename Sink::HitObject& h, const char* p,
+inline bool parse_slider(Sink& sink, typename Sink::HitObject& object, const char* p,
                          const char* end, const HitConsts& k) {
     using Point = typename Sink::Point;
     if (p >= end) [[unlikely]] return false;
     const char curve_type = *p++;
     // A point costs at least four bytes ("|x:y"), which bounds the count;
     // the pair fast path also needs a second slot.
-    Point* const w0 = sink.point_slot(static_cast<size_t>(end - p) / 4 + 2);
-    Point* w = w0;
-    if (!parse_slider_points(p, end, w, k)) [[unlikely]] {
-        sink.slider_rollback(w0, w, false);
+    Point* const first_point = sink.point_slot(static_cast<size_t>(end - p) / 4 + 2);
+    const auto points = write_slider_points(p, end, first_point, k);
+    if (!points) [[unlikely]] {
+        sink.slider_rollback(first_point, first_point, false);
         return false;
     }
-    if (p >= end || *p != ',') [[unlikely]] {
-        sink.slider_rollback(w0, w, true);
+    const auto fields = parse_slider_fields(points->next, end, k);
+    if (!fields) [[unlikely]] {
+        sink.slider_rollback(first_point, points->points_end, true);
         return false;
     }
-    ++p;
-    // slides: editor files write one or two bare digits.
-    int32_t slides;
-    const uint32_t s0 = static_cast<uint8_t>(p[0] - '0');
-    const uint32_t s1 = static_cast<uint8_t>(p[1] - '0');
-    if (s0 <= 9 && p[1] == ',') {
-        slides = static_cast<int32_t>(s0);
-        p += 1;
-    } else if (s0 <= 9 && s1 <= 9 && p[2] == ',') {
-        slides = static_cast<int32_t>(s0 * 10 + s1);
-        p += 2;
-    } else {
-        const uint32_t srun = digit_run8(p);
-        if (srun - 1 <= 6) {
-            slides = static_cast<int32_t>(swar_parse_u64(p, srun));
-            p = skip_numeric_space(p + srun, end);
-        } else {
-            int64_t wide;
-            const char* next = parse_osu_int(p, end, wide);
-            if (next == p) [[unlikely]] {
-                sink.slider_rollback(w0, w, true);
-                return false;
-            }
-            slides = clamp_i32(wide);
-            p = next;
-        }
-    }
-    if (slides > 9000 || (p < end && *p != ',')) [[unlikely]] {
-        sink.slider_rollback(w0, w, true);
-        return false;
-    }
-    double length = 0;
-    if (p < end) {
-#if FOSU_SIMD
-        const char* q = parse_slider_length(p + 1, length, k);
-        if (!q) q = parse_osu_double(p + 1, end, length, 131072);
-#else
-        const char* q = parse_osu_double(p + 1, end, length, 131072);
-#endif
-        if (q != p + 1) q = skip_numeric_space(q, end);
-        // Both numeric paths have already enforced the official length bound.
-        if (q == p + 1 || (q < end && *q != ',')) [[unlikely]] {
-            sink.slider_rollback(w0, w, true);
-            return false;
-        }
-        p = q;
-    }
-    // Optional: edgeSounds, edgeSets, hitSample, assigned positionally;
-    // absent fields are empty, and the sample ends at the next comma as in
-    // the official decoder's field split. (An unconditional scan measured
-    // slower than this branch when the input is cache-resident.)
-    const char* es = p;
-    size_t es_len = 0;
-    const char* eb = p;
-    size_t eb_len = 0;
-    const char* hs = p;
-    size_t hs_len = 0;
-    if (p < end && *p == ',') {
-        ++p;
-#if FOSU_SIMD
-        const auto span = static_cast<size_t>(end - p);
-        if (span <= 32) {
-            // The remaining comma positions from one 32-byte scan.
-            const Bytes32 v = load32(p);
-            const auto cm = equal_mask32(v, k.comma) &
-                            static_cast<uint32_t>((1ull << span) - 1);
-            const uint32_t c0 = trailing_zeros(cm);
-            const uint32_t rest = cm & (cm - 1);
-            const uint32_t c1 = trailing_zeros(rest);
-            const uint32_t c2 = trailing_zeros(rest & (rest - 1));
-            es = p;
-            if (c0 >= span) {
-                es_len = span;
-            } else if (c1 >= span) {
-                es_len = c0;
-                eb = p + c0 + 1;
-                eb_len = span - c0 - 1;
-            } else {
-                es_len = c0;
-                eb = p + c0 + 1;
-                eb_len = c1 - c0 - 1;
-                hs = p + c1 + 1;
-                hs_len = (c2 < span ? c2 : static_cast<uint32_t>(span)) - c1 - 1;
-            }
-        } else
-#endif
-        {
-            std::string_view extra[3];
-            int n = 0;
-            while (n < 3 && p < end) {
-                const auto* c = static_cast<const char*>(memchr(p, ',', static_cast<size_t>(end - p)));
-                const char* fend = c ? c : end;
-                extra[n++] = {p, static_cast<size_t>(fend - p)};
-                p = fend + 1;
-            }
-            es = extra[0].data(); es_len = extra[0].size();
-            eb = extra[1].data(); eb_len = extra[1].size();
-            hs = extra[2].data(); hs_len = extra[2].size();
-        }
-    }
-    if (!valid_sample({hs, hs_len}, true) || !valid_edge_sets({eb, eb_len}, slides)) [[unlikely]] {
-        sink.slider_rollback(w0, w, true);
-        return false;
-    }
-    auto& s = sink.slider_slot();
-    s.point_begin = sink.point_index(w0);
-    s.point_count = static_cast<uint32_t>(w - w0);
-    s.slides = slides;
-    s.curve_type = curve_type;
-    s.length = length;
-    s.edge_sounds = sink.view(es, es_len);
-    s.edge_sets = sink.view(eb, eb_len);
-    sink.slider_commit(h, s, w, hs, hs_len);
+    auto& slider = sink.slider_slot();
+    slider.point_begin = sink.point_index(first_point);
+    slider.point_count = static_cast<uint32_t>(points->points_end - first_point);
+    slider.slides = fields->slides;
+    slider.curve_type = curve_type;
+    slider.length = fields->length;
+    slider.edge_sounds = sink.view(fields->extras.edge_sounds.data(), fields->extras.edge_sounds.size());
+    slider.edge_sets = sink.view(fields->extras.edge_sets.data(), fields->extras.edge_sets.size());
+    sink.slider_commit(object, slider, points->points_end,
+                       fields->extras.hit_sample.data(), fields->extras.hit_sample.size());
     return true;
 }
 
@@ -177,9 +75,10 @@ inline bool finish_hitobject(Sink& sink, typename Sink::HitObject& h, const char
         if (p >= end || *p != ',') return false;
         return parse_slider(sink, h, p + 1, end, k);
     }
-    std::string_view sample;
-    if (!parse_object_tail(h, p, end, sample)) return false;
-    sink.sample(h, sample.data(), sample.size());
+    const auto tail = parse_object_tail(h.type, h.time, p, end);
+    if (!tail) return false;
+    h.end_time = tail->end_time;
+    sink.sample(h, tail->sample.data(), tail->sample.size());
     return true;
 }
 

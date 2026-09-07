@@ -210,6 +210,33 @@ static void test_vector_storage() {
     }
 }
 
+template <typename Map>
+static void test_rejected_slider_points() {
+    struct Case { const char* tail; size_t retained_points; };
+    const Case cases[] = {
+        {"B|7:8|bad,1,10", 0},              // Point parsing failed.
+        {"B|7:8|9:10", 2},                 // Missing slides delimiter.
+        {"B|7:8|9:10,bad,10", 2},          // Invalid slides.
+        {"B|7:8|9:10,1,131073", 2},        // Invalid length.
+        {"B|7:8|9:10,1,10,,/:0", 2},       // Invalid edge sets.
+        {"B|7:8|9:10,1,10,,,/:0", 2},      // Invalid hit sample.
+    };
+    for (const auto& test : cases) {
+        auto input = fosu::make_padded(std::string("[HitObjects]\n1,2,3,2,0,") +
+            test.tail + "\n1,2,4,2,0,L|11:12,1,10\n");
+        for (bool simd : {false, true}) {
+            Map map;
+            fosu::parse_into(input, map, {.use_simd = simd});
+            CHECK_EQ(map.stats.malformed_lines, 1u);
+            CHECK_EQ(map.hit_objects.size(), 1u);
+            CHECK_EQ(map.sliders.size(), 1u);
+            CHECK_EQ(map.slider_points.size(), test.retained_points + 1);
+            CHECK_EQ(map.sliders[0].point_begin, test.retained_points);
+            CHECK_EQ(map.slider_points[test.retained_points].x, 11);
+        }
+    }
+}
+
 static void test_fractional_reuse() {
     auto input = fosu::make_padded(
         "[Events]\n2,1.25,2.75\n[HitObjects]\n1,2,3.5,12,0,5.75\n");
@@ -231,6 +258,8 @@ static void test_fractional_reuse() {
 int main() {
     test_vector_storage<fosu::Beatmap>();
     test_vector_storage<fosu::OffsetBeatmap>();
+    test_rejected_slider_points<fosu::Beatmap>();
+    test_rejected_slider_points<fosu::OffsetBeatmap>();
     test_reuse_shrinks_without_reallocating();
     test_reuse_grows_past_existing_capacity();
     test_reuse_clears_omitted_sections();
