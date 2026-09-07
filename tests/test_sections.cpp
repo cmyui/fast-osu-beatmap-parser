@@ -390,7 +390,59 @@ static void test_exact_keys_and_event_aliases() {
   CHECK_EQ(map.stats.storyboard_lines, 1u);
 }
 
+static void test_long_event_lines() {
+  for (size_t length : {63u, 64u, 65u, 95u, 96u, 97u, 200u}) {
+    for (const auto ending : {"", "\n", "\r\n"}) {
+      const std::string filename(length - 6, 'x');
+      const auto map = parse_str("[Events]\n0,0,\"" + filename + "\"" + ending);
+      CHECK_EQ(map.background, filename);
+    }
+    const auto map = parse_str("[Events]\n " + std::string(length, 'x') +
+                               "\n[Metadata]\nTitle:after events\n");
+    CHECK_EQ(map.stats.storyboard_lines, 1u);
+    CHECK_EQ(map.title, "after events");
+  }
+}
+
+static void test_masked_timing_fallback() {
+  // Exercise the general numeric rules, not just the fast editor shape.
+  for (const std::string line :
+       {"-1.5,500", "0,NaN,4,0,0,100,0,0", "0,500,0meter,0,0,100,1,0",
+        "0,500,4,0,0,100,1anything,0,ignored", " 1 , 500 , 4 ,0,0,100,1,0",
+        "0,500,4,0,0,100,1,", "0,500,,0,0,100,1,0", "0,500,4,0,0,100,1,bad",
+        "0,NaN,4,0,0,100,1,0", "bad,500", "0,500,"}) {
+    for (size_t length : {line.size(), size_t(63), size_t(64)}) {
+      const std::string text = line + std::string(length - line.size(), ' ');
+      const auto input = fosu::make_padded(text + ",outside\n");
+      const char* p = input.data.get();
+      uint64_t commas = 0;
+      for (size_t i = 0; i < text.size(); ++i)
+        if (p[i] == ',')
+          commas |= 1ull << i;
+      fosu::TimingPoint scalar{}, masked{};
+      const bool expected =
+          fosu::internal::parse_timing_fields(p, p + text.size(), scalar);
+      const bool actual =
+          fosu::internal::parse_timing_fields<true>(p, p + text.size(), masked, commas);
+      CHECK_EQ(actual, expected);
+      if (actual) {
+        CHECK_EQ(masked.time, scalar.time);
+        CHECK(masked.beat_length == scalar.beat_length ||
+              (std::isnan(masked.beat_length) && std::isnan(scalar.beat_length)));
+        CHECK_EQ(masked.meter, scalar.meter);
+        CHECK_EQ(masked.sample_set, scalar.sample_set);
+        CHECK_EQ(masked.sample_index, scalar.sample_index);
+        CHECK_EQ(masked.volume, scalar.volume);
+        CHECK_EQ(masked.uninherited, scalar.uninherited);
+        CHECK_EQ(masked.effects, scalar.effects);
+      }
+    }
+  }
+}
+
 int main() {
+  test_long_event_lines();
+  test_masked_timing_fallback();
   test_exact_keys_and_event_aliases();
   test_all_sections();
   test_old_format();

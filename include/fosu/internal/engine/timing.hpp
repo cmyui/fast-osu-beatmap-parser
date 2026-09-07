@@ -7,44 +7,64 @@ namespace fosu::internal {
 
 // Shared bounded fallback. Optional legacy fields may be absent, but a
 // present field must parse completely; NaN is meaningful only when inherited.
-template <typename T>
-inline bool parse_timing_fields(const char* p, const char* end, T& tp) {
-    double time, beat_length;
-    const char* q = parse_osu_double(p, end, time);
-    if (q == p || q >= end || *q != ',') return false;
-    p = q + 1;
-    q = parse_beat_length(p, end, beat_length);
-    if (q == p) return false;
-    p = q;
-    int64_t rest[6] = {4, 0, 0, 100, 1, 0};
-    for (int i = 0; i < 6 && p < end; ++i) {
-        if (*p++ != ',') return false;
-        const auto* comma = static_cast<const char*>(memchr(p, ',', end - p));
-        const char* field_end = comma ? comma : end;
-        if (p == field_end) return false;
-        if (i == 4) rest[i] = *p == '1';
-        else if (i == 0 && *p == '0') {
-            // The official decoder treats any meter field beginning in 0 as
-            // 4/4. Preserve a plain raw zero; use 4 for nonnumeric spellings.
-            q = parse_osu_int(p, field_end, rest[i]);
-            if (q != field_end) rest[i] = 4;
-        } else {
-            q = parse_osu_int(p, field_end, rest[i]);
-            if (q == p || q != field_end || (i == 0 && rest[i] <= 0)) return false;
-        }
-        p = field_end;
+// UseCommaMask is for lines of at most 64 bytes, with a mask relative to p.
+template <bool UseCommaMask = false, typename T>
+inline bool parse_timing_fields(const char* p,
+                                const char* end,
+                                T& tp,
+                                uint64_t commas = 0) {
+  [[maybe_unused]] const char* line = p;
+  double time, beat_length;
+  const char* q = parse_osu_double(p, end, time);
+  if (q == p || q >= end || *q != ',')
+    return false;
+  p = q + 1;
+  q = parse_beat_length(p, end, beat_length);
+  if (q == p)
+    return false;
+  p = q;
+  int64_t rest[6] = {4, 0, 0, 100, 1, 0};
+  for (int i = 0; i < 6 && p < end; ++i) {
+    if (*p++ != ',')
+      return false;
+    const char* field_end;
+    if constexpr (UseCommaMask) {
+      const size_t offset = static_cast<size_t>(p - line);
+      commas = offset < 64 ? commas & (~0ull << offset) : 0;
+      field_end = commas ? line + std::countr_zero(commas) : end;
+    } else {
+      const auto* comma = static_cast<const char*>(memchr(p, ',', end - p));
+      field_end = comma ? comma : end;
     }
-    // Additional legacy columns are ignored by the official decoder.
-    if ((p < end && *p != ',') || (rest[4] != 0 && std::isnan(beat_length))) return false;
-    tp.time = time;
-    tp.beat_length = beat_length;
-    tp.meter = clamp_i32(rest[0]);
-    tp.sample_set = clamp_i32(rest[1]);
-    tp.sample_index = clamp_i32(rest[2]);
-    tp.volume = clamp_i32(rest[3]);
-    tp.uninherited = rest[4] != 0;
-    tp.effects = static_cast<uint32_t>(rest[5]);
-    return true;
+    if (p == field_end)
+      return false;
+    if (i == 4)
+      rest[i] = *p == '1';
+    else if (i == 0 && *p == '0') {
+      // The official decoder treats any meter field beginning in 0 as
+      // 4/4. Preserve a plain raw zero; use 4 for nonnumeric spellings.
+      q = parse_osu_int(p, field_end, rest[i]);
+      if (q != field_end)
+        rest[i] = 4;
+    } else {
+      q = parse_osu_int(p, field_end, rest[i]);
+      if (q == p || q != field_end || (i == 0 && rest[i] <= 0))
+        return false;
+    }
+    p = field_end;
+  }
+  // Additional legacy columns are ignored by the official decoder.
+  if ((p < end && *p != ',') || (rest[4] != 0 && std::isnan(beat_length)))
+    return false;
+  tp.time = time;
+  tp.beat_length = beat_length;
+  tp.meter = clamp_i32(rest[0]);
+  tp.sample_set = clamp_i32(rest[1]);
+  tp.sample_index = clamp_i32(rest[2]);
+  tp.volume = clamp_i32(rest[3]);
+  tp.uninherited = rest[4] != 0;
+  tp.effects = static_cast<uint32_t>(rest[5]);
+  return true;
 }
 
 #if FOSU_SIMD

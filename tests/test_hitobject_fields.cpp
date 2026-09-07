@@ -93,6 +93,31 @@ static void test_slider_fields() {
     }
 }
 
+static void test_slider_sound_boundaries() {
+  const fosu::internal::HitObjectParseConstants constants;
+  for (size_t length : {0u, 1u, 30u, 31u, 32u, 33u, 63u, 64u, 65u, 95u}) {
+    for (size_t long_field = 0; long_field < 3; ++long_field) {
+      std::string fields[] = {"0", "0:0", "0:0:0:0:sample.wav"};
+      fields[long_field] = std::string(length, 'x');
+      for (size_t count = 1; count <= 4; ++count) {
+        std::string text;
+        for (size_t i = 0; i < count; ++i) {
+          if (i)
+            text += ',';
+          text += i < 3 ? fields[i] : "ignored";
+        }
+        // The following comma is readable, but outside the field span.
+        const auto input = fosu::make_padded(text + ",outside\n");
+        const auto sounds = fosu::internal::parse_slider_sound_fields(
+            input.data.get(), input.data.get() + text.size(), constants);
+        CHECK_EQ(sounds.edge_sounds, fields[0]);
+        CHECK_EQ(sounds.edge_sets, count >= 2 ? fields[1] : "");
+        CHECK_EQ(sounds.hit_sample, count >= 3 ? fields[2] : "");
+      }
+    }
+  }
+}
+
 static void test_hitobject_details() {
     struct Case { uint32_t type; const char* text; double end_time; const char* sample; };
     const Case cases[] = {
@@ -141,6 +166,7 @@ static void test_hitobject_details() {
 int main() {
     test_point_values<fosu::SliderPoint>();
     test_slider_fields();
+    test_slider_sound_boundaries();
     test_hitobject_details();
     return test_result();
 }

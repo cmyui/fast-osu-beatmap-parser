@@ -2,6 +2,7 @@
 #include <optional>
 #include "../../beatmap.hpp"
 #include "../string_lookup.hpp"
+#include "line_scan.hpp"
 #include "prefix.hpp"
 #include "text.hpp"
 
@@ -113,12 +114,8 @@ inline const char* parse_events_section(
             line_end = p + trailing_zeros(nl);
             next_line = line_end + 1;
         } else {
-            const auto* m = static_cast<const char*>(memchr(
-                p + 64, '\n',
-                file_end - p > 64 ? static_cast<size_t>(file_end - p) - 64
-                                  : 0));
-            line_end = m ? m : file_end;
-            next_line = m ? m + 1 : file_end;
+          line_end = find_newline32(p + 64, file_end, broadcast_byte('\n'));
+          next_line = line_end + (line_end < file_end);
         }
         if (line_end[-1] == '\r') --line_end;  // line_end > line: c is not CR
         p = next_line;
