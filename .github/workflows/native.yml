@@ -17,11 +17,46 @@ jobs:
         with:
           persist-credentials: false
       - run: cmake -S . -B build/native -G Ninja -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DFOSU_ONESHOT_FLAGS=-march=x86-64-v3
-      - run: cmake --build build/native --target check bench-build references check-oneshot oneshot_process -j2
+      - run: cmake --build build/native --target check bench-build references check-oneshot oneshot_process -j"$(nproc)"
+      - run: python3 tests/test_build.py build/native
+      - name: Exercise benchmark and corpus tools
+        run: |
+          build/native/generate_corpus build/smoke-corpus
+          build/native/library_compare build/smoke-corpus 2 build/native/library_native.so build/native/library_c_api.so > build/library.csv
+          python3 bench/summarize.py build/library.csv
+          build/native/validate_corpus build/smoke-corpus build/native/numeric_oracle.so
+          python3 bench/library_first_compare.py build/smoke-corpus build/native/library_first build/native/c_api_first --limit 2 --reps 1 > build/first.csv
+          python3 bench/summarize.py build/first.csv
+
+  native-configurations:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Check scalar, public vectors, and debug containers
+        run: |
+          cmake -S . -B build/scalar -G Ninja -DFOSU_ISA=scalar -DCMAKE_CXX_COMPILER=g++
+          cmake --build build/scalar --target check -j"$(nproc)"
+          cmake -S . -B build/portable -G Ninja -DFOSU_PORTABLE_VECTORS=ON -DCMAKE_CXX_COMPILER=g++
+          cmake --build build/portable --target test-binaries -j"$(nproc)"
+          ctest --test-dir build/portable -L parser --output-on-failure
+          cmake -S . -B build/debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=g++
+          cmake --build build/debug --target test-binaries -j"$(nproc)"
+          ctest --test-dir build/debug -L parser --output-on-failure
+
+  native-emulation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Check dispatch without AVX
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y qemu-user g++-aarch64-linux-gnu
+          cmake -S . -B build/native -G Ninja -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
+          cmake --build build/native --target test_dispatch -j"$(nproc)"
           qemu-x86_64 -cpu Nehalem build/native/test_dispatch auto
           qemu-x86_64 -cpu Nehalem build/native/test_dispatch avx2
       - name: Check Linux AArch64 dispatch and parsing
@@ -31,31 +66,19 @@ jobs:
             -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
             -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
             '-DCMAKE_CROSSCOMPILING_EMULATOR=qemu-aarch64;-L;/usr/aarch64-linux-gnu'
-          cmake --build build/arm64 --target test-binaries -j2
+          cmake --build build/arm64 --target test-binaries -j"$(nproc)"
           ctest --test-dir build/arm64 --output-on-failure -R '^(numeric|sections|storage|hardening|binary_hardening|dispatch_.*)$'
-      - run: python3 tests/test_build.py build/native
-      - name: Check scalar, public vectors, and debug containers
-        run: |
-          cmake -S . -B build/scalar -G Ninja -DFOSU_ISA=scalar -DCMAKE_CXX_COMPILER=g++
-          cmake --build build/scalar --target check -j2
-          cmake -S . -B build/portable -G Ninja -DFOSU_PORTABLE_VECTORS=ON -DCMAKE_CXX_COMPILER=g++
-          cmake --build build/portable --target test-binaries -j2
-          ctest --test-dir build/portable -L parser --output-on-failure
-          cmake -S . -B build/debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=g++
-          cmake --build build/debug --target test-binaries -j2
-          ctest --test-dir build/debug -L parser --output-on-failure
+
+  native-sanitizers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Sanitizers and fuzzing
         run: |
           cmake -S . -B build/sanitize -G Ninja -DFOSU_SANITIZE=ON -DCMAKE_CXX_COMPILER=clang++
-          cmake --build build/sanitize --target check fuzz-smoke -j2
-      - name: Exercise benchmark and corpus tools
-        run: |
-          build/native/generate_corpus build/smoke-corpus
-          build/native/library_compare build/smoke-corpus 2 build/native/library_native.so build/native/library_c_api.so > build/library.csv
-          python3 bench/summarize.py build/library.csv
-          build/native/validate_corpus build/smoke-corpus build/native/numeric_oracle.so
-          python3 bench/library_first_compare.py build/smoke-corpus build/native/library_first build/native/c_api_first --limit 2 --reps 1 > build/first.csv
-          python3 bench/summarize.py build/first.csv
+          cmake --build build/sanitize --target check fuzz-smoke -j"$(nproc)"
 
   native-macos:
     runs-on: macos-26
