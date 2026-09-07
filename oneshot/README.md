@@ -1,117 +1,121 @@
-# Single-beatmap executable
+# One beatmap per process
 
-This target optimizes one fresh Linux x86-64 process that opens an original
-`.osu` file, materializes all parsed values, and exits. It targets Zen 4 with
-AVX-512 and 4 KiB pages. Build with GCC 13 on Linux:
-
-```sh
-make oneshot
-./build/fosu_oneshot /path/to/map.osu
-
-# Optional compiler profiling; every training invocation is a fresh process.
-taskset -c 5 make oneshot-pgo CORPUS=/path/to/corpus
-./build/fosu_oneshot_pgo /path/to/map.osu
-```
-
-The normal invocation produces no stdout. The full result is materialized and
-kept observable to the compiler before exit. `--dump` emits every parsed value
-in a binary verification format; serialization is outside the default workload.
-The entry point is the place to add an in-process consumer if needed.
-
-## Execution model
-
-- A small assembly entry point calls `main` and invokes Linux `exit` directly.
-  The binary has no dynamic loader or libc/libstdc++ startup.
-- The original file is mapped read-only. Its partial last page supplies zero
-  padding; an anonymous page replaces the reserved page past EOF when required.
-- Allocations advance through a 128 MiB virtual arena. Only touched pages become
-  resident. Deallocation does nothing: process exit reclaims the arena, input
-  mapping, and descriptor. No parse result or mutable arena survives a run.
-- `FOSU_ONESHOT_COMPACT` selects 24-byte hitobjects and 40-byte sliders, reducing
-  output page faults. The ordinary header-only API retains its default layout.
-  Do not mix these layouts in one program.
-- AVX-512 scans memory spans in the minimal runtime. The parser keeps its AVX2
-  prefix kernel. Long decimal fallbacks use the vendored fast_float header.
-
-This is a constrained executable, not a replacement C/C++ runtime. It has no
-TLS, exceptions, global-constructor support, threads, or general libc facility.
-The runtime's decimal conversion supports the decimal/exponent shapes reached
-by this parser; it is not a general `strtod` implementation.
-
-Compact output requires hitobject coordinates to fit signed 16-bit integers,
-type/hitsound to fit unsigned bytes, fewer than 65,536 slider entries, and object
-sample/slider edge strings to fit 16-bit lengths. String addresses must be below
-2^48. Control-point coordinates, times, metadata, timing-point values, and all
-floating-point calculations retain their original widths. This target assumes
-these numeric bounds; it is not an adversarial-input validator. Arena exhaustion
-exits with status 71; invalid compact string/index representation exits with 70.
-Input/argument errors return nonzero.
-
-## Correctness
-
-Build the reference consumer against the exact baseline headers. For example,
-after exporting master’s `include` directory into `build/master/include`:
+The executable minimizes wall time from process creation through exit, including
+opening and reading the original `.osu`, parsing it and writing the complete
+result to stdout. It needs no retained state, cache, sidecar or preprocessing of
+the input. Every successful invocation delivers its result.
 
 ```sh
-g++ -std=c++20 -O3 -march=x86-64-v3 -mtune=znver4 \
-  -fno-plt -fno-stack-protector -Ibuild/master/include \
-  bench/oneshot_reference.cpp -o build/master_reference
-
-python3 tests/test_oneshot.py build/master_reference \
-  build/fosu_oneshot build/fosu_oneshot_pgo
-python3 bench/oneshot_verify.py build/master_reference \
-  build/fosu_oneshot_pgo /path/to/corpus --expected-files 10000
+make oneshot CXX=g++                    # Linux x86-64, GCC, Zen 4 target
+build/fosu_oneshot map.osu > map.fosu
+python3 examples/decode_oneshot.py < map.fosu
 ```
 
-The verifier compares bytes directly for every file, including float bits,
-string contents, pool indices, unused pool entries, and every statistic.
-Addresses, vector capacities, and object padding are excluded. The ordinary
-benchmark’s checksum is narrower and is not this target’s correctness gate.
+The build uses GCC `-O2 -march=znver4`, a custom entry point and direct Linux
+x86-64 syscalls. It links neither libc nor libstdc++, uses no dynamic loader,
+and emits a small static ELF with one RWX load segment. Those choices belong
+to this constrained executable; they are not applied to the hosted library.
+See [performance](../docs/performance.md) for measured results and comparisons.
 
-## Timing
+## Process and memory design
+
+Input and output share one anonymous arena. `read` populates input bytes and
+leaves zero padding before the output cursor. Hitobject prefix SIMD stores land
+directly in stdout records; slider points and strings follow inline. Metadata,
+timing points, breaks and colours are collected for a trailer. Normal files
+fit one output write; larger records/trailers can flush or grow storage.
+
+The arena starts near the executable, at a chosen offset within a 2 MiB-aligned
+region. This shares upper page-table pages with the binary and makes the first
+working-set window eligible for appropriately sized anonymous folios while
+excluding a wasteful 2 MiB folio. Larger maps may use further windows. Mutable
+context is on the initial stack and addressed through `r15`; ordinary maps
+touch no writable global data or overflow mapping.
+
+Rare short timing-point lines can exceed the initial reserve hint. The timing
+buffer then grows geometrically without discarding committed points. Breaks,
+colours and orphaned slider points beyond inline storage use a lazy overflow
+mapping. The process releases all mappings and descriptors when it exits.
+
+Numeric conversion, prefix parsing, metadata tables/defaults and the hitobject
+framing loop are shared with the C++ library. Vector allocation, streamed
+slider rollback, event loops, timing-section loop and storage and top-level dispatch
+retain their representation-specific implementations. The
+[vendored fast_float header](third_party/README.md) supplies the executable's
+rare general decimal fallback; native callers retain `strtod`.
+
+## Optional host configuration
+
+The fastest measured setup enables 64, 128 and 256 KiB multi-size transparent
+huge pages in `madvise` mode. The executable requests `MADV_HUGEPAGE`; it never
+changes host settings. On a compatible Linux kernel, an administrator can opt
+in with:
 
 ```sh
-taskset -c 5 build/oneshot_process /path/to/corpus 0 3 \
-  build/master_reference build/fosu_oneshot build/fosu_oneshot_pgo \
-  > build/oneshot-results.csv
-python3 bench/oneshot_summary.py build/oneshot-results.csv
+for size in 64 128 256; do
+  echo madvise > /sys/kernel/mm/transparent_hugepage/hugepages-${size}kB/enabled
+done
 ```
 
-The driver times `posix_spawn` through `wait4`, including process startup, input
-acquisition, parsing, and exit. Each invocation parses one file. It reads input
-outside the timed region first to define a resident-input, cold-process workload;
-it does not clear the host page cache or cache parsed results. CPU affinity is
-inherited from `taskset`. Executable order rotates within each file/repetition.
-The limit `0` uses the entire corpus; a positive limit samples evenly across it.
+These settings reset on reboot unless the administrator persists them. They
+are host-wide policy for applications requesting huge pages, not private
+parser state. The program also works with ordinary pages; the benchmark guide
+reports a build without `madvise` separately. File contents are never cached by
+the executable, regardless of page size. The benchmark warms the kernel's file
+cache before timing, so its numbers describe fresh processes with resident
+input, not cold disk/S3 fetches.
 
-The summary reports both each file's minimum across repetitions and all observed
-runs. Best-of-repetition figures estimate performance with less scheduling noise;
-they are not average experienced latency. Keep raw samples when comparing small
-changes on a shared VM. PGO trains on every fifth sorted file; the full corpus
-remains the validation and timing set. Profiles are compiler branch counts, not
-cached input or decoded values.
+## Output contract
 
-### Measured process lifetime
+`FOSUDMP4` is a little-endian stream containing every logical `Beatmap` field,
+all four counters, explicit slider/pool indices and points left by failed
+slider lines. Strings are length-prefixed bytes and doubles retain raw IEEE-754
+bits. The last eight bytes give the trailer's length, excluding that footer;
+consumers locate the trailer from the end and read its object count before
+walking the variable-length records. Searching for `TRLR` inside data is not a
+valid way to find a record boundary.
 
-September 2026, GCC 13.3, Ubuntu 24.04/glibc 2.39, Linux 6.8, shared Zen 4 VM.
-One CPU, rotating paired order, 10,000 files totaling 402,593,897 bytes, three
-fresh processes per file and executable. The baseline is the reference consumer
-built against master `4100573` with its default Linux benchmark flags.
+The full field order is specified in [dump.hpp](dump.hpp); the independent
+[Python decoder](../examples/decode_oneshot.py) demonstrates reconstruction of
+metadata, arrays and the complete point pool. A stream consumer should accept
+output only after the process exits successfully: an error may follow a
+partial write. There is no `--dump` switch; output is always written.
 
-| Executable | Mean of per-file minima | Mean of all runs | p99 of per-file minima | Minor faults/run at minimum |
-|---|---:|---:|---:|---:|
-| Master, ordinary dynamic linking | 1046.52 µs | 1098.78 µs | 1328.67 µs | 155.7 |
-| Standalone, no PGO | 186.22 µs | 203.79 µs | 330.26 µs | 21.9 |
-| Standalone, PGO | **177.76 µs** | **193.07 µs** | **321.94 µs** | **21.9** |
-| Empty minimal executable, reference floor | 95.58 µs | 105.15 µs | 113.62 µs | 3.5 |
+## Limits and errors
 
-The PGO row is 5.89× faster by per-file minima and 5.69× by observed mean.
-The baseline's canonical output matched the PGO executable byte-for-byte on all
-10,000 files, including all counters and raw floating-point bits. The aggregate
-verification SHA-256 was
-`7b959fecd18d90cd7d13e3f9c148c0173bc7a2afb73f0d0a50e94914bf8ba9c3`.
+This is a Linux/Zen 4 executable for valid editor-emitted beatmaps, with 4 KiB
+base pages and the runtime/ELF choices above. It accepts one regular file path
+and a blocking stdout. Input must be at most `UINT32_MAX - 128` bytes;
+wire lengths and pool indices are 32-bit. It supports up to eight timing
+sections, 32,784 breaks, 4,104 colours and 1,048,576 orphaned slider points.
+Those limits exceed the evaluation corpus and fail explicitly when exceeded.
+The ordinary C++ library does not have these fixed section/overflow limits.
 
-These are full process timings with resident input, not storage-cache-miss
-latencies or parse-only throughput. The empty executable is a measured point
-of comparison, not a proof of a universal lower bound. No global-optimality
-claim follows from these measurements.
+| Exit | Meaning |
+|---|---|
+| 0 | Complete result written |
+| 1 | Input open/size/read or memory-mapping failure |
+| 2 | Wrong argument count |
+| 3 | Output failure, including nonblocking `EAGAIN` |
+| 4 | More than eight timing sections |
+| 5 | Runtime assertion failure |
+| 6 | Input, break, colour or orphan-point limit exceeded |
+
+Interrupted reads/writes are retried; partial writes are completed. An input
+read that ends before the size reported by `fstat` is an error. An ordinary
+shell may report a signal instead of an exit code, for example `SIGPIPE` when
+a downstream consumer closes its pipe.
+
+## Verification
+
+```sh
+python3 tests/test_oneshot.py build/oneshot_reference build/fosu_oneshot
+python3 tests/test_oneshot_limits.py build/fosu_oneshot
+python3 bench/oneshot_verify.py build/oneshot_reference build/fosu_oneshot /path/to/maps
+```
+
+For a release comparison, build the reference against a separately exported
+master revision, as shown in the [benchmark guide](../docs/performance.md).
+The hosted reference's serializer is a correctness tool, not an optimized
+example of delivering library arrays. Its serialization cost should not be
+mistaken for the minimum cost of returning a `Beatmap` to an in-process caller.

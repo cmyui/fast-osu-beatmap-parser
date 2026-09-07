@@ -17,10 +17,10 @@ if not files or (args.expected_files is not None and len(files) != args.expected
     parser.error(f"unexpected corpus size: {len(files)}")
 digest = hashlib.sha256()
 for i, path in enumerate(files, 1):
-    expected = subprocess.check_output([ref, str(path), '--dump'])
+    expected = subprocess.check_output([ref, str(path)])
     if not expected:
         raise RuntimeError(f"Reference emitted no values for {path.name}")
-    actual = subprocess.check_output([candidate, str(path), '--dump'])
+    actual = subprocess.check_output([candidate, str(path)])
     if expected != actual:
         offset = next((i for i, (a, b) in enumerate(zip(expected, actual)) if a != b), min(len(expected), len(actual)))
         print('MISMATCH', path.name, 'offset', offset, 'lengths', len(expected), len(actual), flush=True)

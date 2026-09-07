@@ -66,7 +66,8 @@ inline constexpr uint64_t kPow10u[9] = {
 // are consumed 8 at a time with SWAR conversion instead of byte loops.
 // Values with exponents or more than 18 significant digits fall back to
 // strtod (the buffer padding guarantees strtod terminates).
-inline const char* parse_double(const char* p, const char* end, double& out) {
+template <auto Fallback>
+inline const char* parse_double_impl(const char* p, const char* end, double& out) {
     const char* start = p;
     bool neg = false;
     if (p < end && *p == '-') {
@@ -84,9 +85,7 @@ inline const char* parse_double(const char* p, const char* end, double& out) {
         if (!run) break;
         any = true;
         if (digits + static_cast<int>(run) > 18) {
-            char* e;
-            out = strtod(start, &e);
-            return e;
+            return Fallback(start, end, out);
         }
         mant = mant * kPow10u[run] + swar_parse_u64(p, run);
         digits += static_cast<int>(run);
@@ -102,9 +101,7 @@ inline const char* parse_double(const char* p, const char* end, double& out) {
             if (!run) break;
             any = true;
             if (digits + static_cast<int>(run) > 18) {
-                char* e;
-                out = strtod(start, &e);
-                return e;
+                return Fallback(start, end, out);
             }
             mant = mant * kPow10u[run] + swar_parse_u64(p, run);
             digits += static_cast<int>(run);
@@ -115,14 +112,22 @@ inline const char* parse_double(const char* p, const char* end, double& out) {
     }
     if (!any) return start;
     if (p < end && (*p == 'e' || *p == 'E')) {
-        char* e;
-        out = strtod(start, &e);
-        return e;
+        return Fallback(start, end, out);
     }
     double v = static_cast<double>(mant);
     if (frac) v /= kPow10[frac];
     out = neg ? -v : v;
     return p;
+}
+
+inline const char* libc_double(const char* start, const char*, double& value) {
+    char* last;
+    value = strtod(start, &last);
+    return last;
+}
+
+inline const char* parse_double(const char* p, const char* end, double& out) {
+    return parse_double_impl<libc_double>(p, end, out);
 }
 
 }  // namespace fosu::detail

@@ -2,3 +2,4 @@
 build/
 bench/corpus/
 bench/corpus-large/
+__pycache__/

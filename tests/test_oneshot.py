@@ -1,8 +1,11 @@
-"""Exercise fresh-process file mapping and compact result preservation."""
+"""Exercise process I/O, padding, streamed records and complete value preservation."""
 import argparse
 from pathlib import Path
 import subprocess
 import tempfile
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
+from decode_oneshot import decode
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("reference", type=Path)
@@ -32,14 +35,36 @@ with tempfile.TemporaryDirectory(prefix="fosu-oneshot-") as temp:
     for size in (3967, 3968, 3969, 4095, 4096, 4097, 8064, 8191, 8192):
         padding = size - len(header) - len(objects) - 3
         cases.append(header + b"//" + b"x" * padding + b"\n" + objects)
+    last_slider = b"[HitObjects]\n1,2,3,2,0,B|-259088:1726|123:456,2,240,2|0,0:0|0:0"
+    for size in (3967, 3968, 3969):
+        cases.append(b"//" + b"x" * (size - len(last_slider) - 3) + b"\n" + last_slider)
+    # A failed slider retains points only after its point loop succeeds.
+    orphan_case = b"[HitObjects]\n1,2,3,2,0,B|10:20|30:40,X,1\n1,2,4,2,0,L|50:60,1,10\n"
+    cases.append(orphan_case)
+    # x has exactly the bytes TRLR: delimiter searching cannot frame records.
+    cases.append(b"[Metadata]\nTitle:TRLR\n[HitObjects]\n1380733524,2,3,1,0,TRLR\n")
+    cases.append(b"[Events]\n" + b"2,100,200\n" * 20 +
+                 b"[Colours]\n" + b"Combo1 : 1,2,3\n" * 12)
+    cases.append(b"[TimingPoints]\n0,500\n[HitObjects]\n1,2,3,1,0\n" * 3)
+    cases.append(b"[TimingPoints]\n" + b"0,500\n" * 400 + b"[HitObjects]\n1,2,3,1,0\n")
+    # Force output flushes; a larger trailer must keep its footer length valid.
+    cases.append(b"[HitObjects]\n" + b"1,2,3,1,0\n" * 140000 +
+                 b"[Metadata]\nTitle:" + b"t" * 200000 + b"\n")
     for index, data in enumerate(cases):
         path = root / f"{index}.osu"
         path.write_bytes(data)
-        expected = subprocess.check_output([reference, str(path), "--dump"])
+        expected = subprocess.check_output([reference, str(path)])
         assert expected, "reference did not serialize a result"
+        parsed = decode(expected)
+        if data == orphan_case:
+            assert parsed['slider_points'] == [(10, 20), (30, 40), (50, 60)]
+            assert parsed['sliders'][0]['point_begin'] == 2
+        if b"1380733524" in data:
+            assert parsed['hit_objects'][0]['x'] == int.from_bytes(b'TRLR', 'little')
         for candidate in candidates:
-            actual = subprocess.check_output([candidate, str(path), "--dump"])
+            actual = subprocess.check_output([candidate, str(path)])
             assert actual == expected, (candidate, len(data))
+            assert decode(actual) == parsed
     for candidate in candidates:
         result = subprocess.run([candidate, str(root / "missing.osu")])
         assert result.returncode != 0, "missing file was accepted"

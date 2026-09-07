@@ -8,6 +8,10 @@
 
 #include "beatmap.hpp"
 #include "hitobject_prefix.hpp"
+#include "detail/timing.hpp"
+#include "detail/slider.hpp"
+#include "detail/metadata.hpp"
+#include "detail/sections.hpp"
 #include "io.hpp"
 #include "scalar_parse.hpp"
 
@@ -39,12 +43,10 @@ struct ParseOptions {
 
 namespace detail {
 
-#ifndef FOSU_ONESHOT_COMPACT
 static_assert(offsetof(HitObject, x) == 0 && offsetof(HitObject, y) == 4 &&
                   offsetof(HitObject, type) == 8 &&
                   offsetof(HitObject, hitsound) == 12,
               "AVX2 prefix path stores {x,y,type,hitsound} as one vector");
-#endif
 
 enum class Section : uint8_t {
     None,
@@ -97,178 +99,21 @@ inline bool split_kv(const char* p, size_t len, std::string_view& key,
     return !key.empty();
 }
 
-inline bool parse_bool(std::string_view v) {
-    return !v.empty() && v[0] == '1';
+template <typename Map>
+inline void parse_general_line(Map& bm, const char* p, size_t len) {
+    parse_kv_line<parse_double>(bm, kGeneral, p, len);
 }
-
-inline int32_t parse_i32_field(std::string_view v, int32_t fallback) {
-    int64_t out;
-    const char* q = parse_i64(v.data(), v.data() + v.size(), out);
-    return q == v.data() ? fallback : clamp_i32(out);
+template <typename Map>
+inline void parse_editor_line(Map& bm, const char* p, size_t len) {
+    parse_kv_line<parse_double>(bm, kEditor, p, len);
 }
-
-inline double parse_f64_field(std::string_view v, double fallback) {
-    double out;
-    const char* q = parse_double(v.data(), v.data() + v.size(), out);
-    return q == v.data() ? fallback : out;
+template <typename Map>
+inline void parse_metadata_line(Map& bm, const char* p, size_t len) {
+    parse_kv_line<parse_double>(bm, kMetadata, p, len);
 }
-
-// Key-value lines are dispatched on their first four bytes loaded as one
-// u32 — editor-emitted keys are unique on that prefix within a section
-// (plus one disambiguating byte where two keys share it). The key length
-// then locates the value with no memchr and no trim.
-inline constexpr uint32_t key4(char a, char b, char c, char d) {
-    return static_cast<uint32_t>(static_cast<uint8_t>(a)) |
-           static_cast<uint32_t>(static_cast<uint8_t>(b)) << 8 |
-           static_cast<uint32_t>(static_cast<uint8_t>(c)) << 16 |
-           static_cast<uint32_t>(static_cast<uint8_t>(d)) << 24;
-}
-
-// Value after "Key:", tolerating the single space General/Editor emit.
-inline std::string_view kv_value(const char* p, size_t len, size_t key_len) {
-    size_t off = key_len + 1;
-    if (off < len && p[off] == ' ') ++off;
-    return {p + off, len > off ? len - off : 0};
-}
-
-inline void parse_general_line(Beatmap& bm, const char* p, size_t len) {
-    switch (load_u32_le(p)) {
-        case key4('A', 'u', 'd', 'i'):
-            if (p[5] == 'F') bm.audio_filename = kv_value(p, len, 13);
-            else if (p[5] == 'L')
-                bm.audio_lead_in = parse_i32_field(kv_value(p, len, 11), 0);
-            break;
-        case key4('P', 'r', 'e', 'v'):
-            bm.preview_time = parse_i32_field(kv_value(p, len, 11), -1);
-            break;
-        case key4('C', 'o', 'u', 'n'):
-            if (p[9] == 'O')
-                bm.countdown_offset = parse_i32_field(kv_value(p, len, 15), 0);
-            else
-                bm.countdown = parse_i32_field(kv_value(p, len, 9), 1);
-            break;
-        case key4('S', 'a', 'm', 'p'):
-            if (p[6] == 'S') bm.sample_set = kv_value(p, len, 9);
-            else
-                bm.samples_match_playback_rate =
-                    parse_bool(kv_value(p, len, 24));
-            break;
-        case key4('S', 't', 'a', 'c'):
-            bm.stack_leniency = parse_f64_field(kv_value(p, len, 13), 0.7);
-            break;
-        case key4('M', 'o', 'd', 'e'):
-            bm.mode = parse_i32_field(kv_value(p, len, 4), 0);
-            break;
-        case key4('L', 'e', 't', 't'):
-            bm.letterbox_in_breaks = parse_bool(kv_value(p, len, 17));
-            break;
-        case key4('W', 'i', 'd', 'e'):
-            bm.widescreen_storyboard = parse_bool(kv_value(p, len, 20));
-            break;
-        case key4('E', 'p', 'i', 'l'):
-            bm.epilepsy_warning = parse_bool(kv_value(p, len, 15));
-            break;
-        case key4('S', 'p', 'e', 'c'):
-            bm.special_style = parse_bool(kv_value(p, len, 12));
-            break;
-        case key4('U', 's', 'e', 'S'):
-            bm.use_skin_sprites = parse_bool(kv_value(p, len, 14));
-            break;
-        case key4('O', 'v', 'e', 'r'):
-            bm.overlay_position = kv_value(p, len, 15);
-            break;
-        case key4('S', 'k', 'i', 'n'):
-            bm.skin_preference = kv_value(p, len, 14);
-            break;
-        default:
-            break;
-    }
-}
-
-inline void parse_editor_line(Beatmap& bm, const char* p, size_t len) {
-    switch (load_u32_le(p)) {
-        case key4('B', 'o', 'o', 'k'):
-            bm.bookmarks = kv_value(p, len, 9);
-            break;
-        case key4('D', 'i', 's', 't'):
-            bm.distance_spacing = parse_f64_field(kv_value(p, len, 15), 0);
-            break;
-        case key4('B', 'e', 'a', 't'):
-            bm.beat_divisor = parse_i32_field(kv_value(p, len, 11), 4);
-            break;
-        case key4('G', 'r', 'i', 'd'):
-            bm.grid_size = parse_i32_field(kv_value(p, len, 8), 4);
-            break;
-        case key4('T', 'i', 'm', 'e'):
-            bm.timeline_zoom = parse_f64_field(kv_value(p, len, 12), 1);
-            break;
-        default:
-            break;
-    }
-}
-
-inline void parse_metadata_line(Beatmap& bm, const char* p, size_t len) {
-    switch (load_u32_le(p)) {
-        case key4('T', 'i', 't', 'l'):
-            if (p[5] == 'U') bm.title_unicode = kv_value(p, len, 12);
-            else bm.title = kv_value(p, len, 5);
-            break;
-        case key4('A', 'r', 't', 'i'):
-            if (p[6] == 'U') bm.artist_unicode = kv_value(p, len, 13);
-            else bm.artist = kv_value(p, len, 6);
-            break;
-        case key4('C', 'r', 'e', 'a'):
-            bm.creator = kv_value(p, len, 7);
-            break;
-        case key4('V', 'e', 'r', 's'):
-            bm.version = kv_value(p, len, 7);
-            break;
-        case key4('S', 'o', 'u', 'r'):
-            bm.source = kv_value(p, len, 6);
-            break;
-        case key4('T', 'a', 'g', 's'):
-            bm.tags = kv_value(p, len, 4);
-            break;
-        case key4('B', 'e', 'a', 't'): {
-            const bool set_id = p[7] == 'S';
-            const auto v = kv_value(p, len, set_id ? 12 : 9);
-            int64_t id;
-            if (parse_i64(v.data(), v.data() + v.size(), id) != v.data()) {
-                if (set_id) bm.beatmap_set_id = id;
-                else bm.beatmap_id = id;
-            }
-            break;
-        }
-        default:
-            break;
-    }
-}
-
-inline void parse_difficulty_line(Beatmap& bm, const char* p, size_t len,
-                                  bool& ar_specified) {
-    switch (load_u32_le(p)) {
-        case key4('H', 'P', 'D', 'r'):
-            bm.hp = parse_f64_field(kv_value(p, len, 11), 5);
-            break;
-        case key4('C', 'i', 'r', 'c'):
-            bm.cs = parse_f64_field(kv_value(p, len, 10), 5);
-            break;
-        case key4('O', 'v', 'e', 'r'):
-            bm.od = parse_f64_field(kv_value(p, len, 17), 5);
-            break;
-        case key4('A', 'p', 'p', 'r'):
-            bm.ar = parse_f64_field(kv_value(p, len, 12), 5);
-            ar_specified = true;
-            break;
-        case key4('S', 'l', 'i', 'd'):
-            if (p[6] == 'M')
-                bm.slider_multiplier = parse_f64_field(kv_value(p, len, 16), 1.4);
-            else
-                bm.slider_tick_rate = parse_f64_field(kv_value(p, len, 14), 1);
-            break;
-        default:
-            break;
-    }
+template <typename Map>
+inline void parse_difficulty_line(Map& bm, const char* p, size_t len, bool& ar_specified) {
+    ar_specified |= parse_kv_line<parse_double>(bm, kDifficulty, p, len);
 }
 
 inline std::string_view strip_quotes(std::string_view v) {
@@ -277,7 +122,8 @@ inline std::string_view strip_quotes(std::string_view v) {
     return v;
 }
 
-inline void parse_event_line(Beatmap& bm, const char* p, size_t len) {
+template <typename Map>
+inline void parse_event_line(Map& bm, const char* p, size_t len) {
     // Storyboard commands are indented; count and skip them.
     if (len == 0 || *p == ' ' || *p == '_') {
         ++bm.stats.storyboard_lines;
@@ -319,7 +165,8 @@ inline void parse_event_line(Beatmap& bm, const char* p, size_t len) {
     }
 }
 
-inline void parse_colour_kv(Beatmap& bm, std::string_view k, std::string_view v) {
+template <typename Map>
+inline void parse_colour_kv(Map& bm, std::string_view k, std::string_view v) {
     if (k.substr(0, 5) != "Combo") return;
     const char* p = v.data();
     const char* end = p + v.size();
@@ -339,9 +186,10 @@ inline void parse_colour_kv(Beatmap& bm, std::string_view k, std::string_view v)
     bm.combo_colours.push_back(rgb);
 }
 
-inline void parse_timing_point_line(Beatmap& bm, const char* p, size_t len) {
+template <typename Map>
+inline void parse_timing_point_line(Map& bm, const char* p, size_t len) {
     const char* end = p + len;
-    TimingPoint tp{0, 0, 4, 0, 0, 100, true, 0};
+    typename Map::TimingPoint tp;
     const char* q = parse_double(p, end, tp.time);
     if (q == p) {
         ++bm.stats.malformed_lines;
@@ -376,288 +224,6 @@ inline void parse_timing_point_line(Beatmap& bm, const char* p, size_t len) {
 }
 
 #if FOSU_SIMD_X86
-// One-pass timing point parse for the editor-emitted 8-field shape.
-// Two preloaded 32-byte vectors cover the whole line (real max: 39
-// bytes); one comma mask and one non-digit mask yield every field
-// boundary; every value is computed speculatively and a single `valid`
-// predicate — accumulated arithmetically, never branched on per field —
-// decides. Structural surprises (old 2/7-field formats, decimal or >8
-// digit offsets, junk bytes) return false to defer to the generic parser.
-//
-// All eight TimingPoint fields are written unconditionally; the caller
-// discards the write by not advancing its cursor when this returns false.
-// always_inline: gcc leaves this out of line otherwise — a call plus
-// per-call constant rebuilds on every timing line (disassembly audit).
-// Geometry derived by a successful parse, exported so the section loop's
-// shape cache can replay identically-shaped lines without re-deriving it.
-struct TpGeom {
-    uint8_t c[7];                          // comma positions
-    uint8_t bl_il, bl_fl1, bl_fl2, bl_frac;  // beatLength digit layout
-    uint8_t bl_neg, bl_has_dot;
-};
-
-__attribute__((always_inline))
-inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
-                                           const char* p, size_t len,
-                                           TimingPoint& tp,
-                                           TpGeom* geom = nullptr) {
-    // Seven comma positions -> eight fields.
-    const uint64_t m1 = _blsr_u64(commas);
-    const uint64_t m2 = _blsr_u64(m1);
-    const uint64_t m3 = _blsr_u64(m2);
-    const uint64_t m4 = _blsr_u64(m3);
-    const uint64_t m5 = _blsr_u64(m4);
-    const uint64_t m6 = _blsr_u64(m5);
-    const auto c0 = static_cast<uint32_t>(_tzcnt_u64(commas));
-    const auto c1 = static_cast<uint32_t>(_tzcnt_u64(m1));
-    const auto c2 = static_cast<uint32_t>(_tzcnt_u64(m2));
-    const auto c3 = static_cast<uint32_t>(_tzcnt_u64(m3));
-    const auto c4 = static_cast<uint32_t>(_tzcnt_u64(m4));
-    const auto c5 = static_cast<uint32_t>(_tzcnt_u64(m5));
-    const auto c6 = static_cast<uint32_t>(_tzcnt_u64(m6));
-
-    bool valid = _mm_popcnt_u64(commas) == 7;
-
-    // Offset: an integer with 1..8 digits — editor-emitted files never
-    // produce negative or decimal offsets (those defer via the purity
-    // check below). Speculative lengths are clamped into 1..8 so shifts
-    // stay defined; `valid` already rules the clamped cases out.
-    valid &= (c0 - 1) <= 7;
-    tp.time = static_cast<double>(swar_parse_u64_safe(p, ((c0 - 1) & 7) + 1));
-
-    // beatLength: [c0+1, c1), optional leading '-', optional fraction.
-    const char* f = p + c0 + 1;
-    const bool neg = *f == '-';
-    f += neg;
-    const uint32_t flen = c1 - c0 - 1 - neg;
-    // Distance from f to the first non-digit: the '.' if present, else
-    // the comma at c1.
-    const auto int_len = static_cast<uint32_t>(_tzcnt_u64(nondig >> (f - p)));
-    const bool has_dot = int_len < flen;
-    // The purity popcount below counts "one extra non-digit" for the dot;
-    // verify that byte actually is '.' (fuzz-found: any junk byte in the
-    // field would otherwise be accepted as the decimal point).
-    valid &= !has_dot || f[int_len] == '.';
-    const uint32_t frac_len = flen - int_len - has_dot;
-    valid &= (int_len - 1) <= 7;
-    valid &= frac_len <= 13;  // real files: 0 (67%) or 12-13
-    const uint32_t il = ((int_len - 1) & 7) + 1;
-    const uint32_t fl1 = frac_len <= 8 ? frac_len : 8;
-    const uint32_t fl2 = frac_len - fl1;
-    const char* fp = f + il + 1;  // il, not int_len: bounds speculative
-                                  // reads within kBufferPadding on garbage
-    uint64_t mant = swar_parse_u64_safe(f, il);
-    const uint64_t fm1 = fl1 ? swar_parse_u64_safe(fp, fl1) : 0;
-    const uint64_t fm2 = fl2 ? swar_parse_u64_safe(fp + 8, fl2) : 0;
-    mant = mant * kPow10u[fl1] + fm1;
-    mant = mant * kPow10u[fl2 & 7] + fm2;  // fl2 <= 5 when valid
-    double bl =
-        static_cast<double>(mant) / kPow10[frac_len <= 13 ? frac_len : 0];
-    // mant >= 0, so the sign bit can be OR'd in directly (no fp select).
-    bl = std::bit_cast<double>(std::bit_cast<uint64_t>(bl) |
-                               (static_cast<uint64_t>(neg) << 63));
-    tp.beat_length = bl;
-
-    // Whole-line digit purity in one predicate: the only non-digit bytes
-    // allowed are the 7 commas, the optional dot, and the optional minus.
-    valid &= _mm_popcnt_u64(nondig) ==
-             7 + static_cast<int>(has_dot) + static_cast<int>(neg);
-
-    // Six small-int tail fields, straight-line (no arrays, no loop — gcc
-    // spills indexed locals to the stack).
-    const uint32_t t0 = c2 - c1 - 1;
-    const uint32_t t1 = c3 - c2 - 1;
-    const uint32_t t2 = c4 - c3 - 1;
-    const uint32_t t3 = c5 - c4 - 1;
-    const uint32_t t4 = c6 - c5 - 1;
-    const uint32_t t5 = static_cast<uint32_t>(len) - c6 - 1;
-    valid &= ((t0 - 1) | (t1 - 1) | (t2 - 1) | (t3 - 1) | (t4 - 1) |
-              (t5 - 1)) <= 7;
-    tp.meter =
-        static_cast<int32_t>(swar_parse_u64_safe(p + c1 + 1, ((t0 - 1) & 7) + 1));
-    tp.sample_set =
-        static_cast<int32_t>(swar_parse_u64_safe(p + c2 + 1, ((t1 - 1) & 7) + 1));
-    tp.sample_index =
-        static_cast<int32_t>(swar_parse_u64_safe(p + c3 + 1, ((t2 - 1) & 7) + 1));
-    tp.volume =
-        static_cast<int32_t>(swar_parse_u64_safe(p + c4 + 1, ((t3 - 1) & 7) + 1));
-    tp.uninherited = swar_parse_u64_safe(p + c5 + 1, ((t4 - 1) & 7) + 1) != 0;
-    tp.effects =
-        static_cast<uint32_t>(swar_parse_u64_safe(p + c6 + 1, ((t5 - 1) & 7) + 1));
-
-    if (geom && valid) {
-        geom->c[0] = static_cast<uint8_t>(c0);
-        geom->c[1] = static_cast<uint8_t>(c1);
-        geom->c[2] = static_cast<uint8_t>(c2);
-        geom->c[3] = static_cast<uint8_t>(c3);
-        geom->c[4] = static_cast<uint8_t>(c4);
-        geom->c[5] = static_cast<uint8_t>(c5);
-        geom->c[6] = static_cast<uint8_t>(c6);
-        geom->bl_il = static_cast<uint8_t>(il);
-        geom->bl_fl1 = static_cast<uint8_t>(fl1);
-        geom->bl_fl2 = static_cast<uint8_t>(fl2);
-        geom->bl_frac = static_cast<uint8_t>(frac_len);
-        geom->bl_neg = neg;
-        geom->bl_has_dot = has_dot;
-    }
-    return valid;
-}
-
-// Compatibility entry (tests/fuzzers): computes the masks itself.
-__attribute__((always_inline))
-inline bool fast_parse_timing_point(__m256i a, __m256i b, const char* p,
-                                    size_t len, TimingPoint& tp) {
-    if (len > 64 || len < 15) return false;  // real lines: 20..39 bytes
-    const uint64_t line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
-    const uint64_t commas =
-        (comma_mask32(a) | static_cast<uint64_t>(comma_mask32(b)) << 32) &
-        line_mask;
-    const uint64_t nondig =
-        (nondigit_mask32(a) |
-         static_cast<uint64_t>(nondigit_mask32(b)) << 32) &
-        line_mask;
-    return fast_parse_timing_point_masked(commas, nondig, p, len, tp);
-}
-
-// --- Timing-line shape cache -------------------------------------------
-//
-// A [TimingPoints] section reuses a handful of byte-level line layouts:
-// on the 10k-map production census, the top 8 exact (comma mask, nondigit
-// mask, length) shapes cover a median 98.1% of a file's timing lines. A
-// line whose masks equal an already-accepted shape is structurally
-// identical to it — same comma positions, same dot/minus placement, all
-// other bytes digits — so validation collapses to the key comparison and
-// every field converts at cached offsets. The six 1-2 digit tail fields
-// convert together with one cached-shuffle maddubs when they fit a
-// 16-byte window; wider shapes fall back to cached-offset SWAR.
-struct TpShapeRow {
-    uint64_t commas = 0, nondig = 0;
-    uint32_t len = 0;  // 0 = empty slot (never matches: len >= 15)
-    TpGeom g{};
-    uint8_t simd_tails = 0;
-    alignas(16) int8_t shuf[16];   // gathers tail digits, 2B lanes
-    alignas(16) uint8_t subv[16];  // '0' on digit lanes, 0 on padding
-};
-
-struct TpShapeCache {
-    TpShapeRow rows[16];
-    static uint32_t slot(uint64_t commas) {
-        return static_cast<uint32_t>((commas * 0x9E3779B97F4A7C15ull) >> 60);
-    }
-};
-
-// The masks pin every byte's class (clear nondigit bit == digit, comma
-// bit == literal comma), but not WHICH non-digit character occupies the
-// beatLength's sign/dot slots — a fuzz-found hole. Two byte compares
-// close it; everything else follows from mask equality.
-inline bool tp_shape_match(const TpShapeRow& row, uint64_t commas,
-                           uint64_t nondig, size_t len, const char* p) {
-    if (row.commas != commas || row.nondig != nondig ||
-        row.len != static_cast<uint32_t>(len))
-        return false;
-    const TpGeom& g = row.g;
-    const bool neg_ok = !g.bl_neg || p[g.c[0] + 1] == '-';
-    const bool dot_ok =
-        !g.bl_has_dot || p[g.c[0] + 1 + g.bl_neg + g.bl_il] == '.';
-    return neg_ok && dot_ok;
-}
-
-inline void tp_shape_insert(TpShapeCache& cache, uint64_t commas,
-                            uint64_t nondig, size_t len, const TpGeom& g) {
-    TpShapeRow& r = cache.rows[TpShapeCache::slot(commas)];
-    r.commas = commas;
-    r.nondig = nondig;
-    r.len = static_cast<uint32_t>(len);
-    r.g = g;
-    // Tail SIMD layout: all six fields 1-2 digits and spanning <= 16
-    // bytes from the first tail digit. Lane i bytes {2i, 2i+1} gather
-    // {tens, ones} (0x80 = zero lane), built as two integers — inserts
-    // are ~15% of a short section's timing cost, so no byte loops here.
-    const uint32_t base = g.c[1] + 1;
-    const uint32_t span = static_cast<uint32_t>(len) - base;
-    uint64_t shuf_lo = 0, shuf_hi = 0, sub_lo = 0, sub_hi = 0;
-    uint32_t maxlen = 0;
-    for (int i = 0; i < 6; ++i) {
-        const uint32_t hi = i < 5 ? g.c[i + 2] : static_cast<uint32_t>(len);
-        const uint32_t off = g.c[i + 1] + 1 - base;
-        const uint32_t flen = hi - g.c[i + 1] - 1;
-        maxlen = flen > maxlen ? flen : maxlen;
-        // flen 1: {0x80, off}; flen 2: {off, off+1}
-        const uint64_t pair = flen == 2 ? (off | ((off + 1) << 8)) : (0x80u | (off << 8));
-        const uint64_t sub = flen == 2 ? 0x3030u : 0x3000u;
-        if (i < 4) {
-            shuf_lo |= pair << (16 * i);
-            sub_lo |= sub << (16 * i);
-        } else {
-            shuf_hi |= pair << (16 * (i - 4));
-            sub_hi |= sub << (16 * (i - 4));
-        }
-    }
-    r.simd_tails = span <= 16 && maxlen <= 2;
-    shuf_hi |= 0x8080808000000000ull;  // lanes 6-7 (bytes 12-15) unused: zero
-    memcpy(r.shuf, &shuf_lo, 8);
-    memcpy(r.shuf + 8, &shuf_hi, 8);
-    memcpy(r.subv, &sub_lo, 8);
-    memcpy(r.subv + 8, &sub_hi, 8);
-}
-
-// Replays a cached shape. Arithmetic mirrors the one-pass parser exactly,
-// so results are bit-identical (pinned by fuzz).
-inline void tp_shape_convert(const TpShapeRow& r, const char* p,
-                             TimingPoint& tp) {
-    const TpGeom& g = r.g;
-    tp.time = static_cast<double>(swar_parse_u64(p, g.c[0]));
-
-    const char* f = p + g.c[0] + 1 + g.bl_neg;
-    uint64_t mant = swar_parse_u64_safe(f, g.bl_il);
-    const char* fp = f + g.bl_il + 1;
-    const uint64_t fm1 = g.bl_fl1 ? swar_parse_u64_safe(fp, g.bl_fl1) : 0;
-    const uint64_t fm2 =
-        g.bl_fl2 ? swar_parse_u64_safe(fp + 8, g.bl_fl2) : 0;
-    mant = mant * kPow10u[g.bl_fl1] + fm1;
-    mant = mant * kPow10u[g.bl_fl2] + fm2;
-    double bl = static_cast<double>(mant) / kPow10[g.bl_frac];
-    bl = std::bit_cast<double>(std::bit_cast<uint64_t>(bl) |
-                               (static_cast<uint64_t>(g.bl_neg) << 63));
-    tp.beat_length = bl;
-
-    if (r.simd_tails) {
-        const __m128i v = _mm_loadu_si128(
-            reinterpret_cast<const __m128i*>(p + g.c[1] + 1));
-        const __m128i gathered = _mm_shuffle_epi8(
-            v, _mm_load_si128(reinterpret_cast<const __m128i*>(r.shuf)));
-        const __m128i digits = _mm_sub_epi8(
-            gathered,
-            _mm_load_si128(reinterpret_cast<const __m128i*>(r.subv)));
-        const __m128i vals =
-            _mm_maddubs_epi16(digits, _mm_set1_epi16(0x010A));
-        alignas(16) uint16_t t[8];
-        _mm_store_si128(reinterpret_cast<__m128i*>(t), vals);
-        tp.meter = t[0];
-        tp.sample_set = t[1];
-        tp.sample_index = t[2];
-        tp.volume = t[3];
-        tp.uninherited = t[4] != 0;
-        tp.effects = t[5];
-    } else {
-        const uint32_t len = r.len;
-        const uint32_t t0 = g.c[2] - g.c[1] - 1;
-        const uint32_t t1 = g.c[3] - g.c[2] - 1;
-        const uint32_t t2 = g.c[4] - g.c[3] - 1;
-        const uint32_t t3 = g.c[5] - g.c[4] - 1;
-        const uint32_t t4 = g.c[6] - g.c[5] - 1;
-        const uint32_t t5 = len - g.c[6] - 1;
-        tp.meter = static_cast<int32_t>(swar_parse_u64(p + g.c[1] + 1, t0));
-        tp.sample_set =
-            static_cast<int32_t>(swar_parse_u64(p + g.c[2] + 1, t1));
-        tp.sample_index =
-            static_cast<int32_t>(swar_parse_u64(p + g.c[3] + 1, t2));
-        tp.volume = static_cast<int32_t>(swar_parse_u64(p + g.c[4] + 1, t3));
-        tp.uninherited = swar_parse_u64(p + g.c[5] + 1, t4) != 0;
-        tp.effects =
-            static_cast<uint32_t>(swar_parse_u64(p + g.c[6] + 1, t5));
-    }
-}
 
 // Fused [TimingPoints] section loop: the same two loads serve the newline
 // scan and the parser, and the section is sized exactly once — the next
@@ -665,7 +231,8 @@ inline void tp_shape_convert(const TpShapeRow& r, const char* p,
 // grows for marathon ones (growth reallocs plus resize's value-init
 // memsets measured worse than the push_back they replaced). Returns the
 // position after the section.
-inline const char* parse_timing_points_section(Beatmap& bm, const char* p,
+template <typename Map>
+inline const char* parse_timing_points_section(Map& bm, const char* p,
                                                const char* file_end) {
     auto& tps = bm.timing_points;
     const auto* bracket = static_cast<const char*>(
@@ -705,7 +272,7 @@ inline const char* parse_timing_points_section(Beatmap& bm, const char* p,
             next_line = m ? m + 1 : file_end;
         }
 
-        TimingPoint tp;
+        typename Map::TimingPoint tp;
         if (len <= 64 && len >= 15) [[likely]] {
             const uint64_t line_mask =
                 len == 64 ? ~0ull : ((1ull << len) - 1);
@@ -741,65 +308,18 @@ inline const char* parse_timing_points_section(Beatmap& bm, const char* p,
 }
 #endif  // FOSU_SIMD_X86
 
-// Slider control point coordinate: overwhelmingly 1-4 plain digits, parsed
-// branchlessly via SWAR. Signs, 5+ digit values, and empty fields take the
-// general path. Returns the advanced pointer, or `p` unchanged on failure.
-inline const char* parse_coord(const char* p, const char* end, int32_t& out) {
-    const uint32_t run = digit_run8(p);
-    if (run - 1 <= 3) {  // 1..4 digits; a run never crosses `end` (the line
-                         // terminator and buffer padding are non-digits)
-        out = static_cast<int32_t>(swar_parse_u32(p, run));
-        return p + run;
-    }
-    int64_t v;
-    const char* q = parse_i64(p, end, v);
-    if (q == p) return p;
-    out = clamp_i32(v);
-    return q;
-}
-
-#if FOSU_SIMD_X86
-// Slider length on the editor-emitted shape: up to 8 integer digits, an
-// optional '.', up to 13 fraction digits, at most 18 digits in all. One
-// 32-byte load classifies the whole number; the mantissa is assembled from
-// the same SWAR pieces parse_double accumulates and divided by the same
-// power of ten, so the result is bit-identical. Returns nullptr for any
-// other shape (sign, exponent, longer or empty numbers) so the caller can
-// run parse_double. The line terminator and buffer padding are non-digits,
-// so the digit run can never cross the end of the line.
-inline const char* parse_slider_length(const char* p, double& out) {
-    const __m256i v =
-        _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
-    const uint64_t nd = nondigit_mask32(v);
-    const auto il = static_cast<uint32_t>(_tzcnt_u64(nd));  // 1..8 if valid
-    const bool has_dot = p[il] == '.';  // il <= 32 stays inside the padding
-    const uint32_t fl =
-        has_dot ? static_cast<uint32_t>(_tzcnt_u64(nd >> (il + 1))) : 0;
-    if ((il - 1) > 7 || fl > 13 || il + fl > 18) return nullptr;
-    const uint32_t fl1 = fl <= 8 ? fl : 8;
-    const uint32_t fl2 = fl - fl1;
-    uint64_t mant = swar_parse_u64(p, il);
-    const char* fp = p + il + 1;
-    if (fl1) mant = mant * kPow10u[fl1] + swar_parse_u64(fp, fl1);
-    if (fl2) mant = mant * kPow10u[fl2] + swar_parse_u64(fp + 8, fl2);
-    double d = static_cast<double>(mant);
-    if (fl) d /= kPow10[fl];
-    out = d;
-    return has_dot ? fp + fl : p + il;
-}
-#endif
-
 // Slider params: curveType|x:y|x:y...,slides,length[,edgeSounds,edgeSets][,hitSample]
 //
 // The Slider is emplaced first and filled in place (popped again if the
 // line turns out malformed): a stack temporary handed to push_back costs
 // a 64-byte zero-fill plus a 64-byte copy on every slider.
-inline bool parse_slider_params(Beatmap& bm, HitObject& h, const char* p,
+template <typename Map>
+inline bool parse_slider_params(Map& bm, typename Map::HitObject& h, const char* p,
                                 const char* end) {
     if (p >= end) return false;
     auto& sliders = bm.sliders;
-    sliders.emplace_back(Slider::uninit_t{});
-    Slider& s = sliders.back();
+    sliders.emplace_back(typename Map::Slider::uninit_t{});
+    auto& s = sliders.back();
     s.curve_type = *p++;
 
     // Points are written straight into the pool through a raw cursor —
@@ -809,50 +329,11 @@ inline bool parse_slider_params(Beatmap& bm, HitObject& h, const char* p,
     auto& pts = bm.slider_points;
     const size_t base = pts.size();
     pts.resize(base + static_cast<size_t>(end - p) / 4 + 1);
-    SliderPoint* w = pts.data() + base;
-#if FOSU_SIMD_X86
-    // Editor-emitted points are "|x:y" with 1..4 plain digits per
-    // coordinate, so one 16-byte load classifies a whole pair: the
-    // non-digit mask yields both digit counts, the ':' mask validates the
-    // separator without a dependent byte load. Anything else (signs,
-    // longer values, empty fields) leaves the loop for the general one.
-    while (p < end && *p == '|') {
-        const __m128i v =
-            _mm_loadu_si128(reinterpret_cast<const __m128i*>(p + 1));
-        const __m128i biased = _mm_add_epi8(v, _mm_set1_epi8(80));
-        const auto nd = static_cast<uint32_t>(_mm_movemask_epi8(
-            _mm_cmpgt_epi8(biased, _mm_set1_epi8(-119))));
-        const auto colon = static_cast<uint32_t>(_mm_movemask_epi8(
-            _mm_cmpeq_epi8(v, _mm_set1_epi8(':'))));
-        const uint32_t xl = _tzcnt_u32(nd);
-        const uint32_t yl = _tzcnt_u32(nd >> (xl + 1));
-        if ((xl - 1) > 3 || (yl - 1) > 3 || !((colon >> xl) & 1)) break;
-        w->x = static_cast<int32_t>(swar_parse_u32(p + 1, xl));
-        w->y = static_cast<int32_t>(swar_parse_u32(p + 2 + xl, yl));
-        ++w;
-        p += 2 + xl + yl;
-    }
-#endif
-    while (p < end && *p == '|') {
-        int32_t px, py;
-        const char* q = parse_coord(p + 1, end, px);
-        // A coord ending at the line end reads the terminator from the
-        // padded buffer, never ':' — no explicit q < end check needed.
-        if (q == p + 1 || *q != ':') {
-            pts.resize(base);
-            sliders.pop_back();
-            return false;
-        }
-        const char* r = parse_coord(q + 1, end, py);
-        if (r == q + 1) {
-            pts.resize(base);
-            sliders.pop_back();
-            return false;
-        }
-        w->x = px;
-        w->y = py;
-        ++w;
-        p = r;
+    auto* w = pts.data() + base;
+    if (!parse_slider_points(p, end, w)) {
+        pts.resize(base);
+        sliders.pop_back();
+        return false;
     }
     pts.resize(static_cast<size_t>(w - pts.data()));
     s.point_begin = static_cast<uint32_t>(base);
@@ -906,13 +387,13 @@ inline bool parse_slider_params(Beatmap& bm, HitObject& h, const char* p,
             const uint32_t c0 = _tzcnt_u32(cm);
             const uint32_t c1 = _tzcnt_u32(_blsr_u32(cm));
             if (c0 >= span) {
-                s.edge_sounds = {p, span};
+                s.edge_sounds = bm.view({p, span});
             } else if (c1 >= span) {
-                s.edge_sounds = {p, c0};
-                s.edge_sets = {p + c0 + 1, span - c0 - 1};
+                s.edge_sounds = bm.view({p, c0});
+                s.edge_sets = bm.view({p + c0 + 1, span - c0 - 1});
             } else {
-                s.edge_sounds = {p, c0};
-                s.edge_sets = {p + c0 + 1, c1 - c0 - 1};
+                s.edge_sounds = bm.view({p, c0});
+                s.edge_sets = bm.view({p + c0 + 1, c1 - c0 - 1});
                 hit_sample = {p + c1 + 1, span - c1 - 1};
             }
         } else
@@ -927,19 +408,20 @@ inline bool parse_slider_params(Beatmap& bm, HitObject& h, const char* p,
                 extra[n++] = {p, static_cast<size_t>(fend - p)};
                 p = fend + 1;
             }
-            s.edge_sounds = extra[0];
-            s.edge_sets = extra[1];
+            s.edge_sounds = bm.view(extra[0]);
+            s.edge_sets = bm.view(extra[1]);
             hit_sample = extra[2];
         }
     }
-    h.hit_sample = hit_sample;
+    h.hit_sample = bm.view(hit_sample);
     h.slider = static_cast<uint32_t>(sliders.size() - 1);
     return true;
 }
 
 // Everything after the "x,y,time,type,hitSound" prefix: slider params,
 // spinner/hold end times, trailing hitSample.
-inline bool finish_hitobject(Beatmap& bm, HitObject& h, const char* p,
+template <typename Map>
+inline bool finish_hitobject(Map& bm, typename Map::HitObject& h, const char* p,
                              const char* end, size_t bytes_remaining) {
     if (h.type & 2) {  // slider
         if (p >= end || *p != ',') return false;
@@ -966,25 +448,26 @@ inline bool finish_hitobject(Beatmap& bm, HitObject& h, const char* p,
             h.hit_sample = {};
             return true;
         }
-        h.hit_sample = {p, static_cast<size_t>(end - p)};
+        h.hit_sample = bm.view({p, static_cast<size_t>(end - p)});
         return true;
     }
     // circle: optional trailing hitSample (every path assigns the field,
     // so callers need not clear it)
-    h.hit_sample = (p < end && *p == ',')
+    h.hit_sample = bm.view((p < end && *p == ',')
                        ? std::string_view{p + 1, static_cast<size_t>(end - (p + 1))}
-                       : std::string_view{};
+                       : std::string_view{});
     return true;
 }
 
 // Scalar-only per-line path; the SIMD build routes [HitObjects] through
 // parse_hitobjects_section instead.
-inline void parse_hitobject_line(Beatmap& bm, const char* line, size_t len,
+template <typename Map>
+inline void parse_hitobject_line(Map& bm, const char* line, size_t len,
                                  size_t bytes_remaining) {
-    bm.hit_objects.emplace_back(HitObject::uninit_t{});
-    HitObject& h = bm.hit_objects.back();
+    bm.hit_objects.emplace_back(typename Map::HitObject::uninit_t{});
+    auto& h = bm.hit_objects.back();
     h.end_time = 0;
-    h.slider = HitObject::kNoSlider;
+    h.slider = Map::HitObject::kNoSlider;
 
     const int next = scalar_parse_prefix(line, len, h);
     if (next < 0) {
@@ -1001,78 +484,25 @@ inline void parse_hitobject_line(Beatmap& bm, const char* line, size_t len,
 }
 
 #if FOSU_SIMD_X86
-// Fused [HitObjects] section loop: one 32-byte load per line yields the
-// prefix delimiter mask AND the newline position (5-field circle lines —
-// the majority in real maps — never touch memchr). Returns the position
-// after the section.
-inline const char* parse_hitobjects_section(Beatmap& bm, const char* p,
-                                            const char* file_end) {
-    // Counted locally: a per-line read-modify-write of bm.stats cannot be
-    // kept in a register across the calls below.
-    uint32_t fast_lines = 0;
-    while (p < file_end) {
-        const char c = *p;
-        if (c == '\r' || c == '\n') {
-            ++p;
-            continue;
-        }
-        if (c == '[') break;
-
-        bm.hit_objects.emplace_back(HitObject::uninit_t{});
-        HitObject& h = bm.hit_objects.back();
-
-        uint32_t nl_mask;
-        const int next = fast_parse_prefix(p, h, nl_mask);
-
-        const char* nl;
-        if (nl_mask) {
-            nl = p + _tzcnt_u32(nl_mask);
-        } else {
-            // Slider lines run past the first window. A second vector
-            // compare covers lines up to 64 bytes — 82% of hitobject
-            // lines in the production census — before paying a memchr
-            // call; bytes past the file end are zero padding.
-            const __m256i b =
-                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + 32));
-            const auto nl2 = static_cast<uint32_t>(_mm256_movemask_epi8(
-                _mm256_cmpeq_epi8(b, _mm256_set1_epi8('\n'))));
-            nl = nl2 ? p + 32 + _tzcnt_u32(nl2)
-                     : static_cast<const char*>(memchr(
-                           p + 64, '\n',
-                           file_end - p > 64
-                               ? static_cast<size_t>(file_end - p) - 64
-                               : 0));
-        }
-        const char* line_end = nl ? nl : file_end;
-        if (line_end > p && line_end[-1] == '\r') --line_end;
-        const char* next_line = nl ? nl + 1 : file_end;
-
-        bool ok;
-        if (next >= 0) {
-            ++fast_lines;
-            ok = finish_hitobject(bm, h, p + next, line_end,
-                                  static_cast<size_t>(file_end - p));
-        } else {
-            h.end_time = 0;
-            h.slider = HitObject::kNoSlider;
-            const int sn = scalar_parse_prefix(
-                p, static_cast<size_t>(line_end - p), h);
-            if (sn >= 0) {
-                ++bm.stats.slow_path_lines;
-                ok = finish_hitobject(bm, h, p + sn, line_end,
-                                      static_cast<size_t>(file_end - p));
-            } else {
-                ok = false;
-            }
-        }
-        if (!ok) {
-            bm.hit_objects.pop_back();
-            ++bm.stats.malformed_lines;
-        }
-        p = next_line;
+template <typename Map>
+struct MaterializedHits {
+    using HitObject = typename Map::HitObject;
+    Map& bm;
+    HitObject& begin(size_t) {
+        bm.hit_objects.emplace_back(typename HitObject::uninit_t{});
+        return bm.hit_objects.back();
     }
-    bm.stats.fast_path_lines += fast_lines;
-    return p;
+    bool finish(HitObject& h, const char* p, const char* end, size_t remaining) {
+        return finish_hitobject(bm, h, p, end, remaining);
+    }
+    void commit(HitObject&) {}
+    void rollback(HitObject&) { bm.hit_objects.pop_back(); }
+    auto& stats() { return bm.stats; }
+};
+template <typename Map>
+inline const char* parse_hitobjects_section(Map& bm, const char* p, const char* file_end) {
+    MaterializedHits<Map> sink{bm};
+    return parse_hitobject_lines(sink, p, file_end);
 }
 
 // Fused [Events] section loop. Storyboard command lines — indented, and
@@ -1080,7 +510,8 @@ inline const char* parse_hitobjects_section(Beatmap& bm, const char* p,
 // their first byte; every line finds its end with vector compares (two
 // 32-byte windows cover 64 bytes) instead of a memchr call. Returns the
 // position after the section.
-inline const char* parse_events_section(Beatmap& bm, const char* p,
+template <typename Map>
+inline const char* parse_events_section(Map& bm, const char* p,
                                         const char* file_end) {
     uint32_t storyboard_lines = 0;
     while (p < file_end) {
@@ -1134,14 +565,15 @@ inline const char* parse_events_section(Beatmap& bm, const char* p,
 // Resets bm for reuse: every field returns to its default, but vector
 // capacity is kept, so the steady state of a parse-many loop allocates
 // nothing and touches no new pages.
-inline void reset_for_reuse(Beatmap& bm) {
+template <typename Map>
+inline void reset_for_reuse(Map& bm) {
     auto breaks = std::move(bm.breaks);
     auto colours = std::move(bm.combo_colours);
     auto tps = std::move(bm.timing_points);
     auto objs = std::move(bm.hit_objects);
     auto sliders = std::move(bm.sliders);
     auto points = std::move(bm.slider_points);
-    bm = Beatmap{};
+    bm = Map{};
     breaks.clear();
     colours.clear();
     tps.clear();
@@ -1162,10 +594,12 @@ inline void reset_for_reuse(Beatmap& bm) {
 // String fields of the result view into `data`; keep the buffer alive.
 // parse_into clears bm (keeping vector capacity) and fills it; pass the
 // same Beatmap across calls to parse many files without allocating.
-inline void parse_into(const char* data, size_t size, Beatmap& bm,
+template <typename Map>
+inline void parse_into(const char* data, size_t size, Map& bm,
                        [[maybe_unused]] ParseOptions opts = {}) {
     using namespace detail;
     reset_for_reuse(bm);
+    bm.set_input(data);
     const char* p = data;
     const char* file_end = data + size;
     if (size >= 3 && static_cast<uint8_t>(p[0]) == 0xEF &&
@@ -1293,7 +727,8 @@ inline void parse_into(const char* data, size_t size, Beatmap& bm,
     if (!ar_specified) bm.ar = bm.od;
 }
 
-inline void parse_into(const FileBuffer& buf, Beatmap& bm,
+template <typename Map>
+inline void parse_into(const FileBuffer& buf, Map& bm,
                        ParseOptions opts = {}) {
     parse_into(buf.data.get(), buf.size, bm, opts);
 }

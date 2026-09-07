@@ -45,6 +45,9 @@ int main(int argc, char** argv) {
     if (!limit || limit > n) limit = n;
     int reps = atoi(argv[3]), bins = argc - 4;
     if (!n || reps <= 0) return 2;
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_addopen(&fa, 1, "/dev/null", O_WRONLY, 0);
     puts(
         "file,bytes,rep,variant,wall_ns,user_us,sys_us,minor_faults,major_"
         "faults");
@@ -69,7 +72,7 @@ int main(int argc, char** argv) {
                 pid_t pid;
                 uint64_t start = now();
                 int rc =
-                    posix_spawn(&pid, child[0], NULL, NULL, child, environ);
+                    posix_spawn(&pid, child[0], &fa, NULL, child, environ);
                 if (rc) {
                     fprintf(stderr, "spawn: %s\n", strerror(rc));
                     return 1;
