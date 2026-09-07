@@ -7,10 +7,13 @@
 
 static void check(std::string_view data) {
     auto input = fosu::make_padded(data);
-    fosu::Parser scalar_parser;
+    fosu::Parser scalar_parser(fosu::internal::scalar_engine);
     fosu::Parser simd_parser;
-    auto a = scalar_parser.parse(input, {.use_simd = false});
-    auto b = simd_parser.parse(input);
+    auto scalar = scalar_parser.parse(input);
+    auto simd = simd_parser.parse(input);
+    assert(scalar && simd);
+    auto a = *scalar.value();
+    auto b = *simd.value();
     a.stats.fast_path_lines = a.stats.slow_path_lines = 0;
     b.stats.fast_path_lines = b.stats.slow_path_lines = 0;
     std::string x, y;

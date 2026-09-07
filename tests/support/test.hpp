@@ -29,7 +29,17 @@ inline int test_result() {
     return g_failures ? 1 : 0;
 }
 
+[[maybe_unused]] static fosu::Beatmap& require_parse(
+    fosu::Result<fosu::Beatmap*> parsed) {
+    CHECK(parsed);
+    if (!parsed) std::abort();
+    return *parsed.value();
+}
+
 [[maybe_unused]] static fosu::Beatmap parse_str(const std::string& s, bool use_simd = true) {
-    static fosu::Parser parser;
-    return parser.parse(s.data(), s.size(), {.use_simd = use_simd});
+    static fosu::Parser native_parser;
+    static fosu::Parser scalar_parser(fosu::internal::scalar_engine);
+    auto& parser = use_simd ? native_parser : scalar_parser;
+    return require_parse(
+        parser.parse(s.data(), s.size()));
 }

@@ -5,14 +5,16 @@ static void test_reparse_reuses_arena_memory() {
     auto input = fosu::make_padded(
         "[HitObjects]\n16,32,100,1,0\n32,64,200,1,0\n");
     fosu::Parser parser;
-    const auto& beatmap = parser.parse(input);
-    const auto* allocation = beatmap.hit_objects.data();
+    const auto& first = require_parse(parser.parse(input));
+    const auto* allocation = first.hit_objects.data();
 
-    parser.parse(input);
-    CHECK_EQ(beatmap.hit_objects.size(), 2u);
-    CHECK(beatmap.hit_objects.data() == allocation);
+    const auto& second = require_parse(parser.parse(input));
+    CHECK_EQ(second.hit_objects.size(), 2u);
+    CHECK(second.hit_objects.data() == allocation);
     fosu::Parser expected;
-    CHECK_EQ(canonical(beatmap), canonical(expected.parse(input)));
+    CHECK_EQ(
+        canonical(second),
+        canonical(require_parse(expected.parse(input))));
 }
 
 static void test_reparse_accepts_larger_arrays() {
@@ -24,11 +26,13 @@ static void test_reparse_accepts_larger_arrays() {
     auto replacement = fosu::make_padded(text);
 
     fosu::Parser parser;
-    parser.parse(initial);
-    const auto& beatmap = parser.parse(replacement);
+    require_parse(parser.parse(initial));
+    const auto& beatmap = require_parse(parser.parse(replacement));
     CHECK_EQ(beatmap.hit_objects.size(), 5000u);
     fosu::Parser expected;
-    CHECK_EQ(canonical(beatmap), canonical(expected.parse(replacement)));
+    CHECK_EQ(
+        canonical(beatmap),
+        canonical(require_parse(expected.parse(replacement))));
 }
 
 static void test_reparse_clears_omitted_sections() {
@@ -44,10 +48,11 @@ static void test_reparse_clears_omitted_sections() {
     auto replacement =
         fosu::make_padded("[Metadata]\nTitle:Replacement title\n");
     fosu::Parser parser;
-    const auto& beatmap = parser.parse(initial);
-    CHECK(!beatmap.sliders.empty() && !beatmap.timing_points.empty());
+    const auto& initial_map = require_parse(parser.parse(initial));
+    CHECK(!initial_map.sliders.empty() &&
+          !initial_map.timing_points.empty());
 
-    parser.parse(replacement);
+    const auto& beatmap = require_parse(parser.parse(replacement));
     CHECK(beatmap.title == "Replacement title");
     CHECK_EQ(beatmap.beatmap_id, -1);
     CHECK(beatmap.audio_filename.empty() && beatmap.background.empty());
@@ -59,7 +64,9 @@ static void test_reparse_clears_omitted_sections() {
     CHECK(beatmap.timing_points.empty() && beatmap.hit_objects.empty());
     CHECK(beatmap.sliders.empty() && beatmap.slider_points.empty());
     fosu::Parser expected;
-    CHECK_EQ(canonical(beatmap), canonical(expected.parse(replacement)));
+    CHECK_EQ(
+        canonical(beatmap),
+        canonical(require_parse(expected.parse(replacement))));
 }
 
 static void test_empty_reparse_resets_defaults() {
@@ -69,10 +76,10 @@ static void test_empty_reparse_resets_defaults() {
         "[HitObjects]\ninvalid\n96,192,800,1,0\n");
     auto empty = fosu::make_padded("");
     fosu::Parser parser;
-    const auto& beatmap = parser.parse(initial);
-    CHECK_EQ(beatmap.stats.malformed_lines, 1u);
+    const auto& initial_map = require_parse(parser.parse(initial));
+    CHECK_EQ(initial_map.stats.malformed_lines, 1u);
 
-    parser.parse(empty);
+    const auto& beatmap = require_parse(parser.parse(empty));
     CHECK(beatmap.title.empty() && beatmap.hit_objects.empty());
     CHECK_EQ(beatmap.stats.malformed_lines, 0u);
     CHECK_EQ(beatmap.stats.fast_path_lines, 0u);
@@ -80,7 +87,9 @@ static void test_empty_reparse_resets_defaults() {
     CHECK(std::abs(beatmap.stack_leniency - 0.7) < 1e-12);
     CHECK(beatmap.sample_set == "Normal");
     fosu::Parser expected;
-    CHECK_EQ(canonical(beatmap), canonical(expected.parse(empty)));
+    CHECK_EQ(
+        canonical(beatmap),
+        canonical(require_parse(expected.parse(empty))));
 }
 
 static void test_large_arena_arrays() {
@@ -106,35 +115,38 @@ static void test_large_arena_arrays() {
     auto timing_input = fosu::make_padded(timing);
 
     for (bool simd : {false, true}) {
-        fosu::Parser parser;
-        const auto& beatmap = parser.parse(
-            circle_input, {.use_simd = simd});
-        CHECK_EQ(beatmap.hit_objects.size(), 3000u);
-        CHECK(beatmap.sliders.empty() && beatmap.slider_points.empty());
+        fosu::Parser parser(simd ? fosu::internal::native_engine : fosu::internal::scalar_engine);
+        const auto& circles_map = require_parse(parser.parse(
+            circle_input));
+        CHECK_EQ(circles_map.hit_objects.size(), 3000u);
+        CHECK(circles_map.sliders.empty() &&
+              circles_map.slider_points.empty());
         CHECK_EQ(
-            beatmap.hit_objects.back().slider,
+            circles_map.hit_objects.back().slider,
             fosu::HitObject::kNoSlider);
-        CHECK(beatmap.hit_objects.back().hit_sample.empty());
+        CHECK(circles_map.hit_objects.back().hit_sample.empty());
 
-        parser.parse(slider_input, {.use_simd = simd});
-        CHECK_EQ(beatmap.hit_objects.size(), 3000u);
-        CHECK_EQ(beatmap.sliders.size(), 3000u);
-        CHECK_EQ(beatmap.slider_points.size(), 9004u);
-        CHECK_EQ(beatmap.stats.malformed_lines, 4u);
+        const auto& sliders_map = require_parse(parser.parse(
+            slider_input));
+        CHECK_EQ(sliders_map.hit_objects.size(), 3000u);
+        CHECK_EQ(sliders_map.sliders.size(), 3000u);
+        CHECK_EQ(sliders_map.slider_points.size(), 9004u);
+        CHECK_EQ(sliders_map.stats.malformed_lines, 4u);
         for (size_t i = 0; i < 3000; ++i) {
-            const auto& slider = beatmap.sliders[i];
-            CHECK_EQ(beatmap.hit_objects[i].slider, i);
+            const auto& slider = sliders_map.sliders[i];
+            CHECK_EQ(sliders_map.hit_objects[i].slider, i);
             CHECK_EQ(slider.point_begin, 3 * i + (i < 1500 ? 2 : 4));
             CHECK_EQ(slider.point_count, 3u);
-            CHECK_EQ(beatmap.slider_points[slider.point_begin].x, 1);
+            CHECK_EQ(sliders_map.slider_points[slider.point_begin].x, 1);
             CHECK_EQ(
-                beatmap.slider_points[slider.point_begin + 2].y, 6);
+                sliders_map.slider_points[slider.point_begin + 2].y, 6);
         }
 
-        parser.parse(timing_input, {.use_simd = simd});
-        CHECK_EQ(beatmap.timing_points.size(), 3000u);
-        CHECK_EQ(beatmap.timing_points.back().beat_length, 500);
-        CHECK(beatmap.hit_objects.empty());
+        const auto& timing_map = require_parse(parser.parse(
+            timing_input));
+        CHECK_EQ(timing_map.timing_points.size(), 3000u);
+        CHECK_EQ(timing_map.timing_points.back().beat_length, 500);
+        CHECK(timing_map.hit_objects.empty());
     }
 }
 
@@ -156,9 +168,9 @@ static void test_rejected_slider_points() {
             std::string("[HitObjects]\n1,2,3,2,0,") + test.tail +
             "\n1,2,4,2,0,L|11:12,1,10\n");
         for (bool simd : {false, true}) {
-            fosu::Parser parser;
-            const auto& beatmap = parser.parse(
-                input, {.use_simd = simd});
+            fosu::Parser parser(simd ? fosu::internal::native_engine : fosu::internal::scalar_engine);
+            const auto& beatmap = require_parse(parser.parse(
+                input));
             CHECK_EQ(beatmap.stats.malformed_lines, 1u);
             CHECK_EQ(beatmap.hit_objects.size(), 1u);
             CHECK_EQ(beatmap.sliders.size(), 1u);
@@ -189,17 +201,67 @@ static void test_copy_owns_all_data() {
             "1,2,4,2,0,B|7:8|9:10,1,20,2|0,1:2|3:4,"
             "1:2:3:4:slider.wav\n");
         fosu::Parser parser;
-        const auto& parsed = parser.parse(input);
+        const auto& parsed = require_parse(parser.parse(input));
         expected = canonical(parsed);
-        owned = parsed.copy(*program_arena);
+        auto copied = parsed.copy(*program_arena);
+        CHECK(copied);
+        if (copied) owned = copied.value();
+        owned.hit_objects[0].x = 42;
+        CHECK_EQ(parsed.hit_objects[0].x, 1);
+        owned.hit_objects[0].x = 1;
         std::memset(input.data.get(), 'x', input.size);
         CHECK_EQ(canonical(parsed), expected);
         auto replacement = fosu::make_padded(
             "[Metadata]\nTitle:Replacement\n[HitObjects]\n1,2,5,1,0\n");
-        parser.parse(replacement);
+        require_parse(parser.parse(replacement));
     }
     CHECK_EQ(canonical(owned), expected);
     fosu::arena_release(program_arena);
+}
+
+static void test_failed_parse_resets_and_parser_remains_reusable() {
+    fosu::Parser parser;
+    auto input = fosu::make_padded(
+        "[Metadata]\nTitle:Before failure\n");
+    CHECK(parser.parse(input));
+
+    auto failed = parser.parse(nullptr, 1);
+    CHECK(!failed);
+    CHECK_EQ(failed.error().code, fosu::ErrorCode::InvalidInput);
+    const auto storage = fosu::internal::parser_storage(parser);
+    CHECK(storage.input == nullptr);
+    CHECK_EQ(fosu::arena_pos(storage.arena), fosu::kArenaHeaderSize);
+
+    const auto& recovered = require_parse(parser.parse(input));
+    CHECK(recovered.title == "Before failure");
+}
+
+static void test_failed_copy_rewinds_destination() {
+    std::string text = "[HitObjects]\n";
+    for (size_t i = 0; i < 2000; ++i)
+        text += "1,2,3,1,0,1:2:3:4:sample.wav\n";
+    auto input = fosu::make_padded(text);
+    fosu::Parser parser;
+    const auto& beatmap = require_parse(parser.parse(input));
+
+    const size_t page_size = fosu::internal::os_page_size();
+    fosu::Arena* destination = fosu::arena_alloc({
+        .reserve_size = page_size,
+        .commit_size = page_size,
+        .flags = 0,
+    });
+    CHECK(destination != nullptr);
+    auto* existing = fosu::arena_push_array<uint32_t>(destination, 1);
+    CHECK(existing != nullptr);
+    *existing = 0x12345678;
+    const size_t checkpoint = fosu::arena_pos(destination);
+
+    auto copied = beatmap.copy(*destination);
+    CHECK(!copied);
+    CHECK_EQ(copied.error().code, fosu::ErrorCode::AllocationFailure);
+    CHECK_EQ(fosu::arena_pos(destination), checkpoint);
+    CHECK_EQ(*existing, 0x12345678u);
+    fosu::arena_release(destination);
 }
 
 static void test_arena_interface() {
@@ -261,7 +323,39 @@ void test_read_into_reuse() {
     unlink(path);
 }
 
+static void test_parser_prepares_engine_input_and_output() {
+    static int calls = 0;
+    const fosu::ParsingEngine engine{
+        fosu::EngineKind::Scalar,
+        [](std::span<const char> input, fosu::Beatmap& beatmap,
+           fosu::ParseOptions options) noexcept {
+            ++calls;
+            CHECK_EQ(options.sections, fosu::kSectionHitObjects);
+            CHECK_EQ(std::string_view(input.data(), input.size()), "1,2,3,1,0");
+            for (size_t i = 0; i < fosu::kBufferPadding; ++i)
+                CHECK_EQ(input.data()[input.size() + i], '\0');
+            CHECK(!beatmap.hit_objects.empty());
+            CHECK(beatmap.timing_points.empty());
+            CHECK_EQ(beatmap.sample_set, "Normal");
+            beatmap.hit_objects[0] = {.x = 42};
+            beatmap.hit_objects = beatmap.hit_objects.first(1);
+            beatmap.sliders = {};
+            beatmap.slider_points = {};
+        },
+    };
+    fosu::Parser parser(engine);
+    std::string input = "1,2,3,1,0";
+    const auto& beatmap = require_parse(parser.parse(
+        std::span<const char>(input), {.sections = fosu::kSectionHitObjects}));
+    CHECK_EQ(beatmap.hit_objects.size(), 1u);
+    CHECK_EQ(beatmap.hit_objects[0].x, 42);
+    CHECK(!parser.parse(nullptr, 1));
+    CHECK(!parser.parse(input.data(), input.size(), {.sections = 1}));
+    CHECK_EQ(calls, 1);
+}
+
 int main() {
+    test_parser_prepares_engine_input_and_output();
     test_reparse_reuses_arena_memory();
     test_reparse_accepts_larger_arrays();
     test_reparse_clears_omitted_sections();
@@ -269,6 +363,8 @@ int main() {
     test_large_arena_arrays();
     test_rejected_slider_points();
     test_copy_owns_all_data();
+    test_failed_parse_resets_and_parser_remains_reusable();
+    test_failed_copy_rewinds_destination();
     test_arena_interface();
     test_read_into_reuse();
     return test_result();

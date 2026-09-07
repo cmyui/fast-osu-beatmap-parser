@@ -19,8 +19,10 @@ void check(fosu_handle* h, const std::string& input, uint32_t sections = FOSU_AL
     const auto* v = fosu_get_view(h);
     assert(v && v->source_size == input.size());
     fosu::Parser parser;
-    auto expected = parser.parse(
+    auto parsed = parser.parse(
         input.data(), input.size(), {.sections = sections});
+    assert(parsed);
+    auto expected = *parsed.value();
     // Runtime dispatch may choose scalar even when this reference was compiled
     // with SIMD (for example under Rosetta). Only path counters differ.
     if (!strcmp(fosu_backend_name(), "scalar")) {

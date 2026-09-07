@@ -19,16 +19,23 @@ Linux AVX2 backend retains Zen 4 scheduling. All backends use the same ABI and
 result ownership contract.
 
 `fosu_backend_name()` returns `"scalar"`, `"avx2"` or `"neon"`.
-`fosu_backend_available("avx2")` reports whether that backend is compiled in and
-supported by the CPU and OS. Set `FOSU_BACKEND=auto|scalar|avx2|neon` before the first
+`fosu_backend_available("avx2")` checks CPU/OS support and whether the adjacent
+engine library is present; it does not load it. Set `FOSU_BACKEND=auto|scalar|avx2|neon` before the first
 call to select a backend; `FOSU_FORCE_SCALAR=1` also works when `FOSU_BACKEND` is
-unset. An unknown or unsupported request makes `fosu_backend_name()` and
+unset. An unknown, unsupported or unloadable forced request makes `fosu_backend_name()` and
 `fosu_new()` return NULL. Selection is thread-safe and fixed for the lifetime
 of that loaded library, even if the environment subsequently changes.
 
-Each API call forwards to a cached function pointer; parsing loops have no
-runtime ISA branches. Backend types and parser storage are private, and baseline
-startup/teardown code calls only the selected backend. Header-only C++ remains
+The core contains Parser ownership, C adaptation and the scalar engine. Keep
+`libfosu_engine_avx2.so` or `libfosu_engine_neon.dylib` (as appropriate for the
+platform) beside the core library. Automatic selection falls back to scalar
+if the optimized engine cannot be loaded. Only the selected engine is loaded,
+and it is unloaded with the core after parser storage cleanup.
+
+One cached function pointer invokes the complete parsing engine per document;
+parsing loops have no runtime ISA dispatch. Engine types are a private,
+versioned interface: distribute matching core and engine builds together.
+Header-only C++ remains
 compile-time selected; C++ applications can use this C ABI for runtime selection.
 
 On Linux the default build bundles private copies of the C++ runtime and

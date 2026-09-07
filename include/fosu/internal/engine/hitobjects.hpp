@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-#include "../beatmap.hpp"
+#include "../../beatmap.hpp"
 #include "hitobject_details.hpp"
 #include "line_scan.hpp"
 #include "prefix.hpp"
@@ -253,17 +253,16 @@ inline const char* parse_hitobject_lines(
 }
 #endif
 
+template <bool UseSimd>
 inline const char* parse_hitobjects_section(
     Beatmap& beatmap, size_t& hit_object_count, size_t& slider_count,
-    size_t& point_count, const char* p, const char* file_end, bool use_simd) {
+    size_t& point_count, const char* p, const char* file_end) {
     const HitObjectParseConstants constants;
 #if FOSU_SIMD
-    if (use_simd)
+    if constexpr (UseSimd)
         return parse_hitobject_lines(
             beatmap, hit_object_count, slider_count, point_count, p,
             file_end, constants);
-#else
-    (void)use_simd;
 #endif
     return parse_hitobject_lines_scalar(
         beatmap, hit_object_count, slider_count, point_count, p, file_end,

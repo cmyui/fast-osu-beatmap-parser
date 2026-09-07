@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <string>
-#include <fosu/internal/scalar_parse.hpp>
+#include <fosu/internal/engine/scalar_parse.hpp>
 
 namespace fosu::internal {
 inline const char* libc_number(const char* p, const char* end, double& out, bool nan) {
@@ -52,7 +52,9 @@ static_assert(!FOSU_SIMD, "the independent numeric oracle must use scalar parsin
 extern "C" __attribute__((visibility("default")))
 void fosu_numeric_oracle(const char* data, size_t size, std::string& output) {
     fosu::Parser parser;
-    auto map = parser.parse(data, size, {.use_simd = false});
+    auto parsed = parser.parse(data, size);
+    if (!parsed) return;
+    auto map = *parsed.value();
     map.stats.fast_path_lines = map.stats.slow_path_lines = 0;
     fosu_dump::dump(map, output);
 }

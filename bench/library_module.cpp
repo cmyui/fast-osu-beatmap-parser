@@ -21,11 +21,15 @@ EXPORT void fosu_bench_free(void* p) { delete static_cast<Result*>(p); }
 EXPORT void fosu_bench_parse(void* p, const char* data, size_t size, int reuse) {
     if (reuse) {
         auto& parser = *static_cast<Result*>(p);
-        const auto& bm = parser.parse(data, size);
+        auto parsed = parser.parse(data, size);
+        if (!parsed) std::abort();
+        const auto& bm = *parsed.value();
         __asm__ volatile("" : : "g"(&bm) : "memory");
     } else {
         Result parser;
-        const auto& bm = parser.parse(data, size);
+        auto parsed = parser.parse(data, size);
+        if (!parsed) std::abort();
+        const auto& bm = *parsed.value();
         __asm__ volatile("" : : "g"(&bm) : "memory");
     }
 }

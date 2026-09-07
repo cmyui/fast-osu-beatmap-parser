@@ -1,5 +1,5 @@
 #pragma once
-#include "../beatmap.hpp"
+#include "../../beatmap.hpp"
 #include "text.hpp"
 #include "metadata.hpp"
 

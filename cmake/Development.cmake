@@ -35,6 +35,13 @@ if(BUILD_TESTING)
     # Inspect ELF on the host; do not run host Python through a target emulator.
     add_test(NAME binary_hardening COMMAND "${Python_EXECUTABLE}" ${PROJECT_SOURCE_DIR}/tests/test_binary_hardening.py $<TARGET_FILE:fosu>)
     set_tests_properties(library_exports binary_hardening c_api_io PROPERTIES LABELS c-api)
+    foreach(kind avx2 neon)
+      if(TARGET fosu_native_${kind})
+        add_test(NAME engine_exports COMMAND Python::Interpreter ${PROJECT_SOURCE_DIR}/tests/test_library_exports.py $<TARGET_FILE:fosu_native_${kind}> --engine ${_export_args})
+        add_test(NAME engine_hardening COMMAND "${Python_EXECUTABLE}" ${PROJECT_SOURCE_DIR}/tests/test_binary_hardening.py $<TARGET_FILE:fosu_native_${kind}>)
+        set_tests_properties(engine_exports engine_hardening PROPERTIES LABELS c-api)
+      endif()
+    endforeach()
   endif()
   add_executable(test_dispatch EXCLUDE_FROM_ALL tests/test_dispatch.cpp)
   fosu_configure(test_dispatch scalar native)
@@ -112,7 +119,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND _x86)
   file(GLOB_RECURSE _oneshot_headers CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/include/*.hpp ${PROJECT_SOURCE_DIR}/include/*.h)
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/fosu_oneshot
     COMMAND ${CMAKE_COMMAND} -E env CXX=${FOSU_ONESHOT_CXX} sh oneshot/build.sh ${CMAKE_CURRENT_BINARY_DIR}/fosu_oneshot ${_oneshot_flags}
-    DEPENDS oneshot/main.cpp oneshot/runtime.hpp oneshot/build.sh ${_oneshot_headers}
+    DEPENDS oneshot/main.cpp oneshot/runtime.hpp oneshot/build.sh tests/support/canonical_dump.hpp ${_oneshot_headers}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} VERBATIM)
   add_custom_target(oneshot DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/fosu_oneshot)
   if(BUILD_TESTING)

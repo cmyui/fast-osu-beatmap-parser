@@ -44,14 +44,16 @@ int main(int argc, char** argv) {
         const auto t0 = std::chrono::steady_clock::now();
         for (const auto& in : inputs) {
             if (reuse) {
-                const auto& beatmap = retained.parse(
-                    in, {.sections = sections});
+                auto parsed = retained.parse(in, {.sections = sections});
+                if (!parsed) return 1;
+                const auto& beatmap = *parsed.value();
                 __asm__ volatile("" : : "g"(&beatmap) : "memory");
                 objects += beatmap.hit_objects.size();
             } else {
                 fosu::Parser parser;
-                const auto& beatmap = parser.parse(
-                    in, {.sections = sections});
+                auto parsed = parser.parse(in, {.sections = sections});
+                if (!parsed) return 1;
+                const auto& beatmap = *parsed.value();
                 __asm__ volatile("" : : "g"(&beatmap) : "memory");
                 objects += beatmap.hit_objects.size();
             }

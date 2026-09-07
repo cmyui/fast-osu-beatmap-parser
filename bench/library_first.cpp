@@ -9,8 +9,9 @@ int main(int argc, char** argv) {
     if (!input) return 1;
     const auto start = std::chrono::steady_clock::now();
     fosu::Parser parser;
-    const auto& result = parser.parse(input);
-    __asm__ volatile("" : : "g"(&result) : "memory");
+    auto result = parser.parse(input);
+    if (!result) return 1;
+    __asm__ volatile("" : : "g"(result.value()) : "memory");
     const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - start).count();
     printf("%zu %lld\n", input.size, static_cast<long long>(ns));

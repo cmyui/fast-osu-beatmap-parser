@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../beatmap.hpp"
+#include "../../beatmap.hpp"
 #include "line_scan.hpp"
 #include "timing.hpp"
 

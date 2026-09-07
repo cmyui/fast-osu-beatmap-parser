@@ -5,11 +5,14 @@ import subprocess
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('library')
 p.add_argument('--bundled', action='store_true')
+p.add_argument('--engine', action='store_true')
 a = p.parse_args()
 exports = subprocess.check_output(['nm', '-D', '--defined-only', a.library], text=True)
 names = {line.split()[-1] for line in exports.splitlines()}
 expected = {'fosu_backend_name', 'fosu_backend_available', 'fosu_abi_version', 'fosu_new', 'fosu_free', 'fosu_parse',
             'fosu_parse_file', 'fosu_get_view'}
+if a.engine:
+    expected = {'fosu_engine_v1'}
 assert names == expected, names ^ expected
 if a.bundled:
     dynamic = subprocess.check_output(['readelf', '-d', a.library], text=True)

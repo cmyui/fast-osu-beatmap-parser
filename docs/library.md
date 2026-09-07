@@ -7,7 +7,7 @@ is the baseline. Native Linux AVX2 builds also use `-fno-plt` and the
 own their build policy.
 The header-only parser uses AVX2/BMI when enabled by the compiler, or NEON on
 AArch64, with scalar fallback. Define `FOSU_DISABLE_SIMD` for scalar parser
-kernels. This interface has no runtime CPU dispatch; compiled C++ callers can
+engine. This interface has no runtime CPU dispatch; compiled C++ callers can
 use the [C ABI](c-api.md) for automatic backend selection.
 
 ## Ownership and reuse
@@ -17,15 +17,19 @@ use the [C ABI](c-api.md) for automatic backend selection.
 
 fosu::Parser parser;
 for (const char* path : paths) {
-    const fosu::Beatmap& beatmap = parser.parse_file(path);
+    auto parsed = parser.parse_file(path);
+    if (!parsed) return parsed.error();
+    fosu::Beatmap& beatmap = *parsed.value();
     consume(beatmap);
 }
 ```
 
 `Parser` owns one working arena containing its padded input and current parsed
 records. A parse clears and reuses that arena. The returned `Beatmap` is a plain
-view into it and remains valid until the parser parses another input or is
-destroyed. Use separate parser instances for concurrent calls.
+view into it and remains valid until the next parse attempt or parser destruction.
+Its fields and array elements are writable. Strings use `std::string_view`:
+the field can be reassigned, but the view does not expose writable characters.
+Use separate parser instances for concurrent calls.
 
 The byte-span overload copies its input into the working arena. `parse_file`
 reads directly into it. Callers do not need to provide SIMD padding or preserve
@@ -36,11 +40,25 @@ Copy into a longer-lived arena when a result must survive parser reuse:
 
 ```cpp
 fosu::Arena* program_arena = fosu::arena_alloc();
+if (!program_arena) return fosu::Error{fosu::ErrorCode::AllocationFailure};
 fosu::Parser parser;
 
-const fosu::Beatmap& first = parser.parse(first_input, first_size);
-fosu::Beatmap retained = first.copy(*program_arena);
-parser.parse(second_input, second_size);
+auto first = parser.parse(first_input, first_size);
+if (!first) {
+    fosu::arena_release(program_arena);
+    return first.error();
+}
+auto copied = first.value()->copy(*program_arena);
+if (!copied) {
+    fosu::arena_release(program_arena);
+    return copied.error();
+}
+fosu::Beatmap retained = copied.value();
+auto second = parser.parse(second_input, second_size);
+if (!second) {
+    fosu::arena_release(program_arena);
+    return second.error();
+}
 consume(retained);
 
 fosu::arena_release(program_arena);
@@ -48,7 +66,9 @@ fosu::arena_release(program_arena);
 
 The destination arena owns every copied array and string. Multiple retained
 beatmaps can share a program-lifetime arena; clearing or releasing that arena
-invalidates all of them. `Beatmap` itself never allocates or releases storage.
+invalidates all of them. Copying duplicates every referenced array and string;
+editing the copy's records does not change the source. `Beatmap` does not own
+or release its storage.
 
 ## Records
 
@@ -72,20 +92,23 @@ when updating headers. Use the [versioned C interface](c-api.md) across an FFI.
 
 ```cpp
 fosu::Parser parser;
-const auto& difficulty = parser.parse(input, size, {
+auto difficulty = parser.parse(input, size, {
     .sections = fosu::kSectionDifficulty,
 });
-consume(difficulty);
+if (!difficulty) return difficulty.error();
+consume(*difficulty.value());
 
-const auto& listing = parser.parse(input, size, {
+auto listing = parser.parse(input, size, {
     .sections = fosu::kSectionMetadata | fosu::kSectionDifficulty,
 });
+if (!listing) return listing.error();
 ```
 
 Unrequested sections are skipped and parsing can stop once all requested
 sections have been consumed. This avoids most work for metadata/difficulty
-callers. Fields from skipped sections retain defaults. `ParseOptions::use_simd`
-can disable SIMD for cross-checking; path counters naturally differ between
+callers. Fields from skipped sections retain defaults. Engine selection is
+separate from per-call parsing options. Define `FOSU_DISABLE_SIMD` when building
+a scalar-only application; parsing-path counters naturally differ between
 scalar and SIMD runs.
 
 ## Performance

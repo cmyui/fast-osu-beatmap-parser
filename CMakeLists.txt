@@ -129,32 +129,44 @@ function(fosu_executable target source)
   fosu_configure(${target} "${_header_isa}" native)
 endfunction()
 
-# Each ISA gets private C++ types and arena state. Only baseline code exports ABI.
+# The core owns Parser lifetime and storage. ISA libraries execute the shared parser.
 function(fosu_dispatch target product)
   fosu_configure(${target} scalar "${product}")
-  target_compile_definitions(${target} PRIVATE FOSU_DEFAULT_BACKEND="${FOSU_ISA}")
-  set(variants scalar)
+  target_sources(${target} PRIVATE src/engine_loader.cpp)
+  target_link_libraries(${target} PRIVATE ${CMAKE_DL_LIBS})
+  target_compile_definitions(${target} PRIVATE
+    FOSU_DEFAULT_BACKEND="${FOSU_ISA}"
+    FOSU_ENGINE_SUFFIX="${CMAKE_SHARED_LIBRARY_SUFFIX}"
+    FOSU_MANAGED_ARENA_CLEANUP)
+  set_target_properties(${target} PROPERTIES
+    CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+  set(variant "")
   if(_x86 AND NOT FOSU_ISA STREQUAL "scalar")
-    list(APPEND variants avx2)
+    set(variant avx2)
     target_compile_definitions(${target} PRIVATE FOSU_HAS_AVX2)
   elseif(_arm64 AND NOT FOSU_ISA STREQUAL "scalar")
-    list(APPEND variants neon)
+    set(variant neon)
     target_compile_definitions(${target} PRIVATE FOSU_HAS_NEON)
   endif()
-  foreach(variant IN LISTS variants)
-    set(obj fosu_${product}_${variant})
-    if(NOT TARGET ${obj})
-      add_library(${obj} OBJECT src/backend.cpp)
-      fosu_configure(${obj} "${variant}" "${product}")
-      target_compile_definitions(${obj} PRIVATE
-        FOSU_BACKEND_NAMESPACE=fosu_${variant}
-        FOSU_BACKEND_SYMBOL=${variant}_backend FOSU_BACKEND_NAME="${variant}"
-        FOSU_MANAGED_ARENA_CLEANUP)
-      set_target_properties(${obj} PROPERTIES POSITION_INDEPENDENT_CODE ON
+  if(variant)
+    set(engine fosu_${product}_${variant})
+    if(NOT TARGET ${engine})
+      add_library(${engine} SHARED src/engine.cpp)
+      fosu_configure(${engine} "${variant}" "${product}")
+      fosu_runtime(${engine})
+      set_target_properties(${engine} PROPERTIES
+        OUTPUT_NAME fosu_engine_${variant}
         CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+      if(product STREQUAL "python")
+        set_target_properties(${engine} PROPERTIES
+          LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/python-engine")
+        install(TARGETS ${engine} LIBRARY DESTINATION fosu)
+      else()
+        install(TARGETS ${engine} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+      endif()
     endif()
-    target_sources(${target} PRIVATE $<TARGET_OBJECTS:${obj}>)
-  endforeach()
+    add_dependencies(${target} ${engine})
+  endif()
 endfunction()
 
 if(NOT SKBUILD)

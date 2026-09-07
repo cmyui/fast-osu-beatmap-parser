@@ -22,7 +22,9 @@ The C++20 interface is header-only:
 #include <fosu/parser.hpp>
 
 fosu::Parser parser;
-const fosu::Beatmap& map = parser.parse_file("map.osu");
+auto parsed = parser.parse_file("map.osu");
+if (!parsed) return 1;
+fosu::Beatmap& map = *parsed.value();
 // map.title, map.ar, map.hit_objects, map.sliders, map.slider_points, ...
 // map remains valid until parser parses another beatmap or is destroyed.
 ```
@@ -64,10 +66,15 @@ Unusual numeric forms take a bounded scalar conversion path; metadata uses
 key/type tables.
 
 Input size gives safe upper bounds for fixed arrays without a second scan. The
-parsing kernels build each record as a local value, then copy it into contiguous
+parsing engine builds each record as a local value, then copies it into contiguous
 arena memory owned by the parser. C++, C and Python share the same `Beatmap`
 model; the C boundary converts its result once to the versioned ABI records.
 One inactive parser arena is retained for cheap fresh-parser reuse.
+
+The public `Parser` prepares input, allocates arrays and owns their lifetime.
+One engine call interprets the complete document. C/Python builds keep the
+scalar engine in the core and load only the selected AVX2 or NEON library;
+header-only builds select their engine at compile time.
 
 ## Coverage and assumptions
 
