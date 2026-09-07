@@ -20,7 +20,7 @@ X86_RUN = arch -x86_64
 endif
 endif
 
-HEADERS = $(wildcard include/fosu/*.hpp)
+HEADERS = $(wildcard include/fosu/*.hpp include/fosu/detail/*.hpp include/fosu/*.h)
 
 all: test bench
 
@@ -60,15 +60,78 @@ COLD_REPS ?= 5
 coldstart: build/coldstart_x86
 	sh bench/coldstart.sh "$(X86_RUN) ./build/coldstart_x86" $(BENCH_ARGS) $(COLD_REPS) $(COLD_CPU)
 
-# Profile-guided build (gcc/Linux): train on the benchmark corpus, then
-# rebuild with measured branch probabilities. Worth +2-3% on real maps.
+# GCC/Linux: train on 20% of sorted files, compare on the other 80%.
+# Run the whole command under taskset to keep every variant on one CPU.
 bench-pgo: | build
-	$(CXX) $(CXXFLAGS) $(X86_FLAGS) -fprofile-generate bench/bench.cpp -o build/bench_pgo
-	$(X86_RUN) ./build/bench_pgo $(BENCH_ARGS) > /dev/null
-	$(CXX) $(CXXFLAGS) $(X86_FLAGS) -fprofile-use -fprofile-correction bench/bench.cpp -o build/bench_pgo
-	$(X86_RUN) ./build/bench_pgo $(BENCH_ARGS)
+	CXX=$(CXX) FOSU_BENCH_FLAGS="$(CXXFLAGS) $(LIB_ARCH_FLAGS)" sh bench/library_pgo.sh $(BENCH_ARGS)
+
+# The freestanding executable targets Linux x86-64/Zen 4. Its build flags
+# are confined to this target; library callers choose their own flags.
+ONESHOT_CXX ?= g++
+
+build/fosu_oneshot: oneshot/main.cpp oneshot/runtime.hpp oneshot/third_party/fast_float.h $(HEADERS) | build
+	CXX=$(ONESHOT_CXX) sh oneshot/build.sh $@
+
+build/oneshot_reference: bench/oneshot_reference.cpp oneshot/dump.hpp $(HEADERS) | build
+	$(CXX) $(CXXFLAGS) $(X86_FLAGS) $< -o $@
+
+build/oneshot_process: bench/oneshot_process.c | build
+	$(CC) -O2 -Wall -Wextra $< -o $@
+
+oneshot: build/fosu_oneshot build/oneshot_reference build/oneshot_process
+
+# Hosted C ABI: process-global runtime and huge-page policy stay with the caller.
+LIB_EXT = so
+LIB_ARCH_FLAGS =
+ifeq ($(UNAME_M),x86_64)
+LIB_ARCH_FLAGS = $(X86_FLAGS)
+endif
+LIB_LINK_FLAGS = -shared
+LIB_RUNTIME ?= bundled
+ifeq ($(filter $(LIB_RUNTIME),bundled shared),)
+$(error LIB_RUNTIME must be bundled or shared)
+endif
+LIB_RUNTIME_FLAGS =
+LIB_EXPORT_FLAGS =
+ifeq ($(UNAME_S),Linux)
+ifeq ($(LIB_RUNTIME),bundled)
+LIB_RUNTIME_FLAGS = -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL
+LIB_EXPORT_FLAGS = --bundled
+endif
+endif
+ifeq ($(UNAME_S),Darwin)
+LIB_EXT = dylib
+LIB_ARCH_FLAGS =
+LIB_LINK_FLAGS = -dynamiclib -Wl,-install_name,@rpath/libfosu.dylib
+endif
+
+# Switching the runtime option must rebuild even if source timestamps match.
+LIB_RUNTIME_STAMP = build/.libfosu-runtime-$(LIB_RUNTIME)-$(LIB_EXT)
+$(LIB_RUNTIME_STAMP): | build
+	rm -f build/.libfosu-runtime-*
+	touch $@
+
+build/libfosu.$(LIB_EXT): src/c_api.cpp $(HEADERS) Makefile $(LIB_RUNTIME_STAMP) | build
+	$(CXX) $(CXXFLAGS) $(LIB_ARCH_FLAGS) -fPIC -fvisibility=hidden $(LIB_LINK_FLAGS) $(LIB_RUNTIME_FLAGS) $< -o $@
+
+lib: build/libfosu.$(LIB_EXT)
+
+build/test_c_api: tests/test_c_api.cpp bench/c_api_view.hpp oneshot/dump.hpp build/libfosu.$(LIB_EXT) | build
+	$(CXX) $(CXXFLAGS) $(LIB_ARCH_FLAGS) $< -Lbuild -lfosu -Wl,-rpath,$(abspath build) -pthread -o $@
+
+build/c_api_reference: bench/c_api_reference.cpp bench/c_api_view.hpp oneshot/dump.hpp build/libfosu.$(LIB_EXT) | build
+	$(CXX) $(CXXFLAGS) $(LIB_ARCH_FLAGS) $< -Lbuild -lfosu -Wl,-rpath,$(abspath build) -o $@
+
+test-c-api: build/test_c_api
+	./build/test_c_api
+ifeq ($(UNAME_S),Linux)
+	python3 tests/test_library_exports.py build/libfosu.$(LIB_EXT) $(LIB_EXPORT_FLAGS)
+endif
+
+cffi: lib
+	python3 examples/cffi_build.py
 
 clean:
 	rm -rf build
 
-.PHONY: all test bench bench-native bench-pgo coldstart clean
+.PHONY: all test bench bench-native bench-pgo coldstart oneshot lib test-c-api cffi clean

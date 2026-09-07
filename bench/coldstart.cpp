@@ -2,9 +2,9 @@
 //
 //   ./coldstart <file.osu> [warm_reps]
 //
-// A fresh process reads one file and times ONE fosu::parse(): cold
-// instruction cache, cold branch predictors, cold heap (every result page
-// is first-touched during the parse). It then times warm_reps further
+// A fresh process reads one file and times ONE fosu::parse(), including
+// first-touch result allocation. CPU caches and predictors are not explicitly
+// flushed. Process startup and file I/O are excluded. It times warm_reps further
 // fresh parses in the same process and reports the best of those, so the
 // cold penalty is measured directly rather than inferred. Minor page
 // faults are counted around each parse via getrusage; with FOSU_PERF=1

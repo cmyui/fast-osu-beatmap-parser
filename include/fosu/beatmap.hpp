@@ -4,6 +4,8 @@
 #include <string_view>
 #include <vector>
 
+#include "header.hpp"
+
 namespace fosu {
 
 // Field order of the first 16 bytes is load-bearing: the AVX2 hitobject
@@ -87,57 +89,27 @@ struct ParseStats {
     uint32_t storyboard_lines = 0;   // event lines ignored (sprites, samples, ...)
 };
 
-struct Beatmap {
-    int format_version = 14;
+struct NativeRecords {
+    using HitObject = fosu::HitObject;
+    using Slider = fosu::Slider;
+    using SliderPoint = fosu::SliderPoint;
+    using TimingPoint = fosu::TimingPoint;
+    using Break = fosu::Break;
+    void set_input(const char*) {}
+    std::string_view view(std::string_view s) const { return s; }
+    std::string_view resolve(std::string_view s) const { return s; }
+};
 
-    // [General]
-    std::string_view audio_filename;
-    int32_t audio_lead_in = 0;
-    int32_t preview_time = -1;
-    int32_t countdown = 1;
-    std::string_view sample_set = "Normal";
-    double stack_leniency = 0.7;
-    int32_t mode = 0;
-    bool letterbox_in_breaks = false;
-    bool widescreen_storyboard = false;
-    bool epilepsy_warning = false;
-    bool special_style = false;
-    bool use_skin_sprites = false;
-    bool samples_match_playback_rate = false;
-    int32_t countdown_offset = 0;
-    std::string_view overlay_position;
-    std::string_view skin_preference;
-
-    // [Editor]
-    std::string_view bookmarks;    // raw comma list
-    double distance_spacing = 0;
-    int32_t beat_divisor = 4;
-    int32_t grid_size = 4;
-    double timeline_zoom = 1;
-
-    // [Metadata]
-    std::string_view title;
-    std::string_view title_unicode;
-    std::string_view artist;
-    std::string_view artist_unicode;
-    std::string_view creator;
-    std::string_view version;
-    std::string_view source;
-    std::string_view tags;
-    int64_t beatmap_id = -1;
-    int64_t beatmap_set_id = -1;
-
-    // [Difficulty]
-    double hp = 5;
-    double cs = 5;
-    double od = 5;
-    double ar = 5;
-    double slider_multiplier = 1.4;
-    double slider_tick_rate = 1;
-
-    // [Events]
-    std::string_view background;
-    std::string_view video;
+// The ordinary library and C ABI instantiate the same parsing algorithm.
+// Record storage is selected at compile time; no virtual calls or ABI macros.
+template <typename Records>
+struct BasicBeatmap : BeatmapHeader, Records {
+    using RecordPolicy = Records;
+    using HitObject = typename Records::HitObject;
+    using Slider = typename Records::Slider;
+    using SliderPoint = typename Records::SliderPoint;
+    using TimingPoint = typename Records::TimingPoint;
+    using Break = typename Records::Break;
     std::vector<Break> breaks;
 
     // [Colours]
@@ -151,5 +123,7 @@ struct Beatmap {
 
     ParseStats stats;
 };
+
+struct Beatmap : BasicBeatmap<NativeRecords> {};
 
 }  // namespace fosu

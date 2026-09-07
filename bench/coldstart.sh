@@ -63,7 +63,7 @@ END {
     printf "files %d   bytes %.2f MB   objects %d   reps/file: best-of\n", nf, tb / 1e6, to
     printf "%-28s %9.1f MB/s  %8.1f us/file  %6.1f faults/file\n", "cold (fresh process, 1st)", tb / tc * 1e3, tc / nf / 1e3, tcf / nf
     printf "%-28s %9.1f MB/s  %8.1f us/file  %6.1f faults/file\n", "warm (same process, best-of)", tb / tw * 1e3, tw / nf / 1e3, twf / nf
-    printf "%-28s %9.1f MB/s  %8.1f us/file\n", "read() (cold page cache?)", tb / tr * 1e3, tr / nf / 1e3
+    printf "%-28s %9.1f MB/s  %8.1f us/file\n", "read() (cache not controlled)", tb / tr * 1e3, tr / nf / 1e3
     printf "cold/warm: aggregate %.2fx   median per-file %.2fx\n", tc / tw, med
     if (tctr[9] > 0) {
         split("cycles instructions branch_misses l1i_misses itlb_misses dtlb_misses l1d_misses", nm, " ")
