@@ -568,32 +568,35 @@ inline void tp_shape_insert(TpShapeCache& cache, uint64_t commas,
     r.len = static_cast<uint32_t>(len);
     r.g = g;
     // Tail SIMD layout: all six fields 1-2 digits and spanning <= 16
-    // bytes from the first tail digit.
+    // bytes from the first tail digit. Lane i bytes {2i, 2i+1} gather
+    // {tens, ones} (0x80 = zero lane), built as two integers — inserts
+    // are ~15% of a short section's timing cost, so no byte loops here.
     const uint32_t base = g.c[1] + 1;
     const uint32_t span = static_cast<uint32_t>(len) - base;
+    uint64_t shuf_lo = 0, shuf_hi = 0, sub_lo = 0, sub_hi = 0;
     uint32_t maxlen = 0;
-    uint8_t lens[6];
     for (int i = 0; i < 6; ++i) {
         const uint32_t hi = i < 5 ? g.c[i + 2] : static_cast<uint32_t>(len);
-        lens[i] = static_cast<uint8_t>(hi - g.c[i + 1] - 1);
-        maxlen = lens[i] > maxlen ? lens[i] : maxlen;
+        const uint32_t off = g.c[i + 1] + 1 - base;
+        const uint32_t flen = hi - g.c[i + 1] - 1;
+        maxlen = flen > maxlen ? flen : maxlen;
+        // flen 1: {0x80, off}; flen 2: {off, off+1}
+        const uint64_t pair = flen == 2 ? (off | ((off + 1) << 8)) : (0x80u | (off << 8));
+        const uint64_t sub = flen == 2 ? 0x3030u : 0x3000u;
+        if (i < 4) {
+            shuf_lo |= pair << (16 * i);
+            sub_lo |= sub << (16 * i);
+        } else {
+            shuf_hi |= pair << (16 * (i - 4));
+            sub_hi |= sub << (16 * (i - 4));
+        }
     }
     r.simd_tails = span <= 16 && maxlen <= 2;
-    if (r.simd_tails) {
-        for (int i = 0; i < 16; ++i) {
-            r.shuf[i] = static_cast<int8_t>(0x80);
-            r.subv[i] = 0;
-        }
-        for (int i = 0; i < 6; ++i) {
-            const uint32_t off = g.c[i + 1] + 1 - base;
-            // lane i bytes {2i, 2i+1} = {tens, ones}, weights {10, 1}
-            for (int d = 0; d < lens[i]; ++d) {
-                r.shuf[2 * i + (2 - lens[i]) + d] =
-                    static_cast<int8_t>(off + d);
-                r.subv[2 * i + (2 - lens[i]) + d] = '0';
-            }
-        }
-    }
+    shuf_hi |= 0x8080808000000000ull;  // lanes 6-7 (bytes 12-15) unused: zero
+    memcpy(r.shuf, &shuf_lo, 8);
+    memcpy(r.shuf + 8, &shuf_hi, 8);
+    memcpy(r.subv, &sub_lo, 8);
+    memcpy(r.subv + 8, &sub_hi, 8);
 }
 
 // Replays a cached shape. Arithmetic mirrors the one-pass parser exactly,
@@ -753,20 +756,81 @@ inline const char* parse_coord(const char* p, const char* end, int32_t& out) {
     return q;
 }
 
+#if FOSU_SIMD_X86
+// Slider length on the editor-emitted shape: up to 8 integer digits, an
+// optional '.', up to 13 fraction digits, at most 18 digits in all. One
+// 32-byte load classifies the whole number; the mantissa is assembled from
+// the same SWAR pieces parse_double accumulates and divided by the same
+// power of ten, so the result is bit-identical. Returns nullptr for any
+// other shape (sign, exponent, longer or empty numbers) so the caller can
+// run parse_double. The line terminator and buffer padding are non-digits,
+// so the digit run can never cross the end of the line.
+inline const char* parse_slider_length(const char* p, double& out) {
+    const __m256i v =
+        _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
+    const uint64_t nd = nondigit_mask32(v);
+    const auto il = static_cast<uint32_t>(_tzcnt_u64(nd));  // 1..8 if valid
+    const bool has_dot = p[il] == '.';  // il <= 32 stays inside the padding
+    const uint32_t fl =
+        has_dot ? static_cast<uint32_t>(_tzcnt_u64(nd >> (il + 1))) : 0;
+    if ((il - 1) > 7 || fl > 13 || il + fl > 18) return nullptr;
+    const uint32_t fl1 = fl <= 8 ? fl : 8;
+    const uint32_t fl2 = fl - fl1;
+    uint64_t mant = swar_parse_u64(p, il);
+    const char* fp = p + il + 1;
+    if (fl1) mant = mant * kPow10u[fl1] + swar_parse_u64(fp, fl1);
+    if (fl2) mant = mant * kPow10u[fl2] + swar_parse_u64(fp + 8, fl2);
+    double d = static_cast<double>(mant);
+    if (fl) d /= kPow10[fl];
+    out = d;
+    return has_dot ? fp + fl : p + il;
+}
+#endif
+
 // Slider params: curveType|x:y|x:y...,slides,length[,edgeSounds,edgeSets][,hitSample]
+//
+// The Slider is emplaced first and filled in place (popped again if the
+// line turns out malformed): a stack temporary handed to push_back costs
+// a 64-byte zero-fill plus a 64-byte copy on every slider.
 inline bool parse_slider_params(Beatmap& bm, HitObject& h, const char* p,
                                 const char* end) {
     if (p >= end) return false;
-    Slider s{};
+    auto& sliders = bm.sliders;
+    sliders.emplace_back(Slider::uninit_t{});
+    Slider& s = sliders.back();
     s.curve_type = *p++;
 
     // Points are written straight into the pool through a raw cursor —
     // one bounds ensure per slider instead of a checked push per point.
     // A point pair costs at least 4 bytes ("|x:y"), which bounds the count.
+    // SliderPoint's no-op default constructor makes both resizes free.
     auto& pts = bm.slider_points;
     const size_t base = pts.size();
     pts.resize(base + static_cast<size_t>(end - p) / 4 + 1);
     SliderPoint* w = pts.data() + base;
+#if FOSU_SIMD_X86
+    // Editor-emitted points are "|x:y" with 1..4 plain digits per
+    // coordinate, so one 16-byte load classifies a whole pair: the
+    // non-digit mask yields both digit counts, the ':' mask validates the
+    // separator without a dependent byte load. Anything else (signs,
+    // longer values, empty fields) leaves the loop for the general one.
+    while (p < end && *p == '|') {
+        const __m128i v =
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(p + 1));
+        const __m128i biased = _mm_add_epi8(v, _mm_set1_epi8(80));
+        const auto nd = static_cast<uint32_t>(_mm_movemask_epi8(
+            _mm_cmpgt_epi8(biased, _mm_set1_epi8(-119))));
+        const auto colon = static_cast<uint32_t>(_mm_movemask_epi8(
+            _mm_cmpeq_epi8(v, _mm_set1_epi8(':'))));
+        const uint32_t xl = _tzcnt_u32(nd);
+        const uint32_t yl = _tzcnt_u32(nd >> (xl + 1));
+        if ((xl - 1) > 3 || (yl - 1) > 3 || !((colon >> xl) & 1)) break;
+        w->x = static_cast<int32_t>(swar_parse_u32(p + 1, xl));
+        w->y = static_cast<int32_t>(swar_parse_u32(p + 2 + xl, yl));
+        ++w;
+        p += 2 + xl + yl;
+    }
+#endif
     while (p < end && *p == '|') {
         int32_t px, py;
         const char* q = parse_coord(p + 1, end, px);
@@ -774,33 +838,57 @@ inline bool parse_slider_params(Beatmap& bm, HitObject& h, const char* p,
         // padded buffer, never ':' — no explicit q < end check needed.
         if (q == p + 1 || *q != ':') {
             pts.resize(base);
+            sliders.pop_back();
             return false;
         }
         const char* r = parse_coord(q + 1, end, py);
         if (r == q + 1) {
             pts.resize(base);
+            sliders.pop_back();
             return false;
         }
-        *w++ = {px, py};
+        w->x = px;
+        w->y = py;
+        ++w;
         p = r;
     }
     pts.resize(static_cast<size_t>(w - pts.data()));
     s.point_begin = static_cast<uint32_t>(base);
     s.point_count = static_cast<uint32_t>(pts.size() - base);
 
-    if (p >= end || *p != ',') return false;
+    if (p >= end || *p != ',') {
+        sliders.pop_back();
+        return false;
+    }
     ++p;
     const uint32_t srun = digit_run8(p);  // slides: a bare small integer
-    if (srun - 1 > 6) return false;
+    if (srun - 1 > 6) {
+        sliders.pop_back();
+        return false;
+    }
     s.slides = static_cast<int32_t>(swar_parse_u64(p, srun));
     p += srun;
-    if (p >= end || *p != ',') return false;
+    if (p >= end || *p != ',') {
+        sliders.pop_back();
+        return false;
+    }
+#if FOSU_SIMD_X86
+    const char* q = parse_slider_length(p + 1, s.length);
+    if (!q) q = parse_double(p + 1, end, s.length);
+#else
     const char* q = parse_double(p + 1, end, s.length);
-    if (q == p + 1) return false;
+#endif
+    if (q == p + 1) {
+        sliders.pop_back();
+        return false;
+    }
     p = q;
 
-    // Optional: edgeSounds, edgeSets, hitSample (assigned positionally).
-    std::string_view extra[3];
+    // Optional: edgeSounds, edgeSets, hitSample, assigned positionally;
+    // absent fields are empty.
+    s.edge_sounds = {};
+    s.edge_sets = {};
+    std::string_view hit_sample{};
     if (p < end && *p == ',') {
         ++p;
 #if FOSU_SIMD_X86
@@ -816,18 +904,19 @@ inline bool parse_slider_params(Beatmap& bm, HitObject& h, const char* p,
             const uint32_t c0 = _tzcnt_u32(cm);
             const uint32_t c1 = _tzcnt_u32(_blsr_u32(cm));
             if (c0 >= span) {
-                extra[0] = {p, span};
+                s.edge_sounds = {p, span};
             } else if (c1 >= span) {
-                extra[0] = {p, c0};
-                extra[1] = {p + c0 + 1, span - c0 - 1};
+                s.edge_sounds = {p, c0};
+                s.edge_sets = {p + c0 + 1, span - c0 - 1};
             } else {
-                extra[0] = {p, c0};
-                extra[1] = {p + c0 + 1, c1 - c0 - 1};
-                extra[2] = {p + c1 + 1, span - c1 - 1};
+                s.edge_sounds = {p, c0};
+                s.edge_sets = {p + c0 + 1, c1 - c0 - 1};
+                hit_sample = {p + c1 + 1, span - c1 - 1};
             }
         } else
 #endif
         {
+            std::string_view extra[3];
             int n = 0;
             while (n < 3 && p < end) {
                 const auto* c =
@@ -836,13 +925,13 @@ inline bool parse_slider_params(Beatmap& bm, HitObject& h, const char* p,
                 extra[n++] = {p, static_cast<size_t>(fend - p)};
                 p = fend + 1;
             }
+            s.edge_sounds = extra[0];
+            s.edge_sets = extra[1];
+            hit_sample = extra[2];
         }
     }
-    s.edge_sounds = extra[0];
-    s.edge_sets = extra[1];
-    h.hit_sample = extra[2];
-    h.slider = static_cast<uint32_t>(bm.sliders.size());
-    bm.sliders.push_back(s);
+    h.hit_sample = hit_sample;
+    h.slider = static_cast<uint32_t>(sliders.size() - 1);
     return true;
 }
 
@@ -878,9 +967,11 @@ inline bool finish_hitobject(Beatmap& bm, HitObject& h, const char* p,
         h.hit_sample = {p, static_cast<size_t>(end - p)};
         return true;
     }
-    // circle: optional trailing hitSample
-    if (p < end && *p == ',')
-        h.hit_sample = {p + 1, static_cast<size_t>(end - (p + 1))};
+    // circle: optional trailing hitSample (every path assigns the field,
+    // so callers need not clear it)
+    h.hit_sample = (p < end && *p == ',')
+                       ? std::string_view{p + 1, static_cast<size_t>(end - (p + 1))}
+                       : std::string_view{};
     return true;
 }
 
@@ -892,7 +983,6 @@ inline void parse_hitobject_line(Beatmap& bm, const char* line, size_t len,
     HitObject& h = bm.hit_objects.back();
     h.end_time = 0;
     h.slider = HitObject::kNoSlider;
-    h.hit_sample = {};
 
     const int next = scalar_parse_prefix(line, len, h);
     if (next < 0) {
@@ -915,35 +1005,49 @@ inline void parse_hitobject_line(Beatmap& bm, const char* line, size_t len,
 // after the section.
 inline const char* parse_hitobjects_section(Beatmap& bm, const char* p,
                                             const char* file_end) {
+    // Counted locally: a per-line read-modify-write of bm.stats cannot be
+    // kept in a register across the calls below.
+    uint32_t fast_lines = 0;
     while (p < file_end) {
         const char c = *p;
         if (c == '\r' || c == '\n') {
             ++p;
             continue;
         }
-        if (c == '[') return p;
+        if (c == '[') break;
 
         bm.hit_objects.emplace_back(HitObject::uninit_t{});
         HitObject& h = bm.hit_objects.back();
-        h.hit_sample = {};  // the fast prefix writes every other field
 
         uint32_t nl_mask;
         const int next = fast_parse_prefix(p, h, nl_mask);
 
-        const char* nl = nl_mask
-                             ? p + _tzcnt_u32(nl_mask)
-                             : static_cast<const char*>(memchr(
-                                   p + 32, '\n',
-                                   file_end - p > 32
-                                       ? static_cast<size_t>(file_end - p) - 32
-                                       : 0));
+        const char* nl;
+        if (nl_mask) {
+            nl = p + _tzcnt_u32(nl_mask);
+        } else {
+            // Slider lines run past the first window. A second vector
+            // compare covers lines up to 64 bytes — 82% of hitobject
+            // lines in the production census — before paying a memchr
+            // call; bytes past the file end are zero padding.
+            const __m256i b =
+                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + 32));
+            const auto nl2 = static_cast<uint32_t>(_mm256_movemask_epi8(
+                _mm256_cmpeq_epi8(b, _mm256_set1_epi8('\n'))));
+            nl = nl2 ? p + 32 + _tzcnt_u32(nl2)
+                     : static_cast<const char*>(memchr(
+                           p + 64, '\n',
+                           file_end - p > 64
+                               ? static_cast<size_t>(file_end - p) - 64
+                               : 0));
+        }
         const char* line_end = nl ? nl : file_end;
         if (line_end > p && line_end[-1] == '\r') --line_end;
         const char* next_line = nl ? nl + 1 : file_end;
 
         bool ok;
         if (next >= 0) {
-            ++bm.stats.fast_path_lines;
+            ++fast_lines;
             ok = finish_hitobject(bm, h, p + next, line_end,
                                   static_cast<size_t>(file_end - p));
         } else {
@@ -965,6 +1069,62 @@ inline const char* parse_hitobjects_section(Beatmap& bm, const char* p,
         }
         p = next_line;
     }
+    bm.stats.fast_path_lines += fast_lines;
+    return p;
+}
+
+// Fused [Events] section loop. Storyboard command lines — indented, and
+// ~12% of all lines in the popular corpus — are counted and skipped on
+// their first byte; every line finds its end with vector compares (two
+// 32-byte windows cover 64 bytes) instead of a memchr call. Returns the
+// position after the section.
+inline const char* parse_events_section(Beatmap& bm, const char* p,
+                                        const char* file_end) {
+    uint32_t storyboard_lines = 0;
+    while (p < file_end) {
+        const char c = *p;
+        if (c == '\r' || c == '\n') {
+            ++p;
+            continue;
+        }
+        if (c == '[') break;
+
+        const __m256i a =
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
+        const __m256i b =
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + 32));
+        const uint64_t nl =
+            static_cast<uint32_t>(_mm256_movemask_epi8(
+                _mm256_cmpeq_epi8(a, _mm256_set1_epi8('\n')))) |
+            static_cast<uint64_t>(static_cast<uint32_t>(_mm256_movemask_epi8(
+                _mm256_cmpeq_epi8(b, _mm256_set1_epi8('\n')))))
+                << 32;
+        const char* line = p;
+        const char* next_line;
+        const char* line_end;
+        if (nl) {
+            line_end = p + _tzcnt_u64(nl);
+            next_line = line_end + 1;
+        } else {
+            const auto* m = static_cast<const char*>(memchr(
+                p + 64, '\n',
+                file_end - p > 64 ? static_cast<size_t>(file_end - p) - 64
+                                  : 0));
+            line_end = m ? m : file_end;
+            next_line = m ? m + 1 : file_end;
+        }
+        if (line_end[-1] == '\r') --line_end;  // line_end > line: c is not CR
+        p = next_line;
+
+        if (c == ' ' || c == '_') {  // indented storyboard command
+            ++storyboard_lines;
+            continue;
+        }
+        const auto len = static_cast<size_t>(line_end - line);
+        if (len >= 2 && c == '/' && line[1] == '/') continue;  // comment
+        parse_event_line(bm, line, len);
+    }
+    bm.stats.storyboard_lines += storyboard_lines;
     return p;
 }
 #endif  // FOSU_SIMD_X86
@@ -1069,6 +1229,13 @@ inline void parse_into(const char* data, size_t size, Beatmap& bm,
 #endif
                 bm.timing_points.reserve(256);
             }
+#if FOSU_SIMD_X86
+            else if (sec == Section::Events && opts.use_simd) {
+                p = parse_events_section(bm, nl ? nl + 1 : file_end, file_end);
+                sec = Section::Unknown;
+                continue;
+            }
+#endif
             goto next_line;
         }
         if (len >= 2 && p[0] == '/' && p[1] == '/') goto next_line;

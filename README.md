@@ -66,6 +66,7 @@ make test          # native + x86-64-v3 test suites (Rosetta on Apple Silicon)
 make bench         # synthetic corpus benchmark
 make bench BENCH_ARGS=/path/to/osu/Songs/dir   # real .osu files
 make bench-pgo BENCH_ARGS=bench/corpus         # profile-guided build (+2-3%)
+make coldstart BENCH_ARGS=bench/corpus-large COLD_CPU=5   # fresh-process single-map latency
 ```
 
 ## How the hitobject fast path works
@@ -143,15 +144,15 @@ All numbers come from real ranked beatmaps. Three corpora, three roles:
 |---|---|---|---|---|---|
 | historical (`bench/fetch_corpus.sh`) | 17 | 0.82 MB | 17,902 | `e7f15a16a8370431` | continuity anchor — every number ever reported |
 | popular (`bench/fetch_corpus_large.sh`) | 167 | 3.86 MB | 70,732 | `c16c5c00b51eaa2e` | most-played ranked sets, census + validation |
-| production | 10,011 | 438 MB | 8,730,940 | `272b2f66dcd5f90a` | ranked maps by a private server's playcounts (contains play data, not distributed) — the adjudicator |
+| production | 10,000 | 403 MB | 8,070,196 | `31999b0f474ecd4a` | the 10,000 most-played ranked/approved maps on a private server (contains play data, not distributed; rebuilt September 2026 from its object store, so the July set's `272b2f66dcd5f90a` is superseded) — the adjudicator |
 
 The historical corpus: The Unforgiving (13-diff 2012 marathon album,
 ~500 timing points per diff), Freedom Dive, The Big Black, Blue Zenith,
 and Disco Prince (the first ranked map, 2007); 100% fast-path, zero
 malformed lines. Best of 9 runs, single thread; `make bench
 BENCH_ARGS=bench/corpus` reproduces. The production corpus parses at
-~1.4–1.5 GB/s fresh even though 438 MB cannot fit in L3 — the parser
-streams from DRAM without becoming memory-bound.
+1517 MB/s fresh / 1563 reuse / 924 scalar even though 403 MB cannot fit
+in L3 — the parser streams from DRAM without becoming memory-bound.
 
 ### AMD EPYC Genoa (Zen 4), Ubuntu 24.04, gcc 13.3
 
@@ -160,13 +161,15 @@ across interleaved A/B runs (min-taking is robust to neighbor noise).
 
 | parser | MB/s | ns/object | vs baseline |
 |---|---|---|---|
-| fosu AVX2 | 1256 | 36.3 | 9.2× |
-| fosu AVX2, reused `Beatmap` (`parse_into`) | 1266 | 36.0 | 9.3× |
-| fosu scalar | 736 | 62.0 | 5.4× |
+| fosu AVX2 | 1408 | 32.4 | 10.4× |
+| fosu AVX2, reused `Beatmap` (`parse_into`) | 1421 | 32.1 | 10.5× |
+| fosu scalar | 764 | 59.7 | 5.6× |
 | getline+sscanf baseline | 136 | 336 | 1× |
 
-(July 2026, current master, the default Linux `make bench` flags with
-gcc 13.3. PGO adds ~5% on top — see Build notes.)
+(September 2026, current master, the default Linux `make bench` flags
+with gcc 13.3. PGO adds ~5% on top — see Build notes. The popular
+corpus, 167 files, parses at 1627 MB/s fresh / 1666 MB/s reuse / 972
+MB/s scalar on the same setup.)
 
 The headline metric is the fresh-`parse()` row — every call pays its own
 result-object construction, like a caller that keeps the Beatmap. The
@@ -227,24 +230,37 @@ counters):
 | timing points | 32.5 | ~106 (with shape cache) | ~354 | 3.4 |
 
 All three classes run at IPC 3.4–3.8: the parser is throughput-bound,
-not latency- or mispredict-bound. The slider params portion measured
-~42 ns/slider isolated; a dedicated deep-dive (SIMD point kernels,
-fused tail, pool cursor) measured every variant within noise of the
-shipped code — that path is at its floor.
+not latency- or mispredict-bound. (Budgets measured July 2026; the
+slider-params path has since lost roughly a quarter of its cost — see
+the ablation list — so the sliders row is an upper bound today.) A
+slider deep-dive of *conversion kernels* (SIMD point walks, fused
+speculative tail, pool cursor) measured every variant within noise; what
+did pay was the *bookkeeping* around them: a Slider filled in place
+instead of copied in, a point pool that stops value-initializing what
+it is about to overwrite, and one 16-byte classify per control-point
+pair instead of two 8-byte ones.
 
 ### What each optimization is worth (ablation audit)
 
-Each fast path toggled off individually against the full build (July
-2026, same interleaved-rounds methodology). Marginal value on the real
-corpus today: hit_objects reserve estimate **+27%**, deferred slider
+Each fast path toggled off individually against the full build (same
+interleaved-rounds methodology, popular corpus). Marginal value on the
+real corpus: hit_objects reserve estimate **+27%**, deferred slider
 pool reserve **+16%**, one-pass timing parser **+7.8%**, timing fused
 section **+4.5%**, hitobjects fused section **+4.3%** (measured with the
 SIMD prefix retained per-line, so this is fusion itself), SWAR
-coordinate path **+4.2%**. Two pieces measured ~zero: a 32-byte SIMD
+coordinate path **+4.2%** (all July 2026); slider point-pair classify
+**+3.1%**, in-place Slider + no-fill point pool + direct extras
+**~+2.8%**, 64-byte newline window before memchr **+2.6%**, fused
+[Events] loop **+2.1%**, masked slider-length parse **+1.8%**,
+straight-line shape-cache insert **+1.4%** (September 2026; together
+1416 → 1632 MB/s fresh). Two pieces measured ~zero: a 32-byte SIMD
 newline probe in the main line loop (deleted — the fused section loops
 had eroded its value to nothing) and the slider-extras 32-byte scan
 (kept; its ceiling remained inside measurement noise at every corpus
-size).
+size). One measured slightly negative and was reverted: hashing the
+nondigit mask into the timing shape-cache slot (the alternating
+inherited/uninherited collision it guards against does not occur often
+enough to pay for the extra multiply).
 
 ### The large corpus (popular maps)
 
@@ -321,6 +337,56 @@ attackable without batching (io_uring) or skipping the filesystem, and
 production consumers feeding network bytes through `parse(data, size)`
 skip it entirely.
 
+### Cold start: one beatmap in a fresh process
+
+The loop benchmarks above run warm: code, branch predictors and heap
+pages are all primed by the previous iteration. A caller that parses a
+single map in a fresh process sees something else. `bench/coldstart.cpp`
+reads one file, times exactly one `parse()`, then times eight more in
+the same process; `bench/coldstart.sh` runs it once per file and
+aggregates (`make coldstart BENCH_ARGS=bench/corpus-large COLD_CPU=5`;
+`FOSU_PERF=1` adds hardware counters via `perf_event_open`). On the
+popular corpus, Zen 4 VM:
+
+| | µs/file | MB/s | minor faults/file |
+|---|---|---|---|
+| first parse in a fresh process | 41 | 560 | 12.3 |
+| best of 8 further parses, same process | 13 | 1650 | 0 |
+
+(On the production corpus, whose files average 40 KB: 64.6 µs/file cold
+at 19.4 faults vs 22.0 µs warm, 2.9×.) Three times slower, and the gap
+is not the parser's code. Controlled
+experiments (`FOSU_COLD_MODE=prefault,warmcode,ptable,pcode`, measured
+before the September changes, 46.8 µs total) decompose it:
+
+| component | µs | how it was isolated |
+|---|---|---|
+| warm compute | ~14 | the warm row |
+| heap provisioning: ~12 first-touch page faults + `brk`/`mmap` | ~18.5 | `prefault` (pre-touched, never-trimmed heap) removes it |
+| cold code (icache, uop cache, BTB) | ~4.5 | `warmcode` (parse a tiny map first) removes it |
+| branch-predictor training on the map's own data | ~7 | remains with both |
+
+A first-touch anonymous page costs **~1.35 µs on this VM** (measured in
+isolation; `MADV_POPULATE_WRITE` is 1.12 µs/page, a bare `mmap` 1.5 µs,
+`munmap` 0.25–0.8 µs/page), so each 4 KB of result written costs about
+as much as parsing 2 KB of input. The result is bigger than the input:
+32.7 KB of vectors for a 22.5 KB average file (1.45×), 10.4 pages
+first-touched per parse — 5.5 hit_objects, 2.6 sliders, 1.1 points,
+1.3 timing. Software-prefetching the lane-mask table or the text
+segment changed nothing (the cold-code cost is front-end warm-up, not
+cache misses), populate saves only the trap (~15%/page), and a 2 MB
+huge page zeroes far more than it saves. The levers that remain are
+structural and change the public types, so they are not taken here:
+one packed arena for all four vectors would first-touch 8.7 pages/file
+(rounding waste of four separate regions), compact structs (48→32-byte
+`HitObject`, 56→40 `Slider`, 40→24 `TimingPoint`) 8.0, both 6.2 —
+about 14% of the cold time. Multi-size THP (64 KB anonymous folios,
+`hugepages-64kB/enabled=madvise`, off by default) would cut the
+per-page cost ~10× for an aligned arena, but that is host
+configuration. The `read()` that precedes the parse pays the same bill
+for the file buffer: ~20 µs for a 22.5 KB file, 12 faults plus four
+syscalls.
+
 ### Apple M3, macOS 26 (Rosetta 2 for the x86 rows)
 
 | parser | MB/s | ns/object |
@@ -348,15 +414,26 @@ to ARM) and format knowledge measured from real ranked maps:
 - **Fused [HitObjects] loop**: the section owns its own line iteration, and
   the prefix's single 32-byte load doubles as the newline scan — a bare
   5-field circle line (60% of real hitobject lines) is fully parsed,
-  including finding the line end, from one load. No memchr, no separate
-  probe.
-- **Slider control points** (`|x:y|…`): each coordinate's digit-run length
-  comes from an 8-byte nibble-classify + tzcnt, and 1–4 digit values
-  convert with two multiplies — no per-digit loop, no length branch
-  mispredicts. Points write through a raw cursor with one bounds ensure
-  per slider; the trailing edgeSounds/edgeSets/hitSample fields get their
-  comma positions from a single 32-byte scan. Signs and 5+ digit Aspire
-  values take the general path.
+  including finding the line end, from one load. Longer lines get a
+  second 32-byte compare (64 bytes cover 82% of hitobject lines in the
+  production census) before anything calls memchr.
+- **Slider control points** (`|x:y|…`): one 16-byte load classifies a
+  whole `|x:y` pair — the non-digit mask gives both digit counts, a ':'
+  mask validates the separator with no dependent byte load — and 1–4
+  digit values convert with two multiplies. Points write through a raw
+  cursor into a pool whose element type has a no-op default constructor,
+  so the per-slider resize never value-initializes what is about to be
+  overwritten; the `Slider` itself is emplaced and filled in place rather
+  than built on the stack and copied. Length is parsed from one 32-byte
+  classify with the same integer mantissa and single division
+  `parse_double` uses (bit-identical); the trailing
+  edgeSounds/edgeSets/hitSample fields get their comma positions from a
+  single 32-byte scan. Signs, 5+ digit Aspire values and exotic numbers
+  take the general path.
+- **Fused [Events] loop**: storyboard command lines are indented and make
+  up ~12% of all lines in the popular corpus; the section loop counts
+  and skips them on their first byte and finds every line end with
+  vector compares instead of a memchr call per line.
 - **Timing points**: a fused section loop parses each line in one pass —
   two 32-byte loads (covering the real-world max line of 39 bytes) serve
   the newline scan, a comma mask, and a digit-classify mask; seven comma
@@ -434,9 +511,10 @@ hit objects wins 6.8% there.
   parse-once binary `Beatmap` cache for repeat workloads (recalc
   pipelines re-parse the same maps every rework).
 
-Closed with measurements, so nobody re-treads them: the slider path is
-at its floor (SIMD point kernels, fused speculative tail, pool-cursor
-writes: all within noise); line pipelining −19%; the single-pass
+Closed with measurements, so nobody re-treads them: slider *conversion
+kernels* are at their floor (SIMD point-walk kernels, fused speculative
+tail: all within noise — the September gains came from bookkeeping, not
+conversion); line pipelining −19%; the single-pass
 hitobject shape cache −3–5% and the branchless binned two-pass −22%
 (the entropy result above); comma-mask folding −1.3% and mask-derived
 hitSound corpus-dependent (both replaced free predicted branches with

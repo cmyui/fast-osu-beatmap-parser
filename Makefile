@@ -41,6 +41,9 @@ build/test_x86: tests/test_parser.cpp $(HEADERS) | build
 build/bench_x86: bench/bench.cpp $(HEADERS) | build
 	$(CXX) $(CXXFLAGS) $(X86_FLAGS) $< -o $@
 
+build/coldstart_x86: bench/coldstart.cpp $(HEADERS) | build
+	$(CXX) $(CXXFLAGS) $(X86_FLAGS) $< -o $@
+
 test: build/test_native build/test_x86
 	./build/test_native
 	$(X86_RUN) ./build/test_x86
@@ -50,6 +53,12 @@ bench: build/bench_native build/bench_x86
 
 bench-native: build/bench_native
 	./build/bench_native $(BENCH_ARGS)
+
+# Cold-start single-beatmap benchmark: one fresh process per file, first
+# parse timed. COLD_CPU pins each process on Linux; COLD_REPS = best-of.
+COLD_REPS ?= 5
+coldstart: build/coldstart_x86
+	sh bench/coldstart.sh "$(X86_RUN) ./build/coldstart_x86" $(BENCH_ARGS) $(COLD_REPS) $(COLD_CPU)
 
 # Profile-guided build (gcc/Linux): train on the benchmark corpus, then
 # rebuild with measured branch probabilities. Worth +2-3% on real maps.
@@ -62,4 +71,4 @@ bench-pgo: | build
 clean:
 	rm -rf build
 
-.PHONY: all test bench bench-native bench-pgo clean
+.PHONY: all test bench bench-native bench-pgo coldstart clean
