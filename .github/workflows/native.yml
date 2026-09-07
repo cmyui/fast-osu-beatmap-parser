@@ -32,7 +32,7 @@ jobs:
             -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
             '-DCMAKE_CROSSCOMPILING_EMULATOR=qemu-aarch64;-L;/usr/aarch64-linux-gnu'
           cmake --build build/arm64 --target test-binaries -j2
-          ctest --test-dir build/arm64 --output-on-failure -R '^(numeric|sections|storage|hardening|dispatch_.*)$'
+          ctest --test-dir build/arm64 --output-on-failure -R '^(numeric|sections|storage|hardening|binary_hardening|dispatch_.*)$'
       - run: python3 tests/test_build.py build/native
       - name: Check scalar, public vectors, and debug containers
         run: |

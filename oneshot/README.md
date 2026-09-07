@@ -17,6 +17,9 @@ The build uses GCC `-O2 -march=znver4`, a custom entry point and direct Linux
 x86-64 syscalls. It links neither libc nor libstdc++, uses no dynamic loader,
 and emits a small static ELF with one RWX load segment. Those choices belong
 to this constrained executable; they are not applied to the hosted library.
+It also disables stack canaries, fortification, PIE and RELRO. Applications
+parsing untrusted input should use the C++ library with appropriate compiler
+protections or the hardened C ABI/Python products.
 See [performance](../docs/performance.md) for measured results and comparisons.
 
 ## Process and memory design

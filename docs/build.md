@@ -50,8 +50,8 @@ backend at first use unless overridden by `FOSU_BACKEND`. Unsupported forced
 requests fail instead of executing invalid instructions. Both products require x86-64-v3 CPU features and OS XMM/YMM support
 before selecting AVX2.
 
-Native AVX2 backend code targets **x86-64-v3**, with Linux Zen 4 scheduling,
-`-fno-plt` and `-fno-stack-protector`. Python AVX2 code retains
+Native AVX2 backend code targets **x86-64-v3**, with Linux Zen 4 scheduling
+and `-fno-plt`. Python AVX2 code retains
 `-mavx2 -mbmi -mbmi2` and Linux Zen 4 scheduling. Python uses `-O3 -g0` and Linux
 `-fno-plt`. On x86-64, dispatch code and scalar backends target the baseline ISA.
 Header-only tests, references and benchmarks remain compile-time selected:
@@ -82,6 +82,22 @@ For Rosetta testing, configure a separate build with
 `-DCMAKE_SYSTEM_PROCESSOR=x86_64 -DCMAKE_SYSTEM_NAME=Darwin
 -DCMAKE_OSX_ARCHITECTURES=x86_64 -DFOSU_ISA=avx2
 -DCMAKE_CROSSCOMPILING_EMULATOR="arch;-x86_64"`; AVX2 translation needs macOS 15+.
+
+## Hardening
+
+Compiled C ABI and Python products, including every parser backend, use
+`-fstack-protector-strong`. Native library benchmarks use the same protections.
+Optimized builds enable `_FORTIFY_SOURCE=3` when the Linux compiler and libc
+support it, otherwise level 2; macOS uses level 2. Debug and sanitizer builds
+omit fosu's fortification flags. Linux also enables stack-clash protection,
+full RELRO with eager binding, and a non-executable stack. Shared libraries
+are position independent; native executables use PIE on Linux.
+
+These are mitigations, not a guarantee of memory safety: canaries cover selected
+stack frames, and fortification checks operations whose object bounds the
+compiler can determine. The parser's validation, bounds checks and sanitizer
+tests remain necessary. Header-only consumers choose their own hardening policy.
+The freestanding one-shot has a separate, deliberately aggressive build.
 
 ## Installed CMake consumers
 
@@ -136,6 +152,9 @@ The production target is Zen 4. For x86-64-v3 CI runners configure with
 - `test_dispatch.cpp`: CPU/OS feature requirements, concurrent first use, forced
   selection and unsupported requests; CI also exercises a CPU without AVX via QEMU.
 - C ABI tests: field values, concurrency, failures, recycling and unload.
+- `test_binary_hardening.py`: Linux C ABI and installed-wheel ELF protections
+  (RELRO, eager binding, non-executable stack, no writable executable load
+  segments or text relocations, and emitted stack-canary support).
 - Python tests: installed API, ownership, errors, array views and generated types.
 - `test_oneshot*.py`: complete stream equality, I/O boundaries and limits.
 - `test_official.py`: acceptance against the pinned official legacy decoder.
