@@ -309,7 +309,8 @@ def test_lightweight_import_and_scalar_fallback():
     code = "import sys, fosu; assert 'numpy' not in sys.modules; assert fosu.parse(b'').sample_set == 'Normal'"
     subprocess.run([sys.executable, "-c", code], check=True)
     env = dict(os.environ, FOSU_FORCE_SCALAR="1")
-    code += "; from fosu._native import SIMD_ENABLED; assert not SIMD_ENABLED; assert 'fosu._native_avx2' not in sys.modules"
+    env.pop("FOSU_BACKEND", None)
+    code += "; from fosu._native import SIMD_ENABLED; assert not SIMD_ENABLED; assert fosu.backend == 'scalar'"
     subprocess.run([sys.executable, "-c", code], env=env, check=True)
 
 
@@ -367,3 +368,21 @@ def test_file_size_limit(tmp_path):
         f.truncate(64 * 1024 * 1024 + 1)
     with pytest.raises(ValueError):
         fosu.parse_file(path)
+
+
+def test_backend_selection():
+    code = "import fosu; print(fosu.backend); assert len(fosu.parse(b'[HitObjects]\\n1,2,3,1,0\\n').hit_objects) == 1"
+    from fosu._native import lib
+
+    # Each import has a fresh selection, independent of the parent test process.
+    for backend in ("auto", "scalar", "avx2", "invalid"):
+        available = backend == "auto" or bool(lib.fosu_backend_available(backend.encode()))
+        result = subprocess.run([sys.executable, "-c", code],
+                                env=dict(os.environ, FOSU_BACKEND=backend),
+                                capture_output=True, text=True)
+        assert (result.returncode == 0) == available, result.stderr
+        if available:
+            expected = ("avx2" if lib.fosu_backend_available(b"avx2") else "scalar") if backend == "auto" else backend
+            assert result.stdout.strip() == expected
+        else:
+            assert "ImportError: FOSU_BACKEND" in result.stderr

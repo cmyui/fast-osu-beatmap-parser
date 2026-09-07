@@ -31,7 +31,7 @@ Tests and benchmark programs are built only when their targets are requested.
 | CMake option | Choices | Default |
 |---|---|---|
 | `CMAKE_BUILD_TYPE` | `Release`, `Debug` | `Release` |
-| `FOSU_ISA` | `auto`, `avx2`, `scalar` | AVX2 on x86-64 targets, scalar elsewhere |
+| `FOSU_ISA` | `auto`, `avx2`, `scalar` | `auto` |
 | `FOSU_PORTABLE_VECTORS` | `ON`, `OFF` | `OFF` |
 | `FOSU_SANITIZE` | `ON`, `OFF` | `OFF` |
 | `FOSU_BUNDLE_RUNTIME` | `ON`, `OFF` | On for native Linux release builds and release wheels; off for local Python source builds, macOS and sanitizers |
@@ -42,12 +42,20 @@ Sanitizers use `-O1 -g`, ASan, UBSan, float-cast checks and vector annotations.
 Tests keep assertions enabled. Standard `CMAKE_CXX_FLAGS`, `CMAKE_C_FLAGS`, and
 linker flag variables accept additional compiler options.
 
-Native AVX2 builds target **x86-64-v3**, with Zen 4 scheduling, `-fno-plt` and
-`-fno-stack-protector` on Linux. Scalar x86 builds target baseline x86-64;
-Apple Silicon builds use the native scalar path. These are compile-time choices
-for C/C++; only the Python package selects a variant at runtime. Python AVX2
-modules retain their narrower `-mavx2 -mbmi -mbmi2` flags and Linux Zen 4 tuning;
-both Python variants use `-O3 -g0`, and Linux variants use `-fno-plt`.
+Compiled C API and Python products use runtime CPU selection with `FOSU_ISA=auto`:
+x86-64 builds include scalar and AVX2 backends; Apple Silicon includes scalar.
+`scalar` omits AVX2; `avx2` requires AVX2 at first use unless overridden by
+`FOSU_BACKEND`. Unsupported forced requests fail instead of executing invalid
+instructions. Both products require x86-64-v3 CPU features and OS XMM/YMM support
+before selecting AVX2.
+
+Native AVX2 backend code targets **x86-64-v3**, with Linux Zen 4 scheduling,
+`-fno-plt` and `-fno-stack-protector`. Python AVX2 code retains
+`-mavx2 -mbmi -mbmi2` and Linux Zen 4 scheduling. Python uses `-O3 -g0` and Linux
+`-fno-plt`. Dispatch code and scalar backends target baseline x86-64.
+Header-only tests, references and benchmarks remain compile-time selected:
+`auto` uses AVX2 on x86-64 and scalar elsewhere. Run those AVX2 tools only on
+supported CPUs, or configure `FOSU_ISA=scalar`.
 A header-only consumer controls its own optimization and hardening flags.
 
 ```sh
@@ -89,8 +97,8 @@ python3 -m build                 # source archive, then wheel from that archive
 
 Build isolation supplies scikit-build-core, CFFI, and a suitable CMake/Ninja when
 needed. An installed C/C++ compiler and Python development headers are required
-for source builds. The wheel contains the same scalar and AVX2 modules on x86-64,
-or the scalar module on Apple Silicon, using the CPython 3.10+ stable ABI.
+for source builds. The wheel contains one extension with scalar and AVX2 backends on x86-64,
+or scalar on Apple Silicon, using the CPython 3.10+ stable ABI.
 `FOSU_BUNDLE_RUNTIME=1` bundles the Linux C++ runtime; cibuildwheel enables this
 by default. `CMAKE_ARGS` or pip's `-Ccmake.define.NAME=VALUE` can configure CMake.
 
@@ -118,6 +126,8 @@ The production target is Zen 4. For x86-64-v3 CI runners configure with
 - `test_sections.cpp`: metadata, object kinds, omitted sections and selection.
 - `test_storage.cpp`: growth, lifetime, reuse and both record layouts.
 - `test_hardening.cpp` and `fuzz_parser.cpp`: malformed input and scalar/SIMD parity.
+- `test_dispatch.cpp`: CPU/OS feature requirements, concurrent first use, forced
+  selection and unsupported requests; CI also exercises a CPU without AVX via QEMU.
 - C ABI tests: field values, concurrency, failures, recycling and unload.
 - Python tests: installed API, ownership, errors, array views and generated types.
 - `test_oneshot*.py`: complete stream equality, I/O boundaries and limits.

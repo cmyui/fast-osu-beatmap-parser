@@ -18,6 +18,12 @@ jobs:
           persist-credentials: false
       - run: cmake -S . -B build/native -G Ninja -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DFOSU_ONESHOT_FLAGS=-march=x86-64-v3
       - run: cmake --build build/native --target check bench-build references check-oneshot oneshot_process -j2
+      - name: Check dispatch without AVX
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y qemu-user
+          qemu-x86_64 -cpu Nehalem build/native/test_dispatch auto
+          qemu-x86_64 -cpu Nehalem build/native/test_dispatch avx2
       - run: python3 tests/test_build.py build/native
       - name: Check scalar, public vectors, and debug containers
         run: |

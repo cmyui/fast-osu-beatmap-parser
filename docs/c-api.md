@@ -12,10 +12,23 @@ cmake --build build/native --target check -j4
 This builds `build/native/libfosu.so` on Linux x86-64 or
 `build/native/libfosu.dylib` on Apple Silicon. See
 [build configurations](build.md) for all targets.
-`include/fosu/c_api.h` is a C-compatible header. The default Linux x86-64 build
-requires **x86-64-v3 (including AVX2 and BMI)** and is tuned for Zen 4; it has no
-CPU dispatch. Use `-DFOSU_ISA=scalar` for a scalar build. Native Apple
-Silicon builds use the scalar parser.
+`include/fosu/c_api.h` is a C-compatible header. The default library selects
+AVX2 on x86-64-v3 CPUs with OS support for XMM/YMM state, otherwise scalar.
+Apple Silicon currently uses scalar. The optimized Linux backend retains Zen 4
+scheduling. Both backends use the same ABI and result ownership contract.
+
+`fosu_backend_name()` returns `"scalar"` or `"avx2"`.
+`fosu_backend_available("avx2")` reports whether that backend is compiled in and
+supported by the CPU and OS. Set `FOSU_BACKEND=auto|scalar|avx2` before the first
+call to select a backend; `FOSU_FORCE_SCALAR=1` also works when `FOSU_BACKEND` is
+unset. An unknown or unsupported request makes `fosu_backend_name()` and
+`fosu_new()` return NULL. Selection is thread-safe and fixed for the lifetime
+of that loaded library, even if the environment subsequently changes.
+
+Each API call forwards to a cached function pointer; parsing loops have no
+runtime ISA branches. Backend types and arena caches are private, and baseline
+startup/teardown code calls only the selected backend. Header-only C++ remains
+compile-time selected; C++ applications can use this C ABI for runtime selection.
 
 On Linux the default build bundles private copies of the C++ runtime and
 unwinder. Only `fosu_*` functions are exported; no C++ exceptions cross the ABI.

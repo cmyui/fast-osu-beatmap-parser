@@ -85,8 +85,9 @@ playability validator. Inputs are limited to 64 MiB. Fast paths use speculative
 reads; C++ byte buffers need **128 readable zero bytes after the logical end**.
 File helpers, the C API and Python supply that padding. See the
 [full input contract](docs/compatibility.md) before integrating a consumer.
-A scalar build works without AVX2; the default Linux x86-64 library target
-requires x86-64-v3, while the one-shot binary targets Zen 4. Measurements are
+The compiled library and Python package select AVX2 on supported x86-64 CPUs
+and otherwise use scalar code. Header-only C++ uses the caller’s compile flags;
+the one-shot binary targets Zen 4. Measurements are
 bounded to the documented corpus and host; see [performance](docs/performance.md).
 
 The project concept and original SIMD hitobject prototype are by

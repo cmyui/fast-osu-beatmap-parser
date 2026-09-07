@@ -10,7 +10,7 @@ print(beatmap.title, beatmap.artist, beatmap.ar)
 print(beatmap.hit_objects[0].time)
 ```
 
-The package builds the C++ parser into its extension modules. No separate
+The package builds the C++ parser into its extension module. No separate
 `libfosu` installation, manual CFFI compilation or handle management is needed.
 
 ## Install
@@ -161,14 +161,19 @@ boolean on Python records. `curve_type` is a one-byte NumPy string and a Python
 
 ## CPU selection and development
 
-On x86-64, the wheel includes scalar and AVX2 variants of the same C API. A
-baseline module checks CPU/OS support before importing the optimized module;
-there is no per-parse dispatch. The optimized variant requires AVX2, BMI1,
-BMI2 and POPCNT, with Linux scheduling tuned for Zen 4. Apple Silicon uses the
-scalar variant; the published Zen 4 timings do not describe its performance.
-Set `FOSU_FORCE_SCALAR=1` before importing for a scalar check.
+The wheel contains one native extension. Its C API selects AVX2 once on
+x86-64-v3 CPUs with OS XMM/YMM support, otherwise scalar. Linux AVX2 scheduling
+remains tuned for Zen 4. Apple Silicon currently uses scalar; the published
+Zen 4 timings do not describe its performance.
+
+`fosu.backend` reports `"scalar"` or `"avx2"`. To force a backend, set
+`FOSU_BACKEND=scalar` or `FOSU_BACKEND=avx2` before importing. Unsupported or
+unknown requests raise `ImportError`; `auto` restores automatic selection.
+`FOSU_FORCE_SCALAR=1` remains a shorthand when `FOSU_BACKEND` is unset.
+Selection stays fixed for that loaded extension. Each C API call forwards to
+the selected implementation; there are no per-record dispatch branches.
 Linux release wheels bundle a private C++ runtime to reduce first-import cost;
-only their Python initialization symbols are exported. macOS uses the system
+only the Python initialization symbol is exported. macOS uses the system
 C++ runtime. Neither uses the standalone executable's custom runtime.
 `FOSU_BUNDLE_RUNTIME=0` disables bundling for a custom wheel build.
 The ordinary C++ library and standalone C API use the [native build configurations](build.md).
@@ -182,6 +187,6 @@ python python/generate_stubs.py  # after changing public C fields
 
 The C declarations are read from `include/fosu/c_api.h` during wheel builds.
 The generated Python property stubs are checked in and verified against the
-compiled declarations. Native APIs are private to the extension modules;
+compiled declarations. Native APIs are private to the extension module;
 applications should use `fosu`'s public objects. See the
 [benchmark guide](performance.md) for measured call boundaries and reproduction.
