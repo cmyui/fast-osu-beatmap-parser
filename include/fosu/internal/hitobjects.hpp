@@ -41,25 +41,37 @@ inline bool parse_slider(Sink& sink, typename Sink::HitObject& object, const cha
     // A point costs at least four bytes ("|x:y"), which bounds the count;
     // the pair fast path also needs a second slot.
     Point* const first_point = sink.point_slot(static_cast<size_t>(end - p) / 4 + 2);
-    const auto points = parse_slider_points_into(p, end, first_point, k);
-    if (!points) [[unlikely]] {
-        sink.slider_rollback(first_point, first_point, false);
-        return false;
+    Point* next_point = first_point;
+#if FOSU_SIMD
+    if (const auto pair = fast_parse_point_pair<Point>(p, k)) {
+        *next_point++ = pair->first;
+        if (pair->has_second) *next_point++ = pair->second;
+        p = pair->next;
     }
-    const auto fields = parse_slider_fields(points->next, end, k);
+#endif
+    while (p < end && *p == '|') {
+        const auto point = parse_point<Point>(p, end, k);
+        if (!point) [[unlikely]] {
+            sink.slider_rollback(first_point, first_point, false);
+            return false;
+        }
+        *next_point++ = point->value;
+        p = point->next;
+    }
+    const auto fields = parse_slider_fields(p, end, k);
     if (!fields) [[unlikely]] {
-        sink.slider_rollback(first_point, points->points_end, true);
+        sink.slider_rollback(first_point, next_point, true);
         return false;
     }
     auto& slider = sink.slider_slot();
     slider.point_begin = sink.point_index(first_point);
-    slider.point_count = static_cast<uint32_t>(points->points_end - first_point);
+    slider.point_count = static_cast<uint32_t>(next_point - first_point);
     slider.slides = fields->slides;
     slider.curve_type = curve_type;
     slider.length = fields->length;
     slider.edge_sounds = sink.view(fields->extras.edge_sounds.data(), fields->extras.edge_sounds.size());
     slider.edge_sets = sink.view(fields->extras.edge_sets.data(), fields->extras.edge_sets.size());
-    sink.slider_commit(object, slider, points->points_end,
+    sink.slider_commit(object, slider, next_point,
                        fields->extras.hit_sample.data(), fields->extras.hit_sample.size());
     return true;
 }
