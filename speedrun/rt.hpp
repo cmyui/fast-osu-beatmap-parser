@@ -44,8 +44,8 @@ inline long fstat_size(int fd) {
     if (sys2(SYS_fstat, fd, (long)&st) < 0) return -1;
     return st.size;
 }
-inline void* mmap(void* addr, size_t len, int prot, int flags) {
-    return (void*)sys6(SYS_mmap, (long)addr, (long)len, prot, flags, -1, 0);
+inline void* mmap(void* addr, size_t len, int prot, int flags, int fd = -1) {
+    return (void*)sys6(SYS_mmap, (long)addr, (long)len, prot, flags, fd, 0);
 }
 inline long madvise(void* p, size_t n, int adv) { return sys3(SYS_madvise, (long)p, (long)n, adv); }
 #ifdef SPEEDRUN_HOSTED

@@ -1262,6 +1262,18 @@ constexpr uintptr_t kArenaBaseFar = 0x100000000000ull;
 #endif
     ctx.spill = arena + len - kSpillBytes;
     ctx.stream_started = false;
+#ifdef INPUT_MMAP
+    // Experiment: map the page-cache pages over the arena start instead of
+    // copying them in. The anonymous arena continues right after the last
+    // file page, so the 128-byte padding past EOF is zero either way; the
+    // output starts at the next 64 KB boundary so its first touch is still
+    // folio-eligible.
+    const size_t got = size;
+    if (size && rt::mmap(arena, size, 1 /*READ*/, 0x02 /*PRIVATE*/ | 0x10 /*FIXED*/ | 0x8000 /*POPULATE*/, static_cast<int>(fd)) != arena)
+        rt::exit(1);
+    g_out_begin = g_out = arena + ((got + 128 + 65535) & ~size_t(65535));
+    g_out_end = ctx.spill;
+#else
     size_t got = 0;
     while (got < size) {
         const long r = rt::read(static_cast<int>(fd), arena + got, size - got);
@@ -1271,6 +1283,7 @@ constexpr uintptr_t kArenaBaseFar = 0x100000000000ull;
     // 128 zero bytes of padding follow the input; the output area starts after them.
     g_out_begin = g_out = arena + ((got + 128 + 63) & ~size_t(63));
     g_out_end = ctx.spill;
+#endif
 #ifdef ABLATE_AFTER_READ
     rt::exit(0);
 #endif

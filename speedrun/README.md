@@ -114,4 +114,9 @@ software-prefetching the text or the lane-mask table (no effect: the cold
 code cost is front-end warm-up, not cache misses), page-fault batching
 with `MADV_POPULATE_WRITE` (saves ~15% per page; folios save 80%).
 Binary size costs ~3 µs per 70 KB of text and ~3 µs per 270 KB of `.bss`
-at exec, which is why both were trimmed.
+at exec, which is why both were trimmed. Mapping the input file over the
+arena instead of `read()`ing it (`-DINPUT_MMAP`, `MAP_POPULATE`,
+padding still zero because the anonymous arena continues after the last
+file page) leaves the parser's user cycles unchanged and costs ~8 µs more
+per map end to end (file-page mapping, VMA split and teardown outweigh a
+28 KB copy), so the input is copied.
