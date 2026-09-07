@@ -63,7 +63,9 @@ auto sample = compact.resolve(compact.hit_objects[0].hit_sample);
 
 `OffsetBeatmap` uses the C API's 48-byte hitobjects and 40-byte sliders. Record
 strings contain 32-bit offsets/lengths into the borrowed input; metadata still
-uses `std::string_view`. The shared 64 MiB input limit keeps parsed spans within `uint32_t`.
+uses `std::string_view`. `BasicBeatmap` also takes the array container as a
+template parameter (`std::vector` by default); the C ABI handle instantiates it
+with arena-backed arrays without changing either public type. The shared 64 MiB input limit keeps parsed spans within `uint32_t`.
 `parse_into` sets the string base automatically. Both representations instantiate
 the same parser; the C API adds input ownership and status-code translation.
 
@@ -87,7 +89,13 @@ scalar and SIMD runs.
 
 ## Performance
 
-Use `-O3` for the hosted library on the measured target; `-O2` was slower.
+The parser writes records directly into reserved vector capacity and publishes
+the sizes once per section, so the steady-state cost of a `Beatmap` result is
+the records themselves. In a fresh process the first parse also pays the page
+faults of that memory through the process allocator; the C ABI's arena reduces
+those for C and Python callers, while the header-only interface keeps the
+caller's allocator. Use `-O3` for the hosted library on the measured target;
+`-O2` was slower.
 Profile-guided compilation of the calling application can improve it further.
 [The benchmark guide](performance.md) includes an executable GCC experiment
 with disjoint training/evaluation files. A header-only library cannot supply a

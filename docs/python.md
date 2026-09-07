@@ -55,6 +55,9 @@ listing = fosu.parse_file(
 
 `parse` copies the bytes once into native padded storage; the caller's input
 can be released immediately. `parse_file` reads directly into that storage.
+Each result owns one native arena holding the input copy and all record
+arrays; a released result's arena is recycled by the next parse in the
+process (see the [C API storage notes](c-api.md)).
 Both return independent results, and CFFI releases the GIL during native calls.
 `parse` also accepts `bytearray`, `memoryview`, `mmap` and other C-contiguous
 buffers. Noncontiguous buffers raise `BufferError`. Do not mutate a writable

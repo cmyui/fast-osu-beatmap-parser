@@ -1,6 +1,8 @@
 # One beatmap per process
 
-The executable minimizes wall time from process creation through exit, including
+The executable is a process-level benchmark and demonstration of the library's
+kernels; the library, C ABI and Python package are the primary products. It
+minimizes wall time from process creation through exit, including
 opening and reading the original `.osu`, parsing it and writing the complete
 result to stdout. It needs no retained state, cache, sidecar or preprocessing of
 the input. Every successful invocation delivers its result.

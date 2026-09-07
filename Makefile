@@ -44,6 +44,13 @@ build/bench_x86: bench/bench.cpp $(HEADERS) | build
 build/coldstart_x86: bench/coldstart.cpp $(HEADERS) | build
 	$(CXX) $(CXXFLAGS) $(X86_FLAGS) $< -o $@
 
+# In-process profiling driver (perf-friendly) and fresh-handle C API loop.
+build/profile_parse: bench/profile_parse.cpp $(HEADERS) | build
+	$(CXX) $(CXXFLAGS) -g $(X86_FLAGS) $< -o $@
+
+build/c_api_loop: bench/c_api_loop.c include/fosu/c_api.h | build
+	$(CC) -std=c11 -D_POSIX_C_SOURCE=200809L -O2 -Iinclude $< -ldl -o $@
+
 build/test_hardening: tests/test_hardening.cpp oneshot/dump.hpp $(HEADERS) | build
 	$(CXX) $(CXXFLAGS) $(LIB_ARCH_FLAGS) $< -o $@
 

@@ -55,11 +55,27 @@ Compile on Linux with `cc -Iinclude examples/c_example.c -Lbuild -lfosu
 records. Version 2 defines the current structs, including double timestamps.
 Incompatible struct changes require a version bump and rebuilding bindings.
 
+## Storage
+
+A handle owns one anonymous memory mapping (an arena) that holds the padded
+input copy followed by every record array, so a parse performs one mapping at
+most and no per-array allocations. A reused handle keeps its arena while the
+input fits. When a handle is freed, its arena (up to 8 MiB) is parked in one
+process-wide slot and taken by the next handle that needs one, so a
+fresh-handle-per-parse pattern reuses warm pages instead of mapping and
+faulting new ones. This recycles memory only; no input bytes or parsed values
+survive between parses. On Linux the arena carries `MADV_HUGEPAGE`, which lets
+a fresh process take larger folios where the host enables them; it is advisory
+and never changes host settings. Build with `-DFOSU_ARENA_NO_HUGEPAGE` to omit
+the advice, or `-DFOSU_ARENA_MALLOC` to back arenas with `malloc` instead of
+`mmap`. Arrays that outgrow their arena fall back to the heap transparently.
+
 ## Contract
 
 - `fosu_new`/`fosu_free` own a reusable handle. Freeing `NULL` is allowed.
 - `fosu_parse` copies an input byte span into padded, owned storage;
-  `fosu_parse_file` reads directly into that storage. Both reuse capacity.
+  `fosu_parse_file` reads directly into that storage. Both reuse the arena
+  while it is large enough.
 - `fosu_get_view` returns borrowed metadata and bulk arrays after a successful
   parse, or `NULL` before success/after failure. **Every new parse call,
   including a failed or argument-rejected call, invalidates the previous view.**

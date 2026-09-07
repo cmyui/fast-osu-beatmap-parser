@@ -830,7 +830,41 @@ void test_selective_parsing() {
     }
 }
 
+// The library publishes records written into vector capacity by setting the
+// vector's end pointer; verify the {begin, end, capacity} layout the direct
+// path relies on, on every supported standard library and record type.
+static void test_vector_layout() {
+    std::vector<fosu::HitObject> objects;
+    std::vector<fosu::Slider> sliders;
+    std::vector<fosu::SliderPoint> points;
+    objects.reserve(7); objects.emplace_back(fosu::HitObject::uninit_t{});
+    sliders.reserve(5); sliders.emplace_back(fosu::Slider::uninit_t{}); sliders.emplace_back(fosu::Slider::uninit_t{});
+    points.reserve(9); points.resize(3);
+    CHECK(fosu::detail::vector_layout_ok(objects));
+    CHECK(fosu::detail::vector_layout_ok(sliders));
+    CHECK(fosu::detail::vector_layout_ok(points));
+    CHECK(fosu::detail::kDirectVectorWrites);
+    fosu::detail::set_vector_size(points, 6);
+    CHECK_EQ(points.size(), (size_t)6);
+    CHECK_EQ(points.capacity(), (size_t)9);
+    // A map growing past every initial reserve exercises the grow paths.
+    std::string many = "[HitObjects]\n";
+    for (int i = 0; i < 3000; ++i) many += "1,2,3,1,0\n";  // 10-byte lines: below the /16 line estimate
+    for (int i = 0; i < 3000; ++i) many += "1,2,3,2,0,B|1:2|3:4|5:6,1,10\n";
+    auto input = fosu::make_padded(many);
+    auto bm = fosu::parse(input);
+    CHECK_EQ(bm.hit_objects.size(), (size_t)6000);
+    CHECK_EQ(bm.sliders.size(), (size_t)3000);
+    CHECK_EQ(bm.slider_points.size(), (size_t)9000);
+    CHECK_EQ(bm.hit_objects[5999].slider, 2999u);
+    CHECK_EQ(bm.sliders[2999].point_begin, 8997u);
+    auto scalar = fosu::parse(input, {.use_simd = false});
+    CHECK_EQ(scalar.slider_points.size(), (size_t)9000);
+    CHECK_EQ(scalar.sliders[1234].point_begin, 3702u);
+}
+
 int main() {
+    test_vector_layout();
     test_full_map();
     test_old_format();
     test_mania_hold();

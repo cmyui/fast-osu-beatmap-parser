@@ -33,9 +33,117 @@ There are three separate measurements:
    `dlopen` through read/parse/view/free/`dlclose`; that broader interval includes
    library loading and I/O. Neither includes Python interpreter startup.
 
-## Current compatibility measurements (0.2.0)
+## Current measurements (kernel restructure and arena handle)
 
-September 7, 2026; previous release `33aa2c0` versus the current implementation,
+September 7, 2026; `a9d7693` (the previous section's "current" implementation)
+versus this revision, GCC 13.3, no PGO unless stated. Every comparison pairs
+the two builds on the same files and CPU 3, rotating variants within each
+file/repetition or interleaving whole runs. Times are microseconds; means of
+per-file minima are shown with means of all runs in parentheses. Output is
+byte-identical to `a9d7693` on the whole corpus (SHA-256
+`334598db4c426ce5e99ba49cb9c4e3c038f88cb5424586ecd718207ec482edad`), so
+these compare identical-output implementations.
+
+### In-process C++ (`library_compare`, 10,000 files, nine repetitions)
+
+| Workload | `a9d7693` | Current | Change |
+|---|---:|---:|---:|
+| Fresh `Beatmap` per parse | 21.446 (23.977) | 20.308 (22.473) | −5.3% (−6.3%) |
+| Reused `Beatmap` | 20.835 (22.813) | 19.664 (21.344) | −5.6% (−6.4%) |
+
+A streaming subset driver (`bench/profile_parse.cpp`: 1,000 evenly spaced
+files, fresh results, best of ten rounds, seven interleaved run pairs) puts
+the medians at 28.2 versus 25.8 µs per file (−8.8%). Per round of 1,000
+files, hardware counters attribute the change to the `[HitObjects]` section:
+305.5M → 261.0M instructions (−14.6%), 88.1M → 80.1M cycles (−9.1%) and
+553k → 441k branch mispredictions; `[TimingPoints]` moved from 44.4M to 41.0M
+instructions and 16.1M to 15.4M cycles. Both regimes matter: the paired
+run keeps each input cache-resident, the driver streams inputs from L3.
+
+### C ABI
+
+| Boundary | `a9d7693` | Current | Change |
+|---|---:|---:|---:|
+| Fresh handle per parse (`c_api_loop`, 1,000 files × 20, five interleaved runs, medians) | 22.80 (25.95) | 21.58 (23.88) | −5.4% (−8.0%) |
+| First use: `dlopen` through parse, free, `dlclose` (1,000 files × 3) | 258.2 | 214.8 | −16.8% |
+
+The first-use gain comes from the arena's huge-page advice: on a 500-file
+subset the mean of file minima was 229.2 µs for `a9d7693`, 191.7 with the
+arena, 217.6 without the advice and 218.5 with a `malloc`-backed arena, while
+the four were within noise of each other in steady state. An in-process paired
+run of two self-contained C API modules showed no significant change (fresh
+21.93 → 22.15, reused 21.22 → 21.11); that harness loads both versions into
+one process and is reported for completeness.
+
+### Python package (CPython 3.12, bundled runtime, paired wheels)
+
+| Call | `a9d7693` | Current | Change |
+|---|---:|---:|---:|
+| `fosu.parse(bytes)` + `len(hit_objects)` (10,000 files × 5) | 25.988 (29.678) | 24.687 (27.834) | −5.0% (−6.2%) |
+| `fosu.parse_file(path)` + `len(hit_objects)` (10,000 files × 5) | 31.947 (35.323) | 30.738 (33.638) | −3.8% (−4.8%) |
+| 300 different files round-robin, `parse(bytes)`, µs per call | 32.22 | 29.46 | −8.6% |
+| First `parse_file` in a fresh interpreter (100 files × 3) | 161.4 (174.9) | 135.1 (148.4) | −16.3% |
+
+Interleaved single-package runs agree (bytes 24.99 → 23.86, file 31.11 →
+29.82 µs, medians of three runs). Interpreter start and `import fosu` are
+unchanged (about 5.0 ms and 16.4 ms whole-process). Page faults per 3,000
+round-robin parses fell from 6,901 to 6,612.
+
+### First parse and process boundaries
+
+| Boundary | `a9d7693` | Current | Change |
+|---|---:|---:|---:|
+| First C++ parse in a fresh process (`coldstart_x86`, 1,000 files × 3) | 73.98 (80.40) | 71.68 (77.87) | −3.1% |
+| One-shot process lifetime (10,000 files × 3, best/file mean; all runs) | 168.56 (186.49) | 167.14 (185.13) | −0.8% |
+
+The header-only interface keeps the caller's allocator, so its first-call
+page faults are unchanged; the one-shot executable already had its own arena
+and gains only the kernel's share of its 160 µs process time.
+
+### Profile-guided builds (held-out)
+
+`make bench-pgo CXX=g++` trains on sorted indices 0, 5, 10, … and evaluates
+the other 8,000 files (five repetitions):
+
+| Build | Fresh | Reused |
+|---|---:|---:|
+| `a9d7693` | 21.697 (24.133) | 21.007 (22.849) |
+| `a9d7693` + PGO | 20.688 (23.136) | 19.997 (21.896) |
+| Current | 20.226 (22.306) | 19.773 (21.318) |
+| Current + PGO | 19.814 (22.158) | 19.246 (21.035) |
+
+PGO adds less on the current code (about 2-3%) than on `a9d7693` (about 5%):
+the restructured loops leave fewer data-dependent branches to specialize. No
+PGO build is shipped.
+
+### Branchy versus branchless slider fields (two paired runs, five repetitions)
+
+| Module | Run 1 fresh / reused | Run 2 fresh / reused |
+|---|---:|---:|
+| `a9d7693` | 23.02 / 21.44 | 22.82 / 21.21 |
+| Branchless length and edge scan | 23.72 / 22.20 | 23.41 / 21.97 |
+| Branchy edge scan only | 23.38 / 21.88 | 23.42 / 21.96 |
+| Branchy length only | 22.20 / 20.58 | 21.77 / 20.38 |
+| Both branchy (kept) | 21.54 / 20.01 | 21.52 / 20.07 |
+
+### Verification coverage (this revision)
+
+- Exact canonical output equality with `a9d7693` on all 10,000 files for the
+  hosted reference writer, the one-shot executable and the C API reference.
+- Python file and bytes entry points match every public field on all 10,000
+  files (float bits, raw strings, pool indices, counters); 18 package tests
+  pass in AVX2 and scalar mode.
+- The official legacy decoder agrees on all 1,395 synthetic fixtures in AVX2
+  and scalar mode.
+- Native, hardening, C ABI (including arena growth and recycling), export and
+  I/O-failure tests pass; Clang ASan/UBSan/float-cast-overflow tests pass;
+  a 61-second, 934,271-run fuzz smoke test passes; the sanitizer-built
+  scalar/offset/numeric-oracle comparison verifies all 10,000 files
+  (8,070,193 objects, six malformed lines).
+
+## Compatibility measurements (0.2.0, `a9d7693`)
+
+September 7, 2026; previous release `33aa2c0` versus `a9d7693`,
 GCC 13.3, no PGO. Each paired benchmark rotates candidates within every
 file/repetition on CPU 3. All 10,000 corpus files are included. Times are
 microseconds; parentheses contain means of all runs.
@@ -51,9 +159,10 @@ spellings use parallel integer digit checks; unusual fields use the complete
 bounded conversion. Both paths enforce the same acceptance policy. These
 results compare different parsing behavior, not identical-output implementations.
 
-The current table covers C++ calls. Earlier process, C API and Python results
-below predate this validation policy and do not establish its performance at
-those boundaries.
+This table covers C++ calls at `a9d7693`. Earlier process, C API and Python
+results below predate this validation policy and do not establish its
+performance at those boundaries; the section above measures every boundary
+for the current revision.
 
 ### Python measurement procedure
 
@@ -324,6 +433,33 @@ without output and older stream versions do different work and should be
 labeled separately. An empty executable measures process-launch overhead, not
 an attainable parsing result or a proof of optimality.
 
+## In-process profiling and boundary harnesses
+
+`bench/profile_parse.cpp` parses an evenly spaced corpus subset in one process
+for `perf`, with fresh or reused results and an optional section mask, and
+reports the best round plus minor faults:
+
+```sh
+make build/profile_parse CXX=g++
+taskset -c 3 perf stat -e cycles:u,instructions:u,branch-misses:u -- \
+  build/profile_parse /path/to/corpus 1000 20 fresh
+taskset -c 3 build/profile_parse /path/to/corpus 1000 20 reuse 0x100  # [HitObjects] only
+```
+
+`bench/c_api_loop.c` measures fresh-handle C API parses (`fosu_new`, parse
+from bytes, view, `fosu_free`) against a library path given on the command
+line; run each library in its own process, because two libraries with the same
+soname loaded into one process share a single copy:
+
+```sh
+make lib build/c_api_loop CXX=g++
+taskset -c 3 build/c_api_loop build/libfosu.so /path/to/corpus 1000 20
+```
+
+Paired C API modules for `library_compare` must compile `src/c_api.cpp` into
+each module (`-DFOSU_BENCH_CAPI bench/library_module.cpp src/c_api.cpp` with
+`-Wl,-Bsymbolic`) for the same reason.
+
 ## Library benchmark and PGO
 
 ```sh
@@ -376,6 +512,40 @@ host permits them. `FOSU_COLD_MODE` enables explicit decomposition experiments
 inside that benchmark only; leave it unset for the default first-parse result.
 
 ## Choices tested
+
+Retained from the hitobject-kernel restructure (all measured on the corpus
+host with interleaved A/B runs; see the current measurements above):
+
+- Packed-lane prefix validation and a multiply-derived table index replaced
+  four range checks, four delimiter byte compares and a serial shift chain.
+- Vector constants materialized once per section (opaque broadcasts) instead
+  of being rebuilt per line whenever the loop body contains a call.
+- Blank/comment/header detection only after the editor shape fails.
+- Records written through raw cursors into reserved capacity and published
+  once per section, for hitobjects, sliders, points and timing points.
+- One 32-byte window converts the first two slider points speculatively and
+  a shuffle table converts each further point; repeat counts of one or two
+  digits take a direct path and slider fields are written straight into the
+  reserved record.
+- The C ABI handle allocates its input copy and arrays from one arena with
+  huge-page advice, recycled through a single process-wide spare slot.
+
+Rejected after measurement:
+
+- A mask-indexed slider tail that located every field boundary up front so
+  fields could convert in parallel: +12% hitobject instructions and +3%
+  cycles on the corpus, because most sliders need two windows plus a
+  sequential fallback and the field chain was not the limiting latency.
+- Branchless slider length and edge-field handling (an unconditional divide
+  and an unconditional edge scan): fewer mispredicts and no change when input
+  streams from L3, but about 7% and 1-2% slower respectively when the input is
+  cache-resident, which is the common single-parse case. The branchy forms
+  were kept.
+- Lambdas capturing the timing cursor by reference: the cursor moved to
+  memory and the section slowed by ~8% until the loop was written out.
+- Arena variants without huge-page advice or backed by `malloc`: equal in
+  steady state, but they gave up most of the first-use improvement.
+
 
 - Shared numeric kernels and compile-time record policies retained library
   throughput. Shared hitobject framing improved the paired hosted result by

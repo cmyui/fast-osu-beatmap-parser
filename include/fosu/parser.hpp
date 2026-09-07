@@ -12,7 +12,7 @@
 #include "detail/timing.hpp"
 #include "detail/slider.hpp"
 #include "detail/metadata.hpp"
-#include "detail/sections.hpp"
+#include "detail/hitobjects.hpp"
 #include "detail/section_names.hpp"
 #include "io.hpp"
 #include "scalar_parse.hpp"
@@ -87,6 +87,45 @@ inline void parse_metadata_line(Map& bm, const char* p, size_t len) {
 template <typename Map>
 inline void parse_difficulty_line(Map& bm, const char* p, size_t len, bool& ar_specified) {
     ar_specified |= parse_kv_line<parse_double>(bm, kDifficulty, p, len, &bm.stats.malformed_lines);
+}
+
+// Publishes records written directly into a vector's reserved capacity.
+// libstdc++ and libc++ lay a vector out as {begin, end, capacity_end};
+// other standard libraries use the portable path below. The layout is
+// checked by tests/test_parser.cpp against the public accessors.
+#if defined(__GLIBCXX__) || defined(_LIBCPP_VERSION)
+inline constexpr bool kDirectVectorWrites = true;
+#else
+inline constexpr bool kDirectVectorWrites = false;
+#endif
+template <typename T>
+inline bool vector_layout_ok(const std::vector<T>& v) {
+    const T* raw[3];
+    static_assert(sizeof(v) == sizeof(raw));
+    const void* const object = &v;
+    memcpy(raw, object, sizeof raw);
+    return raw[0] == v.data() && raw[1] == v.data() + v.size() &&
+           raw[2] == v.data() + v.capacity();
+}
+template <typename T>
+inline void set_vector_size(std::vector<T>& v, size_t n) {
+    T* raw[3];
+    static_assert(sizeof(v) == sizeof(raw));
+    void* const object = &v;
+    memcpy(raw, object, sizeof raw);
+    raw[1] = raw[0] + n;
+    memcpy(object, raw, sizeof raw);
+}
+// Containers with a native set_size (the C ABI arena vectors) always take
+// the direct path; std::vector takes it on the known layouts.
+template <typename V>
+inline constexpr bool has_set_size_v = requires(V& v) { v.set_size(size_t{}); };
+template <typename V>
+inline constexpr bool direct_vector_writes_v = has_set_size_v<V> || kDirectVectorWrites;
+template <typename V>
+inline void publish_size(V& v, size_t n) {
+    if constexpr (has_set_size_v<V>) v.set_size(n);
+    else set_vector_size(v, n);
 }
 
 inline std::string_view strip_quotes(std::string_view v) {
@@ -170,281 +209,249 @@ inline void parse_timing_point_line(Map& bm, const char* p, size_t len) {
 // Fused [TimingPoints] section loop: the same two loads serve the newline
 // scan and the parser, and the section is sized exactly once — the next
 // '[' bounds it, so reserve never over-allocates for short sections nor
-// grows for marathon ones (growth reallocs plus resize's value-init
-// memsets measured worse than the push_back they replaced). Returns the
-// position after the section.
+// grows for marathon ones. Points are written straight into the reserved
+// capacity and published at the end; blank, comment and header lines are
+// only examined when the editor shape fails. Returns the position after
+// the section.
 template <typename Map>
 inline const char* parse_timing_points_section(Map& bm, const char* p,
                                                const char* file_end) {
+    using TP = typename Map::TimingPoint;
     auto& tps = bm.timing_points;
+    constexpr bool kDirect = direct_vector_writes_v<decltype(Map::timing_points)>;
     const auto* bracket = static_cast<const char*>(
         memchr(p, '[', static_cast<size_t>(file_end - p)));
     const char* section_end = bracket ? bracket : file_end;
     tps.reserve(tps.size() + static_cast<size_t>(section_end - p) / 17 + 4);
     TpShapeCache cache{};
+    const __m256i k_nl = bcast256(kByteNewline);
+    const __m256i k_comma = bcast256(kByteComma);
+    const __m256i k_bias = bcast256(kByteBias);
+    const __m256i k_thr = bcast256(kByteThreshold);
+    // Direct mode writes each point into the reserved capacity and publishes
+    // the count at the end; the portable mode falls back to push_back.
+    TP* w = tps.data() + tps.size();
+    TP* wend = tps.data() + tps.capacity();
+    TP local;
+    uint32_t malformed = 0;
     while (p < file_end) {
-        const char c = *p;
-        if (c == '\r' || c == '\n') {
-            ++p;
-            continue;
-        }
-        if (c == '[') break;
-
         const __m256i a =
             _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
         const __m256i b =
             _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + 32));
         const uint64_t nl =
-            static_cast<uint32_t>(_mm256_movemask_epi8(
-                _mm256_cmpeq_epi8(a, _mm256_set1_epi8('\n')))) |
-            static_cast<uint64_t>(static_cast<uint32_t>(_mm256_movemask_epi8(
-                _mm256_cmpeq_epi8(b, _mm256_set1_epi8('\n')))))
-                << 32;
-        const char* next_line;
-        size_t len;
-        if (nl) {
-            const auto pos = static_cast<uint32_t>(_tzcnt_u64(nl));
-            len = pos - (pos > 0 && p[pos - 1] == '\r');
-            next_line = p + pos + 1;
+            static_cast<uint32_t>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(a, k_nl))) |
+            static_cast<uint64_t>(static_cast<uint32_t>(
+                _mm256_movemask_epi8(_mm256_cmpeq_epi8(b, k_nl)))) << 32;
+        const char* nlp = nl ? p + _tzcnt_u64(nl) : find_newline32(p + 64, file_end, k_nl);
+        const char* next_line = nlp + (nlp < file_end);
+        const char* line_end = nlp - (nlp > p && nlp[-1] == '\r');
+        const auto len = static_cast<size_t>(line_end - p);
+        TP* tp;
+        if constexpr (kDirect) {
+            if (w == wend) [[unlikely]] {
+                publish_size(tps, static_cast<size_t>(w - tps.data()));
+                tps.reserve(tps.capacity() * 2 + 16);
+                w = tps.data() + tps.size();
+                wend = tps.data() + tps.capacity();
+            }
+            tp = w;
+            if constexpr (requires(TP t) { t.reserved; }) memset(tp->reserved, 0, sizeof tp->reserved);
         } else {
-            const auto* m = static_cast<const char*>(
-                memchr(p, '\n', static_cast<size_t>(file_end - p)));
-            const char* le = m ? m : file_end;
-            len = static_cast<size_t>(le - p) - (le > p && le[-1] == '\r');
-            next_line = m ? m + 1 : file_end;
+            tp = &local;
         }
-
-        if (fosu::detail::ignored_line(p, p + len)) { p = next_line; continue; }
-        typename Map::TimingPoint tp;
-        if (len <= 64 && len >= 15) [[likely]] {
-            const uint64_t line_mask =
-                len == 64 ? ~0ull : ((1ull << len) - 1);
+        if (len - 15 <= 64 - 15) [[likely]] {
+            const uint64_t line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
             const uint64_t commas =
-                (comma_mask32(a) |
-                 static_cast<uint64_t>(comma_mask32(b)) << 32) &
+                (static_cast<uint32_t>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(a, k_comma))) |
+                 static_cast<uint64_t>(static_cast<uint32_t>(
+                     _mm256_movemask_epi8(_mm256_cmpeq_epi8(b, k_comma)))) << 32) &
                 line_mask;
             const uint64_t nondig =
-                (nondigit_mask32(a) |
-                 static_cast<uint64_t>(nondigit_mask32(b)) << 32) &
+                (nondigit_mask32(a, k_bias, k_thr) |
+                 static_cast<uint64_t>(nondigit_mask32(b, k_bias, k_thr)) << 32) &
                 line_mask;
-            const TpShapeRow& row =
-                cache.rows[TpShapeCache::slot(commas)];
+            const TpShapeRow& row = cache.rows[TpShapeCache::slot(commas)];
+            bool accepted;
             if (tp_shape_match(row, commas, nondig, len, p)) {
-                tp_shape_convert(row, p, tp);
-                tps.push_back(tp);
+                tp_shape_convert(row, p, *tp);
+                accepted = true;
             } else {
                 TpGeom geom;
-                if (fast_parse_timing_point_masked(commas, nondig, p, len,
-                                                   tp, &geom)) {
-                    tp_shape_insert(cache, commas, nondig, len, geom);
-                    tps.push_back(tp);
-                } else {
-                    parse_timing_point_line(bm, p, len);
-                }
+                accepted = fast_parse_timing_point_masked(commas, nondig, p, len, *tp, &geom);
+                if (accepted) tp_shape_insert(cache, commas, nondig, len, geom);
             }
-        } else {
-            parse_timing_point_line(bm, p, len);
+            if (accepted) {
+                if constexpr (kDirect) ++w;
+                else tps.push_back(local);
+                p = next_line;
+                continue;
+            }
+        }
+        // Unusual line: blank, comment, header, old field layouts or bytes
+        // outside the editor shape.
+        const char c = *p;
+        if (c == '\r' || c == '\n') { ++p; continue; }
+        if (c == '[') break;
+        if (!ignored_line(p, line_end)) {
+            if (parse_timing_fields(p, line_end, *tp)) {
+                if constexpr (kDirect) ++w;
+                else tps.push_back(local);
+            } else {
+                ++malformed;
+            }
         }
         p = next_line;
     }
+    if constexpr (kDirect) publish_size(tps, static_cast<size_t>(w - tps.data()));
+    bm.stats.malformed_lines += malformed;
     return p;
 }
 #endif  // FOSU_SIMD_X86
 
-// Slider params: curveType|x:y|x:y...,slides,length[,edgeSounds,edgeSets][,hitSample]
-//
-// The Slider is emplaced first and filled in place (popped again if the
-// line turns out malformed): a stack temporary handed to push_back costs
-// a 64-byte zero-fill plus a 64-byte copy on every slider.
+// Storage policy for the ordinary library: records are written into the
+// Beatmap's vectors through raw cursors (direct mode) and published once per
+// section, so the per-record cost is a bounds check and a pointer bump.
+// Growth publishes, reserves and reopens the affected cursor. Slider pools
+// are sized on the first slider, so slider-free maps allocate none.
 template <typename Map>
-inline bool parse_slider_params(Map& bm, typename Map::HitObject& h, const char* p,
-                                const char* end) {
-    if (p >= end) return false;
-    auto& sliders = bm.sliders;
-    sliders.emplace_back(typename Map::Slider::uninit_t{});
-    auto& s = sliders.back();
-    s.curve_type = *p++;
-
-    // Points are written straight into the pool through a raw cursor —
-    // one bounds ensure per slider instead of a checked push per point.
-    // A point pair costs at least 4 bytes ("|x:y"), which bounds the count.
-    // SliderPoint's no-op default constructor makes both resizes free.
-    auto& pts = bm.slider_points;
-    const size_t base = pts.size();
-    pts.resize(base + static_cast<size_t>(end - p) / 4 + 1);
-    auto* w = pts.data() + base;
-    if (!parse_slider_points(p, end, w)) {
-        pts.resize(base);
-        sliders.pop_back();
-        return false;
-    }
-    pts.resize(static_cast<size_t>(w - pts.data()));
-    s.point_begin = static_cast<uint32_t>(base);
-    s.point_count = static_cast<uint32_t>(pts.size() - base);
-
-    if (p >= end || *p != ',') {
-        sliders.pop_back();
-        return false;
-    }
-    ++p;
-    const uint32_t srun = digit_run8(p);  // slides: a bare small integer
-    if (srun - 1 <= 6) {
-        s.slides = static_cast<int32_t>(swar_parse_u64(p, srun));
-        p = fosu::detail::skip_numeric_space(p + srun, end);
-    } else {
-        int64_t slides;
-        const char* next = parse_osu_int(p, end, slides);
-        if (next == p) { sliders.pop_back(); return false; }
-        s.slides = clamp_i32(slides);
-        p = next;
-    }
-    if (s.slides > 9000 || (p < end && *p != ',')) {
-        sliders.pop_back();
-        return false;
-    }
-    s.length = 0;
-    if (p < end) {
-#if FOSU_SIMD_X86
-        const char* q = parse_slider_length(p + 1, s.length);
-        if (!q) q = parse_osu_double(p + 1, end, s.length, 131072);
-#else
-        const char* q = parse_osu_double(p + 1, end, s.length, 131072);
-#endif
-        if (q != p + 1) q = skip_numeric_space(q, end);
-        if (q == p + 1 || (q < end && *q != ',') || s.length > 131072 || s.length < -131072) {
-            sliders.pop_back();
-            return false;
-        }
-        p = q;
-    }
-
-    // Optional: edgeSounds, edgeSets, hitSample, assigned positionally;
-    // absent fields are empty.
-    s.edge_sounds = {};
-    s.edge_sets = {};
-    std::string_view hit_sample{};
-    if (p < end && *p == ',') {
-        ++p;
-#if FOSU_SIMD_X86
-        const auto span = static_cast<size_t>(end - p);
-        if (span <= 32) {
-            // Both remaining comma positions from one 32-byte scan.
-            const __m256i v =
-                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
-            const auto cm =
-                static_cast<uint32_t>(_mm256_movemask_epi8(
-                    _mm256_cmpeq_epi8(v, _mm256_set1_epi8(',')))) &
-                static_cast<uint32_t>((1ull << span) - 1);
-            const uint32_t c0 = _tzcnt_u32(cm);
-            const uint32_t c1 = _tzcnt_u32(_blsr_u32(cm));
-            if (c0 >= span) {
-                s.edge_sounds = bm.view({p, span});
-            } else if (c1 >= span) {
-                s.edge_sounds = bm.view({p, c0});
-                s.edge_sets = bm.view({p + c0 + 1, span - c0 - 1});
-            } else {
-                s.edge_sounds = bm.view({p, c0});
-                s.edge_sets = bm.view({p + c0 + 1, c1 - c0 - 1});
-                hit_sample = {p + c1 + 1, span - c1 - 1};
-            }
-        } else
-#endif
-        {
-            std::string_view extra[3];
-            int n = 0;
-            while (n < 3 && p < end) {
-                const auto* c =
-                    static_cast<const char*>(memchr(p, ',', end - p));
-                const char* fend = c ? c : end;
-                extra[n++] = {p, static_cast<size_t>(fend - p)};
-                p = fend + 1;
-            }
-            s.edge_sounds = bm.view(extra[0]);
-            s.edge_sets = bm.view(extra[1]);
-            hit_sample = extra[2];
-        }
-    }
-    if (!valid_sample(hit_sample, true) ||
-        !valid_edge_sets(bm.resolve(s.edge_sets), s.slides)) {
-        sliders.pop_back();
-        return false;
-    }
-    h.hit_sample = bm.view(hit_sample);
-    h.slider = static_cast<uint32_t>(sliders.size() - 1);
-    return true;
-}
-
-// Everything after the "x,y,time,type,hitSound" prefix: slider params,
-// spinner/hold end times, trailing hitSample.
-template <typename Map>
-inline bool finish_hitobject(Map& bm, typename Map::HitObject& h, const char* p,
-                             const char* end, size_t bytes_remaining) {
-    if (!(h.type & (1 | 2 | 8 | 128))) return false;
-    if (p < end && *p != ',') return false;
-    if (!(h.type & 1) && (h.type & 2)) {  // slider
-        if (p >= end || *p != ',') return false;
-        // Size the slider pools once, when a map first proves it has
-        // sliders — reserving eagerly per map wastes multi-MB allocations
-        // on slider-free maps, which costs more than the reallocations it
-        // saves.
-        if (bm.sliders.capacity() == 0) {
-            bm.slider_points.reserve(bytes_remaining / 14);
-            bm.sliders.reserve(bytes_remaining / 48);
-        }
-        return parse_slider_params(bm, h, p + 1, end);
-    }
-    std::string_view sample;
-    if (!parse_object_tail(h, p, end, sample)) return false;
-    h.hit_sample = bm.view(sample);
-    return true;
-}
-
-// Scalar-only per-line path; the SIMD build routes [HitObjects] through
-// parse_hitobjects_section instead.
-template <typename Map>
-inline void parse_hitobject_line(Map& bm, const char* line, size_t len,
-                                 size_t bytes_remaining) {
-    bm.hit_objects.emplace_back(typename Map::HitObject::uninit_t{});
-    auto& h = bm.hit_objects.back();
-    h.end_time = 0;
-    h.slider = Map::HitObject::kNoSlider;
-
-    const int next = scalar_parse_prefix(line, len, h);
-    if (next < 0) {
-        bm.hit_objects.pop_back();
-        ++bm.stats.malformed_lines;
-        return;
-    }
-    ++bm.stats.slow_path_lines;
-
-    if (!finish_hitobject(bm, h, line + next, line + len, bytes_remaining)) {
-        bm.hit_objects.pop_back();
-        ++bm.stats.malformed_lines;
-    }
-}
-
-#if FOSU_SIMD_X86
-template <typename Map>
-struct MaterializedHits {
+struct VectorSink {
     using HitObject = typename Map::HitObject;
+    using Slider = typename Map::Slider;
+    using Point = typename Map::SliderPoint;
+    static constexpr bool kDirect = direct_vector_writes_v<decltype(Map::hit_objects)>;
     Map& bm;
+    HitObject* hw = nullptr;
+    HitObject* hend = nullptr;
+    Slider* sw = nullptr;
+    Slider* send = nullptr;
+    Point* pw = nullptr;
+    Point* pend = nullptr;
+    size_t remaining;  // section bytes: sizes the slider pools on first use
+
+    VectorSink(Map& m, size_t section_bytes) : bm(m), remaining(section_bytes) {
+        open_objects(); open_sliders(); open_points();
+    }
+    void open_objects() {
+        hw = bm.hit_objects.data() + bm.hit_objects.size();
+        hend = bm.hit_objects.data() + bm.hit_objects.capacity();
+    }
+    void open_sliders() {
+        sw = bm.sliders.data() + bm.sliders.size();
+        send = bm.sliders.data() + bm.sliders.capacity();
+    }
+    void open_points() {
+        pw = bm.slider_points.data() + bm.slider_points.size();
+        pend = bm.slider_points.data() + bm.slider_points.capacity();
+    }
+    // Makes every record written so far visible through the vectors.
+    void publish() {
+        if constexpr (kDirect) {
+            if (hw) publish_size(bm.hit_objects, static_cast<size_t>(hw - bm.hit_objects.data()));
+            if (sw) publish_size(bm.sliders, static_cast<size_t>(sw - bm.sliders.data()));
+            if (pw) publish_size(bm.slider_points, static_cast<size_t>(pw - bm.slider_points.data()));
+        } else {
+            bm.slider_points.resize(static_cast<size_t>(pw - bm.slider_points.data()));
+        }
+    }
+    __attribute__((noinline)) void grow_objects() {
+        publish();
+        bm.hit_objects.reserve(bm.hit_objects.capacity() * 2 + 64);
+        open_objects();
+    }
+    __attribute__((noinline)) void grow_sliders() {
+        publish();
+        const size_t cap = bm.sliders.capacity();
+        bm.sliders.reserve(cap ? cap * 2 + 16 : remaining / 48 + 16);
+        open_sliders();
+    }
+    __attribute__((noinline)) void grow_points(size_t bound) {
+        publish();
+        const size_t cap = bm.slider_points.capacity();
+        size_t want = cap ? cap * 2 : remaining / 14;
+        if (want < bm.slider_points.size() + bound) want = bm.slider_points.size() + bound + 64;
+        bm.slider_points.reserve(want);
+        open_points();
+    }
+
     HitObject& begin(size_t) {
-        bm.hit_objects.emplace_back(typename HitObject::uninit_t{});
-        return bm.hit_objects.back();
+        if constexpr (kDirect) {
+            if (hw == hend) [[unlikely]] grow_objects();
+        } else {
+            bm.hit_objects.emplace_back(typename HitObject::uninit_t{});
+            hw = &bm.hit_objects.back();
+        }
+        if constexpr (requires(HitObject o) { o.reserved; }) hw->reserved = 0;
+        return *hw;
     }
-    bool finish(HitObject& h, const char* p, const char* end, size_t remaining) {
-        return finish_hitobject(bm, h, p, end, remaining);
+    void commit(HitObject&) {
+        if constexpr (kDirect) ++hw;
     }
-    void commit(HitObject&) {}
-    void rollback(HitObject&) { bm.hit_objects.pop_back(); }
-    auto& stats() { return bm.stats; }
+    void rollback(HitObject&) {
+        if constexpr (!kDirect) bm.hit_objects.pop_back();
+    }
+    void sample(HitObject& h, const char* s, size_t n) { h.hit_sample = bm.view({s, n}); }
+    auto view(const char* s, size_t n) { return bm.view({s, n}); }
+    Point* point_slot(size_t bound) {
+        if constexpr (kDirect) {
+            if (static_cast<size_t>(pend - pw) < bound) [[unlikely]] grow_points(bound);
+        } else {
+            const size_t base = static_cast<size_t>(pw - bm.slider_points.data());
+            if (bm.slider_points.capacity() == 0) bm.slider_points.reserve(remaining / 14);
+            bm.slider_points.resize(base + bound);
+            pw = bm.slider_points.data() + base;
+            pend = pw + bound;
+        }
+        return pw;
+    }
+    uint32_t point_index(Point* w) const {
+        return static_cast<uint32_t>(w - bm.slider_points.data());
+    }
+    void slider_rollback(Point*, Point* w_end, bool keep_points) {
+        if (keep_points) pw = w_end;
+        if constexpr (!kDirect)
+            bm.slider_points.resize(static_cast<size_t>(pw - bm.slider_points.data()));
+    }
+    using SliderRecord = Slider;
+    Slider& slider_slot() {
+        if constexpr (kDirect) {
+            if (sw == send) [[unlikely]] grow_sliders();
+        } else {
+            bm.sliders.emplace_back(typename Slider::uninit_t{});
+            sw = &bm.sliders.back();
+        }
+        if constexpr (requires(Slider o) { o.reserved; }) memset(sw->reserved, 0, sizeof sw->reserved);
+        return *sw;
+    }
+    void slider_commit(HitObject& h, Slider&, Point* w_end, const char* hs, size_t hs_len) {
+        if constexpr (!kDirect)
+            bm.slider_points.resize(static_cast<size_t>(w_end - bm.slider_points.data()));
+        h.hit_sample = bm.view({hs, hs_len});
+        h.slider = static_cast<uint32_t>(sw - bm.sliders.data());
+        if constexpr (kDirect) ++sw;
+        pw = w_end;
+    }
+    ParseStats& stats() { return bm.stats; }
 };
+
+// Parses one [HitObjects] section starting at `p` (after its header line).
 template <typename Map>
-inline const char* parse_hitobjects_section(Map& bm, const char* p, const char* file_end) {
-    MaterializedHits<Map> sink{bm};
-    return parse_hitobject_lines(sink, p, file_end);
+inline const char* parse_hitobjects_section(Map& bm, const char* p, const char* file_end,
+                                            bool use_simd) {
+    VectorSink<Map> sink(bm, static_cast<size_t>(file_end - p));
+    const HitConsts k;
+#if FOSU_SIMD_X86
+    if (use_simd) p = parse_hitobject_lines(sink, p, file_end, k);
+    else
+#else
+    (void)use_simd;
+#endif
+        p = parse_hitobject_lines_scalar(sink, p, file_end, k);
+    sink.publish();
+    return p;
 }
 
+#if FOSU_SIMD_X86
 // Fused [Events] section loop. Storyboard command lines — indented, and
 // ~12% of all lines in the popular corpus — are counted and skipped on
 // their first byte; every line finds its end with vector compares (two
@@ -594,15 +601,11 @@ inline void parse_into(const char* data, size_t size, Map& bm,
                 // while under-reserving costs a full-array growth memmove.
                 bm.hit_objects.reserve(
                     bm.hit_objects.size() +
-                    static_cast<size_t>(file_end - line_end) / 16);
-#if FOSU_SIMD_X86
-                if (opts.use_simd) {
-                    p = parse_hitobjects_section(bm, nl ? nl + 1 : file_end,
-                                                 file_end);
-                    sec = Section::Unknown;
-                    continue;
-                }
-#endif
+                    static_cast<size_t>(file_end - line_end) / 16 + 1);
+                p = parse_hitobjects_section(bm, nl ? nl + 1 : file_end, file_end,
+                                             opts.use_simd);
+                sec = Section::Unknown;
+                continue;
             } else if (sec == Section::TimingPoints) {
 #if FOSU_SIMD_X86
                 if (opts.use_simd) {
@@ -660,10 +663,7 @@ inline void parse_into(const char* data, size_t size, Map& bm,
             case Section::TimingPoints:
                 parse_timing_point_line(bm, p, len);
                 break;
-            case Section::HitObjects:
-                parse_hitobject_line(bm, p, len,
-                                     static_cast<size_t>(file_end - p));
-                break;
+            case Section::HitObjects:  // consumed by parse_hitobjects_section
             case Section::Unknown:
                 break;
         }
