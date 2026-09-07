@@ -34,8 +34,11 @@ int main() {
     assert(points.sliders.size() == 1 && points.slider_points.size() == 2);
     assert(points.slider_points[0].y == 2 && points.slider_points[1].y == 40);
     check("[TimingPoints]\n\r\r// comment\n0,500\n[HitObjects]\n\r\r// comment\n1,2,3,1,0");
+    check("[Events]\n\n \n\t// comment\n");
+    check("[HitObjects]\n0,2,3,3,0\r,");
+    check("[HitObjects]\n1,2,3,2,0,B|1:2\v|3:4,1,10");
     for (const std::string decimal : {"111.99999999999987", "999.9999999999999",
-                                     "99999999.9999999999999"}) {
+                                     "99999.9999999999999"}) {
         const std::string text = "[TimingPoints]\n0,100.0000000000000,4,2,1,100,1,0\n1," +
             decimal + ",4,2,1,100,1,0\n[HitObjects]\n1,2,3,2,0,B|1:2,1," + decimal;
         check(text);
@@ -54,8 +57,8 @@ int main() {
             "1,2,4000,2,0,B|1.5:2.5,1,2.5e2\n"
             "[Events]\n2,1e309,100\n2,1.25,9.75\n");
         auto m = fosu::parse(input, {.use_simd = simd});
-        assert(m.title == "real" && m.beatmap_id == INT64_MIN);
-        assert(m.ar == 5 && m.stats.malformed_lines == 3);
+        assert(m.title == "real" && m.beatmap_id == -1);
+        assert(m.ar == 5 && m.stats.malformed_lines == 4);
         assert(m.timing_points.size() == 2 && std::isnan(m.timing_points[1].beat_length));
         assert(!m.timing_points[1].uninherited);
         assert(m.hit_objects.size() == 3 && m.hit_objects[0].x == 256);

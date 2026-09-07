@@ -23,8 +23,8 @@ const std::string map =
     "[Colours]\nCombo1 : 12,34,56\n"
     "[TimingPoints]\n1.25,342.857142857142857142857,4,2,1,60,1,0\n"
     "[HitObjects]\n-48,192,1000,1,0,0:0:0:0:\n"
-    "512,192,2000,2,14,B|-259088:1726|123:456,2,240,2|0,0:0|0:0,0:0:0:0:\n"
-    "256,192,4294967290,12,0,4294967290,0:0:0:0:\n";
+    "512,192,2000,2,14,B|-129088:1726|123:456,2,240,2|0,0:0|0:0,0:0:0:0:\n"
+    "256,192,2147483647,12,0,2147483647,0:0:0:0:\n";
 
 void check(fosu_handle* h, const std::string& input, uint32_t sections = FOSU_ALL) {
     assert(fosu_parse(h, input.data(), input.size(), sections) == FOSU_OK);

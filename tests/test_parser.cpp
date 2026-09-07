@@ -220,11 +220,11 @@ static void test_long_timing_offsets() {
             "osu file format v14\n"
             "[TimingPoints]\n"
             "123456789,300.5,4,2,1,60,1,0\n"
-            "4123456789,-50,4,2,1,60,0,0\n",
+            "2123456789,-50,4,2,1,60,0,0\n",
             simd);
         CHECK_EQ(bm.timing_points.size(), 2u);
         CHECK(bm.timing_points[0].time == 123456789.0);
-        CHECK(bm.timing_points[1].time == 4123456789.0);
+        CHECK(bm.timing_points[1].time == 2123456789.0);
         CHECK_EQ(bm.timing_points[0].volume, 60);
         CHECK_EQ(bm.stats.malformed_lines, 0u);
     }
@@ -255,18 +255,17 @@ static void test_aspire_edge_cases() {
         "256.5,112.2,4000,1,0\n"                   // decimal coords
         "0,0,4294967290,1,0\n"                     // time > INT32_MAX
         "100,100,5000,2,0,B|-64:-32|700:512,1,600\n");  // negative ctrl points
-    CHECK_EQ(bm.hit_objects.size(), 7u);
+    CHECK_EQ(bm.hit_objects.size(), 6u);
     CHECK_EQ(bm.hit_objects[0].x, -48);
     CHECK_EQ(bm.hit_objects[1].y, -24);
     CHECK_EQ(bm.hit_objects[2].time, -1000);
     CHECK_EQ(bm.hit_objects[3].x, 5120);
     CHECK_EQ(bm.hit_objects[4].x, 256);   // truncated
     CHECK_EQ(bm.hit_objects[4].y, 112);
-    CHECK_EQ(bm.hit_objects[5].time, INT32_MAX);  // saturated
-    const auto& s = bm.sliders[bm.hit_objects[6].slider];
+    const auto& s = bm.sliders[bm.hit_objects[5].slider];
     CHECK_EQ(bm.slider_points[s.point_begin].x, -64);
     CHECK_EQ(bm.slider_points[s.point_begin].y, -32);
-    CHECK_EQ(bm.stats.malformed_lines, 0u);
+    CHECK_EQ(bm.stats.malformed_lines, 1u);
 #if FOSU_SIMD_X86
     CHECK_EQ(bm.stats.fast_path_lines, 1u);  // only the slider line is regular
 #endif
@@ -372,7 +371,8 @@ static void test_fuzz_parse_coord() {
         const char* gp = fosu::detail::parse_coord(buf, buf + payload, got);
         int64_t v;
         const char* wp = fosu::detail::parse_i64(buf, buf + payload, v);
-        if (wp != buf) want = fosu::detail::clamp_i32(v);
+        if (wp != buf && (v < -131072 || v > 131072)) wp = buf;
+        if (wp != buf) want = static_cast<int32_t>(v);
         CHECK_EQ(gp - buf, wp - buf);
         CHECK_EQ(got, want);
         if (g_failures) {

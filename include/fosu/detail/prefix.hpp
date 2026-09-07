@@ -46,22 +46,26 @@ template <typename H>
 inline int scalar_parse_prefix(const char* line, size_t len, H& h) {
     const char* p = line;
     const char* end = line + len;
-    double values[3];
-    for (int i = 0; i < 3; ++i) {
-        const char* q = parse_double(p, end, values[i]);
+    float coord[2];
+    for (int i = 0; i < 2; ++i) {
+        const char* q = parse_osu_float(p, end, coord[i], 131072);
         if (q == p || q >= end || *q != ',') return -1;
         p = q + 1;
     }
-    int64_t type, sound;
-    const char* q = parse_i64(p, end, type);
+    double time;
+    const char* q = parse_osu_double(p, end, time);
     if (q == p || q >= end || *q != ',') return -1;
     p = q + 1;
-    q = parse_i64(p, end, sound);
+    int64_t type, sound;
+    q = parse_osu_int(p, end, type);
+    if (q == p || q >= end || *q != ',') return -1;
+    p = q + 1;
+    q = parse_osu_int(p, end, sound);
     if (q == p || (q < end && *q != ',')) return -1;
     p = q;
-    h.x = clamp_coord(values[0]);
-    h.y = clamp_coord(values[1]);
-    h.time = clamp_time(values[2]);
+    h.x = static_cast<int32_t>(coord[0]);
+    h.y = static_cast<int32_t>(coord[1]);
+    h.time = time;
     h.type = static_cast<uint32_t>(type);
     h.hitsound = static_cast<uint32_t>(sound);
     return static_cast<int>(p - line);
@@ -246,6 +250,7 @@ inline int fast_parse_prefix(__m256i ascii, const char* line, H& h) {
     const char after = line[next];
     if (!(after == ',' || after == '\r' || after == '\n' || after == '\0'))
         return -1;
+    if (after == '\r' && line[next + 1] != '\n' && line[next + 1] != '\0') return -1;
     h.hitsound = hs;
     return static_cast<int>(next);
 }

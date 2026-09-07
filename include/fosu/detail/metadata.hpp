@@ -15,7 +15,7 @@ inline constexpr uint32_t key4(char a, char b, char c, char d) {
 
 static_assert(std::is_standard_layout_v<BeatmapHeader>);
 
-enum class KT : uint8_t { Str, I32, F64, Bool, I64 };
+enum class KT : uint8_t { Str, I32, F32, F64, Bool, I64, Mode, Countdown, RawBool, SampleSet };
 struct KvEntry {
     const char* name;
     uint32_t key;      // first four bytes of the key
@@ -30,16 +30,16 @@ constexpr KvEntry kGeneral[] = {
     KV("AudioLeadIn", I32, audio_lead_in),
     KV("PreviewTime", I32, preview_time),
     KV("CountdownOffset", I32, countdown_offset),
-    KV("Countdown", I32, countdown),
-    KV("SampleSet", Str, sample_set),
+    KV("Countdown", Countdown, countdown),
+    KV("SampleSet", SampleSet, sample_set),
     KV("SamplesMatchPlaybackRate", Bool, samples_match_playback_rate),
-    KV("StackLeniency", F64, stack_leniency),
-    KV("Mode", I32, mode),
+    KV("StackLeniency", F32, stack_leniency),
+    KV("Mode", Mode, mode),
     KV("LetterboxInBreaks", Bool, letterbox_in_breaks),
     KV("WidescreenStoryboard", Bool, widescreen_storyboard),
     KV("EpilepsyWarning", Bool, epilepsy_warning),
     KV("SpecialStyle", Bool, special_style),
-    KV("UseSkinSprites", Bool, use_skin_sprites),
+    KV("UseSkinSprites", RawBool, use_skin_sprites),
     KV("OverlayPosition", Str, overlay_position),
     KV("SkinPreference", Str, skin_preference),
 };
@@ -63,15 +63,41 @@ constexpr KvEntry kMetadata[] = {
     KV("BeatmapID", I64, beatmap_id),
 };
 constexpr KvEntry kDifficulty[] = {
-    KV("HPDrainRate", F64, hp),
-    KV("CircleSize", F64, cs),
-    KV("OverallDifficulty", F64, od),
-    KV("ApproachRate", F64, ar),
+    KV("HPDrainRate", F32, hp),
+    KV("CircleSize", F32, cs),
+    KV("OverallDifficulty", F32, od),
+    KV("ApproachRate", F32, ar),
     KV("SliderMultiplier", F64, slider_multiplier),
     KV("SliderTickRate", F64, slider_tick_rate),
 };
 #undef KV
 
+
+// Enum.Parse accepts named constants (including comma-separated combinations)
+// and the full underlying int32 range, unlike Parsing.ParseInt's symmetric bound.
+inline bool parse_legacy_enum(std::string_view value, const std::string_view (&names)[4], int32_t& out) {
+    const char* p = skip_numeric_space(value.data(), value.data() + value.size());
+    const char* end = value.data() + value.size();
+    while (end > p && skip_numeric_space(end - 1, end) == end) --end;
+    int64_t number;
+    const char* q = parse_i64(p, end, number);
+    if (q != p && q == end && number >= INT32_MIN && number <= INT32_MAX) {
+        out = static_cast<int32_t>(number);
+        return true;
+    }
+    out = 0;
+    do {
+        const auto* comma = static_cast<const char*>(memchr(p, ',', end - p));
+        const char* part_end = comma ? comma : end;
+        while (part_end > p && skip_numeric_space(part_end - 1, part_end) == part_end) --part_end;
+        bool found = false;
+        for (int i = 0; i < 4; ++i) if (std::string_view(p, part_end - p) == names[i]) { out |= i; found = true; }
+        if (!found) return false;
+        if (!comma) return true;
+        p = skip_numeric_space(comma + 1, end);
+    } while (p < end);
+    return false;
+}
 
 // Returns true exactly when an ApproachRate line was consumed.
 // Floating fallback is selected at compile time by the caller.
@@ -99,24 +125,50 @@ inline bool parse_kv_line(BeatmapHeader& bm, const KvEntry (&table)[N],
         char* f = reinterpret_cast<char*>(&bm) + e.off;
         switch (e.type) {
             case KT::Str: *reinterpret_cast<std::string_view*>(f) = v; break;
-            case KT::I32: {
-                int64_t value;
-                const char* q = parse_i64(v.data(), v.data() + v.size(), value);
-                if (!complete(q)) return invalid();
-                *reinterpret_cast<int32_t*>(f) = clamp_i32(value);
+            case KT::Countdown:
+            case KT::SampleSet: {
+                constexpr std::string_view countdown[] = {"None", "Normal", "HalfSpeed", "DoubleSpeed"};
+                constexpr std::string_view samples[] = {"None", "Normal", "Soft", "Drum"};
+                int32_t value;
+                if (!parse_legacy_enum(v, e.type == KT::Countdown ? countdown : samples, value)) return invalid();
+                if (e.type == KT::Countdown) *reinterpret_cast<int32_t*>(f) = value;
+                else *reinterpret_cast<std::string_view*>(f) = v;
                 break;
             }
+            case KT::I32:
+            case KT::Mode: {
+                int64_t value;
+                const char* q = parse_osu_int(v.data(), v.data() + v.size(), value);
+                if (!complete(q) || (e.type == KT::Mode && (value < 0 || value > 3))) return invalid();
+                *reinterpret_cast<int32_t*>(f) = static_cast<int32_t>(value);
+                break;
+            }
+            case KT::F32:
             case KT::F64: {
                 double value;
                 const char* q = ParseDouble(v.data(), v.data() + v.size(), value);
                 if (!complete(q)) return invalid();
+                if (e.type == KT::F32) {
+                    // Preserve the raw double, but test the official float domain.
+                    // Only large boundary values need a second conversion.
+                    if (value < -2147483520.0 || value > 2147483520.0) {
+                        float checked;
+                        if (!complete(parse_osu_float(v.data(), v.data() + v.size(), checked))) return invalid();
+                    }
+                } else if (value < -INT32_MAX || value > INT32_MAX) return invalid();
                 *reinterpret_cast<double*>(f) = value;
                 break;
             }
-            case KT::Bool: *reinterpret_cast<bool*>(f) = !v.empty() && v[0] == '1'; break;
+            case KT::Bool: {
+                int64_t value;
+                if (!complete(parse_osu_int(v.data(), v.data() + v.size(), value))) return invalid();
+                *reinterpret_cast<bool*>(f) = value == 1;
+                break;
+            }
+            case KT::RawBool: *reinterpret_cast<bool*>(f) = !v.empty() && v[0] == '1'; break;
             case KT::I64: {
                 int64_t id;
-                if (!complete(parse_i64(v.data(), v.data() + v.size(), id))) return invalid();
+                if (!complete(parse_osu_int(v.data(), v.data() + v.size(), id))) return invalid();
                 *reinterpret_cast<int64_t*>(f) = id;
                 break;
             }

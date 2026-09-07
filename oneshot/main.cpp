@@ -19,6 +19,7 @@
 #define FASTFLOAT_ASSERT(x) ((void)0)
 #define FASTFLOAT_DEBUG_ASSERT(x) ((void)0)
 #include <fosu/detail/prefix.hpp>
+#include <fosu/detail/object_tail.hpp>
 #include <fosu/detail/timing.hpp>
 #include <fosu/detail/slider.hpp>
 #include <fosu/detail/metadata.hpp>
@@ -82,7 +83,6 @@ using fosu::detail::kPow10;
 using fosu::detail::kPow10u;
 
 using fosu::detail::parse_double;
-using fosu::detail::clamp_time;
 
 // Both output representations use the library's prefix kernel. Numeric fields
 // have the library layout; the final word is the sample length.
@@ -230,12 +230,12 @@ void parse_event_line(const char* p, size_t len) {
         S.video = strip_quotes(trim(fname, c3 ? c3 : end));
     } else if (sv_eq(f0, "2") || sv_eq(f0, "Break")) {
         double start, stop;
-        const char* q = parse_double(rest, end, start);
+        const char* q = fosu::detail::parse_osu_double(rest, end, start);
         if (q == rest || q >= end || *q != ',') { ++S.malformed_lines; return; }
-        const char* r = parse_double(q + 1, end, stop);
+        const char* r = fosu::detail::parse_osu_double(q + 1, end, stop);
         if (r == q + 1 || r != end) { ++S.malformed_lines; return; }
         if (g->n_breaks == kBreaksInline + (1u << 15)) rt::exit(6);
-        break_at(g->n_breaks++) = {clamp_time(start), clamp_time(stop)};
+        break_at(g->n_breaks++) = {start, stop};
     } else {
         ++S.storyboard_lines;
     }
@@ -350,7 +350,7 @@ const char* parse_timing_points_section(const char* p, const char* file_end) {
             len = static_cast<size_t>(le - p) - (le > p && le[-1] == '\r');
             next_line = m ? m + 1 : file_end;
         }
-        if (len >= 2 && c == '/' && p[1] == '/') { p = next_line; continue; }
+        if (fosu::detail::ignored_line(p, p + len)) { p = next_line; continue; }
         if (len <= 64 && len >= 15) [[likely]] {
             const u64 line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
             const u64 commas = (comma_mask32(a) | static_cast<u64>(comma_mask32(b)) << 32) & line_mask;
@@ -424,20 +424,23 @@ bool parse_slider_params(const char* p, const char* end, sv& hs) {
     i32 slides;
     if (srun - 1 <= 6) {
         slides = static_cast<i32>(swar_parse_u64(p, srun));
-        p += srun;
+        p = fosu::detail::skip_numeric_space(p + srun, end);
     } else {
         i64 value;
-        const char* next = parse_i64(p, end, value);
+        const char* next = fosu::detail::parse_osu_int(p, end, value);
         if (next == p) { keep_orphans(w0, npts); return false; }
         slides = clamp_i32(value);
         p = next;
     }
-    if (p >= end || *p != ',') { keep_orphans(w0, npts); return false; }
-    double length;
-    const char* q = parse_slider_length(p + 1, length);
-    if (!q) q = parse_double(p + 1, end, length);
-    if (q == p + 1 || (q < end && *q != ',')) { keep_orphans(w0, npts); return false; }
-    p = q;
+    if (slides > 9000 || (p < end && *p != ',')) { keep_orphans(w0, npts); return false; }
+    double length = 0;
+    if (p < end) {
+        const char* q = parse_slider_length(p + 1, length);
+        if (!q) q = fosu::detail::parse_osu_double(p + 1, end, length, 131072);
+        if (q != p + 1) q = fosu::detail::skip_numeric_space(q, end);
+        if (q == p + 1 || (q < end && *q != ',') || length > 131072 || length < -131072) { keep_orphans(w0, npts); return false; }
+        p = q;
+    }
     sv edge_sounds{}, edge_sets{};
     hs = {};
     if (p < end && *p == ',') {
@@ -471,6 +474,11 @@ bool parse_slider_params(const char* p, const char* end, sv& hs) {
             edge_sounds = extra[0]; edge_sets = extra[1]; hs = extra[2];
         }
     }
+    if (!fosu::detail::valid_sample({hs.p, hs.n}, true) ||
+        !fosu::detail::valid_edge_sets({edge_sets.p, edge_sets.n}, slides)) {
+        keep_orphans(w0, npts);
+        return false;
+    }
     put_i32(slides);
     put_f64(length);
     put_u8(static_cast<u8>(curve_type));
@@ -482,8 +490,9 @@ bool parse_slider_params(const char* p, const char* end, sv& hs) {
 // Everything after the prefix; appends the slider block (if any) and the
 // hit_sample bytes, sets h.slider / h.hs_len / h.end_time as the library.
 bool finish_hitobject(HO& h, const char* p, const char* end) {
+    if (!(h.type & (1 | 2 | 8 | 128))) return false;
     if (p < end && *p != ',') return false;
-    if (h.type & 2) {
+    if (!(h.type & 1) && (h.type & 2)) {
         if (p >= end || *p != ',') return false;
         sv hs;
         if (!parse_slider_params(p + 1, end, hs)) return false;
@@ -493,27 +502,11 @@ bool finish_hitobject(HO& h, const char* p, const char* end) {
         g_out += hs.n;
         return true;
     }
-    sv hs{};
-    if (h.type & 8 || h.type & 128) {
-        if (p >= end || *p != ',') return false;
-        double t;
-        const char* q = parse_double(p + 1, end, t);
-        if (q == p + 1 || (q < end && *q != ',' && *q != ':')) return false;
-        h.end_time = clamp_time(t);
-        p = q;
-        if ((h.type & 128) && p < end && *p == ':') ++p;
-        else if (p < end && *p == ',') ++p;
-        else {
-            h.hs_len = 0;
-            return true;
-        }
-        hs = {p, static_cast<size_t>(end - p)};
-    } else if (p < end && *p == ',') {
-        hs = {p + 1, static_cast<size_t>(end - (p + 1))};
-    }
-    h.hs_len = static_cast<u32>(hs.n);
-    memcpy(g_out, hs.p, hs.n);
-    g_out += hs.n;
+    std::string_view sample;
+    if (!fosu::detail::parse_object_tail(h, p, end, sample)) return false;
+    h.hs_len = static_cast<u32>(sample.size());
+    memcpy(g_out, sample.data(), sample.size());
+    g_out += sample.size();
     return true;
 }
 
@@ -560,6 +553,7 @@ const char* parse_events_section(const char* p, const char* file_end) {
         }
         if (line_end[-1] == '\r') --line_end;
         p = next_line;
+        if (fosu::detail::ignored_line(line, line_end)) continue;
         if (c == ' ' || c == '_') { ++storyboard_lines; continue; }
         const auto len = static_cast<size_t>(line_end - line);
         if (len >= 2 && c == '/' && line[1] == '/') continue;
@@ -614,7 +608,7 @@ void parse(const char* data, size_t size) {
             }
             goto next_line;
         }
-        if (len >= 2 && p[0] == '/' && p[1] == '/') goto next_line;
+        if (fosu::detail::ignored_line(p, line_end)) goto next_line;
         switch (sec) {
             case Section::None: {
                 if (const char* vp = find_version_tag(p, len)) {

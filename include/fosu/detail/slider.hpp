@@ -10,14 +10,14 @@ namespace fosu::detail {
 inline const char* parse_coord(const char* p, const char* end, int32_t& out) {
     const uint32_t run = digit_run8(p);
     if (run - 1 <= 3 && run <= static_cast<size_t>(end - p) &&
-        p[run] != '.' && p[run] != 'e' && p[run] != 'E') {
+        (p[run] == ':' || p[run] == '|' || p[run] == ',')) {
         out = static_cast<int32_t>(swar_parse_u32(p, run));
         return p + run;
     }
-    double v;
-    const char* q = parse_double(p, end, v);
+    float v;
+    const char* q = parse_osu_float(p, end, v, 131072);
     if (q == p) return p;
-    out = clamp_coord(v);
+    out = static_cast<int32_t>(v);
     return q;
 }
 
@@ -76,7 +76,7 @@ inline bool parse_slider_points(const char*& p, const char* end, Point*& w) {
         const uint32_t yl = _tzcnt_u32(nd >> (xl + 1));
         if ((xl - 1) > 3 || (yl - 1) > 3 || !((colon >> xl) & 1)) break;
         const char after_y = p[2 + xl + yl];
-        if (after_y == '.' || (after_y | 32) == 'e') break;
+        if (after_y != '|' && after_y != ',') break;
         w->x = static_cast<int32_t>(swar_parse_u32(p + 1, xl));
         w->y = static_cast<int32_t>(swar_parse_u32(p + 2 + xl, yl));
         ++w;

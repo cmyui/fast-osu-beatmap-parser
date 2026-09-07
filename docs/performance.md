@@ -42,42 +42,20 @@ microseconds; parentheses contain means of all runs.
 
 | Workload | Previous release | Current |
 |---|---:|---:|
-| Complete one-shot process, three repetitions | 159.81 (176.50) | 163.04 (180.46) |
-| C++ fresh result, five repetitions | 20.116 (22.892) | 19.989 (22.706) |
-| C++ reused result, five repetitions | 18.825 (20.787) | 18.756 (20.634) |
-| C API fresh result, five repetitions | 20.961 (23.681) | 21.174 (24.124) |
-| C API reused result, five repetitions | 19.951 (21.935) | 19.930 (22.070) |
+| C++ fresh result, five repetitions | 19.634 (22.011) | 22.519 (25.639) |
+| C++ reused result, five repetitions | 18.704 (20.354) | 21.112 (23.441) |
 
-Native parsing is effectively unchanged at this resolution. Complete process
-time is about 2% higher while delivering wider timestamp records and corrected
-numeric values. Process p50/p99 of file minima are 149.55/284.00 µs before and
-152.35/292.94 µs after; minor faults rise from 5.4 to 6.5. These binaries emit
-different stream versions (FOSUDMP4/FOSUDMP5), so this measures the cost of the
-compatibility changes rather than identical-output implementations. The host's
-64/128/256 KiB transparent-huge-page sizes are configured for `madvise`.
+Official numeric and sample-field validation adds about 2.9 µs (15%) to fresh
+parsing and 2.4 µs (13%) to reused parsing in this comparison. Common sample
+spellings use parallel integer digit checks; unusual fields use the complete
+bounded conversion. Both paths enforce the same acceptance policy. These
+results compare different parsing behavior, not identical-output implementations.
 
-### Python calls
+The current table covers C++ calls. Earlier process, C API and Python results
+below predate this validation policy and do not establish its performance at
+those boundaries.
 
-CPython 3.11.15, locally built GCC 13.3 wheels with the private runtime bundled,
-all 10,000 files, five repetitions per file, fresh results including destruction.
-Imports and input acquisition are outside the timed bytes call; file data is
-resident. This comparison measures the owned Python API, without converting
-records into another library's object hierarchy.
-
-| Python boundary | Previous release, µs | Current, µs |
-|---|---:|---:|
-| `fosu.parse(bytes)` plus object count | 23.261 (26.328) | 23.548 (26.759) |
-| `fosu.parse_file(path)` plus object count | 30.321 (33.550) | 30.663 (34.032) |
-
-The compatibility changes add about 0.3 µs to the mean of file minima in this
-run. These are warmed application calls, not fresh Python process times.
-
-A separate 1,000-file evenly spaced subset uses three fresh interpreters per
-file, rotating packages. Previous/current first `parse_file` calls take
-149.26/157.61 µs at the mean of file minima (161.23/170.51 µs across all runs).
-Import takes 5.098/5.104 ms; the complete Python launch/import/parse/release/exit
-interval is 15.294/15.313 ms (15.707/15.756 ms across all runs). Loading and
-first-touch costs dominate this interval; it is distinct from warmed calls.
+### Python measurement procedure
 
 To reproduce the paired Python comparisons, build each revision into its own
 wheel directory with `FOSU_BUNDLE_RUNTIME=1`, extract into separate package
@@ -94,26 +72,36 @@ taskset -c 3 python bench/python_first_compare.py /path/to/corpus \
 
 - Exact canonical output matches between the hosted and one-shot writers on
   all 10,000 files. The reference SHA-256 is
-  `a4861554d5647abdefc6a973afd106023264bc30a50fa94268b2f3ede8f97b42`.
+  `334598db4c426ce5e99ba49cb9c4e3c038f88cb5424586ecd718207ec482edad`.
 - Both Python file and bytes entry points match every public field on all
   10,000 files, including floating-point bits, raw strings, pool indices and
   counters. The tested extensions bundle private C++ runtimes; dependency
   inspection confirms no dynamic `libstdc++` or `libgcc_s` dependency.
 - Scalar/SIMD record comparisons and the independent numeric-conversion
-  reference pass on that set and on a broader 23,615-file cache: 792,845,936
-  bytes and 14,994,226 hitobjects. The cache is not independently labeled as an
+  reference pass on that set and on a broader 23,618-file cache: 792,921,673
+  bytes and 14,995,892 hitobjects. The cache is not independently labeled as an
   Aspire/unranked evaluation set. Its host-local manifest SHA-256 is
-  `d6adfc43cec71502d576c86c8093fe7afd1d48f97f957d4b6dd34b2d73928aff`.
+  `e1acf6c79fe9c68cb5fe35ba21aa444fa289cd74d7e85ae564b3e56dc0390181`.
+- The actual official legacy decoder at pinned revision `48c4800e` agrees on
+  completion, rejected-line counts and retained object counts for all 10,000
+  maps (six rejected lines) and the 23,618-file cache (70 rejected lines).
+  The 1,395 synthetic fixtures also match in scalar and SIMD configurations.
+  This checks acceptance, not complete gameplay-value equivalence. See the
+  [official reference harness](compatibility.md#sources-of-truth).
 - Native, C ABI, Python, I/O-failure, allocation-failure and one-shot boundary
   checks pass. Clang ASan/UBSan/float-cast-overflow checks and a 61-second,
-  553,823-run mutation fuzz smoke test pass. Fuzz duration is a measured test
+  473,537-run mutation fuzz smoke test pass. Fuzz duration is a measured test
   budget, not a proof that all malformed inputs are safe.
 
 After widening the previous stream's integer timestamp representation, exactly
-28 maps differ from the previous release: 453 slider lengths across 25 maps
+32 maps differ from the previous release: 453 slider lengths across 25 maps
 are corrected by one ULP, and seven inherited NaN timing points across three
 maps are preserved instead of skipped. The latter also removes seven malformed
-counts. Every other field matches. The independent numeric reference and
+counts. Four additional maps change under the official acceptance policy:
+three out-of-range timing points and three invalid sliders are rejected, and
+whitespace-only lines no longer count as malformed timing points or storyboard
+lines. Slider removal also changes the associated pools and indices. The
+independent numeric reference and
 [official decoding rules](compatibility.md#sources-of-truth) support those
 corrections; previous-release equality is not the definition of correctness.
 

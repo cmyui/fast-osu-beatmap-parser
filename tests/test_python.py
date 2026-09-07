@@ -19,8 +19,8 @@ MAP = (
     "[Colours]\nCombo1 : 12,34,56\n"
     "[TimingPoints]\n1.25,342.857142857142857142857,4,2,1,60,1,0\n"
     "[HitObjects]\n-48,192,1000,1,0,0:0:0:0:\n"
-    "512,192,2000,2,14,B|-259088:1726|123:456,2,240,2|0,0:0|0:0,0:0:0:0:\n"
-    "256,192,4294967290,12,0,4294967290,0:0:0:0:\n"
+    "512,192,2000,2,14,B|-129088:1726|123:456,2,240,2|0,0:0|0:0,0:0:0:0:\n"
+    "256,192,2147483647,12,0,2147483647,0:0:0:0:\n"
 ).encode()
 
 
@@ -43,7 +43,7 @@ def test_parse_and_attributes(tmp_path):
         slider = bm.hit_objects[1].slider
         assert isinstance(slider, fosu.Slider)
         assert (slider.curve_type, slider.length, slider.slides) == ("B", 240, 2)
-        assert [(p.x, p.y) for p in slider.points] == [(-259088, 1726), (123, 456)]
+        assert [(p.x, p.y) for p in slider.points] == [(-129088, 1726), (123, 456)]
         assert slider.edge_sounds == "2|0"
         assert bm.timing_points[0].uninherited is True
         assert bm.breaks[0].start == 100
@@ -151,7 +151,7 @@ def test_numpy_slices_and_types():
         np.testing.assert_array_equal(np.asarray(sequence), expected)
         assert not np.asarray(sequence).flags.writeable
     assert bm.sliders.to_numpy()["curve_type"].tolist() == [b"B"]
-    assert bm.sliders[0].points.to_numpy()["x"].tolist() == [-259088, 123]
+    assert bm.sliders[0].points.to_numpy()["x"].tolist() == [-129088, 123]
     empty = fosu.parse(b"").hit_objects.to_numpy()
     assert empty.shape == (0,) and not empty.flags.writeable
     colours = bm.combo_colours

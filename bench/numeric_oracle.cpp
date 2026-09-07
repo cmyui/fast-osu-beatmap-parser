@@ -18,13 +18,32 @@ inline const char* libc_double(const char* p, const char* end, double& out) {
     return libc_number(p, end, out, false);
 }
 inline const char* libc_beat_length(const char* p, const char* end, double& out) {
-    return libc_number(p, end, out, true);
+    const char* q = libc_number(p, end, out, true);
+    return q != p && !(out < -INT32_MAX || out > INT32_MAX)
+        ? skip_numeric_space(q, end) : p;
+}
+inline const char* libc_osu_double(const char* p, const char* end, double& out,
+                                  double limit = INT32_MAX) {
+    const char* q = libc_number(p, end, out, false);
+    return q != p && !(out < -limit || out > limit) ? skip_numeric_space(q, end) : p;
+}
+inline const char* libc_osu_float(const char* p, const char* end, float& out,
+                                 float limit = float(INT32_MAX)) {
+    std::string bounded(p, end);
+    char* next;
+    out = strtof(bounded.c_str(), &next);
+    if (next == bounded.c_str() || !std::isfinite(out) || out < -limit || out > limit) return p;
+    return skip_numeric_space(p + (next - bounded.c_str()), end);
 }
 }
 
 #define parse_double libc_double
 #define parse_beat_length libc_beat_length
+#define parse_osu_double libc_osu_double
+#define parse_osu_float libc_osu_float
 #include <fosu/parser.hpp>
+#undef parse_osu_float
+#undef parse_osu_double
 #undef parse_beat_length
 #undef parse_double
 #include "../oneshot/dump.hpp"

@@ -9,3 +9,5 @@ python/fosu/*.so
 python/fosu/*.dylib
 .pytest_cache/
 .mypy_cache/
+bench/official-reference/obj/
+bench/official-reference/bin/

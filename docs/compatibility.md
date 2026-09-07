@@ -11,13 +11,27 @@ the consumer. Input order and raw sample strings are retained.
 - Object start times, spinner/hold end times and break endpoints are double
   milliseconds; fractional values are preserved. Circle and slider `end_time`
   remain zero: a slider's end depends on timing points and difficulty settings.
-- Coordinates truncate toward zero. Coordinates and object/break times retain
-  the signed-32-bit saturation range. Timing-point offsets and beat lengths
-  are doubles. This range is a storage policy, not osu!'s acceptance criterion.
+- Coordinate acceptance follows the official decoder's float32 conversion and
+  ±131,072 bound; accepted coordinates truncate toward zero. Timestamps,
+  timing-point beat lengths and double metadata use its ±2,147,483,647 bound.
+  Slider lengths use ±131,072. Out-of-range fields are rejected, not saturated.
+- Integer fields use the official symmetric ±2,147,483,647 range, even when
+  fosu stores them in a wider integer. Boolean fields parse a complete integer
+  and compare it with 1. Mode must name a legacy ruleset (0–3). Countdown and
+  sample-bank enums accept official names and underlying int32 values.
+- Difficulty values and stack leniency are stored as raw doubles, but acceptance
+  uses the official float32 domain. Float rounding matters at the upper bound;
+  these are parsing limits, not the subsequent gameplay difficulty clamps.
 - Decimal and exponent conversion is bounded by the field's logical end and
   independent of the process locale. Large significands use a correctly rounded
-  fallback rather than rounding an intermediate integer. Overflow is rejected for double
-  fields; integer overflow saturates without signed-overflow undefined behavior.
+  fallback rather than rounding an intermediate integer. Overflow is rejected;
+  underflow rounded to signed zero is accepted. Numeric fields allow surrounding
+  ASCII whitespace.
+- Slider repeat counts above 9,000 are rejected. Nonpositive repeat counts and
+  negative lengths remain raw values; gameplay preparation must normalize them.
+  An omitted slider length is represented as zero. Missing hold end times use
+  the start time. Hit-sample and edge-bank fields remain raw strings, with the
+  numeric portions the official decoder reads checked before retaining an object.
 - NaN is retained **only for inherited timing-point beat lengths**. It must not
   be treated as an ordinary slider-velocity number. Other NaN/infinity values
   are rejected. A consumer implementing slider duration/ticks must handle the
@@ -53,21 +67,44 @@ own gameplay and resource constraints before expanding slider curves/repeats.
 ## Sources of truth
 
 A previous fosu release is a regression baseline, not the definition of osu!
-correctness. Corrections are checked against independent implementations, with
-raw decoding separated from their subsequent gameplay transformations.
+correctness. **The official osu! decoder determines acceptance and rejection
+policy.** Third-party parsers are not the authority for those decisions. Raw
+storage is separate from gameplay transformations such as clamping difficulty,
+resolving timing points, applying format-version offsets and sorting objects.
 
-The official osu! legacy decoder at revision
-[`48c4800e`](https://github.com/ppy/osu/tree/48c4800e3ae4ee752452cdff83bd3787ccf3105f)
-provides two relevant rules:
+The reference is the unmodified open-source legacy decoder from osu! at
+[`48c4800e3ae4ee752452cdff83bd3787ccf3105f`](https://github.com/ppy/osu/tree/48c4800e3ae4ee752452cdff83bd3787ccf3105f).
+This is lazer's implementation of legacy `.osu` decoding, not an execution of
+the closed-source stable client. Its
+[numeric helpers](https://github.com/ppy/osu/blob/48c4800e3ae4ee752452cdff83bd3787ccf3105f/osu.Game/Beatmaps/Formats/Parsing.cs),
+[legacy decoder](https://github.com/ppy/osu/blob/48c4800e3ae4ee752452cdff83bd3787ccf3105f/osu.Game/Beatmaps/Formats/LegacyBeatmapDecoder.cs)
+and [object decoder](https://github.com/ppy/osu/blob/48c4800e3ae4ee752452cdff83bd3787ccf3105f/osu.Game/Rulesets/Objects/Legacy/ConvertHitObjectParser.cs)
+define the tested numeric limits, inherited-NaN behavior and record acceptance.
 
-- Its [timing-point decoder](https://github.com/ppy/osu/blob/48c4800e3ae4ee752452cdff83bd3787ccf3105f/osu.Game/Beatmaps/Formats/LegacyBeatmapDecoder.cs#L488)
-  accepts inherited NaN beat lengths to disable slider ticks, with velocity 1,
-  and rejects NaN in an uninherited timing point.
-- Its [object decoder](https://github.com/ppy/osu/blob/48c4800e3ae4ee752452cdff83bd3787ccf3105f/osu.Game/Rulesets/Objects/Legacy/ConvertHitObjectParser.cs#L53)
-  reads start/end timestamps as doubles. It also applies coordinate limits,
-  legacy-format conversion and gameplay normalization which fosu does not
-  reproduce simply by returning raw records.
+Rejection is usually **per line**, not per file. For example,
+`OverallDifficulty:7` followed by `ApproachRate:1e309` leaves AR at 7 and continues
+loading the map. fosu likewise retains the previous/default field and counts
+the rejected line. Callers decide whether a partial result is useful.
 
-The synthetic numeric fixtures exercise these decoding rules. They do not
-constitute a full differential run of the official game, nor establish parity
-for lazer-only formats or the whole stable ruleset.
+The executable reference harness records exceptions from the official decoder
+and lets its own outer error handler decide whether decoding continues. Run it
+with .NET 8 and an interpreter with fosu installed:
+
+```sh
+sh bench/official-reference/build.sh
+python tests/test_official.py
+FOSU_FORCE_SCALAR=1 python tests/test_official.py
+python tests/test_official.py --corpus /path/to/maps --report /private/report.json
+```
+
+The synthetic suite checks field rejection and retained object counts. The
+corpus audit compares whole-map completion, rejection counts and object counts;
+it does not prove equality of every gameplay value or identify every rejected
+line in fosu. Keep corpus reports private: they contain local paths.
+
+This is bounded compatibility evidence, not complete format or stable-client
+parity. The raw parser is not a replacement for the game's package loader,
+storyboard interpreter or ruleset processing. Empty raw buffers remain valid
+empty results even though the official file decoder requires a header/content.
+Lazer-only curve segments and versions are outside the supported scope. The
+64 MiB input cap is fosu's resource policy, not an official format restriction.

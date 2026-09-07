@@ -58,13 +58,6 @@ inline int32_t clamp_i32(int64_t v) {
     return static_cast<int32_t>(v);
 }
 
-// Numeric domains are separate from ranking criteria. Coordinates and times
-// retain the existing signed-32-bit saturation, with fractional times preserved.
-inline double clamp_time(double v) {
-    return v > INT32_MAX ? double(INT32_MAX) : v < INT32_MIN ? double(INT32_MIN) : v;
-}
-inline int32_t clamp_coord(double v) { return static_cast<int32_t>(clamp_time(v)); }
-
 inline constexpr double kPow10[20] = {
     1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,  1e9,
     1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19,
@@ -140,9 +133,14 @@ inline const char* parse_double_impl(const char* p, const char* end, double& out
 inline const char* bounded_double(const char* start, const char* end, double& value) {
     const char* p = start;
     while (p < end && (*p == ' ' || *p == '\t')) ++p;
-    if (p < end && *p == '+') ++p;
+    if (p < end && *p == '+') {
+        ++p;
+        if (p < end && (*p == '+' || *p == '-')) return start;
+    }
     const auto r = fast_float::from_chars(p, end, value);
-    return r.ec == std::errc() ? r.ptr : start;
+    // .NET's numeric parser accepts underflow rounded to signed zero.
+    return r.ec == std::errc() || (r.ec == std::errc::result_out_of_range && value == 0)
+        ? r.ptr : start;
 }
 
 inline const char* parse_double(const char* p, const char* end, double& out) {
@@ -150,13 +148,60 @@ inline const char* parse_double(const char* p, const char* end, double& out) {
     return q != p && std::isfinite(out) ? q : p;
 }
 
+inline bool is_numeric_space(char c) {
+    return c == ' ' || (static_cast<unsigned char>(c) - 9u <= 4u);
+}
+
+inline const char* skip_numeric_space(const char* p, const char* end) {
+    while (p < end && is_numeric_space(*p)) ++p;
+    return p;
+}
+
+inline bool ignored_line(const char* p, const char* end) {
+    p = skip_numeric_space(p, end);
+    return p == end || (end - p >= 2 && p[0] == '/' && p[1] == '/');
+}
+
+// Numeric acceptance follows osu.Game Parsing, independently of gameplay
+// clamping or our raw-field storage types. These run only outside digit-only
+// fast paths whose field widths already prove the same limits.
+inline const char* parse_osu_int(const char* p, const char* end, int64_t& out) {
+    const char* first = skip_numeric_space(p, end);
+    const char* q = parse_i64(first, end, out);
+    if (q == first || out < -INT32_MAX || out > INT32_MAX) return p;
+    return skip_numeric_space(q, end);
+}
+
+inline const char* parse_osu_double(const char* p, const char* end, double& out,
+                                   double limit = INT32_MAX) {
+    const char* first = skip_numeric_space(p, end);
+    const char* q = parse_double(first, end, out);
+    if (q == first || out < -limit || out > limit) return p;
+    return skip_numeric_space(q, end);
+}
+
+inline const char* parse_osu_float(const char* p, const char* end, float& out,
+                                  float limit = float(INT32_MAX)) {
+    const char* first = skip_numeric_space(p, end);
+    if (first < end && *first == '+') {
+        ++first;
+        if (first < end && (*first == '+' || *first == '-')) return p;
+    }
+    const auto r = fast_float::from_chars(first, end, out);
+    if (r.ec != std::errc() && !(r.ec == std::errc::result_out_of_range && out == 0)) return p;
+    if (!std::isfinite(out) || out < -limit || out > limit) return p;
+    return skip_numeric_space(r.ptr, end);
+}
+
 // NaN has a defined gameplay meaning only for inherited timing points.
 inline const char* parse_beat_length(const char* p, const char* end, double& out) {
-    if (end - p >= 3 && (p[0] | 32) == 'n' && (p[1] | 32) == 'a' && (p[2] | 32) == 'n') {
+    const char* first = skip_numeric_space(p, end);
+    if (first < end && (*first == '+' || *first == '-')) ++first;
+    if (end - first >= 3 && (first[0] | 32) == 'n' && (first[1] | 32) == 'a' && (first[2] | 32) == 'n') {
         out = std::numeric_limits<double>::quiet_NaN();
-        return p + 3;
+        return skip_numeric_space(first + 3, end);
     }
-    return parse_double(p, end, out);
+    return parse_osu_double(p, end, out);
 }
 
 }  // namespace fosu::detail
