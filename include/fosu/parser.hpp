@@ -39,10 +39,12 @@ struct ParseOptions {
 
 namespace detail {
 
+#ifndef FOSU_ONESHOT_COMPACT
 static_assert(offsetof(HitObject, x) == 0 && offsetof(HitObject, y) == 4 &&
                   offsetof(HitObject, type) == 8 &&
                   offsetof(HitObject, hitsound) == 12,
               "AVX2 prefix path stores {x,y,type,hitsound} as one vector");
+#endif
 
 enum class Section : uint8_t {
     None,

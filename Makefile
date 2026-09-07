@@ -68,7 +68,54 @@ bench-pgo: | build
 	$(CXX) $(CXXFLAGS) $(X86_FLAGS) -fprofile-use -fprofile-correction bench/bench.cpp -o build/bench_pgo
 	$(X86_RUN) ./build/bench_pgo $(BENCH_ARGS)
 
+# Linux x86-64 / Zen 4 standalone process. These flags and the compact
+# representation belong to this executable, not to library consumers.
+ONESHOT_CXX ?= g++
+ONESHOT_FLAGS = -std=c++20 -O3 -march=znver4 -DFOSU_ONESHOT_COMPACT \
+	-fno-exceptions -fno-rtti -fno-stack-protector -fno-pie \
+	-fno-unwind-tables -fno-asynchronous-unwind-tables \
+	-ffunction-sections -fdata-sections -flto -Iinclude
+ONESHOT_LINK = -O3 -flto -nostdlib -static -no-pie \
+	-Wl,--gc-sections,-z,noseparate-code,--build-id=none
+ONESHOT_PROFILE = $(abspath build/oneshot/profile)
+
+build/oneshot:
+	mkdir -p $@
+
+build/oneshot/runtime.o: oneshot/runtime.cpp oneshot/third_party/fast_float.h | build/oneshot
+	$(ONESHOT_CXX) $(ONESHOT_FLAGS) -fno-builtin -c $< -o $@
+
+build/oneshot/main.o: oneshot/main.cpp oneshot/serialize.hpp $(HEADERS) | build/oneshot
+	$(ONESHOT_CXX) $(ONESHOT_FLAGS) -c $< -o $@
+
+build/oneshot/start.o: oneshot/start.S | build/oneshot
+	$(ONESHOT_CXX) -c $< -o $@
+
+build/fosu_oneshot: build/oneshot/main.o build/oneshot/runtime.o build/oneshot/start.o
+	$(ONESHOT_CXX) $(ONESHOT_LINK) $^ -o $@
+
+build/oneshot_reference: bench/oneshot_reference.cpp oneshot/serialize.hpp $(HEADERS) | build
+	$(CXX) $(CXXFLAGS) $(X86_FLAGS) $< -o $@
+
+build/oneshot_process: bench/oneshot_process.c | build
+	$(CC) -O2 -Wall -Wextra $< -o $@
+
+oneshot: build/fosu_oneshot build/oneshot_reference build/oneshot_process
+
+# Train the parser in fresh hosted processes; then use those branch
+# profiles in the executable with its minimal runtime. No input bytes or
+# parsed results are embedded in the profile or retained between runs.
+oneshot-pgo: build/oneshot/runtime.o build/oneshot/start.o
+	test -d "$(CORPUS)"
+	mkdir -p build/oneshot/pgo
+	rm -rf "$(ONESHOT_PROFILE)"
+	$(ONESHOT_CXX) $(ONESHOT_FLAGS) -fprofile-generate="$(ONESHOT_PROFILE)" -c oneshot/main.cpp -o build/oneshot/pgo/main.o
+	$(ONESHOT_CXX) -O3 -flto -static -no-pie -fprofile-generate="$(ONESHOT_PROFILE)" build/oneshot/pgo/main.o -o build/fosu_oneshot_train
+	python3 bench/oneshot_train.py build/fosu_oneshot_train "$(CORPUS)"
+	$(ONESHOT_CXX) $(ONESHOT_FLAGS) -fprofile-use="$(ONESHOT_PROFILE)" -fprofile-correction -c oneshot/main.cpp -o build/oneshot/pgo/main.o
+	$(ONESHOT_CXX) $(ONESHOT_LINK) build/oneshot/pgo/main.o build/oneshot/runtime.o build/oneshot/start.o -o build/fosu_oneshot_pgo
+
 clean:
 	rm -rf build
 
-.PHONY: all test bench bench-native bench-pgo coldstart clean
+.PHONY: all test bench bench-native bench-pgo coldstart oneshot oneshot-pgo clean

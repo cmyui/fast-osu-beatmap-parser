@@ -6,9 +6,49 @@
 
 namespace fosu {
 
-// Field order of the first 16 bytes is load-bearing: the AVX2 hitobject
-// fast path stores its result vector directly over {x, y, type, hitsound}.
+#ifdef FOSU_ONESHOT_COMPACT
+// The standalone executable uses narrower fields to reduce first-touch
+// output pages. This layout is deliberately separate from the library ABI.
+// Strings must fit 16-bit lengths and use addresses below 2^48.
+struct CompactStringView {
+    uint64_t bits = 0;
+    CompactStringView() = default;
+    CompactStringView(const char* p, size_t n)
+        : bits(reinterpret_cast<uintptr_t>(p) | (uint64_t(n) << 48)) {
+        if ((reinterpret_cast<uintptr_t>(p) >> 48) || n > 65535) __builtin_abort();
+    }
+    CompactStringView(std::string_view s) : CompactStringView(s.data(), s.size()) {}
+    const char* data() const {
+        return reinterpret_cast<const char*>(bits & 0x0000ffffffffffffull);
+    }
+    size_t size() const { return bits >> 48; }
+    bool empty() const { return size() == 0; }
+    operator std::string_view() const { return {data(), size()}; }
+};
+struct CompactSliderIndex {
+    uint16_t value;
+    CompactSliderIndex& operator=(uint32_t n) {
+        if (n >= 65535 && n != 0xffffffffu) __builtin_abort();
+        value = static_cast<uint16_t>(n);
+        return *this;
+    }
+    operator uint32_t() const { return value == 65535 ? 0xffffffffu : value; }
+};
+#endif
+
+// Field order is load-bearing: the SIMD prefix parser stores its result
+// directly into the selected layout. See its offsetof assertions.
 struct HitObject {
+#ifdef FOSU_ONESHOT_COMPACT
+    int16_t x;
+    int16_t y;
+    uint8_t type;
+    uint8_t hitsound;
+    CompactSliderIndex slider;
+    int32_t time;
+    int32_t end_time;
+    CompactStringView hit_sample;
+#else
     int32_t x;
     int32_t y;
     uint32_t type;
@@ -17,6 +57,7 @@ struct HitObject {
     int32_t end_time;      // spinners and mania holds; 0 otherwise
     uint32_t slider;       // index into Beatmap::sliders, or kNoSlider
     std::string_view hit_sample;
+#endif
 
     static constexpr uint32_t kNoSlider = 0xFFFFFFFF;
 
@@ -54,8 +95,13 @@ struct Slider {
     int32_t slides;        // 1 = no repeats
     char curve_type;       // 'B', 'C', 'L', 'P'
     double length;         // pixel length
+#ifdef FOSU_ONESHOT_COMPACT
+    CompactStringView edge_sounds;
+    CompactStringView edge_sets;
+#else
     std::string_view edge_sounds;  // raw "2|0|0" (parse on demand)
     std::string_view edge_sets;    // raw "0:0|0:0|0:0"
+#endif
 
     // See HitObject::uninit_t: the parser emplaces a Slider and fills
     // every field in place. Slider{} still zero-initializes.
@@ -63,6 +109,10 @@ struct Slider {
     Slider() = default;
     explicit Slider(uninit_t) {}
 };
+
+#ifdef FOSU_ONESHOT_COMPACT
+static_assert(sizeof(HitObject) == 24 && sizeof(Slider) == 40);
+#endif
 
 struct TimingPoint {
     double time;

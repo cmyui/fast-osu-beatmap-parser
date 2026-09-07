@@ -5,6 +5,13 @@ table-driven AVX2 fast path for hitobject lines, a zero-copy design,
 adaptive shape caching, section-selective parsing, and data-fitting fast
 paths that exploit what editor-emitted files guarantee.
 
+The primary optimization workload is **one fresh process → one original
+beatmap → exit**, with exact parsed-value agreement. Reuse and multi-map
+throughput are secondary. For the constrained Linux/Zen 4 executable, its
+build instructions, and full-process measurement/validation tools, see
+[the single-beatmap target](oneshot/README.md). The warm-loop benchmarks below
+measure a different boundary from full process lifetime.
+
 **Design goal: performance for valid, editor-emitted beatmaps.** This
 project deliberately inverts the usual priority order — robustness against
 hand-edited/adversarial files and code readability are explicit non-goals.

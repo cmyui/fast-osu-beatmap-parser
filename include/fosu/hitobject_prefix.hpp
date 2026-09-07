@@ -132,7 +132,7 @@ consteval std::array<LaneMasks, kNPrefixVariants> make_lane_masks() {
                     break;
                 }
             }
-            if (slot < 0) throw "field byte not covered by lane permutation";
+            if (slot < 0) __builtin_abort();
             lm.shuf[b] = static_cast<int8_t>((slot - lane_base) * 4 + off);
         }
     }
@@ -211,11 +211,21 @@ inline int fast_parse_prefix(const char* line, HitObject& h,
     const __m256i words = _mm256_maddubs_epi16(placed, pair_weights);
     const __m256i dwords = _mm256_madd_epi16(words, word_weights);
 
+#ifdef FOSU_ONESHOT_COMPACT
+    static_assert(offsetof(HitObject, x) == 0 && offsetof(HitObject, y) == 2 &&
+                  offsetof(HitObject, type) == 4 &&
+                  offsetof(HitObject, hitsound) == 5 &&
+                  offsetof(HitObject, slider) == 6 &&
+                  offsetof(HitObject, time) == 8 &&
+                  offsetof(HitObject, end_time) == 12 &&
+                  offsetof(HitObject, hit_sample) == 16);
+#else
     static_assert(offsetof(HitObject, time) == 16 &&
                       offsetof(HitObject, end_time) == 20 &&
                       offsetof(HitObject, slider) == 24 &&
                       offsetof(HitObject, hit_sample) == 32,
                   "the fast path finishes the prefix with one 32-byte store");
+#endif
     if (p2 - p1 - 1 <= 8) {
         // Real maps top out at 7 time digits (a 9-digit time is a 27h+
         // timestamp), so the 1e8 word of `dwords` is zero and an 8-digit
@@ -231,17 +241,38 @@ inline int fast_parse_prefix(const char* line, HitObject& h,
             1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 10000, 1, 0, 0, 0, 0);
         // combined dwords: [x, type, y, 0 | 0, time, 0, 0]
         const __m256i combined = _mm256_madd_epi16(packed, time_weights);
+#ifdef FOSU_ONESHOT_COMPACT
+        // {i16 x,y; u8 type,hs; u16 slider; i32 time,end_time}.
+        const __m128i layout = _mm_setr_epi8(
+            0, 1, 4, 5, 8, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+        const __m128i low = _mm_or_si128(
+            _mm_shuffle_epi8(_mm256_castsi256_si128(dwords), layout),
+            _mm_set_epi32(0, 0, static_cast<int>(0xffff0000u), 0));
+        const __m128i time =
+            _mm_srli_si128(_mm256_extracti128_si256(combined, 1), 4);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(&h),
+                         _mm_unpacklo_epi64(low, time));
+#else
         const __m256i arrange = _mm256_setr_epi32(0, 2, 1, 3, 5, 3, 3, 3);
         const __m256i arranged =
             _mm256_permutevar8x32_epi32(combined, arrange);
         const __m256i no_slider = _mm256_setr_epi32(0, 0, 0, 0, 0, 0, -1, 0);
         _mm256_storeu_si256(reinterpret_cast<__m256i*>(&h),
                             _mm256_blend_epi32(arranged, no_slider, 0x40));
+#endif
     } else {
         // 9-10 digit times: reassemble in GP registers with the overflow
         // check. Callers re-initialize end_time/slider on rejection.
+#ifdef FOSU_ONESHOT_COMPACT
+        const __m128i prefix = _mm256_castsi256_si128(dwords);
+        h.x = _mm_extract_epi32(prefix, 0);
+        h.y = _mm_extract_epi32(prefix, 1);
+        h.type = _mm_extract_epi32(prefix, 2);
+#else
         _mm_storeu_si128(reinterpret_cast<__m128i*>(&h),
                          _mm256_castsi256_si128(dwords));
+#endif
+
         const __m128i thi = _mm256_extracti128_si256(dwords, 1);
         const uint64_t t =
             static_cast<uint32_t>(_mm_extract_epi32(thi, 1)) * 100000000ull +
