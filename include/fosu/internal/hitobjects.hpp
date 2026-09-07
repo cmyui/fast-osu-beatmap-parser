@@ -41,7 +41,7 @@ inline bool parse_slider(Sink& sink, typename Sink::HitObject& object, const cha
     // A point costs at least four bytes ("|x:y"), which bounds the count;
     // the pair fast path also needs a second slot.
     Point* const first_point = sink.point_slot(static_cast<size_t>(end - p) / 4 + 2);
-    const auto points = write_slider_points(p, end, first_point, k);
+    const auto points = parse_slider_points_into(p, end, first_point, k);
     if (!points) [[unlikely]] {
         sink.slider_rollback(first_point, first_point, false);
         return false;

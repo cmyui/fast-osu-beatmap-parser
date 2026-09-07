@@ -123,7 +123,7 @@ inline uint32x4_t convert_point(uint8x16_t src, uint32_t xl, uint32_t yl, const 
 // points; both are unchanged if the first point is not editor-shaped.
 // The caller guarantees room for two points at `w`.
 template <typename Point>
-inline WrittenSliderPoints<Point> write_point_pair(const char* p, Point* w, const HitConsts& k) {
+inline WrittenSliderPoints<Point> parse_point_pair_into(const char* p, Point* w, const HitConsts& k) {
     const Bytes32 v = load32(p);
     const uint32_t nd = nondigit_mask32(v, k.bias, k.thr);
     const auto colon = equal_mask32(v, k.colon);
@@ -164,14 +164,14 @@ inline WrittenSliderPoints<Point> write_point_pair(const char* p, Point* w, cons
 }
 #endif
 
-// Writes the "|x:y|x:y..." control points into their final storage. Returns
+// Parses the "|x:y|x:y..." control points into their final storage. Returns
 // the next input/output positions, or nullopt if the whole point list must
 // be discarded. `w` needs room for one point per four line bytes plus two.
 template <typename Point>
-inline std::optional<WrittenSliderPoints<Point>> write_slider_points(
+inline std::optional<WrittenSliderPoints<Point>> parse_slider_points_into(
     const char* p, const char* end, Point* w, [[maybe_unused]] const HitConsts& k) {
 #if FOSU_SIMD
-    const auto pair = write_point_pair(p, w, k);
+    const auto pair = parse_point_pair_into(p, w, k);
     p = pair.next;
     w = pair.points_end;
     // Third and later points (long Bezier sliders): one 16-byte load per
