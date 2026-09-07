@@ -9,7 +9,6 @@
 #include <sys/resource.h>
 #include <sys/wait.h>
 #endif
-#include <fosu/internal/arena.hpp>
 #include <fosu/parser.hpp>
 #include "support/c_api_view.hpp"
 #include "support/canonical_dump.hpp"
@@ -19,8 +18,9 @@ void check(fosu_handle* h, const std::string& input, uint32_t sections = FOSU_AL
     assert(fosu_parse(h, input.data(), input.size(), sections) == FOSU_OK);
     const auto* v = fosu_get_view(h);
     assert(v && v->source_size == input.size());
-    auto padded = fosu::make_padded(input);
-    auto expected = fosu::parse(padded, {.sections = sections});
+    fosu::Parser parser;
+    auto expected = parser.parse(
+        input.data(), input.size(), {.sections = sections});
     // Runtime dispatch may choose scalar even when this reference was compiled
     // with SIMD (for example under Rosetta). Only path counters differ.
     if (!strcmp(fosu_backend_name(), "scalar")) {
@@ -52,9 +52,8 @@ void check(fosu_handle* h, const std::string& input, uint32_t sections = FOSU_AL
         for (auto byte : v->timing_points[i].reserved) assert(byte == 0);
 }
 
-// Arena growth and recycling: short lines exceed the initial estimates so
-// every array grows (and may fall back to the heap); a freed handle's arena
-// is recycled by the next handle, and results stay exact throughout.
+// Large contiguous arena arrays remain exact across smaller and larger
+// reparses on the same handle.
 void check_growth() {
     std::string many = "[TimingPoints]\n";
     for (int i = 0; i < 3000; ++i) many += std::to_string(i) + ",500\n";
@@ -74,27 +73,6 @@ void check_growth() {
         check(h, many);  // and back
         fosu_free(h);
     }
-}
-
-void check_arena_vector() {
-    fosu::internal::ArenaVector<uint64_t> values;
-    assert(values.empty() && values.size() == 0 && values.capacity() == 0);
-    values.resize(0);
-    values.set_size(0);
-    values.push_back(42);
-    bool rejected = false;
-    try {
-        values.reserve(SIZE_MAX / sizeof(uint64_t) + 1);
-    } catch (const std::bad_alloc&) {
-        rejected = true;
-    }
-    assert(rejected && values.size() == 1 && values[0] == 42);
-    auto moved = std::move(values);
-    assert(values.empty() && values.size() == 0 && values.capacity() == 0);
-    assert(moved.size() == 1 && moved[0] == 42);
-    moved.release();
-    moved.resize(0);
-    assert(moved.empty() && moved.size() == 0 && moved.capacity() == 0);
 }
 
 void check_all_fields() {
@@ -204,10 +182,8 @@ void check_file_matches_bytes() {
 }
 
 #if defined(__linux__)
-void check_allocation_failure_recovery() {
-    const std::string input = "[Metadata]\nTitle:Before allocation failure\n";
-    // Exercise exception translation with the private bundled C++ runtime.
-    // A sparse file and a child-only address-space limit avoid touching RAM.
+void check_allocation_failure() {
+    // A sparse file checks the public input limit without touching RAM.
     char large_path[] = "/tmp/fosu-c-api-oom-XXXXXX";
     int large_fd = mkstemp(large_path);
     assert(large_fd >= 0 && ftruncate(large_fd, FOSU_MAX_INPUT_SIZE + 1ul) == 0);
@@ -216,20 +192,22 @@ void check_allocation_failure_recovery() {
     assert(fosu_parse_file(limited, large_path, FOSU_ALL) == FOSU_INVALID_ARGUMENT);
     assert(!fosu_get_view(limited));
     fosu_free(limited);
-    assert(ftruncate(large_fd, FOSU_MAX_INPUT_SIZE) == 0);
     close(large_fd);
+
+    // A Beatmap reserves a large virtual range up front. A child-only
+    // address-space limit makes that reservation fail deterministically.
     pid_t child = fork();
     assert(child >= 0);
     if (child == 0) {
         rlimit limit{64ul << 20, 64ul << 20};
         if (setrlimit(RLIMIT_AS, &limit)) _exit(2);
-        auto* own = fosu_new();
-        if (!own || fosu_parse(own, input.data(), input.size(), FOSU_ALL) != FOSU_OK) _exit(3);
-        int status = fosu_parse_file(own, large_path, FOSU_ALL);
-        bool invalid = !fosu_get_view(own);
-        bool recovered = fosu_parse(own, nullptr, 0, FOSU_ALL) == FOSU_OK;
-        fosu_free(own);
-        _exit(status == FOSU_OUT_OF_MEMORY && invalid && recovered ? 0 : 4);
+        // The child inherits the cached mapping. Check it out first, then
+        // verify that a new reservation fails under the limit.
+        auto* inherited = fosu_new();
+        auto* exhausted = fosu_new();
+        const bool failed = inherited && !exhausted;
+        fosu_free(inherited);
+        _exit(failed ? 0 : 3);
     }
     int child_status = 0;
     assert(waitpid(child, &child_status, 0) == child);
@@ -253,7 +231,6 @@ void check_independent_threads() {
 
 int main() {
     assert(fosu_abi_version() == FOSU_ABI_VERSION);
-    check_arena_vector();
     check_growth();
     check_all_fields();
     check_same_input_reuses_capacity();
@@ -264,7 +241,7 @@ int main() {
     check_invalid_input_clears_view();
     check_file_matches_bytes();
 #if defined(__linux__)
-    check_allocation_failure_recovery();
+    check_allocation_failure();
 #endif
     check_independent_threads();
     puts("C API: exact values, defaults, reuse, lifetime, errors and independent handles passed");

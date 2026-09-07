@@ -140,7 +140,6 @@ static void test_hitobject_details() {
 
 int main() {
     test_point_values<fosu::SliderPoint>();
-    test_point_values<fosu_point>();
     test_slider_fields();
     test_hitobject_details();
     return test_result();

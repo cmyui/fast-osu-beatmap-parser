@@ -10,7 +10,6 @@
 #include <string_view>
 
 #include <fosu/parser.hpp>
-#include <fosu/offset_beatmap.hpp>
 
 static int g_failures = 0;
 
@@ -31,7 +30,6 @@ inline int test_result() {
 }
 
 [[maybe_unused]] static fosu::Beatmap parse_str(const std::string& s, bool use_simd = true) {
-    static fosu::FileBuffer buf;  // keep alive for string_view fields
-    buf = fosu::make_padded(s);
-    return fosu::parse(buf, {.use_simd = use_simd});
+    static fosu::Parser parser;
+    return parser.parse(s.data(), s.size(), {.use_simd = use_simd});
 }

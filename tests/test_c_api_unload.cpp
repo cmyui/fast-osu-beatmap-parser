@@ -20,7 +20,6 @@ void require(bool condition, const char* message) {
         std::_Exit(1);
     }
 }
-
 template <typename T>
 T symbol(void* library, const char* name) {
     auto function = reinterpret_cast<T>(dlsym(library, name));

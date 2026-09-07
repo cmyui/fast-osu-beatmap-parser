@@ -10,7 +10,8 @@ using fosu_dispatch::Backend;
 constinit std::atomic<const Backend*> selected{nullptr};
 struct Cleanup {
     ~Cleanup() {
-        if (const auto* b = selected.load(std::memory_order_relaxed)) b->cleanup();
+        if (const auto* b = selected.load(std::memory_order_relaxed))
+            b->cleanup();
     }
 };
 Cleanup cleanup;

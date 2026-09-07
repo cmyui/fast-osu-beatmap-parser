@@ -1,4 +1,5 @@
 #pragma once
+#include "../beatmap.hpp"
 #include "text.hpp"
 #include "prefix.hpp"
 
@@ -10,8 +11,8 @@ inline std::string_view strip_quotes(std::string_view v) {
     return v;
 }
 
-template <typename Map>
-inline void parse_event_line(Map& bm, const char* p, size_t len) {
+inline void parse_event_line(
+    Beatmap& bm, size_t& break_count, const char* p, size_t len) {
     // Storyboard commands are indented; count and skip them.
     if (len == 0 || *p == ' ' || *p == '_') {
         ++bm.stats.storyboard_lines;
@@ -46,7 +47,7 @@ inline void parse_event_line(Map& bm, const char* p, size_t len) {
         if (q == rest || q >= end || *q != ',') { ++bm.stats.malformed_lines; return; }
         const char* r = fosu::internal::parse_osu_double(q + 1, end, stop);
         if (r == q + 1 || r != end) { ++bm.stats.malformed_lines; return; }
-        bm.breaks.push_back({start, stop});
+        bm.breaks[break_count++] = {start, stop};
     } else {
         ++bm.stats.storyboard_lines;
     }
@@ -58,9 +59,9 @@ inline void parse_event_line(Map& bm, const char* p, size_t len) {
 // their first byte; every line finds its end with vector compares (two
 // 32-byte windows cover 64 bytes) instead of a memchr call. Returns the
 // position after the section.
-template <typename Map>
-inline const char* parse_events_section(Map& bm, const char* p,
-                                        const char* file_end) {
+inline const char* parse_events_section(
+    Beatmap& bm, size_t& break_count, const char* p,
+    const char* file_end) {
     uint32_t storyboard_lines = 0;
     while (p < file_end) {
         const char c = *p;
@@ -98,7 +99,7 @@ inline const char* parse_events_section(Map& bm, const char* p,
         }
         const auto len = static_cast<size_t>(line_end - line);
         if (len >= 2 && c == '/' && line[1] == '/') continue;  // comment
-        parse_event_line(bm, line, len);
+        parse_event_line(bm, break_count, line, len);
     }
     bm.stats.storyboard_lines += storyboard_lines;
     return p;

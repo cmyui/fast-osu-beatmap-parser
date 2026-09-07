@@ -5,7 +5,6 @@
 #include <iostream>
 #include <dlfcn.h>
 #include <fosu/parser.hpp>
-#include <fosu/offset_beatmap.hpp>
 #include "support/canonical_dump.hpp"
 int main(int argc, char** argv) {
     if (argc < 2 || argc > 3) return 2;
@@ -14,13 +13,14 @@ int main(int argc, char** argv) {
     auto oracle = library ? reinterpret_cast<Oracle>(dlsym(library, "fosu_numeric_oracle")) : nullptr;
     if (argc == 3 && !oracle) { std::cerr << "numeric oracle load failed\n"; return 1; }
     size_t files = 0, bytes = 0, objects = 0, malformed = 0;
+    fosu::Parser scalar_parser;
+    fosu::Parser simd_parser;
     for (const auto& entry : std::filesystem::recursive_directory_iterator(argv[1])) {
         if (entry.path().extension() != ".osu") continue;
         auto input = fosu::read_file_padded(entry.path().c_str());
         if (!input) { std::cerr << "input read failed at file " << files << '\n'; return 1; }
-        auto a = fosu::parse(input, {.use_simd = false});
-        fosu::OffsetBeatmap b;
-        fosu::parse_into(input, b);
+        auto a = scalar_parser.parse(input, {.use_simd = false});
+        auto b = simd_parser.parse(input);
         a.stats.fast_path_lines = a.stats.slow_path_lines = 0;
         b.stats.fast_path_lines = b.stats.slow_path_lines = 0;
         std::string x, y;

@@ -278,7 +278,10 @@ static void test_difficulty_selection_skips_other_sections() {
         "[Colours]\nCombo1:255,0,0\n"
         "[HitObjects]\n64,96,1000,1,0\n");
     for (bool simd : {false, true}) {
-        auto bm = fosu::parse(input, {.use_simd = simd, .sections = fosu::kSectionDifficulty});
+        fosu::Parser parser;
+        auto bm = parser.parse(
+            input,
+            {.use_simd = simd, .sections = fosu::kSectionDifficulty});
         CHECK_EQ(bm.hp, 3);
         CHECK_EQ(bm.cs, 4);
         CHECK_EQ(bm.od, 7);
@@ -296,7 +299,8 @@ static void test_metadata_and_difficulty_selection() {
         "[Difficulty]\nOverallDifficulty:6\n"
         "[HitObjects]\n128,192,2000,1,0\n");
     for (bool simd : {false, true}) {
-        auto bm = fosu::parse(input, {.use_simd = simd,
+        fosu::Parser parser;
+        auto bm = parser.parse(input, {.use_simd = simd,
             .sections = fosu::kSectionMetadata | fosu::kSectionDifficulty});
         CHECK(bm.title == "Selected metadata");
         CHECK_EQ(bm.beatmap_id, 42);
@@ -313,7 +317,10 @@ static void test_hitobject_selection_skips_preceding_sections() {
         "[TimingPoints]\n100,400\n"
         "[HitObjects]\n32,48,3000,1,2\n256,192,4000,8,0,5000\n");
     for (bool simd : {false, true}) {
-        auto bm = fosu::parse(input, {.use_simd = simd, .sections = fosu::kSectionHitObjects});
+        fosu::Parser parser;
+        auto bm = parser.parse(
+            input,
+            {.use_simd = simd, .sections = fosu::kSectionHitObjects});
         CHECK(bm.title.empty() && bm.timing_points.empty());
         CHECK_EQ(bm.hit_objects.size(), 2u);
         CHECK_EQ(bm.hit_objects[0].x, 32);
@@ -329,7 +336,10 @@ static void test_selected_missing_section_uses_defaults() {
         "[Metadata]\nTitle:No difficulty section\n"
         "[HitObjects]\n96,64,6000,1,0\n");
     for (bool simd : {false, true}) {
-        auto bm = fosu::parse(input, {.use_simd = simd, .sections = fosu::kSectionDifficulty});
+        fosu::Parser parser;
+        auto bm = parser.parse(
+            input,
+            {.use_simd = simd, .sections = fosu::kSectionDifficulty});
         CHECK_EQ(bm.hp, 5);
         CHECK_EQ(bm.cs, 5);
         CHECK_EQ(bm.od, 5);
@@ -347,8 +357,12 @@ static void test_all_section_mask_matches_default() {
         "[TimingPoints]\n300,250\n"
         "[HitObjects]\n320,192,7000,128,0,7500:0:0:0:0:\n");
     for (bool simd : {false, true}) {
-        auto explicit_mask = fosu::parse(input, {.use_simd = simd, .sections = fosu::kAllSections});
-        auto default_mask = fosu::parse(input, {.use_simd = simd});
+        fosu::Parser explicit_parser;
+        fosu::Parser default_parser;
+        auto explicit_mask = explicit_parser.parse(
+            input, {.use_simd = simd, .sections = fosu::kAllSections});
+        auto default_mask = default_parser.parse(
+            input, {.use_simd = simd});
         CHECK_EQ(canonical(explicit_mask), canonical(default_mask));
     }
 }

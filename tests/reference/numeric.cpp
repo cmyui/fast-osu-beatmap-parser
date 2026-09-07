@@ -51,7 +51,8 @@ static_assert(!FOSU_SIMD, "the independent numeric oracle must use scalar parsin
 
 extern "C" __attribute__((visibility("default")))
 void fosu_numeric_oracle(const char* data, size_t size, std::string& output) {
-    auto map = fosu::parse(data, size, {.use_simd = false});
+    fosu::Parser parser;
+    auto map = parser.parse(data, size, {.use_simd = false});
     map.stats.fast_path_lines = map.stats.slow_path_lines = 0;
     fosu_dump::dump(map, output);
 }

@@ -11,7 +11,8 @@ int main(int argc, char** argv) {
     if (argc < 2) return 2;
     const fosu::FileBuffer buf = fosu::read_file_padded(argv[1]);
     if (!buf) return 1;
-    const fosu::Beatmap bm = fosu::parse(buf);
+    fosu::Parser parser;
+    const fosu::Beatmap bm = parser.parse(buf);
     std::string out;
     fosu_dump::dump(bm, out);
     size_t done = 0;

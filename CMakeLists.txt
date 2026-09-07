@@ -19,7 +19,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(FOSU_ISA auto CACHE STRING "Native targets: auto, scalar, avx2, neon")
 set_property(CACHE FOSU_ISA PROPERTY STRINGS auto scalar avx2 neon)
-option(FOSU_PORTABLE_VECTORS "Use public vector operations" OFF)
 option(FOSU_SANITIZE "Enable address, undefined and float-cast sanitizers" OFF)
 set(_python OFF)
 if(SKBUILD)
@@ -79,14 +78,10 @@ target_include_directories(fosu_headers INTERFACE $<BUILD_INTERFACE:${PROJECT_SO
 target_compile_features(fosu_headers INTERFACE cxx_std_20)
 
 function(fosu_profile target)
-  if(FOSU_PORTABLE_VECTORS)
-    target_compile_definitions(${target} PRIVATE FOSU_PORTABLE_VECTORS)
-  endif()
   target_compile_definitions(${target} PRIVATE $<$<CONFIG:Debug>:_GLIBCXX_DEBUG>)
   if(FOSU_SANITIZE)
     target_compile_options(${target} PRIVATE -O1 -g -fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=all)
     target_link_options(${target} PRIVATE -fsanitize=address,undefined,float-cast-overflow)
-    target_compile_definitions(${target} PRIVATE _GLIBCXX_SANITIZE_VECTOR=1)
   endif()
 endfunction()
 

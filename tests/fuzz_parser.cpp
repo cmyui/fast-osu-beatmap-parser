@@ -3,14 +3,14 @@
 #include <cassert>
 #include <string>
 #include <fosu/parser.hpp>
-#include <fosu/offset_beatmap.hpp>
 #include "support/canonical_dump.hpp"
 
 static void check(std::string_view data) {
     auto input = fosu::make_padded(data);
-    auto a = fosu::parse(input, {.use_simd = false});
-    fosu::OffsetBeatmap b;
-    fosu::parse_into(input, b);
+    fosu::Parser scalar_parser;
+    fosu::Parser simd_parser;
+    auto a = scalar_parser.parse(input, {.use_simd = false});
+    auto b = simd_parser.parse(input);
     a.stats.fast_path_lines = a.stats.slow_path_lines = 0;
     b.stats.fast_path_lines = b.stats.slow_path_lines = 0;
     std::string x, y;

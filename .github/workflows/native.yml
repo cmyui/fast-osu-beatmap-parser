@@ -34,13 +34,10 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - name: Check scalar, public vectors, and debug containers
+      - name: Check scalar and debug builds
         run: |
           cmake -S . -B build/scalar -G Ninja -DFOSU_ISA=scalar -DCMAKE_CXX_COMPILER=g++
           cmake --build build/scalar --target check -j"$(nproc)"
-          cmake -S . -B build/portable -G Ninja -DFOSU_PORTABLE_VECTORS=ON -DCMAKE_CXX_COMPILER=g++
-          cmake --build build/portable --target test-binaries -j"$(nproc)"
-          ctest --test-dir build/portable -L parser --output-on-failure
           cmake -S . -B build/debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=g++
           cmake --build build/debug --target test-binaries -j"$(nproc)"
           ctest --test-dir build/debug -L parser --output-on-failure

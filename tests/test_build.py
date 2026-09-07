@@ -21,7 +21,7 @@ add_executable(c_api main.c)
 target_link_libraries(c_api PRIVATE fosu::fosu)
 """)
     (root / "main.cpp").write_text("""#include <fosu/parser.hpp>
-int main() { auto map = fosu::parse(nullptr, 0); return map.hit_objects.size(); }
+int main() { fosu::Parser parser; return parser.parse(nullptr, 0).hit_objects.size(); }
 """)
     (root / "main.c").write_text("""#include <fosu/c_api.h>
 int main(void) { fosu_handle* h = fosu_new(); if (!h) return 1;

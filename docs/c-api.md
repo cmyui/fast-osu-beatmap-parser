@@ -27,16 +27,16 @@ unset. An unknown or unsupported request makes `fosu_backend_name()` and
 of that loaded library, even if the environment subsequently changes.
 
 Each API call forwards to a cached function pointer; parsing loops have no
-runtime ISA branches. Backend types and arena caches are private, and baseline
+runtime ISA branches. Backend types and parser storage are private, and baseline
 startup/teardown code calls only the selected backend. Header-only C++ remains
 compile-time selected; C++ applications can use this C ABI for runtime selection.
 
 On Linux the default build bundles private copies of the C++ runtime and
 unwinder. Only `fosu_*` functions are exported; no C++ exceptions cross the ABI.
-Allocation still uses the process's `malloc`/`free` (including interposed
-allocators), but the library uses its own `operator new`/`delete`, so a host's
-C++ replacement operators and `std::set_new_handler` state do not apply. The header-only C++ interface retains
-its caller's runtime and operators.
+Arena storage uses private virtual-memory reservations and on-demand page
+commits. Small control objects still use the library's `operator new`/`delete`,
+so a host's C++ replacement operators and `std::set_new_handler` state do not
+apply. The header-only C++ interface retains its caller's runtime and operators.
 
 To link the system C++ runtime instead, configure with
 `-DFOSU_BUNDLE_RUNTIME=OFF` and rebuild. macOS uses the system runtime.
@@ -75,16 +75,15 @@ Incompatible struct changes require a version bump and rebuilding bindings.
 
 ## Storage
 
-A handle owns an arena containing the padded input copy and contiguous record
-arrays. It retains that mapping while the next input fits; arrays that outgrow
-the arena use heap allocations. Input ownership and result lifetimes are the
-same in either case.
+A handle owns a parser with one working arena for its padded input, domain
+records and converted C records. It reserves virtual address space up front,
+makes it writable in fixed-size chunks and reuses touched pages across parses
+on the same handle. Each parse creates a fresh logical result. Independent
+handles keep separate live storage and may be used concurrently.
 
-Freeing a handle can park its arena, up to 8 MiB, in one spare slot per loaded
-library image. A later handle can take those warm pages. Each parse creates a
-fresh logical result; memory reuse never substitutes a previous parse. The
-spare is released when the library unloads. Independent handles keep separate
-live storage and may be used concurrently.
+Freeing a handle returns its arena to a bounded lock-free single-slot pool. A
+later handle can reuse its mapping and touched pages; checked-out arenas are
+exclusively owned. Library unload releases the spare mapping.
 
 On Linux, `MADV_HUGEPAGE` requests larger pages where the host enables them.
 The advice is optional and never changes host settings. Define
@@ -95,14 +94,15 @@ benchmark on the deployment host.
 
 - `fosu_new`/`fosu_free` own a reusable handle. Freeing `NULL` is allowed.
 - `fosu_parse` copies an input byte span into padded, owned storage;
-  `fosu_parse_file` reads directly into that storage. Both reuse the arena
-  while it is large enough.
+  `fosu_parse_file` reads directly into that storage. Both reuse the parser
+  arena.
 - `fosu_get_view` returns borrowed metadata and bulk arrays after a successful
   parse, or `NULL` before success/after failure. **Every new parse call,
   including a failed or argument-rejected call, invalidates the previous view.**
-- Array records are produced directly by the parser. There is no second array
-  conversion or one FFI call per object. Hitobjects occupy 48 bytes and sliders
-  40 bytes on the supported 64-bit ABIs; point pairs occupy 8 and timing points 40.
+- The parser produces its domain records first. The C boundary copies them once
+  into versioned ABI records in the parser arena; there is no allocation or FFI
+  call per object. Hitobjects occupy 48 bytes and sliders 40 bytes on the
+  supported 64-bit ABIs; point pairs occupy 8 and timing points 40.
 - Every `fosu_string_ref` addresses `view->text` using `offset` and `length`.
   Empty strings have length zero. `source_size` is the original input size;
   `text_size` also includes 128 zero-padding bytes and six bytes for the
