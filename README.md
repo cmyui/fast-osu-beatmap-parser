@@ -21,11 +21,12 @@ The C++20 interface is header-only:
 ```cpp
 #include <fosu/parser.hpp>
 
-auto input = fosu::read_file_padded("map.osu");
-if (!input) return 1;
-fosu::Beatmap map = fosu::parse(input);
+fosu::Parser parser;
+auto parsed = parser.parse_file("map.osu");
+if (!parsed) return 1;
+fosu::Beatmap& map = *parsed.value();
 // map.title, map.ar, map.hit_objects, map.sliders, map.slider_points, ...
-// Keep input alive and unchanged while using map's string views.
+// map remains valid until parser parses another beatmap or is destroyed.
 ```
 
 Recorded warm parsing times on our **10,000-map corpus** are roughly **19 µs
@@ -36,8 +37,8 @@ measurements, host, repetition counts, and reproduction commands.
 
 | Interface | Result | Use |
 |---|---|---|
-| [C++ library](docs/library.md) | `Beatmap` with vectors and borrowed strings | Direct parsing in a C++ application |
-| [C API](docs/c-api.md) | Handle-owned arena: input copy and contiguous arrays | C and other FFI callers |
+| [C++ library](docs/library.md) | Parser-owned `Beatmap` view | Direct parsing in a C++ application |
+| [C API](docs/c-api.md) | Handle-owned parser and result view | C and other FFI callers |
 | [Python package](docs/python.md) | Owned `Beatmap` with named fields and records | Python apps; optional zero-copy NumPy arrays |
 | [One-shot executable](oneshot/README.md) | Complete binary stream on stdout | Process-lifetime benchmark on Linux/Zen 4 |
 
@@ -64,12 +65,16 @@ slider points. Timing points reuse validated shape geometry within a section.
 Unusual numeric forms take a bounded scalar conversion path; metadata uses
 key/type tables.
 
-The same kernels write through compile-time storage policies: native C++
-vectors, compact arena arrays for the C ABI/Python package, or streamed
-one-shot records. Native release vectors use direct writes into reserved
-capacity; debug and sanitizer builds use public vector operations. A freed
-C ABI handle can leave one bounded spare arena for later calls; it retains
-storage, not parsed results. Library unload releases the spare.
+Input size gives safe upper bounds for fixed arrays without a second scan. The
+parsing engine builds each record as a local value, then copies it into contiguous
+arena memory owned by the parser. C++, C and Python share the same `Beatmap`
+model; the C boundary converts its result once to the versioned ABI records.
+One inactive parser arena is retained for cheap fresh-parser reuse.
+
+The public `Parser` prepares input, allocates arrays and owns their lifetime.
+One engine call interprets the complete document. C/Python builds keep the
+scalar engine in the core and load only the selected AVX2 or NEON library;
+header-only builds select their engine at compile time.
 
 ## Coverage and assumptions
 
@@ -82,8 +87,8 @@ lazer's newer per-segment curve syntax is outside this parser's scope.
 
 Malformed numeric records are skipped and counted; this is not a strict
 playability validator. Inputs are limited to 64 MiB. Fast paths use speculative
-reads; C++ byte buffers need **128 readable zero bytes after the logical end**.
-File helpers, the C API and Python supply that padding. See the
+reads; `Parser` copies inputs into owned storage with **128 readable zero bytes
+after the logical end**. See the
 [full input contract](docs/compatibility.md) before integrating a consumer.
 The compiled library and Python package select AVX2 on supported x86-64 CPUs
 or NEON on AArch64, with scalar fallback. Header-only C++ uses the caller’s compile flags;

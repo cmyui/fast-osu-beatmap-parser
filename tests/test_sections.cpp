@@ -278,7 +278,10 @@ static void test_difficulty_selection_skips_other_sections() {
         "[Colours]\nCombo1:255,0,0\n"
         "[HitObjects]\n64,96,1000,1,0\n");
     for (bool simd : {false, true}) {
-        auto bm = fosu::parse(input, {.use_simd = simd, .sections = fosu::kSectionDifficulty});
+        fosu::Parser parser(simd ? fosu::internal::native_engine : fosu::internal::scalar_engine);
+        const auto& bm = require_parse(parser.parse(
+            input,
+            {.sections = fosu::kSectionDifficulty}));
         CHECK_EQ(bm.hp, 3);
         CHECK_EQ(bm.cs, 4);
         CHECK_EQ(bm.od, 7);
@@ -296,8 +299,10 @@ static void test_metadata_and_difficulty_selection() {
         "[Difficulty]\nOverallDifficulty:6\n"
         "[HitObjects]\n128,192,2000,1,0\n");
     for (bool simd : {false, true}) {
-        auto bm = fosu::parse(input, {.use_simd = simd,
-            .sections = fosu::kSectionMetadata | fosu::kSectionDifficulty});
+        fosu::Parser parser(simd ? fosu::internal::native_engine : fosu::internal::scalar_engine);
+        const auto& bm = require_parse(parser.parse(
+            input, {                .sections = fosu::kSectionMetadata |
+                            fosu::kSectionDifficulty}));
         CHECK(bm.title == "Selected metadata");
         CHECK_EQ(bm.beatmap_id, 42);
         CHECK_EQ(bm.od, 6);
@@ -313,7 +318,10 @@ static void test_hitobject_selection_skips_preceding_sections() {
         "[TimingPoints]\n100,400\n"
         "[HitObjects]\n32,48,3000,1,2\n256,192,4000,8,0,5000\n");
     for (bool simd : {false, true}) {
-        auto bm = fosu::parse(input, {.use_simd = simd, .sections = fosu::kSectionHitObjects});
+        fosu::Parser parser(simd ? fosu::internal::native_engine : fosu::internal::scalar_engine);
+        const auto& bm = require_parse(parser.parse(
+            input,
+            {.sections = fosu::kSectionHitObjects}));
         CHECK(bm.title.empty() && bm.timing_points.empty());
         CHECK_EQ(bm.hit_objects.size(), 2u);
         CHECK_EQ(bm.hit_objects[0].x, 32);
@@ -329,7 +337,10 @@ static void test_selected_missing_section_uses_defaults() {
         "[Metadata]\nTitle:No difficulty section\n"
         "[HitObjects]\n96,64,6000,1,0\n");
     for (bool simd : {false, true}) {
-        auto bm = fosu::parse(input, {.use_simd = simd, .sections = fosu::kSectionDifficulty});
+        fosu::Parser parser(simd ? fosu::internal::native_engine : fosu::internal::scalar_engine);
+        const auto& bm = require_parse(parser.parse(
+            input,
+            {.sections = fosu::kSectionDifficulty}));
         CHECK_EQ(bm.hp, 5);
         CHECK_EQ(bm.cs, 5);
         CHECK_EQ(bm.od, 5);
@@ -347,24 +358,51 @@ static void test_all_section_mask_matches_default() {
         "[TimingPoints]\n300,250\n"
         "[HitObjects]\n320,192,7000,128,0,7500:0:0:0:0:\n");
     for (bool simd : {false, true}) {
-        auto explicit_mask = fosu::parse(input, {.use_simd = simd, .sections = fosu::kAllSections});
-        auto default_mask = fosu::parse(input, {.use_simd = simd});
+        const auto& engine = simd ? fosu::internal::native_engine : fosu::internal::scalar_engine;
+        fosu::Parser explicit_parser(engine);
+        fosu::Parser default_parser(engine);
+        const auto& explicit_mask = require_parse(explicit_parser.parse(
+            input, {.sections = fosu::kAllSections}));
+        const auto& default_mask = require_parse(default_parser.parse(
+            input));
         CHECK_EQ(canonical(explicit_mask), canonical(default_mask));
     }
 }
 
+static void test_exact_keys_and_event_aliases() {
+  const auto map = parse_str(
+      "[General]\nCountdown:Normal,HalfSpeed\nSampleSet:Soft\n"
+      "[Metadata]\nTitle:\tkept \nTitleUnicode : unicode\n"
+      "TitleExtra:ignored\n Title:ignored\nTitle\t: final: title \n"
+      "[MetadataExtra]\nTitle:ignored section\n"
+      "[Events]\n0,0,\"background.jpg\"\n"
+      "1,0,\"old.mp4\"\nVideo,0,\"new.mp4\"\n"
+      "2,10,20\nBreak,30,40\nVideoExtra,0,\"ignored.mp4\"\n");
+  CHECK_EQ(map.countdown, 3);
+  CHECK_EQ(map.sample_set, "Soft");
+  CHECK_EQ(map.title, "final: title ");
+  CHECK_EQ(map.title_unicode, "unicode");
+  CHECK_EQ(map.background, "background.jpg");
+  CHECK_EQ(map.video, "new.mp4");
+  CHECK_EQ(map.breaks.size(), 2u);
+  CHECK_EQ(map.breaks[0].start, 10);
+  CHECK_EQ(map.breaks[1].end, 40);
+  CHECK_EQ(map.stats.storyboard_lines, 1u);
+}
+
 int main() {
-    test_all_sections();
-    test_old_format();
-    test_mania_hold();
-    test_aspire_edge_cases();
-    test_malformed();
-    test_long_timing_offsets();
-    test_omitted_sections_use_defaults();
-    test_difficulty_selection_skips_other_sections();
-    test_metadata_and_difficulty_selection();
-    test_hitobject_selection_skips_preceding_sections();
-    test_selected_missing_section_uses_defaults();
-    test_all_section_mask_matches_default();
-    return test_result();
+  test_exact_keys_and_event_aliases();
+  test_all_sections();
+  test_old_format();
+  test_mania_hold();
+  test_aspire_edge_cases();
+  test_malformed();
+  test_long_timing_offsets();
+  test_omitted_sections_use_defaults();
+  test_difficulty_selection_skips_other_sections();
+  test_metadata_and_difficulty_selection();
+  test_hitobject_selection_skips_preceding_sections();
+  test_selected_missing_section_uses_defaults();
+  test_all_section_mask_matches_default();
+  return test_result();
 }

@@ -35,7 +35,7 @@ int main(int argc, char** argv) {
         if (!inputs.back()) return 1;
         bytes += inputs.back().size;
     }
-    fosu::Beatmap retained;
+    fosu::Parser retained;
     size_t objects = 0;
     double best = 1e30, total = 0;
     long fault_total = 0;
@@ -44,14 +44,18 @@ int main(int argc, char** argv) {
         const auto t0 = std::chrono::steady_clock::now();
         for (const auto& in : inputs) {
             if (reuse) {
-                fosu::parse_into(in, retained, {.sections = sections});
-                __asm__ volatile("" : : "g"(&retained) : "memory");
-                objects += retained.hit_objects.size();
+                auto parsed = retained.parse(in, {.sections = sections});
+                if (!parsed) return 1;
+                const auto& beatmap = *parsed.value();
+                __asm__ volatile("" : : "g"(&beatmap) : "memory");
+                objects += beatmap.hit_objects.size();
             } else {
-                fosu::Beatmap bm;
-                fosu::parse_into(in, bm, {.sections = sections});
-                __asm__ volatile("" : : "g"(&bm) : "memory");
-                objects += bm.hit_objects.size();
+                fosu::Parser parser;
+                auto parsed = parser.parse(in, {.sections = sections});
+                if (!parsed) return 1;
+                const auto& beatmap = *parsed.value();
+                __asm__ volatile("" : : "g"(&beatmap) : "memory");
+                objects += beatmap.hit_objects.size();
             }
         }
         const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();

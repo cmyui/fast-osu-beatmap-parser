@@ -10,7 +10,7 @@ performance comparisons must also pass full-result regression checks.
 
 | Driver | Timed work | Outside timing |
 |---|---|---|
-| `library_compare` / native module | C++ parse plus fresh result destruction, or reused result | File read/padding, module loading |
+| `library_compare` / native module | C++ input copy and parse with a fresh or reused `Parser` | Original file read, module loading |
 | `library_compare` / C API module | Input copy, parse, view acquisition, fresh handle/free or reused handle | Original file read, module loading |
 | `python_compare.py` | `parse(bytes)` or `parse_file(path)`, result access and release | Imports; input bytes already available; file data resident |
 | `library_first_compare.py` / `library_first` | First C++ parse and result allocation in a fresh process | Process startup, file read and result destruction |
@@ -24,9 +24,9 @@ or create a Python object for every note. Iterating all records or copying NumPy
 arrays is additional work. The first-use driver launches a new interpreter for
 every sample; the warm driver repeatedly calls an already loaded library.
 
-A fresh result can still benefit from allocator state or the C API's bounded
-spare arena within a process. A fresh process cannot. Neither path caches parsed
-maps. One-shot stdout goes to `/dev/null`, so it measures serialization and the
+A reused parser retains committed arena pages directly. Fresh parsers can reuse
+the bounded arena pool. Neither path caches parsed maps. One-shot stdout
+goes to `/dev/null`, so it measures serialization and the
 write syscall but not another program decoding or consuming the stream.
 
 ## Method and target

@@ -32,14 +32,15 @@ int main() {
         const int simd = (rep + j) % 2;
         auto start = std::chrono::steady_clock::now();
         for (int it = 0; it < iterations; ++it) for (const auto& line : lines) {
-            fosu::HitObject h{};
             if (simd) {
-                uint32_t mask;
-                fosu::internal::fast_parse_prefix(line.data(), h, mask);
+                const auto prefix =
+                    fosu::internal::try_parse_hitobject_prefix_fast(line.data());
+                if (prefix) sink += static_cast<uint32_t>(prefix->value.time);
             } else {
-                fosu::internal::scalar_parse_prefix(line.data(), line.size(), h);
+                const auto prefix = fosu::internal::parse_hitobject_prefix_scalar(
+                    line.data(), line.size());
+                if (prefix) sink += static_cast<uint32_t>(prefix->value.time);
             }
-            sink += static_cast<uint32_t>(h.time);
         }
         const double ns = std::chrono::duration<double, std::nano>(
             std::chrono::steady_clock::now() - start).count();

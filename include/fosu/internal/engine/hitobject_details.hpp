@@ -1,4 +1,7 @@
 #pragma once
+
+// Hitobject kind classification and kind-specific trailing fields.
+#include <optional>
 #include <string_view>
 #include "prefix.hpp"
 
@@ -80,35 +83,81 @@ inline bool valid_edge_sets(std::string_view sets, int32_t slides) {
     return true;
 }
 
-// Circle precedence, omitted hold endpoints and spinner separators follow
-// ConvertHitObjectParser. Raw timestamps remain unshifted/unclamped.
-template <typename H>
-inline bool parse_object_tail(H& h, const char* p, const char* end,
-                              std::string_view& sample) {
-    if (!(h.type & 1) && (h.type & (8 | 128))) {
-        const bool hold = !(h.type & 8);
-        if (hold && (p == end || (p + 1 == end && *p == ','))) {
-            h.end_time = h.time;
-            sample = {};
-            return true;
-        }
-        if (p == end || *p != ',') [[unlikely]] return false;
-        double time;
-        const char* q = parse_osu_double(p + 1, end, time);
-        if (q == p + 1 || (q < end && *q != ',' && !(hold && *q == ':'))) [[unlikely]] return false;
-        h.end_time = time;
-        p = q;
-        if (hold && p < end && *p == ',') p = end;
-        else if (p < end) ++p;
-    } else if (p < end) ++p;
-    if (end - p == 8 && short_sample(p)) {
-        sample = {p, 8};
-        return true;
-    }
+enum class HitObjectKind {
+    Circle,
+    Slider,
+    Spinner,
+    Hold,
+    Invalid,
+};
+
+// A type value may contain several kind bits. The official decoder resolves
+// them in this order while leaving combo and colour-skip bits untouched.
+inline HitObjectKind classify_hitobject_kind(uint32_t type) {
+    if (type & 1) return HitObjectKind::Circle;
+    if (type & 2) return HitObjectKind::Slider;
+    if (type & 8) return HitObjectKind::Spinner;
+    if (type & 128) return HitObjectKind::Hold;
+    return HitObjectKind::Invalid;
+}
+
+inline std::optional<std::string_view> parse_hit_sample(
+    const char* p, const char* end, bool banks_only = false) {
+    if (end - p == 8 && short_sample(p)) return std::string_view{p, 8};
     const auto* comma = static_cast<const char*>(memchr(p, ',', end - p));
     const char* sample_end = comma ? comma : end;
-    sample = {p, static_cast<size_t>(sample_end - p)};
-    return valid_sample(sample);
+    const std::string_view sample{p, static_cast<size_t>(sample_end - p)};
+    if (!valid_sample(sample, banks_only)) return std::nullopt;
+    return sample;
+}
+
+struct CircleDetails {
+    std::string_view hit_sample;
+};
+
+inline std::optional<CircleDetails> parse_circle_details(
+    const char* p, const char* end) {
+    if (p == end) return CircleDetails{};
+    if (*p != ',') return std::nullopt;
+    const auto sample = parse_hit_sample(p + 1, end);
+    if (!sample) return std::nullopt;
+    return CircleDetails{*sample};
+}
+
+struct TimedHitObjectDetails {
+    double end_time;
+    std::string_view hit_sample;
+};
+
+// Raw timestamps remain unshifted and unclamped.
+inline std::optional<TimedHitObjectDetails> parse_spinner_details(
+    const char* p, const char* end) {
+    if (p == end || *p != ',') return std::nullopt;
+    double end_time;
+    const char* next = parse_osu_double(p + 1, end, end_time);
+    if (next == p + 1 || (next < end && *next != ',')) return std::nullopt;
+    const auto sample = parse_hit_sample(next < end ? next + 1 : end, end);
+    if (!sample) return std::nullopt;
+    return TimedHitObjectDetails{end_time, *sample};
+}
+
+// Omitted endpoints and the ':' separator follow ConvertHitObjectParser.
+inline std::optional<TimedHitObjectDetails> parse_hold_details(
+    double start_time, const char* p, const char* end) {
+    if (p == end || (p + 1 == end && *p == ','))
+        return TimedHitObjectDetails{start_time, {}};
+    if (*p != ',') return std::nullopt;
+    double end_time;
+    const char* next = parse_osu_double(p + 1, end, end_time);
+    if (next == p + 1 ||
+        (next < end && *next != ',' && *next != ':'))
+        return std::nullopt;
+    // The official decoder ignores a comma-separated value here; a hold's
+    // hit sample belongs after the ':' in objectParams.
+    if (next < end && *next == ',') return TimedHitObjectDetails{end_time, {}};
+    const auto sample = parse_hit_sample(next < end ? next + 1 : end, end);
+    if (!sample) return std::nullopt;
+    return TimedHitObjectDetails{end_time, *sample};
 }
 
 } // namespace fosu::internal

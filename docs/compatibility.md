@@ -50,15 +50,15 @@ the consumer. Input order and raw sample strings are retained.
 
 All entry points accept at most **64 MiB** of source bytes. Python rejects
 larger inputs with `ValueError`; the C ABI returns `FOSU_INVALID_ARGUMENT`.
-C++ `parse_into` and `make_padded` throw `std::length_error`; file helpers return
-failure with `errno=EFBIG`. The standalone executable exits with status 6.
+C++ `Parser::parse`, `Parser::parse_file` and `make_padded` throw
+`std::length_error`; `read_into` returns failure with `errno=EFBIG`. The
+standalone executable exits with status 6.
 Output arrays and temporary allocations can exceed the source size. This is
 not a strict memory or CPU quota, particularly for consumer geometry code.
 
-The C++ pointer interface requires a valid input allocation with 128 readable
-zero bytes after its logical end. File helpers, the C ABI and Python provide
-that storage. Passing arbitrary pointers or unpadded memory violates the C++
-contract. Hosted allocation failures become `std::bad_alloc`,
+The C++ parser copies pointer inputs into its working arena and appends the 128
+readable zero bytes required by its fast paths. Callers therefore need only
+provide the exact logical byte range. Hosted allocation failures become `std::bad_alloc`,
 `FOSU_OUT_OF_MEMORY`, or Python `MemoryError` as appropriate.
 
 The test suite checks malformed bytes with ASan, UBSan and differential fuzzing.

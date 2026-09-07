@@ -1,37 +1,41 @@
-#include "support/test.hpp"
 #include "support/equality.hpp"
+#include "support/test.hpp"
 
-static void test_reuse_shrinks_without_reallocating() {
-    auto initial = fosu::make_padded(
-        "[HitObjects]\n16,32,100,1,0\n32,64,200,1,0\n48,96,300,1,0\n");
-    auto replacement = fosu::make_padded("[HitObjects]\n80,160,400,1,2\n");
-    fosu::Beatmap bm;
-    fosu::parse_into(initial, bm);
-    const auto* allocation = bm.hit_objects.data();
-    const size_t capacity = bm.hit_objects.capacity();
-    fosu::parse_into(replacement, bm);
-    CHECK_EQ(bm.hit_objects.size(), 1u);
-    CHECK(bm.hit_objects.data() == allocation);
-    CHECK_EQ(bm.hit_objects.capacity(), capacity);
-    CHECK_EQ(canonical(bm), canonical(fosu::parse(replacement)));
+static void test_reparse_reuses_arena_memory() {
+    auto input = fosu::make_padded(
+        "[HitObjects]\n16,32,100,1,0\n32,64,200,1,0\n");
+    fosu::Parser parser;
+    const auto& first = require_parse(parser.parse(input));
+    const auto* allocation = first.hit_objects.data();
+
+    const auto& second = require_parse(parser.parse(input));
+    CHECK_EQ(second.hit_objects.size(), 2u);
+    CHECK(second.hit_objects.data() == allocation);
+    fosu::Parser expected;
+    CHECK_EQ(
+        canonical(second),
+        canonical(require_parse(expected.parse(input))));
 }
 
-static void test_reuse_grows_past_existing_capacity() {
-    auto initial = fosu::make_padded("[HitObjects]\n24,48,500,1,0\n");
-    fosu::Beatmap bm;
-    fosu::parse_into(initial, bm);
-    const size_t old_capacity = bm.hit_objects.capacity();
+static void test_reparse_accepts_larger_arrays() {
+    auto initial =
+        fosu::make_padded("[HitObjects]\n24,48,500,1,0\n");
     std::string text = "[HitObjects]\n";
-    for (size_t i = 0; i <= old_capacity; ++i)
+    for (size_t i = 0; i < 5000; ++i)
         text += "72,144,600,1,4\n";
     auto replacement = fosu::make_padded(text);
-    fosu::parse_into(replacement, bm);
-    CHECK_EQ(bm.hit_objects.size(), old_capacity + 1);
-    CHECK(bm.hit_objects.capacity() > old_capacity);
-    CHECK_EQ(canonical(bm), canonical(fosu::parse(replacement)));
+
+    fosu::Parser parser;
+    require_parse(parser.parse(initial));
+    const auto& beatmap = require_parse(parser.parse(replacement));
+    CHECK_EQ(beatmap.hit_objects.size(), 5000u);
+    fosu::Parser expected;
+    CHECK_EQ(
+        canonical(beatmap),
+        canonical(require_parse(expected.parse(replacement))));
 }
 
-static void test_reuse_clears_omitted_sections() {
+static void test_reparse_clears_omitted_sections() {
     auto initial = fosu::make_padded(
         "[General]\nAudioFilename:previous.mp3\nSampleSet:Soft\n"
         "[Editor]\nGridSize:16\n"
@@ -41,113 +45,54 @@ static void test_reuse_clears_omitted_sections() {
         "[TimingPoints]\n0,500\n"
         "[Colours]\nCombo1:0,128,255\n"
         "[HitObjects]\n64,96,700,2,0,B|128:192|192:96,1,200\n");
-    auto replacement = fosu::make_padded("[Metadata]\nTitle:Replacement title\n");
-    fosu::Beatmap bm;
-    fosu::parse_into(initial, bm);
-    CHECK(!bm.sliders.empty() && !bm.timing_points.empty());
-    fosu::parse_into(replacement, bm);
-    CHECK(bm.title == "Replacement title");
-    CHECK_EQ(bm.beatmap_id, -1);
-    CHECK(bm.audio_filename.empty() && bm.background.empty());
-    CHECK(bm.sample_set == "Normal");
-    CHECK_EQ(bm.grid_size, 4);
-    CHECK_EQ(bm.od, 5);
-    CHECK_EQ(bm.ar, 5);
-    CHECK(bm.breaks.empty() && bm.combo_colours.empty());
-    CHECK(bm.timing_points.empty() && bm.hit_objects.empty());
-    CHECK(bm.sliders.empty() && bm.slider_points.empty());
-    CHECK_EQ(canonical(bm), canonical(fosu::parse(replacement)));
+    auto replacement =
+        fosu::make_padded("[Metadata]\nTitle:Replacement title\n");
+    fosu::Parser parser;
+    const auto& initial_map = require_parse(parser.parse(initial));
+    CHECK(!initial_map.sliders.empty() &&
+          !initial_map.timing_points.empty());
+
+    const auto& beatmap = require_parse(parser.parse(replacement));
+    CHECK(beatmap.title == "Replacement title");
+    CHECK_EQ(beatmap.beatmap_id, -1);
+    CHECK(beatmap.audio_filename.empty() && beatmap.background.empty());
+    CHECK(beatmap.sample_set == "Normal");
+    CHECK_EQ(beatmap.grid_size, 4);
+    CHECK_EQ(beatmap.od, 5);
+    CHECK_EQ(beatmap.ar, 5);
+    CHECK(beatmap.breaks.empty() && beatmap.combo_colours.empty());
+    CHECK(beatmap.timing_points.empty() && beatmap.hit_objects.empty());
+    CHECK(beatmap.sliders.empty() && beatmap.slider_points.empty());
+    fosu::Parser expected;
+    CHECK_EQ(
+        canonical(beatmap),
+        canonical(require_parse(expected.parse(replacement))));
 }
 
-static void test_reuse_resets_empty_document() {
+static void test_empty_reparse_resets_defaults() {
     auto initial = fosu::make_padded(
         "[General]\nStackLeniency:0.2\nSampleSet:Drum\n"
         "[Metadata]\nTitle:Before empty input\n"
         "[HitObjects]\ninvalid\n96,192,800,1,0\n");
     auto empty = fosu::make_padded("");
-    fosu::Beatmap bm;
-    fosu::parse_into(initial, bm);
-    CHECK_EQ(bm.stats.malformed_lines, 1u);
-    fosu::parse_into(empty, bm);
-    CHECK(bm.title.empty() && bm.hit_objects.empty());
-    CHECK_EQ(bm.stats.malformed_lines, 0u);
-    CHECK_EQ(bm.stats.fast_path_lines, 0u);
-    CHECK_EQ(bm.stats.slow_path_lines, 0u);
-    CHECK(std::abs(bm.stack_leniency - 0.7) < 1e-12);
-    CHECK(bm.sample_set == "Normal");
-    CHECK_EQ(canonical(bm), canonical(fosu::parse(empty)));
+    fosu::Parser parser;
+    const auto& initial_map = require_parse(parser.parse(initial));
+    CHECK_EQ(initial_map.stats.malformed_lines, 1u);
+
+    const auto& beatmap = require_parse(parser.parse(empty));
+    CHECK(beatmap.title.empty() && beatmap.hit_objects.empty());
+    CHECK_EQ(beatmap.stats.malformed_lines, 0u);
+    CHECK_EQ(beatmap.stats.fast_path_lines, 0u);
+    CHECK_EQ(beatmap.stats.slow_path_lines, 0u);
+    CHECK(std::abs(beatmap.stack_leniency - 0.7) < 1e-12);
+    CHECK(beatmap.sample_set == "Normal");
+    fosu::Parser expected;
+    CHECK_EQ(
+        canonical(beatmap),
+        canonical(require_parse(expected.parse(empty))));
 }
 
-void test_read_into_reuse() {
-    printf("read_into reuse\n");
-    char path[] = "/tmp/fosu_read_into_XXXXXX";
-    const int fd = mkstemp(path);
-    CHECK(fd >= 0);
-    const std::string big(10000, 'A');
-    const std::string little(100, 'B');
-    CHECK_EQ(write(fd, big.data(), big.size()),
-             static_cast<ssize_t>(big.size()));
-    close(fd);
-
-    fosu::FileBuffer buf;
-    CHECK(fosu::read_into(path, buf));
-    CHECK_EQ(buf.size, big.size());
-    CHECK(memcmp(buf.data.get(), big.data(), big.size()) == 0);
-    const char* alloc0 = buf.data.get();
-    const size_t cap0 = buf.capacity;
-
-    FILE* f = fopen(path, "wb");
-    fwrite(little.data(), 1, little.size(), f);
-    fclose(f);
-
-    CHECK(fosu::read_into(path, buf));
-    CHECK_EQ(buf.size, little.size());
-    CHECK(buf.data.get() == alloc0);  // allocation reused
-    CHECK_EQ(buf.capacity, cap0);
-    CHECK(memcmp(buf.data.get(), little.data(), little.size()) == 0);
-    bool pad_zero = true;
-    for (size_t i = 0; i < fosu::kBufferPadding; ++i)
-        pad_zero &= buf.data[buf.size + i] == 0;
-    CHECK(pad_zero);
-
-    unlink(path);
-    CHECK(!fosu::read_into("/nonexistent/fosu-no-such-file", buf));
-}
-
-template <typename T>
-inline bool vector_layout_ok(const std::vector<T>& v) {
-    const T* raw[3];
-    static_assert(sizeof(v) == sizeof(raw));
-    const void* const object = &v;
-    memcpy(raw, object, sizeof raw);
-    return raw[0] == v.data() && raw[1] == v.data() + v.size() &&
-           raw[2] == v.data() + v.capacity();
-}
-// Instantiate layout checks only when the implementation uses that layout;
-// debug standard libraries may give vector a different representation.
-template <typename T>
-static void test_vector_layout() {
-    if constexpr (fosu::internal::kDirectVectorWrites) {
-        std::vector<T> records;
-        records.reserve(9);
-        records.resize(3);
-        CHECK(vector_layout_ok(records));
-        fosu::internal::set_vector_size(records, 2);
-        CHECK_EQ(records.size(), (size_t)2);
-        CHECK_EQ(records.capacity(), (size_t)9);
-    }
-}
-
-template <typename Map>
-static void test_vector_storage() {
-    test_vector_layout<typename Map::HitObject>();
-    test_vector_layout<typename Map::Slider>();
-    test_vector_layout<typename Map::SliderPoint>();
-    test_vector_layout<typename Map::TimingPoint>();
-
-    // Short lines exceed the initial object/timing estimates. Slider-only
-    // input separately grows both slider pools. Repeated headers append to
-    // each pool, while a subsequent parse_into clears it for reuse.
+static void test_large_arena_arrays() {
     std::string circles = "[HitObjects]\n";
     std::string sliders = "[HitObjects]\n";
     std::string timing = "[TimingPoints]\n";
@@ -159,8 +104,6 @@ static void test_vector_storage() {
         }
         circles += "1,2,3,1,0\n";
         if (i == 0 || i == 1500) {
-            // A broken point list drops its points; a later failure keeps
-            // completed points as orphans but publishes no slider/object.
             sliders += "1,2,3,2,0,B|1:2|bad,1,10\n";
             sliders += "1,2,3,2,0,B|7:8|9:10,9001,10\n";
         }
@@ -170,72 +113,259 @@ static void test_vector_storage() {
     auto circle_input = fosu::make_padded(circles);
     auto slider_input = fosu::make_padded(sliders);
     auto timing_input = fosu::make_padded(timing);
-    auto empty_section = fosu::make_padded("[HitObjects]\n[HitObjects]\n");
+
     for (bool simd : {false, true}) {
-        Map bm;
-        fosu::parse_into(empty_section, bm, {.use_simd = simd});
-        CHECK(bm.hit_objects.empty() && bm.slider_points.empty());
-        fosu::parse_into(circle_input, bm, {.use_simd = simd});
-        CHECK_EQ(bm.hit_objects.size(), (size_t)3000);
-        CHECK(bm.sliders.empty() && bm.slider_points.empty());
-        CHECK_EQ(bm.hit_objects.back().slider, Map::HitObject::kNoSlider);
-        CHECK(bm.resolve(bm.hit_objects.back().hit_sample).empty());
+        fosu::Parser parser(simd ? fosu::internal::native_engine : fosu::internal::scalar_engine);
+        const auto& circles_map = require_parse(parser.parse(
+            circle_input));
+        CHECK_EQ(circles_map.hit_objects.size(), 3000u);
+        CHECK(circles_map.sliders.empty() &&
+              circles_map.slider_points.empty());
+        CHECK_EQ(
+            circles_map.hit_objects.back().slider,
+            fosu::HitObject::kNoSlider);
+        CHECK(circles_map.hit_objects.back().hit_sample.empty());
 
-        fosu::parse_into(slider_input, bm, {.use_simd = simd});
-        CHECK_EQ(bm.hit_objects.size(), (size_t)3000);
-        CHECK_EQ(bm.sliders.size(), (size_t)3000);
-        CHECK_EQ(bm.slider_points.size(), (size_t)9004);
-        CHECK_EQ(bm.stats.malformed_lines, 4u);
+        const auto& sliders_map = require_parse(parser.parse(
+            slider_input));
+        CHECK_EQ(sliders_map.hit_objects.size(), 3000u);
+        CHECK_EQ(sliders_map.sliders.size(), 3000u);
+        CHECK_EQ(sliders_map.slider_points.size(), 9004u);
+        CHECK_EQ(sliders_map.stats.malformed_lines, 4u);
         for (size_t i = 0; i < 3000; ++i) {
-            const auto& s = bm.sliders[i];
-            CHECK_EQ(bm.hit_objects[i].slider, i);
-            CHECK_EQ(s.point_begin, 3 * i + (i < 1500 ? 2 : 4));
-            CHECK_EQ(s.point_count, 3u);
-            CHECK_EQ(bm.slider_points[s.point_begin].x, 1);
-            CHECK_EQ(bm.slider_points[s.point_begin + 2].y, 6);
-        }
-        for (size_t index : {size_t(0), size_t(4502)}) {
-            CHECK_EQ(bm.slider_points[index].x, 7);
-            CHECK_EQ(bm.slider_points[index + 1].y, 10);
+            const auto& slider = sliders_map.sliders[i];
+            CHECK_EQ(sliders_map.hit_objects[i].slider, i);
+            CHECK_EQ(slider.point_begin, 3 * i + (i < 1500 ? 2 : 4));
+            CHECK_EQ(slider.point_count, 3u);
+            CHECK_EQ(sliders_map.slider_points[slider.point_begin].x, 1);
+            CHECK_EQ(
+                sliders_map.slider_points[slider.point_begin + 2].y, 6);
         }
 
-        fosu::parse_into(timing_input, bm, {.use_simd = simd});
-        CHECK_EQ(bm.timing_points.size(), (size_t)3000);
-        CHECK_EQ(bm.timing_points.back().beat_length, 500);
-        CHECK(bm.hit_objects.empty() && bm.sliders.empty() && bm.slider_points.empty());
-        fosu::parse_into(circle_input, bm, {.use_simd = simd});
-        CHECK_EQ(bm.hit_objects.size(), (size_t)3000);
-        CHECK(bm.timing_points.empty() && bm.sliders.empty() && bm.slider_points.empty());
-        CHECK_EQ(bm.stats.malformed_lines, 0u);
+        const auto& timing_map = require_parse(parser.parse(
+            timing_input));
+        CHECK_EQ(timing_map.timing_points.size(), 3000u);
+        CHECK_EQ(timing_map.timing_points.back().beat_length, 500);
+        CHECK(timing_map.hit_objects.empty());
     }
 }
 
-static void test_fractional_reuse() {
+static void test_rejected_slider_points() {
+    struct Case {
+        const char* tail;
+        size_t retained_points;
+    };
+    const Case cases[] = {
+        {"B|7:8|bad,1,10", 0},
+        {"B|7:8|9:10", 2},
+        {"B|7:8|9:10,bad,10", 2},
+        {"B|7:8|9:10,1,131073", 2},
+        {"B|7:8|9:10,1,10,,/:0", 2},
+        {"B|7:8|9:10,1,10,,,/:0", 2},
+    };
+    for (const auto& test : cases) {
+        auto input = fosu::make_padded(
+            std::string("[HitObjects]\n1,2,3,2,0,") + test.tail +
+            "\n1,2,4,2,0,L|11:12,1,10\n");
+        for (bool simd : {false, true}) {
+            fosu::Parser parser(simd ? fosu::internal::native_engine : fosu::internal::scalar_engine);
+            const auto& beatmap = require_parse(parser.parse(
+                input));
+            CHECK_EQ(beatmap.stats.malformed_lines, 1u);
+            CHECK_EQ(beatmap.hit_objects.size(), 1u);
+            CHECK_EQ(beatmap.sliders.size(), 1u);
+            CHECK_EQ(
+                beatmap.slider_points.size(), test.retained_points + 1);
+            CHECK_EQ(
+                beatmap.sliders[0].point_begin, test.retained_points);
+            CHECK_EQ(
+                beatmap.slider_points[test.retained_points].x, 11);
+        }
+    }
+}
+
+static void test_copy_owns_all_data() {
+    fosu::Arena* program_arena = fosu::arena_alloc();
+    CHECK(program_arena != nullptr);
+    fosu::Beatmap owned{};
+    std::string expected;
+    {
+        auto input = fosu::make_padded(
+            "[General]\nAudioFilename:song.mp3\n"
+            "[Metadata]\nTitle:Owned title\nArtist:Owned artist\n"
+            "[Events]\n0,0,\"background.jpg\",0,0\n2,10,20\n"
+            "[TimingPoints]\n0,500\n"
+            "[Colours]\nCombo1:1,2,3\n"
+            "[HitObjects]\n"
+            "1,2,3,1,0,1:2:3:4:sample.wav\n"
+            "1,2,4,2,0,B|7:8|9:10,1,20,2|0,1:2|3:4,"
+            "1:2:3:4:slider.wav\n");
+        fosu::Parser parser;
+        const auto& parsed = require_parse(parser.parse(input));
+        expected = canonical(parsed);
+        auto copied = parsed.copy(*program_arena);
+        CHECK(copied);
+        if (copied) owned = copied.value();
+        owned.hit_objects[0].x = 42;
+        CHECK_EQ(parsed.hit_objects[0].x, 1);
+        owned.hit_objects[0].x = 1;
+        std::memset(input.data.get(), 'x', input.size);
+        CHECK_EQ(canonical(parsed), expected);
+        auto replacement = fosu::make_padded(
+            "[Metadata]\nTitle:Replacement\n[HitObjects]\n1,2,5,1,0\n");
+        require_parse(parser.parse(replacement));
+    }
+    CHECK_EQ(canonical(owned), expected);
+    fosu::arena_release(program_arena);
+}
+
+static void test_failed_parse_resets_and_parser_remains_reusable() {
+    fosu::Parser parser;
     auto input = fosu::make_padded(
-        "[Events]\n2,1.25,2.75\n[HitObjects]\n1,2,3.5,12,0,5.75\n");
-    fosu::Beatmap reused;
-    fosu::parse_into(input, reused);
-    const auto expected = canonical(fosu::parse(input));
-    CHECK_EQ(canonical(reused), expected);
-    // The comparator must see changes within an integer millisecond.
-    reused.breaks[0].start += 0.125;
-    CHECK(canonical(reused) != expected);
-    fosu::parse_into(input, reused);
-    reused.hit_objects[0].time += 0.125;
-    CHECK(canonical(reused) != expected);
-    fosu::parse_into(input, reused);
-    reused.hit_objects[0].end_time += 0.125;
-    CHECK(canonical(reused) != expected);
+        "[Metadata]\nTitle:Before failure\n");
+    CHECK(parser.parse(input));
+
+    auto failed = parser.parse(nullptr, 1);
+    CHECK(!failed);
+    CHECK_EQ(failed.error().code, fosu::ErrorCode::InvalidInput);
+    const auto storage = fosu::internal::parser_storage(parser);
+    CHECK(storage.input == nullptr);
+    CHECK_EQ(fosu::arena_pos(storage.arena), fosu::kArenaHeaderSize);
+
+    const auto& recovered = require_parse(parser.parse(input));
+    CHECK(recovered.title == "Before failure");
+}
+
+static void test_failed_copy_rewinds_destination() {
+    std::string text = "[HitObjects]\n";
+    for (size_t i = 0; i < 2000; ++i)
+        text += "1,2,3,1,0,1:2:3:4:sample.wav\n";
+    auto input = fosu::make_padded(text);
+    fosu::Parser parser;
+    const auto& beatmap = require_parse(parser.parse(input));
+
+    const size_t page_size = fosu::internal::os_page_size();
+    fosu::Arena* destination = fosu::arena_alloc({
+        .reserve_size = page_size,
+        .commit_size = page_size,
+        .flags = 0,
+    });
+    CHECK(destination != nullptr);
+    auto* existing = fosu::arena_push_array<uint32_t>(destination, 1);
+    CHECK(existing != nullptr);
+    *existing = 0x12345678;
+    const size_t checkpoint = fosu::arena_pos(destination);
+
+    auto copied = beatmap.copy(*destination);
+    CHECK(!copied);
+    CHECK_EQ(copied.error().code, fosu::ErrorCode::AllocationFailure);
+    CHECK_EQ(fosu::arena_pos(destination), checkpoint);
+    CHECK_EQ(*existing, 0x12345678u);
+    fosu::arena_release(destination);
+}
+
+static void test_arena_interface() {
+    fosu::Arena* arena = fosu::arena_alloc({
+        .reserve_size = 64u << 10,
+        .commit_size = 4u << 10,
+        .flags = fosu::ArenaFlagChain,
+    });
+    CHECK(arena != nullptr);
+    CHECK(reinterpret_cast<uintptr_t>(arena) % fosu::kCacheLineSize == 0);
+    const size_t initial = fosu::arena_pos(arena);
+    auto* first = fosu::arena_push_array<uint32_t>(arena, 16);
+    CHECK(first != nullptr);
+    const fosu::TempArena temp = fosu::temp_begin(arena);
+    CHECK(fosu::arena_push(
+              arena, 96u << 10, alignof(uint64_t)) != nullptr);
+    CHECK(arena->current != arena);
+    fosu::temp_end(temp);
+    CHECK(arena->current == arena);
+    CHECK_EQ(fosu::arena_pos(arena), temp.pos);
+    fosu::arena_clear(arena);
+    CHECK_EQ(fosu::arena_pos(arena), initial);
+    fosu::arena_release(arena);
+
+    fosu::Arena* pooled = fosu::internal::acquire_parser_arena();
+    CHECK(pooled != nullptr);
+    CHECK(fosu::arena_push(
+              pooled, 1024, alignof(uint64_t)) != nullptr);
+    fosu::internal::recycle_parser_arena(pooled);
+    fosu::Arena* reused = fosu::internal::acquire_parser_arena();
+    CHECK(reused == pooled);
+    CHECK_EQ(fosu::arena_pos(reused), fosu::kArenaHeaderSize);
+    fosu::internal::recycle_parser_arena(reused);
+}
+
+void test_read_into_reuse() {
+    char path[] = "/tmp/fosu_read_into_XXXXXX";
+    const int fd = mkstemp(path);
+    CHECK(fd >= 0);
+    const std::string big(10000, 'A');
+    const std::string little(100, 'B');
+    CHECK_EQ(
+        write(fd, big.data(), big.size()),
+        static_cast<ssize_t>(big.size()));
+    close(fd);
+
+    fosu::FileBuffer buffer;
+    CHECK(fosu::read_into(path, buffer));
+    const char* allocation = buffer.data.get();
+    const size_t capacity = buffer.capacity;
+
+    FILE* file = fopen(path, "wb");
+    fwrite(little.data(), 1, little.size(), file);
+    fclose(file);
+    CHECK(fosu::read_into(path, buffer));
+    CHECK(buffer.data.get() == allocation);
+    CHECK_EQ(buffer.capacity, capacity);
+    CHECK(memcmp(buffer.data.get(), little.data(), little.size()) == 0);
+    unlink(path);
+}
+
+static void test_parser_prepares_engine_input_and_output() {
+    static int calls = 0;
+    const fosu::ParsingEngine engine{
+        fosu::EngineKind::Scalar,
+        [](std::span<const char> input, fosu::Beatmap& beatmap,
+           fosu::ParseOptions options) noexcept {
+            ++calls;
+            CHECK_EQ(options.sections, fosu::kSectionHitObjects);
+            CHECK_EQ(std::string_view(input.data(), input.size()), "1,2,3,1,0");
+            for (size_t i = 0; i < fosu::kBufferPadding; ++i)
+                CHECK_EQ(input.data()[input.size() + i], '\0');
+            CHECK(!beatmap.hit_objects.empty());
+            CHECK(beatmap.timing_points.empty());
+            CHECK_EQ(beatmap.sample_set, "Normal");
+            beatmap.hit_objects[0] = {.x = 42};
+            beatmap.hit_objects = beatmap.hit_objects.first(1);
+            beatmap.sliders = {};
+            beatmap.slider_points = {};
+        },
+    };
+    fosu::Parser parser(engine);
+    std::string input = "1,2,3,1,0";
+    const auto& beatmap = require_parse(parser.parse(
+        std::span<const char>(input), {.sections = fosu::kSectionHitObjects}));
+    CHECK_EQ(beatmap.hit_objects.size(), 1u);
+    CHECK_EQ(beatmap.hit_objects[0].x, 42);
+    CHECK(!parser.parse(nullptr, 1));
+    CHECK(!parser.parse(input.data(), input.size(), {.sections = 1}));
+    CHECK_EQ(calls, 1);
 }
 
 int main() {
-    test_vector_storage<fosu::Beatmap>();
-    test_vector_storage<fosu::OffsetBeatmap>();
-    test_reuse_shrinks_without_reallocating();
-    test_reuse_grows_past_existing_capacity();
-    test_reuse_clears_omitted_sections();
-    test_reuse_resets_empty_document();
+    test_parser_prepares_engine_input_and_output();
+    test_reparse_reuses_arena_memory();
+    test_reparse_accepts_larger_arrays();
+    test_reparse_clears_omitted_sections();
+    test_empty_reparse_resets_defaults();
+    test_large_arena_arrays();
+    test_rejected_slider_points();
+    test_copy_owns_all_data();
+    test_failed_parse_resets_and_parser_remains_reusable();
+    test_failed_copy_rewinds_destination();
+    test_arena_interface();
     test_read_into_reuse();
-    test_fractional_reuse();
     return test_result();
 }

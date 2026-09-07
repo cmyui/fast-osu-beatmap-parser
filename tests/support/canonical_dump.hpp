@@ -46,7 +46,6 @@
 #include <cstring>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #include <fosu/beatmap.hpp>
 
@@ -54,6 +53,7 @@ namespace fosu_dump {
 
 struct Out {
     std::string& s;
+    size_t size() const { return s.size(); }
     void raw(const void* p, size_t n) { s.append(static_cast<const char*>(p), n); }
     void u8(uint8_t v) { s.push_back(static_cast<char>(v)); }
     void i32(int32_t v) { raw(&v, 4); }
@@ -72,9 +72,8 @@ inline std::string_view resolve(const Map& bm, String s) {
     else return s;
 }
 
-template <typename Map>
-inline void dump(const Map& bm, std::string& out) {
-    Out o{out};
+template <typename Map, typename Output>
+inline void dump_to(const Map& bm, Output& o) {
     o.raw("FOSUDMP5", 8);
     for (const auto& h : bm.hit_objects) {
         const auto sample = resolve(bm, h.hit_sample);
@@ -103,7 +102,7 @@ inline void dump(const Map& bm, std::string& out) {
         }
         o.raw(sample.data(), sample.size());
     }
-    const size_t trailer_begin = out.size();
+    const size_t trailer_begin = o.size();
     o.raw("TRLR", 4);
     o.u32(static_cast<uint32_t>(bm.hit_objects.size()));
     o.u32(static_cast<uint32_t>(bm.sliders.size()));
@@ -170,19 +169,29 @@ inline void dump(const Map& bm, std::string& out) {
     o.u32(bm.stats.storyboard_lines);
     o.u32(bm.stats.fast_path_lines);
     o.u32(bm.stats.slow_path_lines);
-    std::vector<char> covered(bm.slider_points.size(), 0);
-    for (const auto& s : bm.sliders)
-        for (uint32_t i = 0; i < s.point_count; ++i) covered[s.point_begin + i] = 1;
-    uint32_t n_orphans = 0;
-    for (char c : covered) n_orphans += !c;
-    o.u32(n_orphans);
-    for (size_t i = 0; i < covered.size(); ++i)
-        if (!covered[i]) {
-            o.u32(static_cast<uint32_t>(i));
-            o.i32(bm.slider_points[i].x);
-            o.i32(bm.slider_points[i].y);
-        }
-    o.i64(static_cast<int64_t>(out.size() - trailer_begin));
+    // Parser-produced slider ranges are disjoint and in point-pool order.
+    size_t covered = 0;
+    for (const auto& slider : bm.sliders) covered += slider.point_count;
+    o.u32(static_cast<uint32_t>(bm.slider_points.size() - covered));
+    size_t point = 0;
+    const auto orphan = [&] {
+        o.u32(static_cast<uint32_t>(point));
+        o.i32(bm.slider_points[point].x);
+        o.i32(bm.slider_points[point].y);
+        ++point;
+    };
+    for (const auto& slider : bm.sliders) {
+        while (point < slider.point_begin) orphan();
+        point += slider.point_count;
+    }
+    while (point < bm.slider_points.size()) orphan();
+    o.i64(static_cast<int64_t>(o.size() - trailer_begin));
+}
+
+template <typename Map>
+inline void dump(const Map& bm, std::string& out) {
+    Out output{out};
+    dump_to(bm, output);
 }
 
 }  // namespace fosu_dump

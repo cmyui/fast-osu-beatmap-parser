@@ -1,4 +1,5 @@
 #pragma once
+#include "../../beatmap.hpp"
 #include "text.hpp"
 #include "metadata.hpp"
 
@@ -21,8 +22,9 @@ inline void parse_difficulty_line(Map& bm, const char* p, size_t len, bool& ar_s
     ar_specified |= parse_kv_line<parse_double>(bm, kDifficulty, p, len, &bm.stats.malformed_lines);
 }
 
-template <typename Map>
-inline void parse_colour_kv(Map& bm, std::string_view k, std::string_view v) {
+inline void parse_colour_kv(
+    Beatmap& bm, size_t& colour_count, std::string_view k,
+    std::string_view v) {
     if (k.substr(0, 5) != "Combo") return;
     const char* p = v.data();
     const char* end = p + v.size();
@@ -39,7 +41,7 @@ inline void parse_colour_kv(Map& bm, std::string_view k, std::string_view v) {
         }
         rgb = (rgb << 8) | (static_cast<uint32_t>(c) & 0xFF);
     }
-    bm.combo_colours.push_back(rgb);
+    bm.combo_colours[colour_count++] = rgb;
 }
 
 }  // namespace fosu::internal

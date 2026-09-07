@@ -9,3 +9,4 @@ python/fosu/*.dylib
 .mypy_cache/
 tests/reference/official/obj/
 tests/reference/official/bin/
+*.osu
