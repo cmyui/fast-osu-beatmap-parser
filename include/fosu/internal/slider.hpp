@@ -24,7 +24,7 @@ inline const char* parse_coord(const char* p, const char* end, int32_t& out) {
     return q;
 }
 
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
 // Slider length on the editor-emitted shape: up to 8 integer digits, an
 // optional '.', up to 13 fraction digits, at most 18 digits in all. One
 // 32-byte load classifies the whole number; the mantissa is assembled from
@@ -35,10 +35,9 @@ inline const char* parse_coord(const char* p, const char* end, int32_t& out) {
 // The line terminator and buffer padding are non-digits,
 // so the digit run can never cross the end of the line.
 inline const char* parse_slider_length(const char* p, double& out, const HitConsts& k) {
-    const __m256i v =
-        _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
+    const Bytes32 v = load32(p);
     const uint64_t nd = nondigit_mask32(v, k.bias, k.thr);
-    const auto il = static_cast<uint32_t>(_tzcnt_u64(nd));  // 1..8 if valid
+    const auto il = static_cast<uint32_t>(trailing_zeros(nd));  // 1..8 if valid
     if (il - 1 > 7) return nullptr;
     // Integer and fractional lengths alternate within a map, so the dot and
     // fraction handling is computed unconditionally: a zero-length fraction
@@ -48,7 +47,7 @@ inline const char* parse_slider_length(const char* p, double& out, const HitCons
     // with an unconditional divide measured about 7% slower on the corpus
     // when the input is cache-resident.
     const uint32_t fl =
-        has_dot ? static_cast<uint32_t>(_tzcnt_u64(nd >> (il + 1))) : 0;
+        has_dot ? static_cast<uint32_t>(trailing_zeros(nd >> (il + 1))) : 0;
     if (fl > 13 || il + fl > 18) return nullptr;
     const uint32_t fl1 = fl <= 8 ? fl : 8;
     const uint32_t fl2 = fl - fl1;
@@ -92,6 +91,7 @@ inline constexpr auto kPointShuf = make_point_shuf();
 
 // `src` starts at a '|'; xl/yl are the digit counts (masked into range, so a
 // speculative call on an invalid shape reads a valid table entry).
+#if FOSU_SIMD_X86
 inline __m128i convert_point(__m128i src, uint32_t xl, uint32_t yl, const HitConsts& k) {
     const __m128i shuf = _mm_load_si128(reinterpret_cast<const __m128i*>(
         kPointShuf[((xl - 1) & 3) * 4 + ((yl - 1) & 3)].b));
@@ -99,6 +99,14 @@ inline __m128i convert_point(__m128i src, uint32_t xl, uint32_t yl, const HitCon
         _mm_shuffle_epi8(_mm_sub_epi8(src, _mm256_castsi256_si128(k.zero)), shuf);
     return _mm_madd_epi16(_mm_maddubs_epi16(placed, k.pair_weights), k.word_weights);
 }
+
+#else
+inline uint32x4_t convert_point(uint8x16_t src, uint32_t xl, uint32_t yl, const HitConsts& k) {
+    const auto* shuf = reinterpret_cast<const uint8_t*>(
+        kPointShuf[((xl - 1) & 3) * 4 + ((yl - 1) & 3)].b);
+    return decimal_groups(vqtbl1q_u8(vsubq_u8(src, k.zero), vld1q_u8(shuf)));
+}
+#endif
 
 // Up to two editor-shaped points ("|x:y", 1..4 digits each) from one 32-byte
 // window, with no data-dependent loop exit: both are converted speculatively
@@ -110,24 +118,24 @@ inline __m128i convert_point(__m128i src, uint32_t xl, uint32_t yl, const HitCon
 // points at `w`.
 template <typename Point>
 inline uint32_t parse_point_pair(const char*& p, Point* w, const HitConsts& k) {
-    const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
+    const Bytes32 v = load32(p);
     const uint32_t nd = nondigit_mask32(v, k.bias, k.thr);
-    const auto colon = static_cast<uint32_t>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, k.colon)));
-    const auto pipe = static_cast<uint32_t>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, k.pipe)));
-    const auto comma = static_cast<uint32_t>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, k.comma)));
+    const auto colon = equal_mask32(v, k.colon);
+    const auto pipe = equal_mask32(v, k.pipe);
+    const auto comma = equal_mask32(v, k.comma);
     const uint32_t sep = pipe | comma;
     // Lengths are masked to 7 before feeding further shifts so every shift
     // count stays below the operand width on any byte pattern.
-    const uint32_t xl1 = _tzcnt_u32(nd >> 1);
+    const uint32_t xl1 = trailing_zeros(nd >> 1);
     const uint32_t c1 = xl1 & 7;
-    const uint32_t yl1 = _tzcnt_u32(nd >> (2 + c1));
+    const uint32_t yl1 = trailing_zeros(nd >> (2 + c1));
     const uint32_t d1 = yl1 & 7;
     const uint32_t end1 = 2 + c1 + d1;  // <= 16
     const bool ok1 = (pipe & 1) & (((xl1 - 1) | (yl1 - 1)) <= 3) &
                      ((colon >> (1 + c1)) & 1) & ((sep >> end1) & 1);
-    const uint32_t xl2 = _tzcnt_u32(nd >> (end1 + 1));
+    const uint32_t xl2 = trailing_zeros(nd >> (end1 + 1));
     const uint32_t c2 = xl2 & 7;
-    const uint32_t yl2 = _tzcnt_u32(nd >> (end1 + 2 + c2));
+    const uint32_t yl2 = trailing_zeros(nd >> (end1 + 2 + c2));
     const uint32_t d2 = yl2 & 7;
     const uint32_t end2 = end1 + 2 + c2 + d2;  // <= 32
     const bool ok2 = ((pipe >> end1) & 1) & (((xl2 - 1) | (yl2 - 1)) <= 3) &
@@ -135,11 +143,17 @@ inline uint32_t parse_point_pair(const char*& p, Point* w, const HitConsts& k) {
                      ((static_cast<uint64_t>(sep) >> end2) & 1);
     if (!ok1) return 0;
     static_assert(sizeof(Point) == 8 && offsetof(Point, x) == 0 && offsetof(Point, y) == 4);
+#if FOSU_SIMD_X86
     _mm_storel_epi64(reinterpret_cast<__m128i*>(w),
                      convert_point(_mm256_castsi256_si128(v), c1, d1, k));
     _mm_storel_epi64(reinterpret_cast<__m128i*>(w + 1),
                      convert_point(_mm_loadu_si128(reinterpret_cast<const __m128i*>(p + end1)),
                                    c2, d2, k));
+#else
+    vst1_u32(reinterpret_cast<uint32_t*>(w), vget_low_u32(convert_point(v.val[0], c1, d1, k)));
+    vst1_u32(reinterpret_cast<uint32_t*>(w + 1), vget_low_u32(convert_point(
+        vld1q_u8(reinterpret_cast<const uint8_t*>(p + end1)), c2, d2, k)));
+#endif
     p += ok2 ? end2 : end1;
     return 1 + ok2;
 }
@@ -151,12 +165,13 @@ inline uint32_t parse_point_pair(const char*& p, Point* w, const HitConsts& k) {
 template <typename Point>
 inline bool parse_slider_points(const char*& p, const char* end, Point*& w,
                                 [[maybe_unused]] const HitConsts& k) {
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
     w += parse_point_pair(p, w, k);
     // Third and later points (long Bezier sliders): one 16-byte load per
     // point classifies a whole pair. Anything else (signs, longer values,
     // empty fields) leaves the loop for the general one.
     while (*p == '|') {  // the byte at `end` is a line terminator, never '|'
+#if FOSU_SIMD_X86
         const __m128i v =
             _mm_loadu_si128(reinterpret_cast<const __m128i*>(p));
         const __m128i biased = _mm_add_epi8(v, _mm256_castsi256_si128(k.bias));
@@ -164,13 +179,22 @@ inline bool parse_slider_points(const char*& p, const char* end, Point*& w,
             _mm_cmpgt_epi8(biased, _mm256_castsi256_si128(k.thr))));
         const auto colon = static_cast<uint32_t>(_mm_movemask_epi8(
             _mm_cmpeq_epi8(v, _mm256_castsi256_si128(k.colon))));
-        const uint32_t xl = _tzcnt_u32(nd >> 1);       // 31 when all digits
+#else
+        const auto v = vld1q_u8(reinterpret_cast<const uint8_t*>(p));
+        const auto nd = nondigit_mask16(v);
+        const auto colon = byte_mask16(vceqq_u8(v, k.colon));
+#endif
+        const uint32_t xl = trailing_zeros(nd >> 1);       // 32 if no delimiter remains
         const uint32_t c = xl & 7;
-        const uint32_t yl = _tzcnt_u32(nd >> (2 + c));  // shift <= 9
+        const uint32_t yl = trailing_zeros(nd >> (2 + c));  // shift <= 9
         if (((xl - 1) | (yl - 1)) > 3 || !((colon >> (1 + c)) & 1)) break;
         const char after_y = p[2 + xl + yl];
         if (after_y != '|' && after_y != ',') break;
+#if FOSU_SIMD_X86
         _mm_storel_epi64(reinterpret_cast<__m128i*>(w), convert_point(v, xl, yl, k));
+#else
+        vst1_u32(reinterpret_cast<uint32_t*>(w), vget_low_u32(convert_point(v, xl, yl, k)));
+#endif
         ++w;
         p += 2 + xl + yl;
     }

@@ -15,7 +15,7 @@ uint64_t rng() {
 }
 
 int main() {
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
     std::vector<std::string> lines;
     char buf[96];
     for (int i = 0; i < 4096; ++i) {
@@ -45,9 +45,9 @@ int main() {
             std::chrono::steady_clock::now() - start).count();
         best[simd] = std::min(best[simd], ns / (iterations * lines.size()));
     }
-    printf("prefix only: scalar %.2f ns, AVX2 %.2f ns; checksum %llu\n",
+    printf("prefix only: scalar %.2f ns, SIMD %.2f ns; checksum %llu\n",
            best[0], best[1], static_cast<unsigned long long>(sink));
 #else
-    puts("prefix comparison requires ISA=avx2");
+    puts("prefix comparison requires a SIMD backend");
 #endif
 }

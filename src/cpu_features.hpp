@@ -4,7 +4,22 @@
 #include <cpuid.h>
 #endif
 
+#if defined(__aarch64__) && defined(__linux__)
+#include <sys/auxv.h>
+#include <asm/hwcap.h>
+#endif
+
 namespace fosu_dispatch {
+inline bool host_supports_neon() {
+#if defined(__aarch64__) && defined(__APPLE__)
+    return true;  // Required by the Apple arm64 platform.
+#elif defined(__aarch64__) && defined(__linux__)
+    return (getauxval(AT_HWCAP) & HWCAP_ASIMD) != 0;
+#else
+    return false;
+#endif
+}
+
 // x86-64-v3, including OS support for saving XMM/YMM state.
 struct CpuFeatures {
     uint32_t leaf1 = 0, leaf7 = 0, extended = 0;

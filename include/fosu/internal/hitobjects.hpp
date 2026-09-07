@@ -83,7 +83,7 @@ inline bool parse_slider(Sink& sink, typename Sink::HitObject& h, const char* p,
     }
     double length = 0;
     if (p < end) {
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
         const char* q = parse_slider_length(p + 1, length, k);
         if (!q) q = parse_osu_double(p + 1, end, length, 131072);
 #else
@@ -109,17 +109,17 @@ inline bool parse_slider(Sink& sink, typename Sink::HitObject& h, const char* p,
     size_t hs_len = 0;
     if (p < end && *p == ',') {
         ++p;
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
         const auto span = static_cast<size_t>(end - p);
         if (span <= 32) {
             // The remaining comma positions from one 32-byte scan.
-            const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
-            const auto cm = static_cast<uint32_t>(_mm256_movemask_epi8(
-                                _mm256_cmpeq_epi8(v, k.comma))) &
+            const Bytes32 v = load32(p);
+            const auto cm = equal_mask32(v, k.comma) &
                             static_cast<uint32_t>((1ull << span) - 1);
-            const uint32_t c0 = _tzcnt_u32(cm);
-            const uint32_t c1 = _tzcnt_u32(_blsr_u32(cm));
-            const uint32_t c2 = _tzcnt_u32(_blsr_u32(_blsr_u32(cm)));
+            const uint32_t c0 = trailing_zeros(cm);
+            const uint32_t rest = cm & (cm - 1);
+            const uint32_t c1 = trailing_zeros(rest);
+            const uint32_t c2 = trailing_zeros(rest & (rest - 1));
             es = p;
             if (c0 >= span) {
                 es_len = span;
@@ -198,7 +198,7 @@ inline bool slow_hitobject_line(Sink& sink, typename Sink::HitObject& h, const c
     return finish_hitobject(sink, h, p + sn, line_end, k);
 }
 
-// Scalar section loop (non-x86 builds and ParseOptions::use_simd = false).
+// Scalar section loop (scalar builds and ParseOptions::use_simd = false).
 // Returns the position after the section.
 template <typename Sink>
 inline const char* parse_hitobject_lines_scalar(Sink& sink, const char* p,
@@ -221,7 +221,7 @@ inline const char* parse_hitobject_lines_scalar(Sink& sink, const char* p,
     return p;
 }
 
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
 // SIMD section loop. One 32-byte load per line yields the newline, comma and
 // non-digit masks. The prefix shape is validated arithmetically; only lines
 // that fail it (blank, comments, headers, signed/decimal/wide fields) take
@@ -230,16 +230,14 @@ inline const char* parse_hitobject_lines_scalar(Sink& sink, const char* p,
 template <typename Sink>
 inline const char* parse_hitobject_lines(Sink& sink, const char* p, const char* file_end,
                                          const HitConsts& k) {
-    const __m256i k_nl = k.nl, k_comma = k.comma, k_bias = k.bias, k_thr = k.thr, k_zero = k.zero;
+    const ByteVector k_nl = k.nl, k_comma = k.comma, k_bias = k.bias, k_thr = k.thr, k_zero = k.zero;
     uint32_t fast_lines = 0, malformed = 0;
     while (p < file_end) {
-        const __m256i ascii = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
-        const auto nl_mask = static_cast<uint32_t>(_mm256_movemask_epi8(
-            _mm256_cmpeq_epi8(ascii, k_nl)));
-        const auto commas = static_cast<uint32_t>(_mm256_movemask_epi8(
-            _mm256_cmpeq_epi8(ascii, k_comma)));
+        const Bytes32 ascii = load32(p);
+        const auto nl_mask = equal_mask32(ascii, k_nl);
+        const auto commas = equal_mask32(ascii, k_comma);
         const uint32_t nondig = nondigit_mask32(ascii, k_bias, k_thr);
-        const char* nl = nl_mask ? p + _tzcnt_u32(nl_mask) : find_newline32(p + 32, file_end, k_nl);
+        const char* nl = nl_mask ? p + trailing_zeros(nl_mask) : find_newline32(p + 32, file_end, k_nl);
         const char* next_line = nl + (nl < file_end);
         const char* line_end = nl - (nl > p && nl[-1] == '\r');
         const auto len = static_cast<size_t>(line_end - p);

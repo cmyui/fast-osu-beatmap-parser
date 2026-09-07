@@ -21,9 +21,18 @@ jobs:
       - name: Check dispatch without AVX
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y qemu-user
+          sudo apt-get install -y qemu-user g++-aarch64-linux-gnu
           qemu-x86_64 -cpu Nehalem build/native/test_dispatch auto
           qemu-x86_64 -cpu Nehalem build/native/test_dispatch avx2
+      - name: Check Linux AArch64 dispatch and parsing
+        run: |
+          cmake -S . -B build/arm64 -G Ninja \
+            -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
+            '-DCMAKE_CROSSCOMPILING_EMULATOR=qemu-aarch64;-L;/usr/aarch64-linux-gnu'
+          cmake --build build/arm64 --target test-binaries -j2
+          ctest --test-dir build/arm64 --output-on-failure -R '^(numeric|sections|storage|hardening|dispatch_.*)$'
       - run: python3 tests/test_build.py build/native
       - name: Check scalar, public vectors, and debug containers
         run: |

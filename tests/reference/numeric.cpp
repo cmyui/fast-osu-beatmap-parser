@@ -47,7 +47,7 @@ inline const char* libc_osu_float(const char* p, const char* end, float& out,
 #undef parse_beat_length
 #undef parse_double
 #include "../support/canonical_dump.hpp"
-static_assert(!FOSU_SIMD_X86, "the independent numeric oracle must use scalar parsing");
+static_assert(!FOSU_SIMD, "the independent numeric oracle must use scalar parsing");
 
 extern "C" __attribute__((visibility("default")))
 void fosu_numeric_oracle(const char* data, size_t size, std::string& output) {

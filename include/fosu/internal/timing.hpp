@@ -47,7 +47,7 @@ inline bool parse_timing_fields(const char* p, const char* end, T& tp) {
     return true;
 }
 
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
 // One-pass timing point parse for the editor-emitted 8-field shape.
 // Two preloaded 32-byte vectors cover the whole line (real max: 39
 // bytes); one comma mask and one non-digit mask yield every field
@@ -75,21 +75,21 @@ inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
                                            T& tp,
                                            TpGeom* geom = nullptr) {
     // Seven comma positions -> eight fields.
-    const uint64_t m1 = _blsr_u64(commas);
-    const uint64_t m2 = _blsr_u64(m1);
-    const uint64_t m3 = _blsr_u64(m2);
-    const uint64_t m4 = _blsr_u64(m3);
-    const uint64_t m5 = _blsr_u64(m4);
-    const uint64_t m6 = _blsr_u64(m5);
-    const auto c0 = static_cast<uint32_t>(_tzcnt_u64(commas));
-    const auto c1 = static_cast<uint32_t>(_tzcnt_u64(m1));
-    const auto c2 = static_cast<uint32_t>(_tzcnt_u64(m2));
-    const auto c3 = static_cast<uint32_t>(_tzcnt_u64(m3));
-    const auto c4 = static_cast<uint32_t>(_tzcnt_u64(m4));
-    const auto c5 = static_cast<uint32_t>(_tzcnt_u64(m5));
-    const auto c6 = static_cast<uint32_t>(_tzcnt_u64(m6));
+    const uint64_t m1 = (commas & (commas - 1));
+    const uint64_t m2 = (m1 & (m1 - 1));
+    const uint64_t m3 = (m2 & (m2 - 1));
+    const uint64_t m4 = (m3 & (m3 - 1));
+    const uint64_t m5 = (m4 & (m4 - 1));
+    const uint64_t m6 = (m5 & (m5 - 1));
+    const auto c0 = static_cast<uint32_t>(trailing_zeros(commas));
+    const auto c1 = static_cast<uint32_t>(trailing_zeros(m1));
+    const auto c2 = static_cast<uint32_t>(trailing_zeros(m2));
+    const auto c3 = static_cast<uint32_t>(trailing_zeros(m3));
+    const auto c4 = static_cast<uint32_t>(trailing_zeros(m4));
+    const auto c5 = static_cast<uint32_t>(trailing_zeros(m5));
+    const auto c6 = static_cast<uint32_t>(trailing_zeros(m6));
 
-    if (_mm_popcnt_u64(commas) != 7) return false;
+    if (std::popcount(commas) != 7) return false;
     bool valid = true;
 
     // Offset: an integer with 1..8 digits — editor-emitted files never
@@ -106,7 +106,7 @@ inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
     const uint32_t flen = c1 - c0 - 1 - neg;
     // Distance from f to the first non-digit: the '.' if present, else
     // the comma at c1.
-    const auto int_len = static_cast<uint32_t>(_tzcnt_u64(nondig >> (f - p)));
+    const auto int_len = static_cast<uint32_t>(trailing_zeros(nondig >> (f - p)));
     const bool has_dot = int_len < flen;
     // The purity popcount below counts "one extra non-digit" for the dot;
     // verify that byte actually is '.' (fuzz-found: any junk byte in the
@@ -135,7 +135,7 @@ inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
 
     // Whole-line digit purity in one predicate: the only non-digit bytes
     // allowed are the 7 commas, the optional dot, and the optional minus.
-    valid &= _mm_popcnt_u64(nondig) ==
+    valid &= std::popcount(nondig) ==
              7 + static_cast<int>(has_dot) + static_cast<int>(neg);
 
     // Six small-int tail fields, straight-line (no arrays, no loop — gcc
@@ -186,7 +186,7 @@ inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
 // Compatibility entry (tests/fuzzers): computes the masks itself.
 template <typename T>
 __attribute__((always_inline))
-inline bool fast_parse_timing_point(__m256i a, __m256i b, const char* p,
+inline bool fast_parse_timing_point(Bytes32 a, Bytes32 b, const char* p,
                                     size_t len, T& tp) {
     if (len > 64 || len < 15) return false;  // real lines: 20..39 bytes
     const uint64_t line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
@@ -308,6 +308,8 @@ inline void tp_shape_convert(const TpShapeRow& r, const char* p,
     tp.beat_length = bl;
 
     if (r.simd_tails) {
+        alignas(16) uint16_t t[8];
+#if FOSU_SIMD_X86
         const __m128i v = _mm_loadu_si128(
             reinterpret_cast<const __m128i*>(p + g.c[1] + 1));
         const __m128i gathered = _mm_shuffle_epi8(
@@ -317,8 +319,14 @@ inline void tp_shape_convert(const TpShapeRow& r, const char* p,
             _mm_load_si128(reinterpret_cast<const __m128i*>(r.subv)));
         const __m128i vals =
             _mm_maddubs_epi16(digits, _mm_set1_epi16(0x010A));
-        alignas(16) uint16_t t[8];
         _mm_store_si128(reinterpret_cast<__m128i*>(t), vals);
+#else
+        const auto v = vld1q_u8(reinterpret_cast<const uint8_t*>(p + g.c[1] + 1));
+        const auto gathered = vqtbl1q_u8(v, vld1q_u8(reinterpret_cast<const uint8_t*>(r.shuf)));
+        const auto digits = vsubq_u8(gathered, vld1q_u8(reinterpret_cast<const uint8_t*>(r.subv)));
+        constexpr uint8_t weights[16] = {10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1};
+        vst1q_u16(t, vpaddlq_u8(vmulq_u8(digits, vld1q_u8(weights))));
+#endif
         tp.meter = t[0];
         tp.sample_set = t[1];
         tp.sample_index = t[2];

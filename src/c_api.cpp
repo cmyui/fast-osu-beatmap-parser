@@ -23,6 +23,14 @@ bool avx2_available() {
     return false;
 #endif
 }
+bool neon_available() {
+#ifdef FOSU_HAS_NEON
+    static const bool supported = fosu_dispatch::host_supports_neon();
+    return supported;
+#else
+    return false;
+#endif
+}
 const Backend* choose() {
     const char* request = std::getenv("FOSU_BACKEND");
     if (!request) {
@@ -31,9 +39,13 @@ const Backend* choose() {
     }
     const Backend* b = nullptr;
     if (std::strcmp(request, "scalar") == 0) b = &fosu_dispatch::scalar_backend();
-    else if (std::strcmp(request, "auto") == 0 || std::strcmp(request, "avx2") == 0) {
+    else if (std::strcmp(request, "auto") == 0 || std::strcmp(request, "avx2") == 0 ||
+             std::strcmp(request, "neon") == 0) {
 #ifdef FOSU_HAS_AVX2
-        if (avx2_available()) b = &fosu_dispatch::avx2_backend();
+        if (std::strcmp(request, "neon") != 0 && avx2_available()) b = &fosu_dispatch::avx2_backend();
+#endif
+#ifdef FOSU_HAS_NEON
+        if (std::strcmp(request, "avx2") != 0 && neon_available()) b = &fosu_dispatch::neon_backend();
 #endif
         if (!b && std::strcmp(request, "auto") == 0) b = &fosu_dispatch::scalar_backend();
     }
@@ -53,7 +65,8 @@ extern "C" const char* fosu_backend_name() {
 }
 extern "C" int fosu_backend_available(const char* name) {
     return name && (std::strcmp(name, "scalar") == 0 ||
-                   (std::strcmp(name, "avx2") == 0 && avx2_available()));
+                   (std::strcmp(name, "avx2") == 0 && avx2_available()) ||
+                   (std::strcmp(name, "neon") == 0 && neon_available()));
 }
 extern "C" fosu_handle* fosu_new() {
     const auto* b = backend();

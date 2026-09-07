@@ -118,7 +118,7 @@ inline void parse_into(const char* data, size_t size, Map& bm,
                 sec = Section::Unknown;
                 continue;
             } else if (sec == Section::TimingPoints) {
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
                 if (opts.use_simd) {
                     p = parse_timing_points_section(
                         bm, nl ? nl + 1 : file_end, file_end);
@@ -128,7 +128,7 @@ inline void parse_into(const char* data, size_t size, Map& bm,
 #endif
                 bm.timing_points.reserve(256);
             }
-#if FOSU_SIMD_X86
+#if FOSU_SIMD
             else if (sec == Section::Events && opts.use_simd) {
                 p = parse_events_section(bm, nl ? nl + 1 : file_end, file_end);
                 sec = Section::Unknown;

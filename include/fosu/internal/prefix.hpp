@@ -28,16 +28,11 @@
 
 #include "scalar_parse.hpp"
 
-#if defined(__AVX2__) && defined(__BMI__)
-#define FOSU_SIMD_X86 1
-#include <immintrin.h>
-#else
-#define FOSU_SIMD_X86 0
-#endif
+#include "simd.hpp"
 
 namespace fosu::internal {
 
-#if !FOSU_SIMD_X86
+#if !FOSU_SIMD
 struct HitConsts {};  // the scalar path has no vector constants
 #endif
 
@@ -195,6 +190,43 @@ inline uint32_t nondigit_mask32(__m256i ascii) {
     return static_cast<uint32_t>(_mm256_movemask_epi8(delims));
 }
 
+#elif FOSU_SIMD_NEON
+struct HitConsts {
+    ByteVector nl = broadcast_byte('\n'), comma = broadcast_byte(','),
+               colon = broadcast_byte(':'), pipe = broadcast_byte('|'),
+               bias = broadcast_byte(80), thr = broadcast_byte(-119),
+               zero = broadcast_byte('0');
+};
+inline uint32_t nondigit_mask32(Bytes32 v) {
+    return nondigit_mask16(v.val[0]) | (nondigit_mask16(v.val[1]) << 16);
+}
+inline uint32_t nondigit_mask32(Bytes32 v, ByteVector, ByteVector) {
+    return nondigit_mask32(v);
+}
+inline uint32_t comma_mask32(Bytes32 v) { return equal_mask32(v, broadcast_byte(',')); }
+
+// TBL directly addresses both 16-byte input registers. No lane permutation
+// is needed, so each prefix shape occupies 32 bytes instead of AVX2's 64.
+struct alignas(32) PrefixShuffle { uint8_t bytes[32]; };
+consteval auto make_prefix_shuffles() {
+    std::array<PrefixShuffle, kNPrefixVariants> out{};
+    for (int x = 1; x <= 3; ++x)
+    for (int y = 1; y <= 3; ++y)
+    for (int t = 1; t <= 10; ++t)
+    for (int type = 1; type <= 3; ++type) {
+        auto& m = out[(((x - 1) * 3 + y - 1) * 10 + t - 1) * 3 + type - 1];
+        for (auto& b : m.bytes) b = 255;
+        for (int i = 0; i < x; ++i) m.bytes[4 - x + i] = i;
+        for (int i = 0; i < y; ++i) m.bytes[8 - y + i] = x + 1 + i;
+        for (int i = 0; i < type; ++i) m.bytes[12 - type + i] = x + y + t + 3 + i;
+        for (int i = 0; i < t; ++i) m.bytes[32 - t + i] = x + y + 2 + i;
+    }
+    return out;
+}
+inline constexpr auto kPrefixShuffles = make_prefix_shuffles();
+#endif
+
+#if FOSU_SIMD
 // Delimiter geometry of one hitobject prefix inside a 32-byte window, derived
 // from the non-digit and comma masks alone. The four field lengths are packed
 // into 16-bit lanes so one subtraction, one addition and one AND validate
@@ -210,15 +242,15 @@ struct PrefixShape {
 };
 
 inline PrefixShape classify_prefix(uint32_t nondig, uint32_t commas) {
-    const uint32_t m1 = _blsr_u32(nondig);
-    const uint32_t m2 = _blsr_u32(m1);
-    const uint32_t m3 = _blsr_u32(m2);
-    const uint32_t m4 = _blsr_u32(m3);
-    const uint64_t p0 = _tzcnt_u32(nondig);
-    const uint64_t p1 = _tzcnt_u32(m1);
-    const uint64_t p2 = _tzcnt_u32(m2);
-    const uint64_t p3 = _tzcnt_u32(m3);
-    const uint32_t p4 = _tzcnt_u32(m4);
+    const uint32_t m1 = (nondig & (nondig - 1));
+    const uint32_t m2 = (m1 & (m1 - 1));
+    const uint32_t m3 = (m2 & (m2 - 1));
+    const uint32_t m4 = (m3 & (m3 - 1));
+    const uint64_t p0 = trailing_zeros(nondig);
+    const uint64_t p1 = trailing_zeros(m1);
+    const uint64_t p2 = trailing_zeros(m2);
+    const uint64_t p3 = trailing_zeros(m3);
+    const uint32_t p4 = trailing_zeros(m4);
     // Lanes (low to high): p0, p1, p2, p3 — each at most 32.
     const uint64_t pk = p0 | p1 << 16 | p2 << 32 | p3 << 48;
     // Lanes: len_x, len_y, len_time, len_type. A lane below zero borrows from
@@ -251,12 +283,13 @@ inline PrefixShape classify_prefix(uint32_t nondig, uint32_t commas) {
 // scalar parser then rejects.
 template <typename H>
 __attribute__((always_inline))
-inline bool convert_prefix(__m256i ascii, __m256i zero, const PrefixShape& sh,
+inline bool convert_prefix(Bytes32 ascii, ByteVector zero, const PrefixShape& sh,
                            const char* line, H& h, uint32_t& type) {
     static_assert(offsetof(H, x) == 0 && offsetof(H, y) == 4 &&
                       offsetof(H, type) == 8 && offsetof(H, hitsound) == 12 &&
                       offsetof(H, time) == 16 && offsetof(H, end_time) == 24,
                   "the fast path stores numeric fields directly");
+#if FOSU_SIMD_X86
     const __m256i digits = _mm256_sub_epi8(ascii, zero);
     const LaneMasks& lm = kLaneMasks[sh.index];
     const __m256i perm =
@@ -300,6 +333,23 @@ inline bool convert_prefix(__m256i ascii, __m256i zero, const PrefixShape& sh,
         h.time = static_cast<double>(t);
         h.end_time = 0;
     }
+#else
+    const Bytes32 digits{{vsubq_u8(ascii.val[0], zero), vsubq_u8(ascii.val[1], zero)}};
+    const auto& shuf = kPrefixShuffles[sh.index];
+    auto fields = decimal_groups(vqtbl2q_u8(digits, vld1q_u8(shuf.bytes)));
+    const auto times = decimal_groups(vqtbl2q_u8(digits, vld1q_u8(shuf.bytes + 16)));
+    const uint32_t d0 = static_cast<uint8_t>(line[sh.p3 + 1] - '0');
+    const uint32_t d1 = static_cast<uint8_t>(line[sh.p3 + 2] - '0');
+    const uint32_t two = sh.p4 - sh.p3 - 2;
+    fields = vsetq_lane_u32(d0 + two * (d0 * 9 + d1), fields, 3);
+    vst1q_u32(reinterpret_cast<uint32_t*>(&h), fields);
+    type = vgetq_lane_u32(fields, 2);
+    const uint64_t t = uint64_t(vgetq_lane_u32(times, 1)) * 100000000 +
+                      uint64_t(vgetq_lane_u32(times, 2)) * 10000 + vgetq_lane_u32(times, 3);
+    if (t > INT32_MAX) return false;
+    h.time = static_cast<double>(t);
+    h.end_time = 0;
+#endif
     h.slider = H::kNoSlider;
     return true;
 }
@@ -314,7 +364,7 @@ inline bool convert_prefix(__m256i ascii, __m256i zero, const PrefixShape& sh,
 // slider (kNoSlider); on failure the caller owns re-initializing the
 // fields before running the scalar fallback.
 template <typename H>
-inline int fast_parse_prefix(__m256i ascii, const char* line, H& h) {
+inline int fast_parse_prefix(Bytes32 ascii, const char* line, H& h) {
     const PrefixShape sh = classify_prefix(nondigit_mask32(ascii), comma_mask32(ascii));
     if (!sh.ok) return -1;
     const char after = line[sh.p4];
@@ -322,19 +372,18 @@ inline int fast_parse_prefix(__m256i ascii, const char* line, H& h) {
           (after == '\r' && (line[sh.p4 + 1] == '\n' || line[sh.p4 + 1] == '\0'))))
         return -1;
     uint32_t type;
-    if (!convert_prefix(ascii, _mm256_set1_epi8('0'), sh, line, h, type)) return -1;
+    if (!convert_prefix(ascii, broadcast_byte('0'), sh, line, h, type)) return -1;
     return static_cast<int>(sh.p4);
 }
 
 // Public line-oriented entry point also returns the first newline mask.
 template <typename H>
 inline int fast_parse_prefix(const char* line, H& h, uint32_t& nl_mask) {
-    const __m256i ascii = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(line));
-    nl_mask = static_cast<uint32_t>(_mm256_movemask_epi8(
-        _mm256_cmpeq_epi8(ascii, _mm256_set1_epi8('\n'))));
+    const Bytes32 ascii = load32(line);
+    nl_mask = equal_mask32(ascii, broadcast_byte('\n'));
     return fast_parse_prefix(ascii, line, h);
 }
 
-#endif  // FOSU_SIMD_X86
+#endif  // FOSU_SIMD
 
 }  // namespace fosu::internal

@@ -51,18 +51,20 @@ input bytes divided by the sum of per-file minima, using decimal megabytes.
 
 ## Current measurement snapshot
 
+### Linux / Zen 4
+
 On the target above, 2026-09-07, with resident input and one pinned core:
 
 | Boundary | Mean per-map minimum |
 |---|---:|
-| C++ fresh result, resident bytes | 18.44–18.94 µs |
-| C++ reused result | 18.03–18.42 µs |
-| C ABI fresh handle, input copy included | 19.85–20.10 µs |
-| C ABI reused handle | 19.47–19.55 µs |
+| C++ fresh result, resident bytes | 19.30–19.32 µs |
+| C++ reused result | 18.22–18.36 µs |
+| C ABI fresh handle, input copy included | 20.68–20.71 µs |
+| C ABI reused handle | 19.68–19.69 µs |
 | Complete one-shot process | 163.12 µs |
 
 Library ranges are two full-corpus comparisons with reversed starting order,
-15 repetitions per map for C++ and seven for the C ABI. The one-shot measurement
+seven repetitions per map for both C++ and the C ABI. The one-shot measurement
 uses three repetitions per map. The AVX2 kernels use GCC
 `-O3 -march=x86-64-v3 -mtune=znver4`, with baseline code selecting the C ABI
 backend once per loaded library; the process uses its
@@ -88,6 +90,28 @@ First C ABI use in a fresh C process averages 187.96 µs across 1,000 evenly
 spaced maps, three repetitions each. This includes `dlopen`, CPU selection,
 file I/O, parsing, view acquisition, destruction and `dlclose`, excluding the
 C process's startup. CPU detection is paid once per library load, not once per map.
+
+### Apple Silicon / NEON
+
+Apple M3 Max, macOS 26, Apple Clang 17, `-O3`, 2026-09-07. This measures
+**The Unforgiving only**: 243,197 bytes and 6,503 hitobjects, all taking the
+NEON prefix path. It is not a 10k-corpus average. File contents are resident.
+Two rotating comparisons reverse the starting order, with 1,001 repetitions
+per variant in each run:
+
+| Boundary | Minimum | Median of all repetitions |
+|---|---:|---:|
+| C++ fresh result, resident bytes | 134–135 µs | 154–162 µs |
+| C ABI fresh handle, input copy included | 133–139 µs | 155–164 µs |
+| Python warm `parse(bytes)` and release | 146–147 µs | 156–158 µs |
+| Python warm `parse_file(path)` and release | 156–158 µs | 169–173 µs |
+
+Python uses CPython 3.14.6 and CFFI 2.1.1. In a separate 51-repetition rotating
+comparison with fresh interpreters and precompiled bytecode, the first
+`parse_file` and result release took a median 326 µs; import took 1.63 ms and
+the whole process 24.34 ms. These intervals have separate statistics and should
+not be added together. They do not include cold storage reads or establish
+worst-case latency.
 
 ## Build and verify
 

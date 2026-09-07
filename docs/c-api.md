@@ -13,13 +13,14 @@ This builds `build/native/libfosu.so` on Linux x86-64 or
 `build/native/libfosu.dylib` on Apple Silicon. See
 [build configurations](build.md) for all targets.
 `include/fosu/c_api.h` is a C-compatible header. The default library selects
-AVX2 on x86-64-v3 CPUs with OS support for XMM/YMM state, otherwise scalar.
-Apple Silicon currently uses scalar. The optimized Linux backend retains Zen 4
-scheduling. Both backends use the same ABI and result ownership contract.
+AVX2 on x86-64-v3 CPUs with OS support for XMM/YMM state, or NEON on
+supported AArch64 systems, otherwise scalar. Apple Silicon uses NEON. The
+Linux AVX2 backend retains Zen 4 scheduling. All backends use the same ABI and
+result ownership contract.
 
-`fosu_backend_name()` returns `"scalar"` or `"avx2"`.
+`fosu_backend_name()` returns `"scalar"`, `"avx2"` or `"neon"`.
 `fosu_backend_available("avx2")` reports whether that backend is compiled in and
-supported by the CPU and OS. Set `FOSU_BACKEND=auto|scalar|avx2` before the first
+supported by the CPU and OS. Set `FOSU_BACKEND=auto|scalar|avx2|neon` before the first
 call to select a backend; `FOSU_FORCE_SCALAR=1` also works when `FOSU_BACKEND` is
 unset. An unknown or unsupported request makes `fosu_backend_name()` and
 `fosu_new()` return NULL. Selection is thread-safe and fixed for the lifetime
