@@ -102,7 +102,9 @@ struct NativeRecords {
 
 // The ordinary library and C ABI instantiate the same parsing algorithm.
 // Record storage is selected at compile time; no virtual calls or ABI macros.
-template <typename Records>
+// `Vec` is the array container: std::vector for the public types, an
+// arena-backed container inside the C ABI handle.
+template <typename Records, template <typename...> class Vec = std::vector>
 struct BasicBeatmap : BeatmapHeader, Records {
     using RecordPolicy = Records;
     using HitObject = typename Records::HitObject;
@@ -110,16 +112,16 @@ struct BasicBeatmap : BeatmapHeader, Records {
     using SliderPoint = typename Records::SliderPoint;
     using TimingPoint = typename Records::TimingPoint;
     using Break = typename Records::Break;
-    std::vector<Break> breaks;
+    Vec<Break> breaks;
 
     // [Colours]
-    std::vector<uint32_t> combo_colours;  // 0xRRGGBB in file order
+    Vec<uint32_t> combo_colours;  // 0xRRGGBB in file order
 
     // [TimingPoints] / [HitObjects]
-    std::vector<TimingPoint> timing_points;
-    std::vector<HitObject> hit_objects;
-    std::vector<Slider> sliders;
-    std::vector<SliderPoint> slider_points;  // shared pool, ranged by Slider
+    Vec<TimingPoint> timing_points;
+    Vec<HitObject> hit_objects;
+    Vec<Slider> sliders;
+    Vec<SliderPoint> slider_points;  // shared pool, ranged by Slider
 
     ParseStats stats;
 };

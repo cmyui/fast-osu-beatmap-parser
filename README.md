@@ -1,22 +1,18 @@
 # fosu — fast osu! beatmap parsing
 
-A C++20 parser for legacy `.osu` beatmap files, focused on **maximum parsing
-performance with reliable behavior for application callers**. Use the
-header-only C++ library, a small C ABI, or an installable Python package backed
-by CFFI. Acceptance and rejection rules are tested against the official osu!
-legacy decoder.
-
-A separate Linux executable measures the complete single-map process:
-**launch → read the original beatmap → parse → write the complete result → exit**.
-It shares parser kernels with the library and provides a process-lifetime
-benchmark and a binary output interface.
+A C++20 parsing library for legacy `.osu` beatmap files: a header-only C++
+interface, a small in-process C ABI with owned storage, and an installable
+Python package backed by CFFI. The same kernels also power a freestanding
+one-shot executable used as a process-level benchmark and demonstration.
+Correctness follows the official osu! legacy decoder's acceptance rules;
+unusual or malformed input is skipped and counted rather than trusted.
 
 | Interface | Result | Use |
 |---|---|---|
 | [C++ library](docs/library.md) | `Beatmap` with vectors and borrowed strings | Direct parsing in a C++ application |
-| [C API](docs/c-api.md) | Handle-owned input and contiguous arrays | C and other FFI callers |
+| [C API](docs/c-api.md) | Handle-owned arena: input copy and contiguous arrays | C and other FFI callers |
 | [Python package](docs/python.md) | Owned `Beatmap` with named fields and records | Python apps; optional zero-copy NumPy arrays |
-| [One-shot executable](oneshot/README.md) | Complete binary stream on stdout | Complete process benchmarking and serialized output on Linux/Zen 4 |
+| [One-shot executable](oneshot/README.md) | Complete binary stream on stdout | Process-lifetime benchmark on Linux/Zen 4 |
 
 The native representations are checked on a fixed corpus of **10,000
 ranked/approved maps, 402,593,897 bytes**, and a broader cache corpus. Comparisons
@@ -57,29 +53,29 @@ section selection and NumPy access.
 
 ## Parsing strategy
 
-One AVX2 load classifies the hitobject prefix `x,y,time,type,hitSound` and
-finds its newline. Delimiter positions select a compile-time permutation and
-shuffle table; multiply-add instructions convert several fields together.
-Builds with AVX-512 VBMI/VL use a single byte permutation and smaller masks.
-The result lands directly in its final record. Unusual shapes take a scalar
-fallback, including signed/wide coordinates and fractional timestamps.
-Common hit-sample fields are validated in parallel; unusual spellings use the
-same bounded numeric rules. Circles with a validated eight-byte sample can be
-completed directly in their final representation.
+One AVX2 load per hitobject line yields its newline, comma and non-digit
+masks. The four prefix field lengths are packed into 16-bit lanes so a single
+subtraction, addition and mask validate every bound and one multiply selects a
+compile-time permutation table; multiply-add instructions then convert
+`x,y,time,type` together and a branchless select reads `hitSound`. Circles
+with the common 8-byte sample finish inline; sliders take an out-of-line
+routine that converts the first two control points speculatively from one
+32-byte window (most sliders have one or two), converts each further point
+with one shuffle, and parses the length with SWAR. Blank, comment and header
+lines are only examined after the editor shape fails, so no per-line
+whitespace scan runs on the fast path.
 
-Timing-point lines reuse their delimiter geometry within the current section.
-Slider points are written through a cursor, with vector/SWAR decimal conversion
-and a general numeric fallback. Metadata uses compact key/type tables. These
-numeric kernels, metadata definitions and hitobject framing are shared between
-the library and executable through compile-time templates. Storage-specific
-slider handling stays separate: vectors for library callers, inline records
-for stdout. There are no virtual calls or macros that change `Beatmap`'s layout.
-
-The executable adds a freestanding runtime, a single input/output arena and
-streamed records. Its fastest configuration uses Linux multi-size transparent
-huge pages to reduce first-touch faults. The library leaves allocator and host
-policy to its caller. No parsed results or input files are cached across
-processes; profile-guided builds contain code-generation feedback only.
+Records are written through raw cursors into reserved vector capacity and
+published once per section, with ordinary vector operations for debug and
+sanitizer builds; timing points reuse per-section shape geometry the same way.
+Metadata uses compact key/type tables. These kernels are shared by
+the library, the C ABI and the executable through compile-time storage
+policies; the C ABI handle keeps its input copy and arrays in an arena, with
+heap growth when needed. A freed handle can leave one bounded spare arena for
+a later parse; library unload releases it.
+The executable adds a freestanding runtime and streams records to stdout. No
+parsed results or input files are cached across processes; profile-guided
+builds contain code-generation feedback only.
 
 ## Coverage and assumptions
 
@@ -96,7 +92,8 @@ reads; C++ byte buffers need **128 readable zero bytes after the logical end**.
 File helpers, the C API and Python supply that padding. See the
 [full input contract](docs/compatibility.md) before integrating a consumer.
 A scalar build works without AVX2; the default Linux x86-64 library target
-requires x86-64-v3, while the one-shot binary targets Zen 4.
+requires x86-64-v3, while the one-shot binary targets Zen 4. Measurements are
+bounded to the documented corpus and host; see [performance](docs/performance.md).
 
 The project concept and original SIMD hitobject prototype are by
 [Flamme](https://github.com/infernalfire72). The implementation extends that

@@ -6,11 +6,6 @@ is the baseline. `make` also uses `-fno-plt -fno-stack-protector` for its Linux
 benchmark and shared-library targets. Applications own their build policy.
 Without AVX2/BMI compile flags the parser uses its scalar path; there is no
 runtime CPU dispatch.
-When AVX-512 VBMI/VL are enabled at compile time, the prefix converter uses
-byte permutations with a smaller lookup table. Enabling more instruction sets
-does not guarantee a faster complete parse; compare builds on the application
-workload. The default library and Python AVX2 builds retain their existing CPU
-requirements.
 
 ## Ownership and reuse
 
@@ -68,7 +63,9 @@ auto sample = compact.resolve(compact.hit_objects[0].hit_sample);
 
 `OffsetBeatmap` uses the C API's 48-byte hitobjects and 40-byte sliders. Record
 strings contain 32-bit offsets/lengths into the borrowed input; metadata still
-uses `std::string_view`. The shared 64 MiB input limit keeps parsed spans within `uint32_t`.
+uses `std::string_view`. `BasicBeatmap` also takes the array container as a
+template parameter (`std::vector` by default); the C ABI handle instantiates it
+with arena-backed arrays without changing either public type. The shared 64 MiB input limit keeps parsed spans within `uint32_t`.
 `parse_into` sets the string base automatically. Both representations instantiate
 the same parser; the C API adds input ownership and status-code translation.
 
@@ -92,7 +89,19 @@ scalar and SIMD runs.
 
 ## Performance
 
-Use `-O3` for the hosted library on the measured target; `-O2` was slower.
+The parser writes records directly into reserved vector capacity and publishes
+the sizes once per section on the tested libstdc++/libc++ release layouts.
+It starts record lifetimes without zero-initializing fields that parsing
+overwrites. Debug containers, AddressSanitizer and other layouts use ordinary
+vector operations. Define `FOSU_PORTABLE_VECTORS` consistently across the
+application to select that path explicitly. Layout and growth tests cover
+both storage paths; the direct path depends on standard-library internals.
+
+In a fresh process the first parse also pays the page faults of that memory
+through the process allocator; the C ABI's arena reduces those for C and Python
+callers, while the header-only interface keeps the caller's allocator.
+Use `-O3` for the hosted library on the measured target;
+`-O2` was slower.
 Profile-guided compilation of the calling application can improve it further.
 [The benchmark guide](performance.md) includes an executable GCC experiment
 with disjoint training/evaluation files. A header-only library cannot supply a

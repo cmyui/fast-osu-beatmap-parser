@@ -9,6 +9,7 @@
 #include <sys/resource.h>
 #include <sys/wait.h>
 #endif
+#include <fosu/detail/arena.hpp>
 #include <fosu/parser.hpp>
 #include "../bench/c_api_view.hpp"
 #include "../oneshot/dump.hpp"
@@ -57,8 +58,54 @@ void check(fosu_handle* h, const std::string& input, uint32_t sections = FOSU_AL
         for (auto byte : v->timing_points[i].reserved) assert(byte == 0);
 }
 
+// Arena growth and recycling: short lines exceed the initial estimates so
+// every array grows (and may fall back to the heap); a freed handle's arena
+// is recycled by the next handle, and results stay exact throughout.
+void check_growth() {
+    std::string many = "[TimingPoints]\n";
+    for (int i = 0; i < 3000; ++i) many += std::to_string(i) + ",500\n";
+    many += "[HitObjects]\n";
+    for (int i = 0; i < 20000; ++i) many += "1,2,3,1,0\n";
+    for (int i = 0; i < 5000; ++i) many += "1,2,3,2,0,B|1:2|3:4|5:6|7:8,1,10\n";
+    for (int round = 0; round < 3; ++round) {
+        auto* h = fosu_new();
+        assert(h);
+        check(h, many);
+        const auto* v = fosu_get_view(h);
+        assert(v->hit_object_count == 25000 && v->slider_count == 5000 &&
+               v->point_count == 20000 && v->timing_point_count == 3000);
+        assert(v->hit_objects[24999].slider == 4999 && v->sliders[4999].point_begin == 19996);
+        check(h, map);   // smaller input on the same handle
+        check(h, many);  // and back
+        fosu_free(h);
+    }
+}
+
+void check_arena_vector() {
+    fosu::detail::ArenaVector<uint64_t> values;
+    assert(values.empty() && values.size() == 0 && values.capacity() == 0);
+    values.resize(0);
+    values.set_size(0);
+    values.push_back(42);
+    bool rejected = false;
+    try {
+        values.reserve(SIZE_MAX / sizeof(uint64_t) + 1);
+    } catch (const std::bad_alloc&) {
+        rejected = true;
+    }
+    assert(rejected && values.size() == 1 && values[0] == 42);
+    auto moved = std::move(values);
+    assert(values.empty() && values.size() == 0 && values.capacity() == 0);
+    assert(moved.size() == 1 && moved[0] == 42);
+    moved.release();
+    moved.resize(0);
+    assert(moved.empty() && moved.size() == 0 && moved.capacity() == 0);
+}
+
 int main() {
     assert(fosu_abi_version() == FOSU_ABI_VERSION);
+    check_arena_vector();
+    check_growth();
     auto* h = fosu_new();
     assert(h && !fosu_get_view(h));
     check(h, map);

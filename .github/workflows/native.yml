@@ -17,19 +17,33 @@ jobs:
         with:
           persist-credentials: false
       - run: make CXX=g++ test test-c-api
-      - name: Compile and check the optional AVX-512 prefix
+      - name: Check portable and debug vectors
         run: |
-          g++ -std=c++20 -O3 -Iinclude -march=x86-64-v3 -mavx512vl -mavx512vbmi tests/test_parser.cpp -o build/test_avx512
-          g++ -x c++ -o build/has_avx512 - <<'CPP'
-          int main() {
-              return !(__builtin_cpu_supports("avx512f") &&
-                       __builtin_cpu_supports("avx512bw") &&
-                       __builtin_cpu_supports("avx512vl") &&
-                       __builtin_cpu_supports("avx512vbmi"));
-          }
-          CPP
-          if build/has_avx512; then build/test_avx512; else echo 'AVX-512 execution skipped on this CPU'; fi
+          g++ -std=c++20 -O2 -Iinclude -march=x86-64-v3 -DFOSU_PORTABLE_VECTORS tests/test_parser.cpp -o build/test_portable
+          build/test_portable
+          g++ -std=c++20 -O1 -Iinclude -march=x86-64-v3 -D_GLIBCXX_DEBUG tests/test_parser.cpp -o build/test_debug
+          build/test_debug
+      - name: Check vector annotations and direct arena storage
+        run: |
+          SAN='-fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=all'
+          clang++ -std=c++20 -O1 -g -Iinclude -march=x86-64-v3 $SAN -D_GLIBCXX_SANITIZE_VECTOR=1 tests/test_parser.cpp -o build/test_vector_sanitize
+          build/test_vector_sanitize
+          clang++ -std=c++20 -O1 -g -Iinclude -march=x86-64-v3 $SAN -fPIC -fvisibility=hidden -shared src/c_api.cpp -o build/libfosu_sanitize.so
+          clang++ -std=c++20 -O1 -g -Iinclude -march=x86-64-v3 $SAN tests/test_c_api.cpp -Lbuild -lfosu_sanitize -Wl,-rpath,"$PWD/build" -pthread -o build/test_c_api_sanitize
+          build/test_c_api_sanitize
       - run: make CXX=clang++ test-sanitize fuzz-smoke
+
+  native-macos:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: make CXX=clang++ test-c-api test-sanitize
+      - name: Check libc++ container annotations
+        run: |
+          clang++ -std=c++20 -O1 -g -Iinclude -fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=all tests/test_parser.cpp -o build/test_vector_sanitize
+          build/test_vector_sanitize
 
   official-acceptance:
     runs-on: ubuntu-24.04

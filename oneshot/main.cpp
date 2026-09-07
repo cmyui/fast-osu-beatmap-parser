@@ -23,7 +23,7 @@
 #include <fosu/detail/timing.hpp>
 #include <fosu/detail/slider.hpp>
 #include <fosu/detail/metadata.hpp>
-#include <fosu/detail/sections.hpp>
+#include <fosu/detail/hitobjects.hpp>
 #include <fosu/detail/section_names.hpp>
 
 namespace {
@@ -378,10 +378,6 @@ const char* parse_timing_points_section(const char* p, const char* file_end) {
 }
 
 // ---------------------------------------------------------------- hit objects
-using fosu::detail::parse_coord;
-using fosu::detail::parse_slider_length;
-using fosu::detail::parse_slider_points;
-
 struct __attribute__((packed)) Pt { i32 x, y; };
 
 // The library leaves a failed slider line's points in its pool once the
@@ -400,139 +396,67 @@ inline void keep_orphans(const Pt* p, u32 n) {
     S.n_orphans += n;
 }
 
-// Slider block: u32 point_begin, point_count, points, i32 slides, f64 length,
-// u8 curve_type, str edge_sounds, str edge_sets. Returns false to reject
-// the line (the caller rewinds the whole record). `hs` receives the
-// trailing hit_sample.
-bool parse_slider_params(const char* p, const char* end, sv& hs) {
-    if (p >= end) return false;
-    const char curve_type = *p++;
-    put_u32(S.n_points);
-    char* const count_slot = g_out;
-    g_out += 4;
-    Pt* w = reinterpret_cast<Pt*>(g_out);
-    Pt* const w0 = w;
-    if (!parse_slider_points(p, end, w)) return false;
-    const auto npts = static_cast<u32>(w - w0);
-    memcpy(count_slot, &npts, 4);
-    g_out = reinterpret_cast<char*>(w);
-    // From here on the library leaves the points in its pool on failure.
-    S.n_points += npts;
-    if (p >= end || *p != ',') { keep_orphans(w0, npts); return false; }
-    ++p;
-    const u32 srun = digit_run8(p);
-    i32 slides;
-    if (srun - 1 <= 6) {
-        slides = static_cast<i32>(swar_parse_u64(p, srun));
-        p = fosu::detail::skip_numeric_space(p + srun, end);
-    } else {
-        i64 value;
-        const char* next = fosu::detail::parse_osu_int(p, end, value);
-        if (next == p) { keep_orphans(w0, npts); return false; }
-        slides = clamp_i32(value);
-        p = next;
-    }
-    if (slides > 9000 || (p < end && *p != ',')) { keep_orphans(w0, npts); return false; }
-    double length = 0;
-    if (p < end) {
-        const char* q = parse_slider_length(p + 1, length);
-        if (!q) q = fosu::detail::parse_osu_double(p + 1, end, length, 131072);
-        if (q != p + 1) q = fosu::detail::skip_numeric_space(q, end);
-        if (q == p + 1 || (q < end && *q != ',')) { keep_orphans(w0, npts); return false; }
-        p = q;
-    }
-    sv edge_sounds{}, edge_sets{};
-    hs = {};
-    if (p < end && *p == ',') {
-        ++p;
-        const auto span = static_cast<size_t>(end - p);
-        if (span <= 32) {
-            const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
-            const auto cm = static_cast<u32>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, _mm256_set1_epi8(',')))) &
-                            static_cast<u32>((1ull << span) - 1);
-            const u32 c0 = _tzcnt_u32(cm);
-            const u32 c1 = _tzcnt_u32(_blsr_u32(cm));
-            if (c0 >= span) {
-                edge_sounds = {p, span};
-            } else if (c1 >= span) {
-                edge_sounds = {p, c0};
-                edge_sets = {p + c0 + 1, span - c0 - 1};
-            } else {
-                edge_sounds = {p, c0};
-                edge_sets = {p + c0 + 1, c1 - c0 - 1};
-                hs = {p + c1 + 1, span - c1 - 1};
-            }
-        } else {
-            sv extra[3];
-            int n = 0;
-            while (n < 3 && p < end) {
-                const auto* c = static_cast<const char*>(memchr(p, ',', end - p));
-                const char* fend = c ? c : end;
-                extra[n++] = {p, static_cast<size_t>(fend - p)};
-                p = fend + 1;
-            }
-            edge_sounds = extra[0]; edge_sets = extra[1]; hs = extra[2];
-        }
-    }
-    if (!fosu::detail::valid_sample({hs.p, hs.n}, true) ||
-        !fosu::detail::valid_edge_sets({edge_sets.p, edge_sets.n}, slides)) {
-        keep_orphans(w0, npts);
-        return false;
-    }
-    put_i32(slides);
-    put_f64(length);
-    put_u8(static_cast<u8>(curve_type));
-    put_str(edge_sounds);
-    put_str(edge_sets);
-    return true;
-}
-
-// Everything after the prefix; appends the slider block (if any) and the
-// hit_sample bytes, sets h.slider / h.hs_len / h.end_time as the library.
-bool finish_hitobject(HO& h, const char* p, const char* end) {
-    if (!(h.type & (1 | 2 | 8 | 128))) return false;
-    if (p < end && *p != ',') return false;
-    if (!(h.type & 1) && (h.type & 2)) {
-        if (p >= end || *p != ',') return false;
-        sv hs;
-        if (!parse_slider_params(p + 1, end, hs)) return false;
-        h.slider = S.n_sliders++;
-        h.hs_len = static_cast<u32>(hs.n);
-        memcpy(g_out, hs.p, hs.n);
-        g_out += hs.n;
-        return true;
-    }
-    std::string_view sample;
-    if (!fosu::detail::parse_object_tail(h, p, end, sample)) return false;
-    h.hs_len = static_cast<u32>(sample.size());
-    memcpy(g_out, sample.data(), sample.size());
-    g_out += sample.size();
-    return true;
-}
-
+// Stream storage policy for the shared hitobject kernel. A record is laid
+// out as HO, then (for sliders) u32 point_begin, u32 point_count, points,
+// i32 slides, f64 length, u8 curve_type, str edge_sounds, str edge_sets,
+// then the hit_sample bytes. Points are written in place right after the
+// two count words; a rejected line rewinds the whole record.
 struct StreamHits {
     using HitObject = HO;
+    using Point = Pt;
     HO& begin(size_t len) {
         ensure(4 * len + 128);
         auto& h = *reinterpret_cast<HO*>(g_out);
         g_out += sizeof(HO);
         return h;
     }
-    bool finish(HO& h, const char* p, const char* end, size_t) {
-        return finish_hitobject(h, p, end);
-    }
-    void finish_circle_sample8(HO& h, const char* sample) {
-        h.hs_len = 8;
-        memcpy(g_out, sample, 8);
-        g_out += 8;
-    }
     void commit(HO&) { ++S.n_hitobjects; }
     void rollback(HO& h) { g_out = reinterpret_cast<char*>(&h); }
+    void sample(HO& h, const char* s, size_t n) {
+        h.hs_len = static_cast<u32>(n);
+        memcpy(g_out, s, n);
+        g_out += n;
+    }
+    Pt* point_slot(size_t) {
+        // begin() ensured 4 bytes per line byte plus slack: room for every point.
+        return reinterpret_cast<Pt*>(g_out + 8);
+    }
+    u32 point_index(Pt*) const { return S.n_points; }
+    sv view(const char* s, size_t n) const { return {s, n}; }
+    void slider_rollback(Pt* w0, Pt* w_end, bool keep_points) {
+        if (!keep_points) return;
+        const auto n = static_cast<u32>(w_end - w0);
+        S.n_points += n;
+        keep_orphans(w0, n);
+    }
+    struct SliderRecord {
+        u32 point_begin, point_count;
+        i32 slides;
+        char curve_type;
+        double length;
+        sv edge_sounds, edge_sets;
+    };
+    SliderRecord record;
+    SliderRecord& slider_slot() { return record; }
+    void slider_commit(HO& h, SliderRecord& s, Pt* w_end, const char* hs, size_t hs_len) {
+        memcpy(g_out, &s.point_begin, 4);
+        memcpy(g_out + 4, &s.point_count, 4);
+        S.n_points += s.point_count;
+        g_out = reinterpret_cast<char*>(w_end);
+        put_i32(s.slides);
+        put_f64(s.length);
+        put_u8(static_cast<u8>(s.curve_type));
+        put_str(s.edge_sounds);
+        put_str(s.edge_sets);
+        h.slider = S.n_sliders++;
+        sample(h, hs, hs_len);
+    }
     State& stats() { return S; }
 };
 const char* parse_hitobjects_section(const char* p, const char* file_end) {
     StreamHits sink;
-    return fosu::detail::parse_hitobject_lines(sink, p, file_end);
+    const fosu::detail::HitConsts k;
+    return fosu::detail::parse_hitobject_lines(sink, p, file_end, k);
 }
 
 const char* parse_events_section(const char* p, const char* file_end) {
