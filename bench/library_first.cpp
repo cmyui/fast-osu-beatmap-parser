@@ -8,8 +8,10 @@ int main(int argc, char** argv) {
     auto input = fosu::read_file_padded(argv[1]);
     if (!input) return 1;
     const auto start = std::chrono::steady_clock::now();
-    auto result = fosu::parse(input);
-    __asm__ volatile("" : : "g"(&result) : "memory");
+    fosu::Parser parser;
+    auto result = parser.parse(input);
+    if (!result) return 1;
+    __asm__ volatile("" : : "g"(result.value()) : "memory");
     const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - start).count();
     printf("%zu %lld\n", input.size, static_cast<long long>(ns));

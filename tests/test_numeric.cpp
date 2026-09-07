@@ -189,11 +189,11 @@ static void test_fuzz_timing_point() {
         if (!fosu::internal::fast_parse_timing_point(a, b, buf, (size_t)len, tp))
             continue;
         ++accepted;
-        fosu::Beatmap ref;
-        fosu::internal::parse_timing_point_line(ref, buf, (size_t)len);
-        CHECK(!ref.timing_points.empty());
-        if (!ref.timing_points.empty()) {
-            const fosu::TimingPoint& w = ref.timing_points[0];
+        fosu::TimingPoint reference{};
+        CHECK(fosu::internal::parse_timing_fields(
+            buf, buf + len, reference));
+        {
+            const fosu::TimingPoint& w = reference;
             CHECK(memcmp(&tp.time, &w.time, 8) == 0);
             CHECK(memcmp(&tp.beat_length, &w.beat_length, 8) == 0);
             CHECK_EQ(tp.meter, w.meter);

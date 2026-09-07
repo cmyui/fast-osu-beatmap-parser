@@ -26,12 +26,6 @@ typedef struct fosu_hit_object {
     double time, end_time;
     uint32_t slider, reserved;
     fosu_string_ref hit_sample;
-#ifdef __cplusplus
-    static constexpr uint32_t kNoSlider = FOSU_NO_SLIDER;
-    struct uninit_t {};
-    fosu_hit_object() = default;
-    explicit fosu_hit_object(uninit_t) : reserved(0) {}
-#endif
 } fosu_hit_object;
 
 typedef struct fosu_slider {
@@ -41,19 +35,10 @@ typedef struct fosu_slider {
     uint8_t reserved[3];
     double length;
     fosu_string_ref edge_sounds, edge_sets;
-#ifdef __cplusplus
-    struct uninit_t {};
-    fosu_slider() = default;
-    explicit fosu_slider(uninit_t) : reserved{} {}
-#endif
 } fosu_slider;
 
 typedef struct fosu_point {
     int32_t x, y;
-#ifdef __cplusplus
-    fosu_point() {}
-    fosu_point(int32_t x_, int32_t y_) : x(x_), y(y_) {}
-#endif
 } fosu_point;
 
 typedef struct fosu_timing_point {
@@ -62,9 +47,6 @@ typedef struct fosu_timing_point {
     uint8_t uninherited;
     uint8_t reserved[3];
     uint32_t effects;
-#ifdef __cplusplus
-    fosu_timing_point() : reserved{} {}
-#endif
 } fosu_timing_point;
 
 typedef struct fosu_break { double start, end; } fosu_break;

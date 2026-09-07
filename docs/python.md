@@ -56,11 +56,10 @@ listing = fosu.parse_file(
 
 `parse` copies the bytes once into native padded storage; the caller's input
 can be released immediately. `parse_file` reads directly into that storage.
-Each result owns native storage for the input copy and record arrays. Most
-allocations fit in one arena; arrays can grow onto the heap. A released
-result's arena can be recycled by a later parse, with at most one 8 MiB spare
-per loaded native extension (see the [C API storage notes](c-api.md)).
-Both return independent results, and CFFI releases the GIL during native calls.
+Each result owns a native parser containing the input copy and record arrays.
+Its arena reserves virtual address space and makes it writable in fixed-size
+chunks; released arenas can be reused by a later parse. Both return independent
+results, and CFFI releases the GIL during native calls.
 `parse` also accepts `bytearray`, `memoryview`, `mmap` and other C-contiguous
 buffers. Noncontiguous buffers raise `BufferError`. Do not mutate a writable
 input concurrently while parsing it.

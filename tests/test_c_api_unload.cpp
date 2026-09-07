@@ -20,7 +20,6 @@ void require(bool condition, const char* message) {
         std::_Exit(1);
     }
 }
-
 template <typename T>
 T symbol(void* library, const char* name) {
     auto function = reinterpret_cast<T>(dlsym(library, name));
@@ -46,7 +45,9 @@ bool mapped(uintptr_t address) {
 #else
     unsigned char residency;
     errno = 0;
-    int result = mincore(reinterpret_cast<void*>(address),
+    const auto page_size = static_cast<uintptr_t>(getpagesize());
+    const auto page = address & ~(page_size - 1);
+    int result = mincore(reinterpret_cast<void*>(page),
                          static_cast<size_t>(getpagesize()), &residency);
     require(result == 0 || errno == ENOMEM, "mincore failed unexpectedly");
     return result == 0;
@@ -61,6 +62,13 @@ struct ExitApi {
     uintptr_t address;
     int done;
 };
+
+bool loaded(const std::string& path) {
+    void* library = dlopen(path.c_str(), RTLD_NOW | RTLD_NOLOAD);
+    if (library) dlclose(library);
+    return library != nullptr;
+}
+
 ExitApi exit_api;
 
 void parse_at_exit() {
@@ -116,6 +124,14 @@ void check_late_exit(const char* path) {
 
 int main(int argc, char** argv) {
     require(argc == 2, "expected the shared library path");
+    const std::string core_path = argv[1];
+    const auto directory = core_path.substr(0, core_path.find_last_of('/') + 1);
+#if defined(__APPLE__)
+    const char* suffix = ".dylib";
+#else
+    const char* suffix = ".so";
+#endif
+    const char* kinds[] = {"avx2", "neon"};
     const std::string input = "[Metadata]\nTitle:before recycling\n[HitObjects]\n"
                               "1,2,3,1,0\n" + std::string(256 * 1024, ' ');
     for (int round = 0; round < 3; ++round) {
@@ -125,8 +141,20 @@ int main(int argc, char** argv) {
         const auto parse = symbol<decltype(&fosu_parse)>(library, "fosu_parse");
         const auto view = symbol<decltype(&fosu_get_view)>(library, "fosu_get_view");
         const auto release = symbol<decltype(&fosu_free)>(library, "fosu_free");
+        const auto available = symbol<decltype(&fosu_backend_available)>(library, "fosu_backend_available");
+        const auto name = symbol<decltype(&fosu_backend_name)>(library, "fosu_backend_name");
+        for (const auto* kind : kinds) {
+            (void)available(kind);
+            require(!loaded(directory + "libfosu_engine_" + kind + suffix),
+                    "availability check loaded an engine");
+        }
         auto* first = make();
         require(first != nullptr, "fosu_new failed");
+        for (const auto* kind : kinds) {
+            require(loaded(directory + "libfosu_engine_" + kind + suffix) ==
+                        (strcmp(name(), kind) == 0),
+                    "selection did not load exactly its requested engine");
+        }
         require(parse(first, input.data(), input.size(), FOSU_ALL) == FOSU_OK,
                 "initial parse failed");
         require(view(first)->hit_object_count == 1, "initial result is incorrect");
@@ -150,6 +178,9 @@ int main(int argc, char** argv) {
         if (remaining) dlclose(remaining);
         require(remaining == nullptr,
                 "library remained loaded after dlclose; the unload check did not run");
+        for (const auto* kind : kinds)
+            require(!loaded(directory + "libfosu_engine_" + kind + suffix),
+                    "engine remained loaded after core teardown");
         require(!mapped(address), "unloaded library leaked its parked arena");
     }
     check_late_exit(argv[1]);

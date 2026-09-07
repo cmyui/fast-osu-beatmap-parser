@@ -3,26 +3,33 @@
 #include <cstdio>
 #include <string>
 #include <fosu/parser.hpp>
-#include <fosu/offset_beatmap.hpp>
 #include "support/canonical_dump.hpp"
+
+static fosu::Beatmap must_parse(
+    fosu::Parser& parser, const fosu::FileBuffer& input,
+    fosu::ParseOptions options = {}) {
+    auto parsed = parser.parse(input, options);
+    assert(parsed);
+    return *parsed.value();
+}
 
 static void check(const std::string& text) {
     auto input = fosu::make_padded(text);
-    auto scalar = fosu::parse(input, {.use_simd = false});
-    auto simd = fosu::parse(input);
-    fosu::OffsetBeatmap offset;
-    fosu::parse_into(input, offset);
+    fosu::Parser scalar_parser(fosu::internal::scalar_engine);
+    fosu::Parser simd_parser;
+    auto scalar = must_parse(
+        scalar_parser, input);
+    auto simd = must_parse(simd_parser, input);
     scalar.stats.fast_path_lines = scalar.stats.slow_path_lines = 0;
     simd.stats.fast_path_lines = simd.stats.slow_path_lines = 0;
-    offset.stats.fast_path_lines = offset.stats.slow_path_lines = 0;
-    std::string a, b, c;
+    std::string a, b;
     fosu_dump::dump(scalar, a);
     fosu_dump::dump(simd, b);
-    fosu_dump::dump(offset, c);
-    assert(a == b && a == c);
+    assert(a == b);
 }
 
 int main() {
+    fosu::Parser parser;
     // The short sample shortcut must reject every non-digit/separator byte,
     // including high-bit bytes. Full parsing may accept other spellings via
     // its bounded fallback; all representations must still agree.
@@ -41,14 +48,16 @@ int main() {
         const std::string line = "[HitObjects]\n1,2,3," + std::to_string(type) + ",0,0:1:2:3:";
         for (const std::string ending : {"", "\n", "\r\n"}) check(line + ending);
     }
-    assert(fosu::parse(nullptr, 0).hit_objects.empty());
-    assert(fosu::parse(fosu::make_padded({})).hit_objects.empty());
+    auto empty = parser.parse(nullptr, 0);
+    assert(empty && empty.value()->hit_objects.empty());
+    assert(must_parse(parser, fosu::make_padded({})).hit_objects.empty());
     auto embedded = fosu::make_padded(
         "[Metadata]\nTitle:[HitObjects]\n1,2,3,1,0\n[HitObjects]\n1,2,4,1,0\n");
-    auto selected = fosu::parse(embedded, {.sections = fosu::kSectionHitObjects});
+    auto selected = must_parse(parser,
+        embedded, {.sections = fosu::kSectionHitObjects});
     assert(selected.hit_objects.size() == 1 && selected.hit_objects[0].time == 4);
     auto point_input = fosu::make_padded("[HitObjects]\n1,2,3,2,0,B|1:2.5|3:4e1,1,10\n");
-    auto points = fosu::parse(point_input);
+    auto points = must_parse(parser, point_input);
     assert(points.sliders.size() == 1 && points.slider_points.size() == 2);
     assert(points.slider_points[0].y == 2 && points.slider_points[1].y == 40);
     check("[TimingPoints]\n\r\r// comment\n0,500\n[HitObjects]\n\r\r// comment\n1,2,3,1,0");
@@ -73,7 +82,7 @@ int main() {
     }
     {
         auto input = fosu::make_padded("[HitObjects]\n1,2,3,2,0,L|1:2,1,100,0|0,0:0|0:0,0:0:0:0:a,b\n");
-        auto m = fosu::parse(input);
+        auto m = must_parse(parser, input);
         assert(m.hit_objects.size() == 1 && m.hit_objects[0].hit_sample == "0:0:0:0:a");
     }
     for (const std::string decimal : {"111.99999999999987", "999.9999999999999",
@@ -82,12 +91,13 @@ int main() {
             decimal + ",4,2,1,100,1,0\n[HitObjects]\n1,2,3,2,0,B|1:2,1," + decimal;
         check(text);
         auto input = fosu::make_padded(text);
-        auto map = fosu::parse(input);
+        auto map = must_parse(parser, input);
         const double expected = strtod(decimal.c_str(), nullptr);
         assert(map.timing_points[1].beat_length == expected);
         assert(map.sliders[0].length == expected);
     }
     for (bool simd : {false, true}) {
+        fosu::Parser parser(simd ? fosu::internal::native_engine : fosu::internal::scalar_engine);
         auto input = fosu::make_padded(
             "[Metadata]\nTitle:real\nTitlX:wrong\nBeatmapID:-9223372036854775808\n"
             "[MetadataFake]\nTitle:wrong\n[Difficulty]\nApproachRate:1e309\n"
@@ -95,7 +105,7 @@ int main() {
             "[HitObjects]\n256.5,192,1000.5,1,0\n1,2,2000.25,8,0,3000.75\n"
             "1,2,4000,2,0,B|1.5:2.5,1,2.5e2\n"
             "[Events]\n2,1e309,100\n2,1.25,9.75\n");
-        auto m = fosu::parse(input, {.use_simd = simd});
+        auto m = must_parse(parser, input);
         assert(m.title == "real" && m.beatmap_id == -1);
         assert(m.ar == 5 && m.stats.malformed_lines == 4);
         assert(m.timing_points.size() == 2 && std::isnan(m.timing_points[1].beat_length));

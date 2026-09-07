@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <cmath>
 #include <limits>
-#include "fast_float.h"
+#include "../fast_float.h"
 
 #include "swar.hpp"
 

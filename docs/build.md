@@ -37,15 +37,15 @@ Tests and benchmark programs are built only when their targets are requested.
 | `FOSU_BUNDLE_RUNTIME` | `ON`, `OFF` | On for native Linux release builds and release wheels; off for local Python source builds, macOS and sanitizers |
 
 Release C++ uses `-O3`; C benchmark launchers use `-O2`. Debug uses `-O0 -g` and
-libstdc++ debug containers. Portable vectors use public vector operations.
-Sanitizers use `-O1 -g`, ASan, UBSan, float-cast checks and vector annotations.
+libstdc++ debug checks. Sanitizers use `-O1 -g`, ASan, UBSan and float-cast checks.
 Tests keep assertions enabled. Standard `CMAKE_CXX_FLAGS`, `CMAKE_C_FLAGS`, and
 linker flag variables accept additional compiler options.
 
 Compiled C API and Python products use runtime CPU selection with `FOSU_ISA=auto`:
-x86-64 builds include scalar and AVX2 backends; AArch64 builds include scalar
-and NEON.
-`scalar` omits optimized backends; `avx2` and `neon` require their respective
+x86-64 builds contain the scalar engine in the core and an adjacent AVX2 shared
+library; AArch64 builds use the same layout with NEON. Only the selected
+optimized library is loaded. Install/distribute both files together.
+`scalar` omits optimized libraries; `avx2` and `neon` require their respective
 backend at first use unless overridden by `FOSU_BACKEND`. Unsupported forced
 requests fail instead of executing invalid instructions. Both products require x86-64-v3 CPU features and OS XMM/YMM support
 before selecting AVX2.
@@ -120,14 +120,15 @@ python3 -m build                 # source archive, then wheel from that archive
 
 Build isolation supplies scikit-build-core, CFFI, and a suitable CMake/Ninja when
 needed. An installed C/C++ compiler and Python development headers are required
-for source builds. The wheel contains one extension with scalar and AVX2 backends on x86-64,
-or scalar and NEON on Apple Silicon, using the CPython 3.10+ stable ABI.
+for source builds. The wheel contains a CPython 3.10+ stable-ABI extension with
+the scalar engine, plus an adjacent AVX2 library on x86-64 or NEON library on
+Apple Silicon.
 `FOSU_BUNDLE_RUNTIME=1` bundles the Linux C++ runtime; cibuildwheel enables this
 by default. `CMAKE_ARGS` or pip's `-Ccmake.define.NAME=VALUE` can configure CMake.
 
 ## One-shot process
 
-This separate target requires GCC and Linux x86-64. Its `-O2`, fixed register,
+This separate target requires GCC and Linux x86-64. Its `-O2`,
 custom entrypoint, syscall and runtime settings stay in `oneshot/build.sh`.
 They are never applied to the library or Python extension.
 

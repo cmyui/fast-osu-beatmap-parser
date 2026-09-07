@@ -7,6 +7,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>  // declarations only; the definitions below are ours (build with -D_FORTIFY_SOURCE=0)
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace rt {
 
@@ -38,15 +43,6 @@ enum : long { SYS_read = 0, SYS_write = 1, SYS_open = 2, SYS_fstat = 5, SYS_mmap
 
 inline long read(int fd, void* p, size_t n) { return sys3(SYS_read, fd, (long)p, (long)n); }
 inline long write(int fd, const void* p, size_t n) { return sys3(SYS_write, fd, (long)p, (long)n); }
-inline long open_ro(const char* path) { return sys3(SYS_open, (long)path, 0 /*O_RDONLY*/, 0); }
-inline long fstat_size(int fd) {
-    struct { char pad[48]; long size; char rest[144 - 56]; } st;  // st_size at offset 48
-    if (sys2(SYS_fstat, fd, (long)&st) < 0) return -1;
-    return st.size;
-}
-inline void* mmap(void* addr, size_t len, int prot, int flags, int fd = -1) {
-    return (void*)sys6(SYS_mmap, (long)addr, (long)len, prot, flags, fd, 0);
-}
 inline long madvise(void* p, size_t n, int adv) { return sys3(SYS_madvise, (long)p, (long)n, adv); }
 [[noreturn]] inline void exit(int code) {
     for (;;) sys1(SYS_exit_group, code);
@@ -55,6 +51,58 @@ inline long madvise(void* p, size_t n, int adv) { return sys3(SYS_madvise, (long
 }  // namespace rt
 
 extern "C" {
+// POSIX surface used by Parser and its arena OS layer. The one-shot process
+// has one thread, so errno needs no TLS runtime.
+int* __errno_location() noexcept {
+    static int value;
+    return &value;
+}
+
+static long posix_result(long result) {
+    if (result < 0 && result >= -4095) {
+        errno = static_cast<int>(-result);
+        return -1;
+    }
+    return result;
+}
+
+int open(const char* path, int flags, ...) {
+    return static_cast<int>(posix_result(rt::sys3(2, (long)path, flags, 0)));
+}
+int close(int fd) {
+    return static_cast<int>(posix_result(rt::sys1(3, fd)));
+}
+int fstat(int fd, struct stat* info) noexcept {
+    return static_cast<int>(posix_result(rt::sys2(5, fd, (long)info)));
+}
+ssize_t read(int fd, void* data, size_t size) {
+    return posix_result(rt::read(fd, data, size));
+}
+ssize_t write(int fd, const void* data, size_t size) {
+    return posix_result(rt::write(fd, data, size));
+}
+long sysconf(int name) noexcept {
+    if (name == _SC_PAGESIZE) return 4096;  // Linux x86-64 base page size.
+    errno = EINVAL;
+    return -1;
+}
+void* mmap(void* address, size_t size, int protection, int flags, int fd, off_t offset) noexcept {
+    return reinterpret_cast<void*>(posix_result(
+        rt::sys6(9, (long)address, size, protection, flags, fd, offset)));
+}
+int mprotect(void* address, size_t size, int protection) noexcept {
+    return static_cast<int>(posix_result(rt::sys3(10, (long)address, size, protection)));
+}
+int munmap(void* address, size_t size) noexcept {
+    return static_cast<int>(posix_result(rt::sys2(11, (long)address, size)));
+}
+int madvise(void* address, size_t size, int advice) noexcept {
+    return static_cast<int>(posix_result(rt::madvise(address, size, advice)));
+}
+int mlock(const void* address, size_t size) noexcept {
+    return static_cast<int>(posix_result(rt::sys2(149, (long)address, size)));
+}
+
 // Small copies dominate (hit_sample and edge strings, 3-16 bytes each, a
 // thousand-plus per file); rep movsb costs ~30 cycles of startup per call,
 // so sizes up to 64 go through overlapping loads/stores instead.

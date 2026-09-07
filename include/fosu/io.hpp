@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cerrno>
-#include <stdexcept>
+#include <new>
 #include <memory>
 #include <string_view>
 
@@ -56,8 +56,9 @@ inline bool read_into(const char* path, FileBuffer& buf) {
     }
     const size_t len = static_cast<size_t>(st.st_size);
     if (buf.capacity < len + kBufferPadding) {
-        try { buf.data.reset(new char[len + kBufferPadding]); }
-        catch (...) { close(fd); throw; }
+        auto data = std::unique_ptr<char[]>(new (std::nothrow) char[len + kBufferPadding]);
+        if (!data) { close(fd); errno = ENOMEM; return false; }
+        buf.data = std::move(data);
         buf.capacity = len + kBufferPadding;
     }
     size_t got = 0;
@@ -84,9 +85,10 @@ inline FileBuffer read_file_padded(const char* path) {
 
 // For tests/benchmarks: copy an in-memory string into a padded buffer.
 inline FileBuffer make_padded(std::string_view content) {
-    if (content.size() > kMaxInputSize) throw std::length_error("beatmap input exceeds 64 MiB");
+    if (content.size() > kMaxInputSize) return {};
     FileBuffer buf;
-    buf.data.reset(new char[content.size() + kBufferPadding]);
+    buf.data.reset(new (std::nothrow) char[content.size() + kBufferPadding]);
+    if (!buf.data) return {};
     buf.capacity = content.size() + kBufferPadding;
     if (!content.empty()) memcpy(buf.data.get(), content.data(), content.size());
     memset(buf.data.get() + content.size(), 0, kBufferPadding);

@@ -1,7 +1,7 @@
 # One beatmap per process
 
 The executable is a process-level benchmark and demonstration of the library's
-kernels; the library, C ABI and Python package are the primary products. It
+parsing engine; the library, C ABI and Python package are the primary products. It
 minimizes wall time from process creation through exit, including
 opening and reading the original `.osu`, parsing it and writing the complete
 result to stdout. It needs no retained state, cache, sidecar or preprocessing of
@@ -24,30 +24,17 @@ See [performance](../docs/performance.md) for measured results and comparisons.
 
 ## Process and memory design
 
-Input and output share one anonymous arena. `read` populates input bytes and
-leaves zero padding before the output cursor. Hitobject prefix SIMD stores land
-directly in stdout records; slider points and strings follow inline. Metadata,
-timing points, breaks and colours are collected for a trailer. Normal files
-fit one output write; larger records/trailers can flush or grow storage.
+The executable calls the same `Parser::parse_file` as the hosted library.
+Parser owns the padded input and contiguous Beatmap arrays in one working
+arena. The compile-time AVX2 engine fills those arrays, then a bounded 64 KiB
+output buffer serializes the result to stdout. The process releases mappings
+and descriptors when it exits.
 
-The arena starts near the executable, at a chosen offset within a 2 MiB-aligned
-region. This shares upper page-table pages with the binary and makes the first
-working-set window eligible for appropriately sized anonymous folios while
-excluding a wasteful 2 MiB folio. Larger maps may use further windows. Mutable
-context is on the initial stack and addressed through `r15`; ordinary maps
-touch no writable global data or overflow mapping.
-
-Rare short timing-point lines can exceed the initial reserve hint. The timing
-buffer then grows geometrically without discarding committed points. Breaks,
-colours and orphaned slider points beyond inline storage use a lazy overflow
-mapping. The process releases all mappings and descriptors when it exits.
-
-Numeric conversion, prefix parsing, metadata tables/defaults and the hitobject
-framing loop are shared with the C++ library. Vector allocation, streamed
-slider rollback, event loops, timing-section loop and storage and top-level dispatch
-retain their representation-specific implementations. The
+The freestanding runtime implements the small POSIX surface used by Parser
+and the arena OS layer using direct syscalls. It does not duplicate format
+rules, section loops or beatmap storage. The
 [vendored fast_float header](../include/fosu/internal/fast_float.md) supplies
-the bounded, locale-independent fallback for every representation.
+the bounded, locale-independent numeric fallback.
 
 ## Optional host configuration
 
@@ -81,7 +68,7 @@ consumers locate the trailer from the end and read its object count before
 walking the variable-length records. Searching for `TRLR` inside data is not a
 valid way to find a record boundary.
 
-The field order is specified by the independent test serializer, [canonical_dump.hpp](../tests/support/canonical_dump.hpp); the independent
+The field order is specified by the shared serializer, [canonical_dump.hpp](../tests/support/canonical_dump.hpp); the independent
 [Python decoder](../oneshot/decode.py) demonstrates reconstruction of
 metadata, arrays and the complete point pool. A stream consumer should accept
 output only after the process exits successfully: an error may follow a
@@ -92,10 +79,9 @@ partial write. There is no `--dump` switch; output is always written.
 This is a Linux/Zen 4 executable for legacy beatmaps, with 4 KiB
 base pages and the runtime/ELF choices above. It accepts one regular file path
 and a blocking stdout. Input must be at most 64 MiB;
-wire lengths and pool indices are 32-bit. It supports up to eight timing
-sections, 32,784 breaks, 4,104 colours and 1,048,576 orphaned slider points.
-Those limits exceed the evaluation corpus and fail explicitly when exceeded.
-The ordinary C++ library does not have these fixed section/overflow limits.
+wire lengths and pool indices are 32-bit. Array capacities follow the same
+input-derived bounds as the library; there are no separate fixed section or
+record-count limits.
 The shared [parsing contract](../docs/compatibility.md) defines numeric bounds,
 malformed-record handling and the consumer's gameplay responsibilities.
 
@@ -105,9 +91,8 @@ malformed-record handling and the consumer's gameplay responsibilities.
 | 1 | Input open/size/read or memory-mapping failure |
 | 2 | Wrong argument count |
 | 3 | Output failure, including nonblocking `EAGAIN` |
-| 4 | More than eight timing sections |
 | 5 | Runtime assertion failure |
-| 6 | Input, break, colour or orphan-point limit exceeded |
+| 6 | Input exceeds 64 MiB |
 
 Interrupted reads/writes are retried; partial writes are completed. An input
 read that ends before the size reported by `fstat` is an error. An ordinary
@@ -123,6 +108,7 @@ python3 tests/verify_stream.py build/release-avx2-bundled/reference_native build
 
 For a release comparison, build the reference against a separately exported
 master revision, as shown in the [benchmark guide](../docs/performance.md).
-The hosted reference's serializer is a correctness tool, not an optimized
-example of delivering library arrays. Its serialization cost should not be
-mistaken for the minimum cost of returning a `Beatmap` to an in-process caller.
+The reference and executable use the same serializer over the same Beatmap.
+Their complete streams are compared, including counters and orphaned points;
+independent reference tests check parsing semantics. Serialization cost should
+not be mistaken for the cost of returning a Beatmap to an in-process caller.

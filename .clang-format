@@ -1,0 +1,3 @@
+BasedOnStyle: Chromium
+AllowShortLambdasOnASingleLine: Empty
+ColumnLimit: 90
