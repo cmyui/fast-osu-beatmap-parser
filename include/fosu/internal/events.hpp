@@ -1,0 +1,114 @@
+#pragma once
+#include "text.hpp"
+#include "prefix.hpp"
+
+namespace fosu::internal {
+
+inline std::string_view strip_quotes(std::string_view v) {
+    if (v.size() >= 2 && v.front() == '"' && v.back() == '"')
+        return v.substr(1, v.size() - 2);
+    return v;
+}
+
+template <typename Map>
+inline void parse_event_line(Map& bm, const char* p, size_t len) {
+    // Storyboard commands are indented; count and skip them.
+    if (len == 0 || *p == ' ' || *p == '_') {
+        ++bm.stats.storyboard_lines;
+        return;
+    }
+    const char* end = p + len;
+    const auto* c1 = static_cast<const char*>(memchr(p, ',', len));
+    if (!c1) {
+        ++bm.stats.storyboard_lines;
+        return;
+    }
+    const std::string_view f0{p, static_cast<size_t>(c1 - p)};
+    const char* rest = c1 + 1;
+    if (f0 == "0") {
+        // 0,0,"bg.jpg",xOffset,yOffset
+        const auto* c2 = static_cast<const char*>(memchr(rest, ',', end - rest));
+        if (!c2) return;
+        const char* fname = c2 + 1;
+        const auto* c3 = static_cast<const char*>(memchr(fname, ',', end - fname));
+        const char* fend = c3 ? c3 : end;
+        bm.background = strip_quotes(trim(fname, fend));
+    } else if (f0 == "1" || f0 == "Video") {
+        const auto* c2 = static_cast<const char*>(memchr(rest, ',', end - rest));
+        if (!c2) return;
+        const char* fname = c2 + 1;
+        const auto* c3 = static_cast<const char*>(memchr(fname, ',', end - fname));
+        const char* fend = c3 ? c3 : end;
+        bm.video = strip_quotes(trim(fname, fend));
+    } else if (f0 == "2" || f0 == "Break") {
+        double start, stop;
+        const char* q = fosu::internal::parse_osu_double(rest, end, start);
+        if (q == rest || q >= end || *q != ',') { ++bm.stats.malformed_lines; return; }
+        const char* r = fosu::internal::parse_osu_double(q + 1, end, stop);
+        if (r == q + 1 || r != end) { ++bm.stats.malformed_lines; return; }
+        bm.breaks.push_back({start, stop});
+    } else {
+        ++bm.stats.storyboard_lines;
+    }
+}
+
+#if FOSU_SIMD_X86
+// Fused [Events] section loop. Storyboard command lines — indented, and
+// ~12% of all lines in the popular corpus — are counted and skipped on
+// their first byte; every line finds its end with vector compares (two
+// 32-byte windows cover 64 bytes) instead of a memchr call. Returns the
+// position after the section.
+template <typename Map>
+inline const char* parse_events_section(Map& bm, const char* p,
+                                        const char* file_end) {
+    uint32_t storyboard_lines = 0;
+    while (p < file_end) {
+        const char c = *p;
+        if (c == '\r' || c == '\n') {
+            ++p;
+            continue;
+        }
+        if (c == '[') break;
+
+        const __m256i a =
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
+        const __m256i b =
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p + 32));
+        const uint64_t nl =
+            static_cast<uint32_t>(_mm256_movemask_epi8(
+                _mm256_cmpeq_epi8(a, _mm256_set1_epi8('\n')))) |
+            static_cast<uint64_t>(static_cast<uint32_t>(_mm256_movemask_epi8(
+                _mm256_cmpeq_epi8(b, _mm256_set1_epi8('\n')))))
+                << 32;
+        const char* line = p;
+        const char* next_line;
+        const char* line_end;
+        if (nl) {
+            line_end = p + _tzcnt_u64(nl);
+            next_line = line_end + 1;
+        } else {
+            const auto* m = static_cast<const char*>(memchr(
+                p + 64, '\n',
+                file_end - p > 64 ? static_cast<size_t>(file_end - p) - 64
+                                  : 0));
+            line_end = m ? m : file_end;
+            next_line = m ? m + 1 : file_end;
+        }
+        if (line_end[-1] == '\r') --line_end;  // line_end > line: c is not CR
+        p = next_line;
+
+        if (fosu::internal::ignored_line(line, line_end)) continue;
+        if (c == ' ' || c == '_') {  // indented storyboard command
+            ++storyboard_lines;
+            continue;
+        }
+        const auto len = static_cast<size_t>(line_end - line);
+        if (len >= 2 && c == '/' && line[1] == '/') continue;  // comment
+        parse_event_line(bm, line, len);
+    }
+    bm.stats.storyboard_lines += storyboard_lines;
+    return p;
+}
+#endif  // FOSU_SIMD_X86
+
+}  // namespace fosu::internal

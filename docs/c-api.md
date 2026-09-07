@@ -1,23 +1,23 @@
-# C API and Python CFFI
+# C API
 
 Python applications should start with the [Python package](python.md), which
 provides `fosu.parse_file(path)` and manages ownership automatically. This page
-documents the lower-level C interface and manual CFFI example.
+documents the lower-level C interface.
 
 ```sh
 make lib test-c-api CXX=g++
 ```
 
-This builds `build/libfosu.so` on Linux or `build/libfosu.dylib` on macOS.
+This builds `build/release-avx2-bundled/libfosu.so` on Linux x86-64 or
+`build/release-scalar-shared/libfosu.dylib` on Apple Silicon. See
+[build configurations](build.md) for all targets.
 `include/fosu/c_api.h` is a C-compatible header. The default Linux x86-64 build
 requires **x86-64-v3 (including AVX2 and BMI)** and is tuned for Zen 4; it has no
-CPU dispatch. Override `LIB_ARCH_FLAGS=` for a scalar build. Native Apple
+CPU dispatch. Use `ISA=scalar` for a scalar build. Native Apple
 Silicon builds use the scalar parser.
 
 On Linux the default build bundles private copies of the C++ runtime and
-unwinder. This reduced measured first-library-use time from about 756 to 182 µs,
-with steady-state parsing unchanged. Loaded sections grow from about 65 to
-250 KB. Only `fosu_*` functions are exported; no C++ exceptions cross the ABI.
+unwinder. Only `fosu_*` functions are exported; no C++ exceptions cross the ABI.
 Allocation still uses the process's `malloc`/`free` (including interposed
 allocators), but the library uses its own `operator new`/`delete`, so a host's
 C++ replacement operators and `std::set_new_handler` state do not apply. The header-only C++ interface retains
@@ -50,8 +50,8 @@ int main(int argc, char **argv) {
 }
 ```
 
-Compile on Linux with `cc -Iinclude examples/c_example.c -Lbuild -lfosu
--Wl,-rpath,"$PWD/build" -o build/example`. Check the ABI version before accessing
+Compile on Linux with `cc -Iinclude examples/c_example.c -Lbuild/release-avx2-bundled -lfosu
+-Wl,-rpath,"$PWD/build/release-avx2-bundled" -o build/example`. Check the ABI version before accessing
 records. Version 2 defines the current structs, including double timestamps.
 Incompatible struct changes require a version bump and rebuilding bindings.
 
@@ -70,9 +70,8 @@ live storage and may be used concurrently.
 
 On Linux, `MADV_HUGEPAGE` requests larger pages where the host enables them.
 The advice is optional and never changes host settings. Define
-`FOSU_ARENA_NO_HUGEPAGE` when building to omit it, or `FOSU_ARENA_MALLOC` to
-back the arena with `malloc` instead of `mmap`. These choices can affect first
-use and memory provisioning; benchmark on the deployment host.
+`FOSU_ARENA_NO_HUGEPAGE` when building to omit it. Page provisioning affects first use;
+benchmark on the deployment host.
 
 ## Contract
 
@@ -107,27 +106,3 @@ The C record layout is an in-process ABI, not a portable raw-memory file
 format. Use the [one-shot stream](../oneshot/README.md) for serialized results.
 The library does not change process allocator settings, CPU affinity or host
 huge-page configuration.
-
-## Manual CFFI example
-
-The example uses CFFI's compiled API mode, reading declarations from the actual
-C header. This lets the C compiler check sizes and field offsets. It exposes
-NumPy views of the C arrays without creating a Python object for every note.
-
-```sh
-python3 -m venv build/python
-build/python/bin/pip install cffi numpy setuptools
-build/python/bin/python examples/cffi_build.py
-PYTHONPATH=build/cffi build/python/bin/python examples/cffi_example.py map.osu
-```
-
-`setuptools` is needed for CFFI compilation on Python 3.12+. The example embeds
-a library search path to this checkout's `build` directory; packaging an
-application requires configuring its own installed library location.
-
-**Keep the handle alive while reading a NumPy array.** A read-only NumPy flag
-prevents accidental writes; it does not extend ownership. Use `objects.copy()`
-before the next parse or `fosu_free` if the array must survive. The same rules
-apply to `ffi.buffer`, strings and pointers obtained from the view. CFFI can
-release the GIL during C calls, so independent handles are required for parallel
-parses.

@@ -28,7 +28,6 @@ T symbol(void* library, const char* name) {
     return function;
 }
 
-#ifndef FOSU_ARENA_MALLOC
 bool mapped(uintptr_t address) {
 #if defined(__APPLE__)
     // Darwin's mincore succeeds even for unmapped holes. Region lookup must
@@ -53,7 +52,6 @@ bool mapped(uintptr_t address) {
     return result == 0;
 #endif
 }
-#endif
 
 struct ExitApi {
     decltype(&fosu_new) make;
@@ -66,9 +64,7 @@ struct ExitApi {
 ExitApi exit_api;
 
 void parse_at_exit() {
-#ifndef FOSU_ARENA_MALLOC
     require(!mapped(exit_api.address), "late callback ran before arena cleanup");
-#endif
     auto* handle = exit_api.make();
     require(handle != nullptr, "late fosu_new failed");
     const char input[] = "[Metadata]\nTitle:after cleanup\n[HitObjects]\n4,5,6,1,0\n";
@@ -136,9 +132,7 @@ int main(int argc, char** argv) {
         require(view(first)->hit_object_count == 1, "initial result is incorrect");
         const auto address = reinterpret_cast<uintptr_t>(view(first)->text);
         release(first);
-#ifndef FOSU_ARENA_MALLOC
         require(mapped(address), "freeing a handle did not retain its reusable arena");
-#endif
         auto* second = make();
         require(second != nullptr, "second fosu_new failed");
         require(parse(second, nullptr, 0, FOSU_ALL) == FOSU_OK, "recycled parse failed");
@@ -156,9 +150,7 @@ int main(int argc, char** argv) {
         if (remaining) dlclose(remaining);
         require(remaining == nullptr,
                 "library remained loaded after dlclose; the unload check did not run");
-#ifndef FOSU_ARENA_MALLOC
         require(!mapped(address), "unloaded library leaked its parked arena");
-#endif
     }
     check_late_exit(argv[1]);
     puts("C API: recycling, fresh results, actual unload and late host exit callback passed");

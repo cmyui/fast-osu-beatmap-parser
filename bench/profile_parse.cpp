@@ -25,6 +25,7 @@ int main(int argc, char** argv) {
     size_t limit = strtoul(argv[2], nullptr, 10);
     if (!limit || limit > files.size()) limit = files.size();
     const int rounds = atoi(argv[3]);
+    if (!limit || rounds < 1 || (strcmp(argv[4], "fresh") && strcmp(argv[4], "reuse"))) return 2;
     const bool reuse = strcmp(argv[4], "reuse") == 0;
     const uint32_t sections = argc > 5 ? static_cast<uint32_t>(strtoul(argv[5], nullptr, 0)) : fosu::kAllSections;
     std::vector<fosu::FileBuffer> inputs;

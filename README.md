@@ -1,26 +1,22 @@
 # fosu — fast osu! beatmap parsing
 
-A C++20 parsing library for legacy `.osu` beatmap files: a header-only C++
-interface, a small in-process C ABI with owned storage, and an installable
-Python package backed by CFFI. The same kernels also power a freestanding
-one-shot executable used as a process-level benchmark and demonstration.
-Correctness follows the official osu! legacy decoder's acceptance rules;
-unusual or malformed input is skipped and counted rather than trusted.
+Parse `.osu` beatmaps into named fields and records from Python, C++, or C.
+fosu combines SIMD parsing with the official osu! legacy decoder's acceptance
+rules, including unusual numeric forms and malformed records.
 
-| Interface | Result | Use |
-|---|---|---|
-| [C++ library](docs/library.md) | `Beatmap` with vectors and borrowed strings | Direct parsing in a C++ application |
-| [C API](docs/c-api.md) | Handle-owned arena: input copy and contiguous arrays | C and other FFI callers |
-| [Python package](docs/python.md) | Owned `Beatmap` with named fields and records | Python apps; optional zero-copy NumPy arrays |
-| [One-shot executable](oneshot/README.md) | Complete binary stream on stdout | Process-lifetime benchmark on Linux/Zen 4 |
+```python
+import fosu
 
-The native representations are checked on a fixed corpus of **10,000
-ranked/approved maps, 402,593,897 bytes**, and a broader cache corpus. Comparisons
-cover strings, raw float bits, every pool entry/index and parser counters.
-Prior releases are regression baselines; intentional correctness fixes are
-accounted for separately. See [compatibility](docs/compatibility.md) for the
-parsing contract and independent references, and
-[performance](docs/performance.md) for measured boundaries and reproduction.
+beatmap = fosu.parse_file("map.osu")
+print(beatmap.title, beatmap.ar, beatmap.hit_objects[0].time)
+```
+
+Python results own their native storage. Strings and records are exposed as
+needed, and optional NumPy views give you read-only arrays without copying.
+Install a prebuilt wheel, or run `python -m pip install .` in a source checkout.
+See the [Python guide](docs/python.md) for installation and the complete API.
+
+The C++20 interface is header-only:
 
 ```cpp
 #include <fosu/parser.hpp>
@@ -32,50 +28,48 @@ fosu::Beatmap map = fosu::parse(input);
 // Keep input alive and unchanged while using map's string views.
 ```
 
+Recorded warm parsing times on our **10,000-map corpus** are roughly **19 µs
+per map in C++** and **25 µs from Python**. These are means of per-map minima
+on a pinned Zen 4 core, starting with resident input bytes; they exclude file
+I/O and process startup. See [performance](docs/performance.md) for the exact
+measurements, host, repetition counts, and reproduction commands.
+
+| Interface | Result | Use |
+|---|---|---|
+| [C++ library](docs/library.md) | `Beatmap` with vectors and borrowed strings | Direct parsing in a C++ application |
+| [C API](docs/c-api.md) | Handle-owned arena: input copy and contiguous arrays | C and other FFI callers |
+| [Python package](docs/python.md) | Owned `Beatmap` with named fields and records | Python apps; optional zero-copy NumPy arrays |
+| [One-shot executable](oneshot/README.md) | Complete binary stream on stdout | Process-lifetime benchmark on Linux/Zen 4 |
+
+All native representations are checked on the same fixed corpus of **10,000
+ranked/approved maps, 402,593,897 bytes**. Comparisons cover strings, raw float
+bits, every pool entry/index and parser counters. Prior releases are regression
+baselines; intentional correctness fixes are accounted for separately. See
+[compatibility](docs/compatibility.md) for the parsing contract and independent
+references.
+
 ```sh
-make test                           # scalar + AVX2; Rosetta on Apple Silicon
-make lib test-c-api CXX=g++          # hosted C ABI
-make oneshot CXX=g++                # Linux x86-64, Zen 4 target
-build/fosu_oneshot map.osu > map.fosu
-python3 examples/decode_oneshot.py < map.fosu
+make                       # build the C ABI library
+make -j4 test              # native correctness and storage checks
 ```
 
-```python
-import fosu
+See [builds and checks](docs/build.md) for compiler/ISA profiles, sanitizers,
+benchmarks and the optional Linux one-shot executable.
 
-beatmap = fosu.parse_file("map.osu")
-print(beatmap.title, beatmap.ar, beatmap.hit_objects[0].time)
-```
+## Implementation
 
-Install a prebuilt wheel or run `python -m pip install .` in a source checkout.
-The [Python guide](docs/python.md) covers installation, automatic ownership,
-section selection and NumPy access.
+AVX2 classifies delimiters and digits together, then uses compile-time shuffle
+masks and multiply-add instructions to convert common hitobject prefixes and
+slider points. Timing points reuse validated shape geometry within a section.
+Unusual numeric forms take a bounded scalar conversion path; metadata uses
+key/type tables.
 
-## Parsing strategy
-
-One AVX2 load per hitobject line yields its newline, comma and non-digit
-masks. The four prefix field lengths are packed into 16-bit lanes so a single
-subtraction, addition and mask validate every bound and one multiply selects a
-compile-time permutation table; multiply-add instructions then convert
-`x,y,time,type` together and a branchless select reads `hitSound`. Circles
-with the common 8-byte sample finish inline; sliders take an out-of-line
-routine that converts the first two control points speculatively from one
-32-byte window (most sliders have one or two), converts each further point
-with one shuffle, and parses the length with SWAR. Blank, comment and header
-lines are only examined after the editor shape fails, so no per-line
-whitespace scan runs on the fast path.
-
-Records are written through raw cursors into reserved vector capacity and
-published once per section, with ordinary vector operations for debug and
-sanitizer builds; timing points reuse per-section shape geometry the same way.
-Metadata uses compact key/type tables. These kernels are shared by
-the library, the C ABI and the executable through compile-time storage
-policies; the C ABI handle keeps its input copy and arrays in an arena, with
-heap growth when needed. A freed handle can leave one bounded spare arena for
-a later parse; library unload releases it.
-The executable adds a freestanding runtime and streams records to stdout. No
-parsed results or input files are cached across processes; profile-guided
-builds contain code-generation feedback only.
+The same kernels write through compile-time storage policies: native C++
+vectors, compact arena arrays for the C ABI/Python package, or streamed
+one-shot records. Native release vectors use direct writes into reserved
+capacity; debug and sanitizer builds use public vector operations. A freed
+C ABI handle can leave one bounded spare arena for later calls; it retains
+storage, not parsed results. Library unload releases the spare.
 
 ## Coverage and assumptions
 
@@ -96,8 +90,4 @@ requires x86-64-v3, while the one-shot binary targets Zen 4. Measurements are
 bounded to the documented corpus and host; see [performance](docs/performance.md).
 
 The project concept and original SIMD hitobject prototype are by
-[Flamme](https://github.com/infernalfire72). The implementation extends that
-technique with parallel delimiter extraction, compile-time masks, fallback
-validation and full-file parsing. The one-shot runtime and memory placement
-were developed with Fable; the combined implementation is reviewed and measured
-across both storage paths.
+[Flamme](https://github.com/infernalfire72).

@@ -16,22 +16,23 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - run: make CXX=g++ test test-c-api
-      - name: Check portable and debug vectors
+      - run: python3 tests/test_build.py
+      - run: make -j2 CXX=g++ test
+      - run: make -j2 CXX=g++ ISA=scalar test
+      - run: make -j2 CXX=g++ PROFILE=portable test-parser
+      - run: make -j2 CXX=g++ PROFILE=debug test-parser
+      - run: make -j2 CXX=clang++ PROFILE=sanitize test
+      - run: make CXX=clang++ PROFILE=sanitize fuzz-smoke
+      - name: Check complete one-shot output and resource limits
+        run: make -j2 CXX=g++ ONESHOT_FLAGS=-march=x86-64-v3 test-oneshot
+      - name: Build and exercise benchmark tools
         run: |
-          g++ -std=c++20 -O2 -Iinclude -march=x86-64-v3 -DFOSU_PORTABLE_VECTORS tests/test_parser.cpp -o build/test_portable
-          build/test_portable
-          g++ -std=c++20 -O1 -Iinclude -march=x86-64-v3 -D_GLIBCXX_DEBUG tests/test_parser.cpp -o build/test_debug
-          build/test_debug
-      - name: Check vector annotations and direct arena storage
-        run: |
-          SAN='-fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=all'
-          clang++ -std=c++20 -O1 -g -Iinclude -march=x86-64-v3 $SAN -D_GLIBCXX_SANITIZE_VECTOR=1 tests/test_parser.cpp -o build/test_vector_sanitize
-          build/test_vector_sanitize
-          clang++ -std=c++20 -O1 -g -Iinclude -march=x86-64-v3 $SAN -fPIC -fvisibility=hidden -shared src/c_api.cpp -o build/libfosu_sanitize.so
-          clang++ -std=c++20 -O1 -g -Iinclude -march=x86-64-v3 $SAN tests/test_c_api.cpp -Lbuild -lfosu_sanitize -Wl,-rpath,"$PWD/build" -pthread -o build/test_c_api_sanitize
-          build/test_c_api_sanitize
-      - run: make CXX=clang++ test-sanitize fuzz-smoke
+          make -j2 CXX=g++ bench-build references build/release-avx2-bundled/oneshot_process
+          build/release-avx2-bundled/generate_corpus build/smoke-corpus
+          make CXX=g++ CORPUS=build/smoke-corpus REPS=2 bench
+          build/release-avx2-bundled/validate_corpus build/smoke-corpus build/release-avx2-bundled/numeric_oracle.so
+          python3 bench/library_first_compare.py build/smoke-corpus build/release-avx2-bundled/library_first build/release-avx2-bundled/c_api_first --limit 2 --reps 1 > build/first.csv
+          python3 bench/summarize.py build/first.csv
 
   native-macos:
     runs-on: macos-26
@@ -39,11 +40,8 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - run: make CXX=clang++ test-c-api test-sanitize
-      - name: Check libc++ container annotations
-        run: |
-          clang++ -std=c++20 -O1 -g -Iinclude -fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=all tests/test_parser.cpp -o build/test_vector_sanitize
-          build/test_vector_sanitize
+      - run: make -j3 test bench-build references
+      - run: make -j3 PROFILE=sanitize test
 
   official-acceptance:
     runs-on: ubuntu-24.04
@@ -57,7 +55,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - run: python -m pip install .
-      - run: sh bench/official-reference/build.sh
+      - run: python -m pip install build
+      - run: python -m build --sdist --outdir dist
+      - run: python -m pip install dist/*.tar.gz
+      - run: sh tests/reference/official/build.sh
       - run: python tests/test_official.py
       - run: FOSU_FORCE_SCALAR=1 python tests/test_official.py

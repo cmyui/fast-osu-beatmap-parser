@@ -1,12 +1,12 @@
 // fosu one-shot: the fosu parser as a one-shot process — exec, read one .osu
-// file, parse, write the canonical dump (oneshot/dump.hpp) to stdout,
+// file, parse, write the canonical dump (tests/support/canonical_dump.hpp) to stdout,
 // exit — with nothing between the kernel and the parser. Freestanding:
 // no libc, no libstdc++, one anonymous arena (input, padding, timing
 // buffer and output stream back to back, so multi-size THP can back the
 // whole working set with one or two folios), hit objects written straight
 // from the SIMD prefix store into the output stream, and everything else
 // gathered into a trailer. Numeric kernels, metadata and hitobject
-// framing are shared with the library. bench/oneshot_reference.cpp
+// framing are shared with the library. tests/reference/native.cpp
 // serializes the ordinary library for exact comparison.
 #include <immintrin.h>
 
@@ -18,13 +18,13 @@
 #include "runtime.hpp"
 #define FASTFLOAT_ASSERT(x) ((void)0)
 #define FASTFLOAT_DEBUG_ASSERT(x) ((void)0)
-#include <fosu/detail/prefix.hpp>
-#include <fosu/detail/object_tail.hpp>
-#include <fosu/detail/timing.hpp>
-#include <fosu/detail/slider.hpp>
-#include <fosu/detail/metadata.hpp>
-#include <fosu/detail/hitobjects.hpp>
-#include <fosu/detail/section_names.hpp>
+#include <fosu/internal/prefix.hpp>
+#include <fosu/internal/object_tail.hpp>
+#include <fosu/internal/timing.hpp>
+#include <fosu/internal/slider.hpp>
+#include <fosu/internal/metadata.hpp>
+#include <fosu/internal/hitobjects.hpp>
+#include <fosu/internal/section_names.hpp>
 
 namespace {
 
@@ -69,20 +69,10 @@ inline void put_f64(double v);
 inline void put_str(sv s);
 
 // Shared bounded numeric kernels.
-using fosu::detail::load_u32_le;
-using fosu::detail::load_u64_le;
-using fosu::detail::digit_run8;
-using fosu::detail::swar_parse_u32;
-using fosu::detail::swar_parse_u64;
-using fosu::detail::swar_parse_u64_safe;
-using fosu::detail::is_digit;
-using fosu::detail::parse_u64;
-using fosu::detail::parse_i64;
-using fosu::detail::clamp_i32;
-using fosu::detail::kPow10;
-using fosu::detail::kPow10u;
+using fosu::internal::parse_i64;
+using fosu::internal::clamp_i32;
 
-using fosu::detail::parse_double;
+using fosu::internal::parse_double;
 
 // Both output representations use the library's prefix kernel. Numeric fields
 // have the library layout; the final word is the sample length.
@@ -94,10 +84,8 @@ struct __attribute__((packed)) HO {
     static constexpr u32 kNoSlider = 0xFFFFFFFF;
 };
 constexpr u32 kNoSlider = HO::kNoSlider;
-using fosu::detail::fast_parse_prefix;
-using fosu::detail::scalar_parse_prefix;
-using fosu::detail::comma_mask32;
-using fosu::detail::nondigit_mask32;
+using fosu::internal::comma_mask32;
+using fosu::internal::nondigit_mask32;
 
 // ---------------------------------------------------------------- parse state (the trailer)
 struct __attribute__((packed)) TPRec {
@@ -196,13 +184,13 @@ inline bool split_kv(const char* p, size_t len, sv& key, sv& val) {
     val = trim(colon + 1, p + len);
     return key.n != 0;
 }
-using fosu::detail::kGeneral;
-using fosu::detail::kEditor;
-using fosu::detail::kMetadata;
-using fosu::detail::kDifficulty;
+using fosu::internal::kGeneral;
+using fosu::internal::kEditor;
+using fosu::internal::kMetadata;
+using fosu::internal::kDifficulty;
 template <size_t N>
-inline void parse_kv_line(const fosu::detail::KvEntry (&table)[N], const char* p, size_t len) {
-    S.ar_specified |= fosu::detail::parse_kv_line<parse_double>(S, table, p, len, &S.malformed_lines);
+inline void parse_kv_line(const fosu::internal::KvEntry (&table)[N], const char* p, size_t len) {
+    S.ar_specified |= fosu::internal::parse_kv_line<parse_double>(S, table, p, len, &S.malformed_lines);
 }
 
 inline sv strip_quotes(sv v) {
@@ -230,9 +218,9 @@ void parse_event_line(const char* p, size_t len) {
         S.video = strip_quotes(trim(fname, c3 ? c3 : end));
     } else if (sv_eq(f0, "2") || sv_eq(f0, "Break")) {
         double start, stop;
-        const char* q = fosu::detail::parse_osu_double(rest, end, start);
+        const char* q = fosu::internal::parse_osu_double(rest, end, start);
         if (q == rest || q >= end || *q != ',') { ++S.malformed_lines; return; }
-        const char* r = fosu::detail::parse_osu_double(q + 1, end, stop);
+        const char* r = fosu::internal::parse_osu_double(q + 1, end, stop);
         if (r == q + 1 || r != end) { ++S.malformed_lines; return; }
         if (g->n_breaks == kBreaksInline + (1u << 15)) rt::exit(6);
         break_at(g->n_breaks++) = {start, stop};
@@ -283,17 +271,17 @@ inline void tp_commit() { S.tp_out += sizeof(TPRec); ++S.tp_blocks[S.n_tp_blocks
 
 void parse_timing_point_line(const char* p, size_t len) {
     TPRec& tp = tp_slot();
-    if (fosu::detail::parse_timing_fields(p, p + len, tp)) tp_commit();
+    if (fosu::internal::parse_timing_fields(p, p + len, tp)) tp_commit();
     else ++S.malformed_lines;
 }
 
-using fosu::detail::TpGeom;
-using fosu::detail::TpShapeCache;
-using fosu::detail::TpShapeRow;
-using fosu::detail::tp_shape_match;
-using fosu::detail::tp_shape_insert;
-using fosu::detail::tp_shape_convert;
-using fosu::detail::fast_parse_timing_point_masked;
+using fosu::internal::TpGeom;
+using fosu::internal::TpShapeCache;
+using fosu::internal::TpShapeRow;
+using fosu::internal::tp_shape_match;
+using fosu::internal::tp_shape_insert;
+using fosu::internal::tp_shape_convert;
+using fosu::internal::fast_parse_timing_point_masked;
 
 // Allocates a timing block sized like the library's reserve (section
 // bytes / 17 + 4 entries) from the output arena; if the hitobject stream
@@ -350,7 +338,7 @@ const char* parse_timing_points_section(const char* p, const char* file_end) {
             len = static_cast<size_t>(le - p) - (le > p && le[-1] == '\r');
             next_line = m ? m + 1 : file_end;
         }
-        if (fosu::detail::ignored_line(p, p + len)) { p = next_line; continue; }
+        if (fosu::internal::ignored_line(p, p + len)) { p = next_line; continue; }
         if (len <= 64 && len >= 15) [[likely]] {
             const u64 line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
             const u64 commas = (comma_mask32(a) | static_cast<u64>(comma_mask32(b)) << 32) & line_mask;
@@ -455,8 +443,8 @@ struct StreamHits {
 };
 const char* parse_hitobjects_section(const char* p, const char* file_end) {
     StreamHits sink;
-    const fosu::detail::HitConsts k;
-    return fosu::detail::parse_hitobject_lines(sink, p, file_end, k);
+    const fosu::internal::HitConsts k;
+    return fosu::internal::parse_hitobject_lines(sink, p, file_end, k);
 }
 
 const char* parse_events_section(const char* p, const char* file_end) {
@@ -482,7 +470,7 @@ const char* parse_events_section(const char* p, const char* file_end) {
         }
         if (line_end[-1] == '\r') --line_end;
         p = next_line;
-        if (fosu::detail::ignored_line(line, line_end)) continue;
+        if (fosu::internal::ignored_line(line, line_end)) continue;
         if (c == ' ' || c == '_') { ++storyboard_lines; continue; }
         const auto len = static_cast<size_t>(line_end - line);
         if (len >= 2 && c == '/' && line[1] == '/') continue;
@@ -493,9 +481,9 @@ const char* parse_events_section(const char* p, const char* file_end) {
 }
 
 // ---------------------------------------------------------------- sections / main loop
-using fosu::detail::Section;
+using fosu::internal::Section;
 inline Section match_section(const char* p, size_t len) {
-    return fosu::detail::match_section({p, len});
+    return fosu::internal::match_section({p, len});
 }
 inline const char* find_version_tag(const char* p, size_t len) {
     static constexpr char tag[] = "osu file format v";
@@ -537,7 +525,7 @@ void parse(const char* data, size_t size) {
             }
             goto next_line;
         }
-        if (fosu::detail::ignored_line(p, line_end)) goto next_line;
+        if (fosu::internal::ignored_line(p, line_end)) goto next_line;
         switch (sec) {
             case Section::None: {
                 if (const char* vp = find_version_tag(p, len)) {
@@ -657,9 +645,6 @@ constexpr uintptr_t kArenaBaseFar = 0x100000000000ull;
     ctx.st = State{};
     ctx.n_breaks = ctx.n_colours = 0;
     if (argc != 2) rt::exit(2);
-#ifdef ABLATE_EXIT_ONLY
-    rt::exit(0);
-#endif
     const long fd = rt::open_ro(argv[1]);
     if (fd < 0) rt::exit(1);
     const long ssize = rt::fstat_size(static_cast<int>(fd));
@@ -680,18 +665,6 @@ constexpr uintptr_t kArenaBaseFar = 0x100000000000ull;
     rt::madvise(arena, len, 14 /*MADV_HUGEPAGE*/);
 #endif
     ctx.spill = nullptr;
-#ifdef INPUT_MMAP
-    // Experiment: map the page-cache pages over the arena start instead of
-    // copying them in. The anonymous arena continues right after the last
-    // file page, so the 128-byte padding past EOF is zero either way; the
-    // output starts at the next 64 KB boundary so its first touch is still
-    // folio-eligible.
-    const size_t got = size;
-    if (size && rt::mmap(arena, size, 1 /*READ*/, 0x02 /*PRIVATE*/ | 0x10 /*FIXED*/ | 0x8000 /*POPULATE*/, static_cast<int>(fd)) != arena)
-        rt::exit(1);
-    g_out_begin = g_out = arena + ((got + 128 + 65535) & ~size_t(65535));
-    g_out_end = arena + len;
-#else
     size_t got = 0;
     while (got < size) {
         const long r = rt::read(static_cast<int>(fd), arena + got, size - got);
@@ -702,23 +675,15 @@ constexpr uintptr_t kArenaBaseFar = 0x100000000000ull;
     // 128 zero bytes of padding follow the input; the output area starts after them.
     g_out_begin = g_out = arena + ((got + 128 + 63) & ~size_t(63));
     g_out_end = arena + len;
-#endif
-#ifdef ABLATE_AFTER_READ
-    rt::exit(0);
-#endif
     put_raw("FOSUDMP5", 8);
     parse(arena, got);
     emit_trailer();
-#ifdef ABLATE_NO_WRITE
-    rt::exit(0);
-#endif
     flush();
     rt::exit(0);
 }
 
 }  // namespace
 
-#ifndef FOSU_ONESHOT_HOSTED
 void* fosu_memchr(const void* s, int c, size_t n) __asm__("memchr");
 void* fosu_memchr(const void* s, int c, size_t n) {
     const char* p = static_cast<const char*>(s);
@@ -750,10 +715,3 @@ _start:
     call main_entry
     hlt
 )");
-#else
-// Hosted variant for experiments. GCC profiles from this runtime are not
-// interchangeable with the freestanding build.
-#include <cstdlib>
-namespace rt { [[noreturn]] void exit(int code) { ::exit(code); } }
-int main(int argc, char** argv) { run(argc, argv); }
-#endif

@@ -1,7 +1,6 @@
 // First shared-library use in a fresh C process, including dlopen, input I/O,
 // parse, view acquisition, free and dlclose. Excludes process startup itself.
-// Output columns match coldstart.cpp for library_first_compare.py; only bytes,
-// object count and the fourth (timed region) column are populated.
+// Output: input bytes and elapsed nanoseconds.
 #include <fosu/c_api.h>
 #include <dlfcn.h>
 #include <stdint.h>
@@ -10,7 +9,7 @@
 #include <time.h>
 
 #ifndef FOSU_DEFAULT_LIBRARY
-#define FOSU_DEFAULT_LIBRARY "build/libfosu.so"
+#error "Build through make, or define FOSU_DEFAULT_LIBRARY to the measured library"
 #endif
 
 static uint64_t now(void) {
@@ -19,7 +18,7 @@ static uint64_t now(void) {
     return (uint64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
 }
 int main(int argc, char** argv) {
-    if (argc < 2) return 2;
+    if (argc != 2) return 2;
     const char* path = getenv("FOSU_LIBRARY");
     if (!path) path = FOSU_DEFAULT_LIBRARY;
     uint64_t start = now();
@@ -35,11 +34,11 @@ int main(int argc, char** argv) {
     if (!h || parse(h, argv[1], FOSU_ALL) != FOSU_OK) return 1;
     const fosu_view* result = view(h);
     if (!result) return 1;
-    size_t bytes = result->source_size, objects = result->hit_object_count;
+    size_t bytes = result->source_size;
     __asm__ volatile("" : : "g"(result) : "memory");
     release(h);
     dlclose(dso);
     uint64_t elapsed = now() - start;
-    printf("%zu\t%zu\t0\t%llu\t0\t0\t0\n", bytes, objects, (unsigned long long)elapsed);
+    printf("%zu %llu\n", bytes, (unsigned long long)elapsed);
     return 0;
 }

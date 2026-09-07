@@ -4,7 +4,7 @@
 #include <string_view>
 #include <vector>
 
-#include "header.hpp"
+#include "internal/beatmap_header.hpp"
 
 namespace fosu {
 
