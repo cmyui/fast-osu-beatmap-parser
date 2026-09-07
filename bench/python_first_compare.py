@@ -1,9 +1,9 @@
 """Compare first Python use of packages extracted from wheels in separate dirs."""
 import argparse
-import json
 import os
 from pathlib import Path
-from statistics import mean
+import csv
+from common import select_files
 import subprocess
 import sys
 from time import perf_counter_ns
@@ -29,18 +29,15 @@ def main():
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--reps", type=int, default=3)
     args = parser.parse_args()
-    files = sorted(args.corpus.glob("*.osu"))
-    assert files and args.limit > 0 and args.reps > 0
-    count = min(args.limit, len(files))
-    files = [files[i * len(files) // count] for i in range(count)]
+    files = select_files(parser, args.corpus, args.reps, args.limit)
     packages = [path.resolve() for path in args.packages]
     assert len(set(packages)) == len(packages)
     for package in packages:
         assert (package / "fosu/__init__.py").is_file()
-    runs, minima = ({path: [] for path in packages} for _ in range(2))
+    out = csv.writer(sys.stdout)
+    out.writerow(['file', 'bytes', 'rep', 'variant', 'workload', 'wall_ns'])
     for i, file in enumerate(files):
         file.read_bytes()  # resident file data; fresh interpreter each time
-        per_file = {path: [] for path in packages}
         for rep in range(args.reps):
             for j in range(len(packages)):
                 package = packages[(i + rep + j) % len(packages)]
@@ -52,17 +49,8 @@ def main():
                 )
                 elapsed = perf_counter_ns() - start
                 load, parse = map(int, output.split())
-                per_file[package].append((load, parse, elapsed))
-        for package, values in per_file.items():
-            runs[package].extend(values)
-            minima[package].append(tuple(min(row[k] for row in values) for k in range(3)))
-    def summary(values):
-        return dict(zip(("import_us", "first_parse_file_us", "process_us"),
-                        (mean(row[k] for row in values) / 1000 for k in range(3))))
-    print(json.dumps({"files": len(files), "reps": args.reps, "variants": [
-        {"package": str(path), "all_mean": summary(runs[path]),
-         "mean_file_min": summary(minima[path])} for path in packages
-    ]}, indent=2))
+                for kind, ns in zip(('import', 'first-file', 'process'), (load, parse, elapsed)):
+                    out.writerow([file.name, file.stat().st_size, rep, str(package), kind, ns])
 
 
 if __name__ == "__main__":

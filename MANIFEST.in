@@ -7,3 +7,11 @@ include python/generate_stubs.py
 include python/scalar.map python/avx2.map
 recursive-include python/fosu *.py *.pyi py.typed
 include tests/test_python.py
+include tools/build_config.py
+include include/fosu/detail/fast_float.md
+recursive-include bench *.cpp *.c *.py *.sh
+recursive-include examples *.c
+recursive-include oneshot *.cpp *.hpp *.py *.sh *.md
+recursive-include tests *.cpp *.hpp *.py *.dict *.osu *.cs *.csproj *.sh
+prune tests/reference/official/obj
+prune tests/reference/official/bin

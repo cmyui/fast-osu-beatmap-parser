@@ -1,7 +1,5 @@
 .vscode/
 build/
-bench/corpus/
-bench/corpus-large/
 __pycache__/
 dist/
 *.egg-info/
@@ -9,5 +7,5 @@ python/fosu/*.so
 python/fosu/*.dylib
 .pytest_cache/
 .mypy_cache/
-bench/official-reference/obj/
-bench/official-reference/bin/
+tests/reference/official/obj/
+tests/reference/official/bin/

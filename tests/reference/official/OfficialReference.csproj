@@ -4,7 +4,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <OsuSource Condition="'$(OsuSource)' == ''">$(MSBuildThisFileDirectory)../../build/official-osu</OsuSource>
+    <OsuSource Condition="'$(OsuSource)' == ''">$(MSBuildThisFileDirectory)../../../build/official-osu</OsuSource>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="$(OsuSource)/osu.Game.Rulesets.Osu/osu.Game.Rulesets.Osu.csproj" />

@@ -11,8 +11,8 @@
 #endif
 #include <fosu/detail/arena.hpp>
 #include <fosu/parser.hpp>
-#include "../bench/c_api_view.hpp"
-#include "../oneshot/dump.hpp"
+#include "support/c_api_view.hpp"
+#include "support/canonical_dump.hpp"
 
 const std::string map =
     "osu file format v14\n[General]\nAudioFilename: song.mp3\n"

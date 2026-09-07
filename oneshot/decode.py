@@ -1,6 +1,6 @@
-"""Decode a FOSUDMP4/FOSUDMP5 stream into Python values, including the complete point pool.
+"""Decode a FOSUDMP5 stream into Python values, including the complete point pool.
 
-    build/fosu_oneshot map.osu | python3 examples/decode_oneshot.py
+    build/release-avx2-bundled/fosu_oneshot map.osu | python3 oneshot/decode.py
 
 This example consumes trusted parser output. Strings remain bytes; decode only
 at the application boundary. For zero-copy array access use the C API instead.
@@ -37,9 +37,8 @@ class Reader:
 
 
 def decode(data):
-    if len(data) < 36 or data[:8] not in (b'FOSUDMP4', b'FOSUDMP5'):
-        raise ValueError('not a FOSUDMP4/FOSUDMP5 stream')
-    time_code = 'd' if data[:8] == b'FOSUDMP5' else 'i'
+    if len(data) < 36 or data[:8] != b'FOSUDMP5':
+        raise ValueError('not a FOSUDMP5 stream')
     trailer_size = struct.unpack('<Q', data[-8:])[0]
     start = len(data) - 8 - trailer_size
     if start < 8:
@@ -48,7 +47,7 @@ def decode(data):
     if r.take(4) != b'TRLR':
         raise ValueError('missing trailer')
     object_count, slider_count, point_count = (r.value('I') for _ in range(3))
-    if object_count > len(data) // 32 or point_count > len(data) // 8:
+    if object_count > len(data) // 40 or point_count > len(data) // 8:
         raise ValueError('impossible counts')
     m = {}
     r.fields(m, 'i', 'format_version')
@@ -67,7 +66,7 @@ def decode(data):
     r.fields(m, 'q', 'beatmap_id beatmap_set_id')
     r.fields(m, 'd', 'hp cs od ar slider_multiplier slider_tick_rate')
     r.fields(m, 's', 'background video')
-    breaks = [(r.value(time_code), r.value(time_code)) for _ in range(r.value('I'))]
+    breaks = [(r.value('d'), r.value('d')) for _ in range(r.value('I'))]
     colours = [r.value('I') for _ in range(r.value('I'))]
     timing = []
     for _ in range(r.value('I')):
@@ -97,7 +96,7 @@ def decode(data):
         h = {}
         r.fields(h, 'i', 'x y')
         r.fields(h, 'I', 'type hitsound')
-        r.fields(h, time_code, 'time end_time')
+        r.fields(h, 'd', 'time end_time')
         r.fields(h, 'I', 'slider')
         sample_size = r.value('I')
         if h['slider'] != 0xFFFFFFFF:

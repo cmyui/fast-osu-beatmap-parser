@@ -35,7 +35,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-26]
-        python: ['3.10', '3.14']
+        # cibuildwheel already runs the installed suite on CPython 3.10.
+        python: ['3.14']
     steps:
       - uses: actions/checkout@v6
         with:

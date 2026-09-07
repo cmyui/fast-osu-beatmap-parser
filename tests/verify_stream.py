@@ -6,16 +6,14 @@ import subprocess
 import sys
 import struct
 import json
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "examples"))
-from decode_oneshot import decode
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "oneshot"))
+from decode import decode
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("reference", type=pathlib.Path)
 parser.add_argument("candidate", type=pathlib.Path)
 parser.add_argument("corpus", type=pathlib.Path)
 parser.add_argument("--expected-files", type=int)
-parser.add_argument("--previous-format", action="store_true",
-                    help="compare v4/v5 fields, widening legacy integer timestamps to doubles")
 parser.add_argument("--report", type=pathlib.Path,
                     help="collect all mismatches in a host-local report instead of stopping at the first")
 args = parser.parse_args()
@@ -29,10 +27,6 @@ mismatches = []
 
 def canonical(data):
     values = decode(data)
-    for h in values['hit_objects']:
-        h['time'], h['end_time'] = float(h['time']), float(h['end_time'])
-    values['breaks'] = [tuple(map(float, b)) for b in values['breaks']]
-
     def bits(value):
         if isinstance(value, float):
             return ('float64', struct.pack('<d', value))
@@ -48,7 +42,7 @@ for i, path in enumerate(files, 1):
     if not expected:
         raise RuntimeError(f"Reference emitted no values for {path.name}")
     actual = subprocess.check_output([candidate, str(path)])
-    equal = canonical(expected) == canonical(actual) if args.previous_format else expected == actual
+    equal = expected == actual
     if not equal:
         offset = next((i for i, (a, b) in enumerate(zip(expected, actual)) if a != b), min(len(expected), len(actual)))
         print('MISMATCH', path.name, 'offset', offset, 'lengths', len(expected), len(actual), flush=True)
@@ -67,5 +61,5 @@ if args.report:
 if mismatches:
     print('Mismatches:', len(mismatches), 'of', len(files))
     sys.exit(1)
-print('Exact field equality' if args.previous_format else 'Exact byte equality', len(files),
+print('Exact byte equality', len(files),
       'files; string bytes, float bits, pool indices and stats; reference sha256', digest.hexdigest())

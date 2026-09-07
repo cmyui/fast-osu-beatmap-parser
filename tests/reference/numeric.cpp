@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <string>
-#include <fosu/scalar_parse.hpp>
+#include <fosu/detail/scalar_parse.hpp>
 
 namespace fosu::detail {
 inline const char* libc_number(const char* p, const char* end, double& out, bool nan) {
@@ -46,7 +46,7 @@ inline const char* libc_osu_float(const char* p, const char* end, float& out,
 #undef parse_osu_double
 #undef parse_beat_length
 #undef parse_double
-#include "../oneshot/dump.hpp"
+#include "../support/canonical_dump.hpp"
 static_assert(!FOSU_SIMD_X86, "the independent numeric oracle must use scalar parsing");
 
 extern "C" __attribute__((visibility("default")))

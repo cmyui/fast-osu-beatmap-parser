@@ -6,7 +6,7 @@
 #include <dlfcn.h>
 #include <fosu/parser.hpp>
 #include <fosu/offset_beatmap.hpp>
-#include "../oneshot/dump.hpp"
+#include "support/canonical_dump.hpp"
 int main(int argc, char** argv) {
     if (argc < 2 || argc > 3) return 2;
     using Oracle = void(*)(const char*, size_t, std::string&);

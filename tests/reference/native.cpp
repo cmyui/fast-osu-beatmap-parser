@@ -1,14 +1,11 @@
-// Baseline one-shot parse process, written the obvious way with the
-// library: read the file, parse(), write the canonical dump to stdout.
-// This is also the reference generator: its output defines "the same
-// output as master".
+// Canonical serialization of the native result for cross-interface equality.
 #include <unistd.h>
 
 #include <string>
 
 #include <fosu/parser.hpp>
 
-#include "../oneshot/dump.hpp"
+#include "../support/canonical_dump.hpp"
 
 int main(int argc, char** argv) {
     if (argc < 2) return 2;

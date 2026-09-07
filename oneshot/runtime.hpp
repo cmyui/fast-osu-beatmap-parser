@@ -48,17 +48,12 @@ inline void* mmap(void* addr, size_t len, int prot, int flags, int fd = -1) {
     return (void*)sys6(SYS_mmap, (long)addr, (long)len, prot, flags, fd, 0);
 }
 inline long madvise(void* p, size_t n, int adv) { return sys3(SYS_madvise, (long)p, (long)n, adv); }
-#ifdef FOSU_ONESHOT_HOSTED
-[[noreturn]] void exit(int code);  // libc exit, so gcov can write its profile
-#else
 [[noreturn]] inline void exit(int code) {
     for (;;) sys1(SYS_exit_group, code);
 }
-#endif
 
 }  // namespace rt
 
-#ifndef FOSU_ONESHOT_HOSTED
 extern "C" {
 // Small copies dominate (hit_sample and edge strings, 3-16 bytes each, a
 // thousand-plus per file); rep movsb costs ~30 cycles of startup per call,
@@ -139,4 +134,3 @@ int memcmp(const void* a, const void* b, size_t n) {
 }
 // memchr is declared as C++ overloads by <cstring>; the symbol itself is
 // provided by the parser TU through an asm label (see main.cpp).
-#endif  // !FOSU_ONESHOT_HOSTED

@@ -1,4 +1,5 @@
 #pragma once
+#include "line_scan.hpp"
 // [HitObjects] section parsing over a compile-time storage policy (the
 // "sink"). The library writes records straight into vector capacity through
 // raw cursors; the one-shot executable streams them to its output. Both use
@@ -221,19 +222,6 @@ inline const char* parse_hitobject_lines_scalar(Sink& sink, const char* p,
 }
 
 #if FOSU_SIMD_X86
-// Newline search past the first window, 32 bytes per step. Bytes beyond
-// `end` are zero padding, so a hit is always inside the input. Returns `end`
-// when the remaining bytes hold no newline.
-inline const char* find_newline32(const char* p, const char* end, __m256i nl) {
-    while (p < end) {
-        const auto m = static_cast<uint32_t>(_mm256_movemask_epi8(
-            _mm256_cmpeq_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(p)), nl)));
-        if (m) return p + _tzcnt_u32(m);
-        p += 32;
-    }
-    return end;
-}
-
 // SIMD section loop. One 32-byte load per line yields the newline, comma and
 // non-digit masks. The prefix shape is validated arithmetically; only lines
 // that fail it (blank, comments, headers, signed/decimal/wide fields) take

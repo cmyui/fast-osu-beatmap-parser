@@ -94,7 +94,7 @@ and lets its own outer error handler decide whether decoding continues. Run it
 with .NET 8 and an interpreter with fosu installed:
 
 ```sh
-sh bench/official-reference/build.sh
+sh tests/reference/official/build.sh
 python tests/test_official.py
 FOSU_FORCE_SCALAR=1 python tests/test_official.py
 python tests/test_official.py --corpus /path/to/maps --report /private/report.json

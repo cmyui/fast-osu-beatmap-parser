@@ -1,6 +1,6 @@
 """Compare acceptance with osu!'s unmodified legacy decoder, not a third-party parser.
 
-Build the reference with sh bench/official-reference/build.sh, then run using
+Build the reference with sh tests/reference/official/build.sh, then run using
 an interpreter with fosu installed. --corpus audits local files without copying
 or printing their contents; --report may contain local paths and stays private.
 """

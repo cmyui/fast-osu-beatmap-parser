@@ -1,8 +1,8 @@
 #pragma once
 
 #include <type_traits>
-#include "../header.hpp"
-#include "../scalar_parse.hpp"
+#include "beatmap_header.hpp"
+#include "scalar_parse.hpp"
 
 namespace fosu::detail {
 

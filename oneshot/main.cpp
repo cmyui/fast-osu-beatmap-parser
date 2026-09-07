@@ -1,12 +1,12 @@
 // fosu one-shot: the fosu parser as a one-shot process — exec, read one .osu
-// file, parse, write the canonical dump (oneshot/dump.hpp) to stdout,
+// file, parse, write the canonical dump (tests/support/canonical_dump.hpp) to stdout,
 // exit — with nothing between the kernel and the parser. Freestanding:
 // no libc, no libstdc++, one anonymous arena (input, padding, timing
 // buffer and output stream back to back, so multi-size THP can back the
 // whole working set with one or two folios), hit objects written straight
 // from the SIMD prefix store into the output stream, and everything else
 // gathered into a trailer. Numeric kernels, metadata and hitobject
-// framing are shared with the library. bench/oneshot_reference.cpp
+// framing are shared with the library. tests/reference/native.cpp
 // serializes the ordinary library for exact comparison.
 #include <immintrin.h>
 
@@ -69,18 +69,8 @@ inline void put_f64(double v);
 inline void put_str(sv s);
 
 // Shared bounded numeric kernels.
-using fosu::detail::load_u32_le;
-using fosu::detail::load_u64_le;
-using fosu::detail::digit_run8;
-using fosu::detail::swar_parse_u32;
-using fosu::detail::swar_parse_u64;
-using fosu::detail::swar_parse_u64_safe;
-using fosu::detail::is_digit;
-using fosu::detail::parse_u64;
 using fosu::detail::parse_i64;
 using fosu::detail::clamp_i32;
-using fosu::detail::kPow10;
-using fosu::detail::kPow10u;
 
 using fosu::detail::parse_double;
 
@@ -94,8 +84,6 @@ struct __attribute__((packed)) HO {
     static constexpr u32 kNoSlider = 0xFFFFFFFF;
 };
 constexpr u32 kNoSlider = HO::kNoSlider;
-using fosu::detail::fast_parse_prefix;
-using fosu::detail::scalar_parse_prefix;
 using fosu::detail::comma_mask32;
 using fosu::detail::nondigit_mask32;
 
@@ -657,9 +645,6 @@ constexpr uintptr_t kArenaBaseFar = 0x100000000000ull;
     ctx.st = State{};
     ctx.n_breaks = ctx.n_colours = 0;
     if (argc != 2) rt::exit(2);
-#ifdef ABLATE_EXIT_ONLY
-    rt::exit(0);
-#endif
     const long fd = rt::open_ro(argv[1]);
     if (fd < 0) rt::exit(1);
     const long ssize = rt::fstat_size(static_cast<int>(fd));
@@ -680,18 +665,6 @@ constexpr uintptr_t kArenaBaseFar = 0x100000000000ull;
     rt::madvise(arena, len, 14 /*MADV_HUGEPAGE*/);
 #endif
     ctx.spill = nullptr;
-#ifdef INPUT_MMAP
-    // Experiment: map the page-cache pages over the arena start instead of
-    // copying them in. The anonymous arena continues right after the last
-    // file page, so the 128-byte padding past EOF is zero either way; the
-    // output starts at the next 64 KB boundary so its first touch is still
-    // folio-eligible.
-    const size_t got = size;
-    if (size && rt::mmap(arena, size, 1 /*READ*/, 0x02 /*PRIVATE*/ | 0x10 /*FIXED*/ | 0x8000 /*POPULATE*/, static_cast<int>(fd)) != arena)
-        rt::exit(1);
-    g_out_begin = g_out = arena + ((got + 128 + 65535) & ~size_t(65535));
-    g_out_end = arena + len;
-#else
     size_t got = 0;
     while (got < size) {
         const long r = rt::read(static_cast<int>(fd), arena + got, size - got);
@@ -702,23 +675,15 @@ constexpr uintptr_t kArenaBaseFar = 0x100000000000ull;
     // 128 zero bytes of padding follow the input; the output area starts after them.
     g_out_begin = g_out = arena + ((got + 128 + 63) & ~size_t(63));
     g_out_end = arena + len;
-#endif
-#ifdef ABLATE_AFTER_READ
-    rt::exit(0);
-#endif
     put_raw("FOSUDMP5", 8);
     parse(arena, got);
     emit_trailer();
-#ifdef ABLATE_NO_WRITE
-    rt::exit(0);
-#endif
     flush();
     rt::exit(0);
 }
 
 }  // namespace
 
-#ifndef FOSU_ONESHOT_HOSTED
 void* fosu_memchr(const void* s, int c, size_t n) __asm__("memchr");
 void* fosu_memchr(const void* s, int c, size_t n) {
     const char* p = static_cast<const char*>(s);
@@ -750,10 +715,3 @@ _start:
     call main_entry
     hlt
 )");
-#else
-// Hosted variant for experiments. GCC profiles from this runtime are not
-// interchangeable with the freestanding build.
-#include <cstdlib>
-namespace rt { [[noreturn]] void exit(int code) { ::exit(code); } }
-int main(int argc, char** argv) { run(argc, argv); }
-#endif

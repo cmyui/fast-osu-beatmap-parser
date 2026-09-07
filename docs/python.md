@@ -29,7 +29,8 @@ repository's workflow.
 
 A source checkout is also installable with `python -m pip install .`; this
 requires a C++20 compiler. Build a source archive and wheel with
-`python -m pip install build` followed by `python -m build`. Linux builds use
+`python -m pip install build` followed by `python -m build`. The source archive
+also includes the C/C++ build, examples and test/benchmark sources. Linux builds use
 GCC; macOS builds use Apple Clang. Build dependencies are installed by pip.
 Linux source builds use the system C++ runtime. To bundle it as the release
 wheels do, install your compiler's static runtime archives and run
@@ -170,7 +171,7 @@ Linux release wheels bundle a private C++ runtime to reduce first-import cost;
 only their Python initialization symbols are exported. macOS uses the system
 C++ runtime. Neither uses the standalone executable's custom runtime.
 `FOSU_BUNDLE_RUNTIME=0` disables bundling for a custom wheel build.
-The ordinary C++ library and standalone C API keep their existing build policy.
+The ordinary C++ library and standalone C API use the [native build configurations](build.md).
 
 ```sh
 python -m pip install -e '.[test]'

@@ -29,24 +29,15 @@ struct Arena {
 
     // Returns nullptr when the mapping cannot be created.
     static Arena* create(size_t bytes) {
-#ifdef FOSU_ARENA_MALLOC  // experiment: heap-backed arena
-        void* p = malloc(bytes);
-        if (!p) return nullptr;
-#else
         void* p = mmap(nullptr, bytes, PROT_READ | PROT_WRITE,
                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
         if (p == MAP_FAILED) return nullptr;
 #if defined(MADV_HUGEPAGE) && !defined(FOSU_ARENA_NO_HUGEPAGE)
         madvise(p, bytes, MADV_HUGEPAGE);  // advisory; failure is harmless
 #endif
-#endif
         auto* a = static_cast<Arena*>(malloc(sizeof(Arena)));
         if (!a) {
-#ifdef FOSU_ARENA_MALLOC
-            free(p);
-#else
             munmap(p, bytes);
-#endif
             return nullptr;
         }
         a->base = static_cast<char*>(p);
@@ -56,11 +47,7 @@ struct Arena {
     }
     static void destroy(Arena* a) {
         if (!a) return;
-#ifdef FOSU_ARENA_MALLOC
-        free(a->base);
-#else
         munmap(a->base, a->size);
-#endif
         free(a);
     }
     void* bump(size_t bytes) {

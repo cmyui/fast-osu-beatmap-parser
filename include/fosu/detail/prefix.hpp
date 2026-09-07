@@ -26,7 +26,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "../scalar_parse.hpp"
+#include "scalar_parse.hpp"
 
 #if defined(__AVX2__) && defined(__BMI__)
 #define FOSU_SIMD_X86 1
@@ -153,11 +153,6 @@ inline constexpr auto kLaneMasks = make_lane_masks();
 // otherwise does whenever a loop body contains a call).
 inline __m256i bcast256(const char& k) {
     __m256i v;
-    __asm__("vpbroadcastb %1, %0" : "=x"(v) : "m"(k));
-    return v;
-}
-inline __m128i bcast128(const char& k) {
-    __m128i v;
     __asm__("vpbroadcastb %1, %0" : "=x"(v) : "m"(k));
     return v;
 }

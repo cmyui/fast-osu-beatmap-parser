@@ -9,8 +9,8 @@ the input. Every successful invocation delivers its result.
 
 ```sh
 make oneshot CXX=g++                    # Linux x86-64, GCC, Zen 4 target
-build/fosu_oneshot map.osu > map.fosu
-python3 examples/decode_oneshot.py < map.fosu
+build/release-avx2-bundled/fosu_oneshot map.osu > map.fosu
+python3 oneshot/decode.py < map.fosu
 ```
 
 The build uses GCC `-O2 -march=znver4`, a custom entry point and direct Linux
@@ -62,7 +62,7 @@ done
 These settings reset on reboot unless the administrator persists them. They
 are host-wide policy for applications requesting huge pages, not private
 parser state. The program also works with ordinary pages; the benchmark guide
-reports a build without `madvise` separately. File contents are never cached by
+shows how to omit the advice for comparison. File contents are never cached by
 the executable, regardless of page size. The benchmark warms the kernel's file
 cache before timing, so its numbers describe fresh processes with resident
 input, not cold disk/S3 fetches.
@@ -72,14 +72,14 @@ input, not cold disk/S3 fetches.
 `FOSUDMP5` is a little-endian stream containing every logical `Beatmap` field,
 all four counters, explicit slider/pool indices and points left by failed
 slider lines. Strings are length-prefixed bytes and doubles retain raw IEEE-754
-bits, including object and break timestamps. The example decoder also reads
-legacy FOSUDMP4 streams with integer timestamps. The last eight bytes give the trailer's length, excluding that footer;
+bits, including object and break timestamps. The last eight bytes give the
+trailer's length, excluding that footer;
 consumers locate the trailer from the end and read its object count before
 walking the variable-length records. Searching for `TRLR` inside data is not a
 valid way to find a record boundary.
 
-The full field order is specified in [dump.hpp](dump.hpp); the independent
-[Python decoder](../examples/decode_oneshot.py) demonstrates reconstruction of
+The field order is specified by the independent test serializer, [canonical_dump.hpp](../tests/support/canonical_dump.hpp); the independent
+[Python decoder](../oneshot/decode.py) demonstrates reconstruction of
 metadata, arrays and the complete point pool. A stream consumer should accept
 output only after the process exits successfully: an error may follow a
 partial write. There is no `--dump` switch; output is always written.
@@ -114,9 +114,8 @@ a downstream consumer closes its pipe.
 ## Verification
 
 ```sh
-python3 tests/test_oneshot.py build/oneshot_reference build/fosu_oneshot
-python3 tests/test_oneshot_limits.py build/fosu_oneshot
-python3 bench/oneshot_verify.py build/oneshot_reference build/fosu_oneshot /path/to/maps
+make CXX=g++ test-oneshot references
+python3 tests/verify_stream.py build/release-avx2-bundled/reference_native build/release-avx2-bundled/fosu_oneshot /path/to/maps
 ```
 
 For a release comparison, build the reference against a separately exported

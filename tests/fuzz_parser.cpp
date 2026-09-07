@@ -4,7 +4,7 @@
 #include <string>
 #include <fosu/parser.hpp>
 #include <fosu/offset_beatmap.hpp>
-#include "../oneshot/dump.hpp"
+#include "support/canonical_dump.hpp"
 
 static void check(std::string_view data) {
     auto input = fosu::make_padded(data);

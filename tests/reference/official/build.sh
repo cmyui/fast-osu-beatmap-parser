@@ -1,7 +1,7 @@
 #!/bin/sh
 # Build the unmodified official legacy decoder at a reproducible revision.
 set -eu
-root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 revision=48c4800e3ae4ee752452cdff83bd3787ccf3105f
 source="$root/build/official-osu"
 if [ ! -d "$source/.git" ]; then
@@ -15,6 +15,6 @@ fi
     echo 'Official source revision does not match the pinned reference' >&2; exit 1;
 }
 git -C "$source" diff --exit-code HEAD --
-dotnet build "$root/bench/official-reference/OfficialReference.csproj" \
+dotnet build "$root/tests/reference/official/OfficialReference.csproj" \
     -c Release --nologo -m:4 -p:RunAnalyzers=false \
     -p:GenerateDocumentationFile=false -o "$root/build/official-reference"

@@ -1,6 +1,6 @@
 #include <cstdio>
-#include "c_api_view.hpp"
-#include "../oneshot/dump.hpp"
+#include "../support/c_api_view.hpp"
+#include "../support/canonical_dump.hpp"
 int main(int argc, char** argv) {
     if (argc < 2) return 2;
     fosu_handle* h = fosu_new();

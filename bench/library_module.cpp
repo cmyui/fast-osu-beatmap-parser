@@ -15,12 +15,7 @@ EXPORT void fosu_bench_parse(void* p, const char* data, size_t size, int reuse) 
 }
 #else
 #include <fosu/parser.hpp>
-#ifdef FOSU_BENCH_OFFSET
-#include <fosu/offset_beatmap.hpp>
-using Result = fosu::OffsetBeatmap;
-#else
 using Result = fosu::Beatmap;
-#endif
 EXPORT void* fosu_bench_new() { return new Result; }
 EXPORT void fosu_bench_free(void* p) { delete static_cast<Result*>(p); }
 EXPORT void fosu_bench_parse(void* p, const char* data, size_t size, int reuse) {

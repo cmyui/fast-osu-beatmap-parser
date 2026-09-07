@@ -100,8 +100,7 @@ both storage paths; the direct path depends on standard-library internals.
 In a fresh process the first parse also pays the page faults of that memory
 through the process allocator; the C ABI's arena reduces those for C and Python
 callers, while the header-only interface keeps the caller's allocator.
-Use `-O3` for the hosted library on the measured target;
-`-O2` was slower.
+The hosted build uses `-O3` on the measured target.
 Profile-guided compilation of the calling application can improve it further.
 [The benchmark guide](performance.md) includes an executable GCC experiment
 with disjoint training/evaluation files. A header-only library cannot supply a
