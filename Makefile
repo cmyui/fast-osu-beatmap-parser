@@ -44,6 +44,13 @@ build/bench_x86: bench/bench.cpp $(HEADERS) | build
 build/coldstart_x86: bench/coldstart.cpp $(HEADERS) | build
 	$(CXX) $(CXXFLAGS) $(X86_FLAGS) $< -o $@
 
+# In-process profiling driver (perf-friendly) and fresh-handle C API loop.
+build/profile_parse: bench/profile_parse.cpp $(HEADERS) | build
+	$(CXX) $(CXXFLAGS) -g $(X86_FLAGS) $< -o $@
+
+build/c_api_loop: bench/c_api_loop.c include/fosu/c_api.h | build
+	$(CC) -std=c11 -D_POSIX_C_SOURCE=200809L -O2 -Iinclude $< -ldl -o $@
+
 build/test_hardening: tests/test_hardening.cpp oneshot/dump.hpp $(HEADERS) | build
 	$(CXX) $(CXXFLAGS) $(LIB_ARCH_FLAGS) $< -o $@
 
@@ -112,7 +119,9 @@ $(error LIB_RUNTIME must be bundled or shared)
 endif
 LIB_RUNTIME_FLAGS =
 LIB_EXPORT_FLAGS =
+LIB_DL_FLAGS =
 ifeq ($(UNAME_S),Linux)
+LIB_DL_FLAGS = -ldl
 ifeq ($(LIB_RUNTIME),bundled)
 LIB_RUNTIME_FLAGS = -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL
 LIB_EXPORT_FLAGS = --bundled
@@ -138,11 +147,15 @@ lib: build/libfosu.$(LIB_EXT)
 build/test_c_api: tests/test_c_api.cpp bench/c_api_view.hpp oneshot/dump.hpp build/libfosu.$(LIB_EXT) | build
 	$(CXX) $(CXXFLAGS) $(LIB_ARCH_FLAGS) $< -Lbuild -lfosu -Wl,-rpath,$(abspath build) -pthread -o $@
 
+build/test_c_api_unload: tests/test_c_api_unload.cpp include/fosu/c_api.h | build
+	$(CXX) $(CXXFLAGS) $< $(LIB_DL_FLAGS) -o $@
+
 build/c_api_reference: bench/c_api_reference.cpp bench/c_api_view.hpp oneshot/dump.hpp build/libfosu.$(LIB_EXT) | build
 	$(CXX) $(CXXFLAGS) $(LIB_ARCH_FLAGS) $< -Lbuild -lfosu -Wl,-rpath,$(abspath build) -o $@
 
-test-c-api: build/test_c_api
+test-c-api: build/test_c_api build/test_c_api_unload
 	./build/test_c_api
+	./build/test_c_api_unload $(abspath build/libfosu.$(LIB_EXT))
 ifeq ($(UNAME_S),Linux)
 	python3 tests/test_library_exports.py build/libfosu.$(LIB_EXT) $(LIB_EXPORT_FLAGS)
 	./build/test_c_api_io

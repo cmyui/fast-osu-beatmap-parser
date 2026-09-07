@@ -13,9 +13,18 @@ inline bool four_sample_digits(uint64_t text) {
             ~(digits + 0x00c600c600c600c6ull) & lanes) == lanes;
 }
 inline bool short_sample(const char* p) {
+#if FOSU_SIMD_X86
+    const __m128i text = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(p));
+    // Digits become [-128, -119]; each ':' becomes -128. A single
+    // comparison rejects both non-digits and misplaced separators.
+    const __m128i biased = _mm_add_epi8(text, _mm_set1_epi16(0x4650));
+    const __m128i invalid = _mm_cmpgt_epi8(biased, _mm_set1_epi16(-32631));
+    return (_mm_movemask_epi8(invalid) & 0xff) == 0;
+#else
     const uint64_t text = load_u64_le(p);
     return (text & 0xff00ff00ff00ff00ull) == 0x3a003a003a003a00ull &&
            four_sample_digits(text);
+#endif
 }
 
 // Only the fields read by the official legacy decoder affect acceptance.
@@ -31,7 +40,7 @@ inline bool valid_sample(std::string_view sample, bool banks_only = false) {
     for (int i = 0; i < (banks_only ? 2 : 4); ++i) {
         int64_t value;
         const char* q = parse_osu_int(p, end, value);
-        if (q == p || (q < end && *q != ':')) return false;
+        if (q == p || (q < end && *q != ':')) [[unlikely]] return false;
         if (q == end) return i >= 1;
         p = q + 1;
     }
@@ -41,9 +50,16 @@ inline bool valid_sample(std::string_view sample, bool banks_only = false) {
 inline bool valid_edge_sets(std::string_view sets, int32_t slides) {
     if (sets.empty()) return true;
     if (sets.size() == 7) {
+#if FOSU_SIMD_X86
+        const __m128i text = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(sets.data()));
+        const __m128i biased = _mm_add_epi8(text, _mm_set_epi64x(0, 0x0050465004504650ull));
+        const __m128i invalid = _mm_cmpgt_epi8(biased, _mm_set1_epi16(-32631));
+        if ((_mm_movemask_epi8(invalid) & 0x7f) == 0) return true;
+#else
         const uint64_t text = load_u64_le(sets.data());
         if ((text & 0x0000ff00ff00ff00ull) == 0x00003a007c003a00ull &&
             four_sample_digits(text)) return true;
+#endif
     }
     const char* p = sets.data();
     const char* end = p + sets.size();
@@ -57,7 +73,7 @@ inline bool valid_edge_sets(std::string_view sets, int32_t slides) {
         }
         const auto* separator = static_cast<const char*>(memchr(p, '|', end - p));
         const char* next = separator ? separator : end;
-        if (!valid_sample({p, static_cast<size_t>(next - p)})) return false;
+        if (!valid_sample({p, static_cast<size_t>(next - p)})) [[unlikely]] return false;
         if (!separator) break;
         p = next + 1;
     }
@@ -76,10 +92,10 @@ inline bool parse_object_tail(H& h, const char* p, const char* end,
             sample = {};
             return true;
         }
-        if (p == end || *p != ',') return false;
+        if (p == end || *p != ',') [[unlikely]] return false;
         double time;
         const char* q = parse_osu_double(p + 1, end, time);
-        if (q == p + 1 || (q < end && *q != ',' && !(hold && *q == ':'))) return false;
+        if (q == p + 1 || (q < end && *q != ',' && !(hold && *q == ':'))) [[unlikely]] return false;
         h.end_time = time;
         p = q;
         if (hold && p < end && *p == ',') p = end;

@@ -23,6 +23,24 @@ static void check(const std::string& text) {
 }
 
 int main() {
+    // The short sample shortcut must reject every non-digit/separator byte,
+    // including high-bit bytes. Full parsing may accept other spellings via
+    // its bounded fallback; all representations must still agree.
+    for (size_t pos = 0; pos < 8; ++pos) {
+        for (unsigned byte = 0; byte < 256; ++byte) {
+            std::string sample = "0:1:2:3:";
+            sample[pos] = static_cast<char>(byte);
+            auto padded = fosu::make_padded(sample);
+            const bool exact_shape = pos % 2 ? byte == ':' : byte >= '0' && byte <= '9';
+            assert(fosu::detail::short_sample(padded.data.get()) == exact_shape);
+            check("[HitObjects]\n1,2,3,1,0," + sample);
+        }
+    }
+    // Circle precedence applies even when slider/spinner/hold bits are set.
+    for (int type : {1, 3, 9, 129, 255}) {
+        const std::string line = "[HitObjects]\n1,2,3," + std::to_string(type) + ",0,0:1:2:3:";
+        for (const std::string ending : {"", "\n", "\r\n"}) check(line + ending);
+    }
     assert(fosu::parse(nullptr, 0).hit_objects.empty());
     assert(fosu::parse(fosu::make_padded({})).hit_objects.empty());
     auto embedded = fosu::make_padded(
@@ -37,6 +55,27 @@ int main() {
     check("[Events]\n\n \n\t// comment\n");
     check("[HitObjects]\n0,2,3,3,0\r,");
     check("[HitObjects]\n1,2,3,2,0,B|1:2\v|3:4,1,10");
+    // Slider tails: editor shapes, fields split at commas, spaces, trailing
+    // commas, wide repeats, long tails and sample text with further commas
+    // must agree between the scalar, mask-indexed and sequential parsers.
+    for (const char* tail : {
+             "B|1:2,1,10", "B|1:2,1", "B|1:2,12,142.499996185303,2|0,0:0|0:0,0:0:0:0:",
+             "P|1:2|3:4,1,100,0|0,0:0|0:0,0:0:0:0:a,b", "L|1:2,1,100,0|0,0:0|0:0,0:0:0:0:,",
+             "L|1:2,1,100,,,", "L|1:2,1,100,2|0,0:0|0:0", "L|1:2,1,100,2|0",
+             "L|1:2, 1 , 100 ,0|0,0:0|0:0,0:0:0:0:", "L|1:2,100,100", "L|1:2,9001,100",
+             "L|1:2,1,131072", "L|1:2,1,131072.5", "L|1:2,1,-5", "L|1:2,1,1e2", "L|1:2,1,,",
+             "B|1:2|3:4|5:6|7:8|9:10|11:12|13:14|15:16|17:18,1,142.499996185303,0|0|0|0,0:0|0:0|0:0|0:0,0:0:0:0:",
+             "L|1:2,1,100,0|0,0:0|0:0,0:0:0:0:file name with spaces.wav",
+             "L|1:2,1,100,0|0,0:0|0:0,0:0:0:0:x,junk,more", "L|1:2.5,1,100", "L|-1:2,1,100",
+             "L|1:2,1,100,0|0,0:0|9:9,0:0:0:0:", "L|1:2,1,100,0|0,0:0|/:0,0:0:0:0:"}) {
+        check(std::string("[HitObjects]\n256,192,1000,2,0,") + tail + "\n1,2,3,1,0\n");
+        check(std::string("[HitObjects]\n256,192,1000,2,0,") + tail + "\r\n");
+    }
+    {
+        auto input = fosu::make_padded("[HitObjects]\n1,2,3,2,0,L|1:2,1,100,0|0,0:0|0:0,0:0:0:0:a,b\n");
+        auto m = fosu::parse(input);
+        assert(m.hit_objects.size() == 1 && m.hit_objects[0].hit_sample == "0:0:0:0:a");
+    }
     for (const std::string decimal : {"111.99999999999987", "999.9999999999999",
                                      "99999.9999999999999"}) {
         const std::string text = "[TimingPoints]\n0,100.0000000000000,4,2,1,100,1,0\n1," +

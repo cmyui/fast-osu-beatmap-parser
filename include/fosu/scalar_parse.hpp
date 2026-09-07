@@ -23,7 +23,7 @@ inline const char* parse_u64(const char* p, const char* end, uint64_t& out) {
     uint64_t v = 0;
     while (p < end && is_digit(*p)) {
         const uint64_t digit = static_cast<unsigned>(*p - '0');
-        if (v > UINT64_MAX / 10 || (v == UINT64_MAX / 10 && digit > UINT64_MAX % 10)) {
+        if (v > UINT64_MAX / 10 || (v == UINT64_MAX / 10 && digit > UINT64_MAX % 10)) [[unlikely]] {
             do { ++p; } while (p < end && is_digit(*p));
             out = UINT64_MAX;
             return p;
@@ -153,6 +153,9 @@ inline bool is_numeric_space(char c) {
 }
 
 inline const char* skip_numeric_space(const char* p, const char* end) {
+    // The input is padded even at end. Digits and field separators take one
+    // byte comparison; uncommon control/space bytes use the bounded loop.
+    if (static_cast<unsigned char>(*p) > 32) return p;
     while (p < end && is_numeric_space(*p)) ++p;
     return p;
 }
@@ -168,15 +171,16 @@ inline bool ignored_line(const char* p, const char* end) {
 inline const char* parse_osu_int(const char* p, const char* end, int64_t& out) {
     const char* first = skip_numeric_space(p, end);
     const char* q = parse_i64(first, end, out);
-    if (q == first || out < -INT32_MAX || out > INT32_MAX) return p;
+    if (q == first || out < -INT32_MAX || out > INT32_MAX) [[unlikely]] return p;
     return skip_numeric_space(q, end);
 }
 
 inline const char* parse_osu_double(const char* p, const char* end, double& out,
                                    double limit = INT32_MAX) {
     const char* first = skip_numeric_space(p, end);
-    const char* q = parse_double(first, end, out);
-    if (q == first || out < -limit || out > limit) return p;
+    const char* q = parse_double_impl<bounded_double>(first, end, out);
+    // One absolute-value bound also rejects infinities and NaN.
+    if (q == first || !(std::abs(out) <= limit)) [[unlikely]] return p;
     return skip_numeric_space(q, end);
 }
 
@@ -188,8 +192,8 @@ inline const char* parse_osu_float(const char* p, const char* end, float& out,
         if (first < end && (*first == '+' || *first == '-')) return p;
     }
     const auto r = fast_float::from_chars(first, end, out);
-    if (r.ec != std::errc() && !(r.ec == std::errc::result_out_of_range && out == 0)) return p;
-    if (!std::isfinite(out) || out < -limit || out > limit) return p;
+    if (r.ec != std::errc() && !(r.ec == std::errc::result_out_of_range && out == 0)) [[unlikely]] return p;
+    if (!(std::abs(out) <= limit)) [[unlikely]] return p;
     return skip_numeric_space(r.ptr, end);
 }
 

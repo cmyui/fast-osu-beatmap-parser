@@ -1,236 +1,242 @@
 # Performance and verification
 
-## Workload and boundaries
+## Scope and measurement boundaries
 
-The evaluation set contains 10,000 of the most-played ranked/approved beatmaps
-on a private server: 402,593,897 original input bytes. A manifest retained with
-the corpus fixes its membership and provenance. The corpus and play data are
-not distributed. Each file has equal weight in the latency mean; this is not
-weighted by its historical playcount.
+The primary products are the C++ library, C ABI and Python package. The
+freestanding executable measures the additional cost of creating a process,
+reading one original beatmap, writing its complete result and exiting.
 
-Measurements use a shared-tenancy AMD EPYC Genoa/Zen 4 VM, eight cores without
-SMT, 32 MiB L3, 15 GB RAM, Ubuntu 24.04, Linux 6.8, glibc 2.39 and GCC 13.3.
-Runs are pinned to one CPU. Other tenants can interrupt execution, so both
-observed means and means of per-file minima are reported. Minima estimate an
-uninterrupted run; they are not a latency guarantee or a replacement for the
-observed distribution. The date and result boundary matter when comparing runs.
+The evaluation set contains 10,000 ranked/approved beatmaps selected by
+playcount: 402,593,897 original bytes and 8,070,193 retained hitobjects. Its
+manifest fixes membership and provenance; maps and play data stay private.
+Each file has equal weight in the latency mean, regardless of playcount.
 
-There are three separate measurements:
+Measurements below were taken on September 7, 2026 on a shared-tenancy AMD
+EPYC Genoa/Zen 4 VM: eight cores without SMT, 32 MiB L3, 15 GB RAM, Ubuntu
+24.04, Linux 6.8, glibc 2.39 and GCC 13.3. Runs use CPU 3 and are serialized
+with a shared benchmark lock. The host enables 64/128/256 KiB anonymous
+multi-size transparent huge pages in `madvise` mode. fosu requests huge pages
+for its C ABI arena and one-shot executable; it does not change host policy.
+The header-only interface uses the caller's allocator.
 
-1. **Process lifetime:** `posix_spawn` through `wait4`, including input I/O,
-   allocation, parsing, output writes and exit. Each repetition uses a fresh
-   process. The harness rotates binaries within every file/repetition and sends
-   stdout to `/dev/null`; consumer decoding and disk persistence are excluded.
-   It reads each input before timing, making input resident in the kernel file
-   cache. CPU caches/predictors are not explicitly flushed.
-2. **In-process parsing:** modules are loaded once; padded input is acquired
-   before timing. Each current file is parsed repeatedly, rotating modules and
-   fresh/reused result modes. Fresh mode includes result destruction; reuse
-   retains capacity. Input is generally cache-resident. DSO entry points keep
-   the complete result observable to the compiler.
-3. **First library use:** a fresh process reads a file and times its first C++
-   parse, excluding startup, read and destruction. A separate C driver times
-   `dlopen` through read/parse/view/free/`dlclose`; that broader interval includes
-   library loading and I/O. Neither includes Python interpreter startup.
+Tables report microseconds as **mean of per-file minima (mean of all runs)**.
+Minima reduce interruption noise on the shared VM; observed means retain it.
+Neither is a latency guarantee. Compare variants within the same table/run:
+load, compiler layout and the number of loaded modules affect absolute times.
 
-## Current compatibility measurements (0.2.0)
+- **C++:** preloaded padded bytes; parse every selected section into a complete
+  result. Fresh includes construction and destruction; reuse retains capacity.
+  Variants and modes rotate within every file/repetition. A compiler barrier
+  makes the complete result observable.
+- **C ABI:** also includes copying/padding input and publishing the view.
+  Fresh creates and frees a handle each call. Freed storage may be recycled,
+  but no parsed result is reused. Independently loaded modules own separate
+  spare arenas.
+- **Warm Python:** package already imported, fresh owned `Beatmap` each call,
+  `len(hit_objects)` and release included. `parse_file` includes the file read;
+  `parse(bytes)` receives existing bytes. Lazy conversion of every field to
+  Python objects is excluded.
+- **First Python call:** a new interpreter imports fosu, calls `parse_file`
+  once, reads the object count and releases the result. Import and first-call
+  times are separate. Whole-process time also includes launch, interpreter
+  startup, timing-output collection and exit. Package bytecode is precompiled
+  with the measured interpreter, matching a normal installed package.
+- **One-shot:** parent `posix_spawn` through `wait4`, including original input
+  I/O, parsing, complete output writes to `/dev/null` and exit. Consumer
+  decoding and disk persistence are excluded.
 
-September 7, 2026; previous release `33aa2c0` versus the current implementation,
-GCC 13.3, no PGO. Each paired benchmark rotates candidates within every
-file/repetition on CPU 3. All 10,000 corpus files are included. Times are
-microseconds; parentheses contain means of all runs.
+All file benchmarks warm the kernel file cache before timing. A fresh process
+is not a cold disk read; CPU caches and predictors are not explicitly flushed.
 
-| Workload | Previous release | Current |
-|---|---:|---:|
-| C++ fresh result, five repetitions | 19.634 (22.011) | 22.519 (25.639) |
-| C++ reused result, five repetitions | 18.704 (20.354) | 21.112 (23.441) |
+## Kernel and arena measurements
 
-Official numeric and sample-field validation adds about 2.9 µs (15%) to fresh
-parsing and 2.4 µs (13%) to reused parsing in this comparison. Common sample
-spellings use parallel integer digit checks; unusual fields use the complete
-bounded conversion. Both paths enforce the same acceptance policy. These
-results compare different parsing behavior, not identical-output implementations.
+The baseline is the compatible parser at `a9d7693`. The two independent
+optimization attempts are `9676109` and `a10ac66`; the combined implementation
+at `164d554` uses their best measured pieces plus storage-lifetime fixes.
+All four preserve the baseline's complete output on this corpus. Release
+`33aa2c0` predates correctness fixes and is not an identical-work baseline.
 
-The current table covers C++ calls. Earlier process, C API and Python results
-below predate this validation policy and do not establish its performance at
-those boundaries.
+### C++: 10,000 files, nine repetitions, no PGO
 
-### Python measurement procedure
-
-To reproduce the paired Python comparisons, build each revision into its own
-wheel directory with `FOSU_BUNDLE_RUNTIME=1`, extract into separate package
-directories, then run with CFFI installed in the driver environment:
-
-```sh
-taskset -c 3 python bench/python_versions.py /path/to/corpus \
-  /path/to/previous-wheel /path/to/current-wheel --reps 5
-taskset -c 3 python bench/python_first_compare.py /path/to/corpus \
-  /path/to/previous-wheel /path/to/current-wheel --limit 1000 --reps 3
-```
-
-### Verification coverage
-
-- Exact canonical output matches between the hosted and one-shot writers on
-  all 10,000 files. The reference SHA-256 is
-  `334598db4c426ce5e99ba49cb9c4e3c038f88cb5424586ecd718207ec482edad`.
-- Both Python file and bytes entry points match every public field on all
-  10,000 files, including floating-point bits, raw strings, pool indices and
-  counters. The tested extensions bundle private C++ runtimes; dependency
-  inspection confirms no dynamic `libstdc++` or `libgcc_s` dependency.
-- Scalar/SIMD record comparisons and the independent numeric-conversion
-  reference pass on that set and on a broader 23,618-file cache: 792,921,673
-  bytes and 14,995,892 hitobjects. The cache is not independently labeled as an
-  Aspire/unranked evaluation set. Its host-local manifest SHA-256 is
-  `e1acf6c79fe9c68cb5fe35ba21aa444fa289cd74d7e85ae564b3e56dc0390181`.
-- The actual official legacy decoder at pinned revision `48c4800e` agrees on
-  completion, rejected-line counts and retained object counts for all 10,000
-  maps (six rejected lines) and the 23,618-file cache (70 rejected lines).
-  The 1,395 synthetic fixtures also match in scalar and SIMD configurations.
-  This checks acceptance, not complete gameplay-value equivalence. See the
-  [official reference harness](compatibility.md#sources-of-truth).
-- Native, C ABI, Python, I/O-failure, allocation-failure and one-shot boundary
-  checks pass. Clang ASan/UBSan/float-cast-overflow checks and a 61-second,
-  473,537-run mutation fuzz smoke test pass. Fuzz duration is a measured test
-  budget, not a proof that all malformed inputs are safe.
-
-After widening the previous stream's integer timestamp representation, exactly
-32 maps differ from the previous release: 453 slider lengths across 25 maps
-are corrected by one ULP, and seven inherited NaN timing points across three
-maps are preserved instead of skipped. The latter also removes seven malformed
-counts. Four additional maps change under the official acceptance policy:
-three out-of-range timing points and three invalid sliders are rejected, and
-whitespace-only lines no longer count as malformed timing points or storyboard
-lines. Slider removal also changes the associated pools and indices. The
-independent numeric reference and
-[official decoding rules](compatibility.md#sources-of-truth) support those
-corrections; previous-release equality is not the definition of correctness.
-
-## Earlier 0.1.0 measurements
-
-September 2026, complete corpus, three fresh processes per file, rotating
-binaries within each repetition. Times are microseconds.
-
-| Process | Mean of file minima | Mean of all runs | p50 / p99 of file minima | Minor faults at minima |
+| Result | Compatible baseline | Attempt A | Attempt B | Combined |
 |---|---:|---:|---:|---:|
-| One-shot, complete FOSUDMP4 output | **163.05** | 180.76 | 152.43 / 286.59 | 5.4 |
-| One-shot without huge-page advice | 192.20 | 210.24 | 171.85 / 429.66 | 28.5 |
-| Earlier Fable executable, FOSUDMP3 output | 161.68 | 178.07 | 151.05 / 289.11 | 5.4 |
-| Master, dynamic runtime and reference serializer | 1168.84 | 1234.47 | 1123.18 / 1697.00 | 186.8 |
-| Empty minimal executable | 108.06 | 122.28 | 109.29 / 138.25 | 3.6 |
+| Fresh | 23.532 (26.597) | 22.208 (25.187) | 21.635 (24.240) | **20.711 (23.245)** |
+| Reused | 22.243 (25.046) | 20.881 (23.449) | 20.591 (22.789) | **19.661 (21.845)** |
 
-The Fable comparison is a process baseline using its older stream format;
-FOSUDMP4 additionally preserves explicit point-pool indices and a framing
-footer. It is not an identical-output comparison. Exact verification uses the
-master reference emitting FOSUDMP4. That executable is 61,680 bytes; these results precede the current numeric
-corrections and timestamp representation.
+The combined fresh-result time is 12.0% below the compatible baseline, 6.7%
+below attempt A and 4.3% below attempt B in this run. GCC flags are `-O3
+-march=x86-64-v3 -mtune=znver4 -fno-plt -fno-stack-protector`, with hidden
+symbols in isolated benchmark modules.
 
-For library parsing, the following paired run uses 8,000 evaluation files,
-five repetitions per file, with modules and fresh/reused modes rotated.
-PGO training used the other 2,000 files. Times are means of per-file minima;
-parentheses contain means of all runs.
+### C ABI
 
-| In-process interface | Fresh result, µs | Reused result, µs |
+Isolated implementation modules, all 10,000 files, nine repetitions:
+
+| Result | Compatible baseline | Attempt A | Attempt B | Combined |
+|---|---:|---:|---:|---:|
+| Fresh handle | 23.392 (26.957) | 22.159 (25.213) | 22.312 (25.818) | **21.134 (24.350)** |
+| Reused handle | 22.033 (24.682) | 21.050 (23.356) | 21.318 (23.408) | **20.181 (22.193)** |
+
+The combined fresh call saves 9.7% against the compatible baseline, 4.6%
+against attempt A and 5.3% against attempt B.
+
+A separate fresh C process driver measures `dlopen` through read, parse, view,
+free and `dlclose` on 1,000 evenly spaced files, three repetitions:
+
+| Compatible baseline | Attempt A | Attempt B | Combined |
+|---:|---:|---:|---:|
+| 209.441 (232.707) | 207.619 (232.398) | 175.554 (199.087) | 191.906 (216.846) |
+
+The combined result includes the corrected arena unload cleanup. Attempt B
+leaves its spare mapping allocated after `dlclose`, so its faster teardown
+figure does less resource cleanup. First Python-call timing ends before
+library unload and must be considered separately. The corrected first C use
+is 8.4% faster than the compatible baseline at this broader boundary.
+
+### Python: CPython 3.11.15, bundled runtime, no PGO
+
+Warm calls, all 10,000 files, five repetitions, five package variants rotated
+within each file (the fifth was an experimental VBMI build):
+
+| Call | Compatible baseline | Attempt A | Attempt B | Combined |
+|---|---:|---:|---:|---:|
+| `parse(bytes)` | 30.398 (34.750) | 27.804 (31.880) | 27.375 (31.958) | **26.759 (30.990)** |
+| `parse_file(path)` | 35.369 (39.941) | 33.106 (37.230) | 32.751 (37.723) | **32.133 (36.191)** |
+
+The combined bytes call saves 12.0% against the compatible baseline and 2.2%
+against attempt B. File reads and Python wrapper work reduce the relative
+benefit in `parse_file`. These are fresh logical results, even though the
+loaded library can recycle storage between calls.
+
+Fresh interpreters, 500 evenly spaced files, three repetitions, four rotating
+packages after matching CPython bytecode-cache state:
+
+| Boundary | Compatible baseline | Attempt A | Attempt B | Combined |
+|---|---:|---:|---:|---:|
+| First `parse_file` | 166.476 (180.390) | 163.701 (178.645) | 138.365 (154.062) | **138.411 (153.559)** |
+| `import fosu`, ms | 5.146 (5.354) | 5.137 (5.365) | 5.130 (5.357) | 5.137 (5.346) |
+| Whole process, ms | 15.406 (15.918) | 15.403 (15.959) | 15.363 (15.928) | 15.390 (15.911) |
+
+The first call improves by 16.9% versus the compatible baseline; the combined
+and attempt B results are effectively tied. Interpreter startup and imports
+dominate the whole process, so the parser improvement barely moves its total.
+Each interval's minimum is selected independently within a file; columns are
+not components from one chosen execution and must not be added together.
+
+### Profile-guided compilation
+
+GCC PGO trains on 2,000 sorted corpus files and evaluates only the other
+8,000, with five rotating repetitions. This is a separate paired run of the
+combined implementation:
+
+| Build | Fresh | Reused |
 |---|---:|---:|
-| Master C++, GCC | 20.442 (22.729) | 19.051 (20.644) |
-| Current C++, GCC | 20.401 (22.942) | 18.898 (20.674) |
-| Current C++, GCC + PGO | **18.988 (21.499)** | **17.412 (19.276)** |
-| Offset records, GCC | 20.444 (23.062) | 18.844 (20.770) |
-| Current C++, Clang 18.1 | 21.756 (24.451) | 20.213 (22.233) |
-| C API, bundled runtime; includes copy/view publication | 21.663 (24.517) | 19.972 (22.001) |
+| Default | 19.140 (21.275) | 18.645 (20.272) |
+| PGO | **18.506 (20.825)** | **18.018 (19.805)** |
 
-The unprofiled C++ path is effectively tied with master; offset records save
-storage without a consistent latency benefit. The PGO build reduces parse time
-versus master by about 7% fresh / 9% reused in this comparison. A separate
-two-module PGO comparison measured 18.997 → 17.509 µs fresh and
-18.495 → 16.983 µs reused. Module count and
-allocator/cache state affect absolute times; compare rows within a run.
+PGO reduces the mean minima by about 3.3% here. Published wheels do not carry
+this profile. The reproducible experiment below lets C++ applications measure
+profiles for their own call sites and workload.
 
-First-use measurements on an evenly spaced 1,000-file subset, five fresh
-processes per file: master first C++ parse 62.950 µs; current first C++ parse
-63.479 µs. This is effectively unchanged, not a cold-library speedup.
-The system-runtime C driver's broader initial `dlopen`/file/parse/release interval is
-756.445 µs (802.858 µs across all runs), including loading the shared C++
-runtime. A long-running application pays library loading once. These numbers
-exclude Python startup and must not be compared as the same timed workload.
+### One-shot process lifetime
 
-The Linux C API defaults to a private bundled C++ runtime. In a paired
-1,000-file first-use comparison, system-runtime loading took 756.490 µs
-(802.183 across all runs), versus **181.849 µs** (197.270 across all runs)
-with bundling. Steady-state C API time was unchanged: system/bundled fresh
-19.970/20.034 µs and reuse 19.334/19.280 µs on 8,000 evaluation files.
-Bundling raises loaded ELF sections from about 65 to 250 KB, hides the C++
-copy and still uses the application's `malloc`/`free`. See
-[runtime selection](c-api.md) for the operator-new distinction and opt-out.
+All 10,000 files, three fresh processes per file, identical complete FOSUDMP5
+output contract, GCC `-O2 -march=znver4`:
 
-The earlier Fable baseline was rebuilt from its latest reviewed revision
-`b484fea`; its binary hash matched the preserved measurement binary exactly.
+| Compatible baseline | Attempt A | Attempt B | Combined |
+|---:|---:|---:|---:|
+| 170.24 (191.73) | 167.15 (187.07) | 168.74 (189.02) | 168.15 (188.75) |
 
-The executable has no supported PGO build target: profiles from a hosted
-training runtime have different GCC control-flow counters from the
-freestanding runtime. They cannot be treated as valid profiles for that binary.
-PGO results above are for the hosted library, with matching training/use builds.
+The combined executable is 81,296 bytes and records 6.5 minor faults at the
+selected minima on average. Its mean minimum is 1.2% below the compatible
+baseline; attempt A is 0.6% faster at this boundary. The shared implementation
+is selected for its stronger primary library results, not a claim that it
+wins every sub-microsecond process comparison.
 
-## Earlier Python package measurements
+The hosted reference serializer is a verification tool; its growing
+`std::string` is not an optimized delivery path. Its runtime does not establish
+the minimum cost of returning a native result. Older parse-and-exit figures
+without output perform different work.
 
-The locally built package uses the same unprofiled C API, compiled with GCC
-13.3 for AVX2/BMI1/BMI2 and Zen 4 scheduling, with its private runtime bundled.
-On CPython 3.12, a paired run over all
-10,000 maps with five repetitions per file measured:
+## Measured implementation choices
 
-| Python call boundary | Mean of all runs, µs | Mean of file minima, µs |
+The shared hitobject loop packs prefix lengths for validation and table
+selection, keeps vector constants at section scope, and tests uncommon line
+shapes after the common editor format. Sliders convert their first two points
+speculatively. Compile-time storage policies share parsing semantics between
+native vectors, C ABI arena arrays and streamed one-shot records.
+
+Independent two-way ablations, all 10,000 files with nine repetitions, measure
+the incremental pieces. Each row is a separate run:
+
+| Removed optimization | Combined fresh / reused | Ablated fresh / reused |
 |---|---:|---:|
-| Raw CFFI: allocate, parse bytes, get count, free | 21.97 | 20.83 |
-| `fosu.parse(bytes)` and `len(beatmap.hit_objects)` | **23.88** | 22.52 |
-| Raw CFFI: allocate, read/parse file, get count, free | 27.54 | 26.02 |
-| `fosu.parse_file(path)` and `len(beatmap.hit_objects)` | **29.61** | 27.99 |
-| `fosu.parse(bytes)` and `beatmap.hit_objects.to_numpy()` | 27.08 | 25.31 |
+| SSE sample and edge-set classifiers | 19.486 / 18.942 | 20.361 / 19.802 |
+| Numeric whitespace/bounds shortcuts | 19.714 / 19.207 | 20.252 / 19.707 |
+| Direct vector writes (`FOSU_PORTABLE_VECTORS`) | 19.392 / 18.812 | 21.162 / 20.340 |
 
-Each timed call creates and releases a fresh result. Variants rotate within
-each file/repetition; the input and file data are resident. Imports and NumPy
-dtype construction happen before timing. The owned Python interface costs
-about 2 µs over direct CFFI in this run. Accessing every field as Python objects
-adds conversion and iteration work; these timings do not include that traversal.
-The package adds convenience and ownership to the current parser, with no new
-parser-kernel speedup over the C++ measurements above.
+Direct vector writes depend on tested libstdc++/libc++ release layouts.
+Explicit placement construction starts record lifetimes without redundant
+zeroing. Debug containers, AddressSanitizer and unsupported layouts use normal
+vector operations; callers can force that path with `FOSU_PORTABLE_VECTORS`.
+The arena vectors have their own direct-size interface and remain exercised
+under sanitizers. The C ABI caches at most one spare arena of up to 8 MiB per
+loaded library image, releases it at unload, and preserves independent live
+results. See [C++ storage](library.md#performance) and [C ABI storage](c-api.md#storage).
 
-A separate run of the distributable manylinux wheel (built with GCC 14.2.1)
-measured 24.41 µs from bytes and 30.26 µs from a file, against 22.45/28.08 µs
-through raw CFFI in that same run. These are means of all runs at the same
-boundary; both builds place the Python ownership overhead near 2 µs. The
-10,000-file exact comparison also covers the distributable Linux wheel.
+The optional AVX-512 VBMI prefix uses 256-bit byte permutations and a smaller
+table. It was measured, then omitted. Dedicated Python A/B runs rotate AVX2
+and VBMI within each map and repeat with the starting order reversed:
 
-For cold Python use, a separate 100-file subset with three fresh interpreters
-per file compared otherwise identical Linux wheels. The private bundled C++
-runtime took 5.13 ms to import `fosu`, versus 6.00 ms with the system runtime;
-the full interpreter/import/parse/release/exit interval was 16.38 versus
-17.36 ms. These are means of all runs, including parent launch and timing-output
-collection for the full interval. The first `parse_file` call itself averaged
-155 µs bundled / 148 µs system. The bundled wheel was 259 KB versus 77 KB.
-The package keeps the private runtime for its lower import and process time.
-Already-loaded application dependencies can change that tradeoff. These cold
-Python intervals are distinct from the warmed-call table and from the one-shot
-native executable's process time.
+| Boundary | AVX2, order A/B | VBMI, order A/B | AVX2, order B/A | VBMI, order B/A |
+|---|---:|---:|---:|---:|
+| Warm bytes, 10k × 7 | 24.400 (28.005) | 24.802 (28.043) | 23.498 (27.641) | 23.731 (27.072) |
+| Warm file, 10k × 7 | 31.451 (34.882) | 31.820 (35.419) | 30.574 (33.776) | 30.818 (33.799) |
+| First file call, 500 × 3 | 135.271 (150.744) | 135.873 (150.128) | 135.204 (151.620) | 135.766 (150.850) |
 
-```sh
-FOSU_BUNDLE_RUNTIME=1 python -m pip install -e '.[test]'
-taskset -c 5 python bench/python_compare.py /path/to/corpus --reps 5
-python bench/python_verify.py build/oneshot_reference /path/to/corpus
+AVX2 wins the warm minima in both orders. Observed means have interruption
+noise; the first-call sub-microsecond differences disagree in direction
+between minima and means. Whole-process Python time has no consistent winner.
+A C++ paired run was effectively tied (fresh 19.181 vs 19.287 µs); streaming
+favored AVX2 (24.713 vs 25.192). One-shot minima differed by less than 1%
+(168.67 AVX2 vs 168.04 VBMI), while observed means favored AVX2. No measured
+boundary establishes a durable VBMI benefit on this host.
 
-# Extract each wheel into its own directory, with cffi installed in the driver.
-taskset -c 5 python bench/python_first_compare.py /path/to/corpus \
-  /path/to/extracted-bundled-wheel /path/to/extracted-system-wheel --limit 100 --reps 3
-```
+Additional measured alternatives were rejected: AVX-512 VBMI2 delimiter
+compression slowed fresh parsing from 19.121 to 20.112 µs; software prefetch
+512 bytes ahead did not improve streaming (24.713 vs 24.804 µs/file, median
+best round across seven rotated runs of 1,000 files × ten rounds). Wider
+`-march=znver4` code generation alone did not beat the AVX2 library target.
+These conclusions apply to this host and workload, not every CPU or map mix.
 
-Build the runtime comparison wheels from clean source copies using the same
-compiler, with `FOSU_BUNDLE_RUNTIME=1 python -m build` for the bundled variant
-and `FOSU_BUNDLE_RUNTIME=0 python -m build` for the system-runtime variant.
-The build always keeps symbol hiding enabled.
-The Python verifier checks both bytes and file entry points against the
-canonical reference: all fields, raw string bytes, floating-point bits, pool
-indices and parser counters match on all 10,000 files. Package tests additionally
-cover buffer inputs, lazy views, section selection, Unicode and embedded NULs,
-errors, threading, scalar selection and ownership through NumPy view chains.
-Installed wheels are tested on CPython 3.10 and 3.14 on Linux and Apple Silicon.
+## Verification coverage
+
+The current implementation matches `a9d7693` exactly across all 10,000 maps
+for native, portable-vector, C ABI and one-shot output. Canonical SHA-256:
+`334598db4c426ce5e99ba49cb9c4e3c038f88cb5424586ecd718207ec482edad`.
+The comparison includes raw strings, float bits, all pools and indices,
+orphaned points and all four parser counters.
+
+Both Python entry points match every public field on all 10,000 maps. The
+18 package tests pass in scalar and SIMD modes. Release, forced-portable,
+debug-vector and ASan container-annotation builds pass, as do C ABI growth,
+recycling, concurrent ownership, actual unload/reload and late host exit
+callback checks. The one-shot boundary and resource-limit tests pass.
+
+Clang ASan/UBSan/float-cast-overflow checks pass. A 61-second mutation fuzz
+smoke completed 855,444 runs; the sanitizer-built scalar/SIMD/offset comparison
+with an independently converted numeric reference passed all 10,000 files
+(six malformed lines). Fuzz duration and corpus coverage are measured test
+budgets, not proofs that every malformed input is safe.
+
+Official acceptance is checked against ppy/osu revision
+`48c4800e3ae4ee752452cdff83bd3787ccf3105f`. The 1,395 synthetic fixtures
+agree in scalar and SIMD modes (969 rejected lines). This is acceptance
+coverage, not proof of complete gameplay-value equivalence. The compatibility
+baseline also passed an official-decoder audit of the 10k corpus and a broader
+23,618-file cache; that cache is not independently labeled as an Aspire set.
+[Compatibility](compatibility.md) explains the authority, supported semantics
+and intentional differences from older releases.
 
 ## Verification and regression comparison
 
@@ -301,105 +307,106 @@ record counts. `fuzz-smoke` starts with synthetic numeric/format seeds and
 mutates full files plus forced timing/hitobject sections. The native CI job
 runs these checks independently of wheel installation tests.
 
-## Process benchmark
+## Reproduce paired library and Python measurements
 
-```sh
-make oneshot CXX=g++
-sh oneshot/build.sh build/fosu_oneshot_4k -DABLATE_NO_MADVISE
-taskset -c 5 build/oneshot_process /path/to/corpus 0 3 \
-  build/previous/build/fosu_oneshot build/fosu_oneshot build/fosu_oneshot_4k > build/process.csv
-python3 bench/oneshot_summary.py build/process.csv
-```
-
-Arguments are `corpus limit reps binaries...`; limit 0 selects every file.
-A nonzero limit selects evenly spaced files from sorted membership. All
-candidates must accept a single input path and exit successfully. The `_4k`
-variant omits the huge-page request; it does not modify host settings. See
-[one-shot setup](../oneshot/README.md) for the optional multi-size THP policy.
-
-The hosted reference emits the same complete stream, but its growing
-`std::string` serializer is intentionally straightforward. Its output cost is
-not a lower bound on native result delivery. Older parse-and-exit numbers
-without output and older stream versions do different work and should be
-labeled separately. An empty executable measures process-launch overhead, not
-an attainable parsing result or a proof of optimality.
-
-## Library benchmark and PGO
-
-```sh
-# GCC/Linux. The outer taskset also pins the training run.
-taskset -c 5 make bench-pgo CXX=g++ BENCH_ARGS=/path/to/corpus
-```
-
-`bench/library_pgo.sh` compiles isolated DSOs, trains on sorted file indices
-0, 5, 10, … and compares on the remaining 80%. It reports five repetitions per
-file in rotating order. No evaluation file enters the training pass. Compiler
-profiles live under `build/`; they describe branch/code frequencies, not cached
-beatmap results. Train a real application at its own call sites and workload
-before relying on its PGO benefit.
-
-Additional module variants can be compiled from `bench/library_module.cpp`:
-`FOSU_BENCH_OFFSET` uses offset records; `FOSU_BENCH_CAPI` links `libfosu` and
-includes input copying, padding and view publication. Use hidden symbol
-visibility so inline C++ functions from different revisions cannot interpose.
-For example:
+Export each complete revision into a separate source directory. Compile each
+variant against exactly its own include root; mixing roots silently measures
+the wrong implementation. Give benchmark modules hidden symbols and compile
+C API implementation code into each module, rather than linking both wrappers
+to one loader-resolved dependency.
 
 ```sh
 g++ -std=c++20 -O3 -march=x86-64-v3 -mtune=znver4 -fno-plt \
   -fno-stack-protector -Iinclude -fPIC -fvisibility=hidden -shared \
-  -DFOSU_BENCH_OFFSET bench/library_module.cpp -o build/library_offset.so
-taskset -c 5 build/library_compare /path/to/corpus 5 \
-  build/library_baseline.so build/library_offset.so > build/library.csv
+  bench/library_module.cpp -o build/library_native.so
+g++ -std=c++20 -O3 -march=x86-64-v3 -mtune=znver4 -fno-plt \
+  -fno-stack-protector -Iinclude -fPIC -fvisibility=hidden -shared \
+  -DFOSU_BENCH_CAPI bench/library_module.cpp src/c_api.cpp \
+  -Wl,-Bsymbolic -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL \
+  -o build/library_capi.so
+g++ -std=c++20 -O2 -Iinclude bench/library_compare.cpp -ldl -o build/library_compare
+taskset -c 3 build/library_compare /path/to/corpus 9 \
+  /path/to/previous/build/library_native.so build/library_native.so > build/library.csv
 python3 bench/library_summary.py build/library.csv
 ```
 
-The older `make bench BENCH_ARGS=/path/to/corpus` preloads the entire corpus
-and traverses it over repeated rounds. A 403 MB corpus exceeds this host's L3,
-so those throughput numbers describe a different cache working set from the
-per-file repeated comparisons above. `make bench` without a corpus uses
-synthetic input and is useful for local smoke checks, not deciding production
-performance.
+Use `FOSU_BENCH_OFFSET` for the compact C++ representation. The C API modules
+include allocation, input copying, padding and view publication. A single
+library can also be profiled with `build/c_api_loop`; its separate process
+runs are not a substitute for paired variant rotation.
+
+Build Python wheels from separate clean source copies with the same compiler
+and `FOSU_BUNDLE_RUNTIME=1`. Extract each wheel into a separate package
+directory; install CFFI in the driver's environment. Use the same interpreter
+to precompile bytecode in every package before first-use comparisons:
 
 ```sh
-make build/coldstart_x86 CXX=g++
+python -m compileall -q /path/to/previous/fosu /path/to/current/fosu
+taskset -c 3 python bench/python_versions.py /path/to/corpus \
+  /path/to/previous /path/to/current --reps 7
+taskset -c 3 python bench/python_first_compare.py /path/to/corpus \
+  /path/to/previous /path/to/current --limit 500 --reps 3
+```
+
+Both harnesses rotate variants within each file/repetition. Repeat with package
+arguments reversed to check starting-order effects. Keep compiler, Python,
+bytecode-cache state, CPU affinity and package-loading conditions identical.
+
+```sh
+# GCC/Linux; the outer taskset also pins training.
+taskset -c 3 make bench-pgo CXX=g++ BENCH_ARGS=/path/to/corpus
+```
+
+PGO trains on sorted indices 0, 5, 10, … and evaluates the remaining 80%, with
+five paired repetitions per evaluation file. Training and evaluation files are
+disjoint. Profiles contain code-generation feedback, not cached map results.
+Train an application at its own call sites before assuming this benefit.
+
+## Streaming, first-use and process harnesses
+
+`profile_parse` reads an evenly spaced subset before timing, then visits every
+file in each round. This exposes a different working set from repeatedly
+parsing one file. Complete results remain observable to the compiler.
+
+```sh
+make build/profile_parse CXX=g++
+taskset -c 3 perf stat -e cycles:u,instructions:u,branch-misses:u -- \
+  build/profile_parse /path/to/corpus 1000 20 fresh
+taskset -c 3 build/profile_parse /path/to/corpus 1000 20 reuse 0x100
+```
+
+The optional section mask above selects `[HitObjects]`. `make bench` with a
+corpus preloads the complete set (403 MB here, larger than L3); without a
+corpus it uses synthetic input and is only a smoke check.
+
+```sh
+make build/coldstart_x86 lib CXX=g++
 cc -std=c11 -D_POSIX_C_SOURCE=200809L -O2 -Iinclude \
   bench/c_api_first.c -ldl -o build/c_api_first
-FOSU_LIBRARY=build/libfosu.so taskset -c 5 python3 bench/library_first_compare.py \
-  /path/to/corpus build/coldstart_x86 build/c_api_first --limit 1000 --reps 5 \
+FOSU_LIBRARY=build/libfosu.so taskset -c 3 python3 bench/library_first_compare.py \
+  /path/to/corpus build/coldstart_x86 build/c_api_first --limit 1000 --reps 3 \
   > build/first.csv
 python3 bench/library_summary.py build/first.csv
 ```
 
-The two rows deliberately time different interfaces; see the boundaries above.
-`FOSU_PERF=1` enables optional hardware counters in `coldstart_x86` when the
-host permits them. `FOSU_COLD_MODE` enables explicit decomposition experiments
-inside that benchmark only; leave it unset for the default first-parse result.
+These two rows have deliberately different boundaries: `coldstart_x86` times
+only the first C++ parse after reading; `c_api_first` times `dlopen`, file I/O,
+parse, view, free and `dlclose`. Neither includes process startup itself.
+For multiple C ABI revisions, compile a driver per library with
+`FOSU_DEFAULT_LIBRARY` set to its absolute path. `FOSU_PERF=1` enables optional
+hardware counters in the C++ driver when the host permits them.
 
-## Choices tested
+```sh
+make oneshot CXX=g++
+sh oneshot/build.sh build/fosu_oneshot_4k -DABLATE_NO_MADVISE
+taskset -c 3 build/oneshot_process /path/to/corpus 0 3 \
+  /path/to/previous/build/fosu_oneshot build/fosu_oneshot build/fosu_oneshot_4k \
+  > build/process.csv
+python3 bench/oneshot_summary.py build/process.csv
+```
 
-- Shared numeric kernels and compile-time record policies retained library
-  throughput. Shared hitobject framing improved the paired hosted result by
-  about 2%, while one-shot time was unchanged. Slider storage/rollback remains
-  specific to each output representation.
-- Shared metadata tables were effectively tied with native switch dispatch;
-  they also provide one definition of keys, defaults and numeric behavior.
-- `-O2` was about 10% slower than `-O3` for the hosted parser. The freestanding
-  executable uses `-O2`, where code size and startup layout matter differently.
-- A runtime function pointer for decimal fallback enlarged the executable by
-  roughly 7 KiB and cost an additional fault. A compile-time fallback argument
-  restored direct calls and the smaller binary.
-- Timing storage grows only when its hint is exceeded. Overflow metadata is
-  mapped lazily; normal corpus files have no orphaned points and fit the inline
-  break/colour storage. An earlier empty-program experiment measured about
-  3 µs of extra exec cost for 270 KB of `.bss`.
-- In the one-shot design, a controlled input `mmap(MAP_POPULATE)` variant from
-  the preceding attempt cost roughly 8 µs more than `read` over the full set.
-  Parser user cycles were nearly unchanged. This supports the I/O choice;
-  it does not establish an explanation for IPC differences between parsers.
-- Previous audits found no durable benefit from instruction/table prefetches,
-  wider ISA code generation alone, or a two-pass hitobject classification
-  scheme. The present code keeps SIMD conversion and per-section shape reuse
-  while concentrating process optimization on startup, output and page faults.
-
-These measurements establish improvements under the stated boundary and host
-conditions. They do not prove that no faster parser or process design can exist.
+Arguments are `corpus limit reps binaries...`; zero selects every file, and a
+positive limit selects evenly spaced sorted files. The `_4k` variant omits
+huge-page advice without changing host policy. See [one-shot setup](../oneshot/README.md).
+An empty executable measures launch overhead, not an attainable parse result.
+These measurements do not prove that no faster design can exist.

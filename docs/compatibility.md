@@ -32,6 +32,9 @@ the consumer. Input order and raw sample strings are retained.
   An omitted slider length is represented as zero. Missing hold end times use
   the start time. Hit-sample and edge-bank fields remain raw strings, with the
   numeric portions the official decoder reads checked before retaining an object.
+  Every raw field ends at the next comma, matching the official decoder's field
+  split: a slider sample such as `0:0:0:0:a,b` is retained as `0:0:0:0:a`
+  regardless of line length.
 - NaN is retained **only for inherited timing-point beat lengths**. It must not
   be treated as an ordinary slider-velocity number. Other NaN/infinity values
   are rejected. A consumer implementing slider duration/ticks must handle the
