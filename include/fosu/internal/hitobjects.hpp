@@ -10,19 +10,19 @@
 //   HitObject& begin(size_t len)                 next uncommitted record
 //   void commit(HitObject&) / rollback(HitObject&)
 //   void sample(HitObject&, const char* s, size_t n)   trailing hit sample
-//   Point* point_slot(size_t bound)              storage for `bound` points
+//   Point* reserve_slider_points(size_t bound)   storage for `bound` points
 //   uint32_t point_index(Point*)                 pool index of a point slot
-//   SliderRecord& slider_slot()                  uncommitted slider fields
+//   SliderRecord& begin_slider()                 uncommitted slider fields
 //   StringRef view(const char* s, size_t n)      string representation
-//   void slider_commit(HitObject&, SliderRecord&, Point* end, const char* hs, size_t hs_len)
-//   void slider_rollback(Point* first, Point* end, bool keep_points)
+//   void commit_slider(HitObject&, SliderRecord&, Point* end, const char* hs, size_t hs_len)
+//   void reject_slider(Point* first, Point* retained_end)
 //   Stats& stats()                               fast/slow/malformed counters
 #include <cstring>
 #include <string_view>
 
-#include "object_tail.hpp"
+#include "hitobject_details.hpp"
 #include "prefix.hpp"
-#include "slider_fields.hpp"
+#include "slider_tail.hpp"
 
 namespace fosu::internal {
 
@@ -34,64 +34,93 @@ namespace fosu::internal {
 template <typename Sink>
 __attribute__((noinline))
 inline bool parse_slider(Sink& sink, typename Sink::HitObject& object, const char* p,
-                         const char* end, const HitConsts& k) {
-    using Point = typename Sink::Point;
+                         const char* end,
+                         const HitObjectParseConstants& k) {
+    using SliderPoint = typename Sink::Point;
     if (p >= end) [[unlikely]] return false;
     const char curve_type = *p++;
     // A point costs at least four bytes ("|x:y"), which bounds the count;
     // the pair fast path also needs a second slot.
-    Point* const first_point = sink.point_slot(static_cast<size_t>(end - p) / 4 + 2);
-    Point* next_point = first_point;
+    SliderPoint* const first_point =
+        sink.reserve_slider_points(static_cast<size_t>(end - p) / 4 + 2);
+    SliderPoint* next_point = first_point;
 #if FOSU_SIMD
-    if (const auto pair = fast_parse_point_pair<Point>(p, k)) {
-        *next_point++ = pair->first;
-        if (pair->has_second) *next_point++ = pair->second;
-        p = pair->next;
+    if (const auto initial_points =
+            try_parse_slider_point_prefix_fast<SliderPoint>(p, k)) {
+        *next_point++ = initial_points->first;
+        if (initial_points->has_second)
+            *next_point++ = initial_points->second;
+        p = initial_points->next;
     }
 #endif
     while (p < end && *p == '|') {
-        const auto point = parse_point<Point>(p, end, k);
+        const auto point = parse_slider_point<SliderPoint>(p, end, k);
         if (!point) [[unlikely]] {
-            sink.slider_rollback(first_point, first_point, false);
+            sink.reject_slider(first_point, first_point);
             return false;
         }
         *next_point++ = point->value;
         p = point->next;
     }
-    const auto fields = parse_slider_fields(p, end, k);
-    if (!fields) [[unlikely]] {
-        sink.slider_rollback(first_point, next_point, true);
+    const auto tail = parse_slider_tail(p, end, k);
+    if (!tail) [[unlikely]] {
+        sink.reject_slider(first_point, next_point);
         return false;
     }
-    auto& slider = sink.slider_slot();
+    auto& slider = sink.begin_slider();
     slider.point_begin = sink.point_index(first_point);
     slider.point_count = static_cast<uint32_t>(next_point - first_point);
-    slider.slides = fields->slides;
+    slider.slides = tail->slides;
     slider.curve_type = curve_type;
-    slider.length = fields->length;
-    slider.edge_sounds = sink.view(fields->extras.edge_sounds.data(), fields->extras.edge_sounds.size());
-    slider.edge_sets = sink.view(fields->extras.edge_sets.data(), fields->extras.edge_sets.size());
-    sink.slider_commit(object, slider, next_point,
-                       fields->extras.hit_sample.data(), fields->extras.hit_sample.size());
+    slider.length = tail->length;
+    slider.edge_sounds = sink.view(
+        tail->sounds.edge_sounds.data(), tail->sounds.edge_sounds.size());
+    slider.edge_sets = sink.view(
+        tail->sounds.edge_sets.data(), tail->sounds.edge_sets.size());
+    sink.commit_slider(object, slider, next_point,
+                       tail->sounds.hit_sample.data(),
+                       tail->sounds.hit_sample.size());
     return true;
 }
 
 // Everything after the "x,y,time,type,hitSound" prefix: slider params,
 // spinner/hold end times, trailing hitSample.
 template <typename Sink>
-inline bool finish_hitobject(Sink& sink, typename Sink::HitObject& h, const char* p,
-                             const char* end, const HitConsts& k) {
-    if (!(h.type & (1 | 2 | 8 | 128))) return false;
-    if (p < end && *p != ',') return false;
-    if (!(h.type & 1) && (h.type & 2)) {  // slider
-        if (p >= end || *p != ',') return false;
-        return parse_slider(sink, h, p + 1, end, k);
+inline bool parse_hitobject_details(
+    Sink& sink, typename Sink::HitObject& object, const char* p,
+    const char* end, const HitObjectParseConstants& k) {
+    switch (classify_hitobject_kind(object.type)) {
+        case HitObjectKind::Circle: {
+            const auto details = parse_circle_details(p, end);
+            if (!details) return false;
+            object.end_time = 0;
+            sink.sample(object, details->hit_sample.data(),
+                        details->hit_sample.size());
+            return true;
+        }
+        case HitObjectKind::Slider:
+            return p < end && *p == ',' &&
+                   parse_slider(sink, object, p + 1, end, k);
+        case HitObjectKind::Spinner: {
+            const auto details = parse_spinner_details(p, end);
+            if (!details) return false;
+            object.end_time = details->end_time;
+            sink.sample(object, details->hit_sample.data(),
+                        details->hit_sample.size());
+            return true;
+        }
+        case HitObjectKind::Hold: {
+            const auto details = parse_hold_details(object.time, p, end);
+            if (!details) return false;
+            object.end_time = details->end_time;
+            sink.sample(object, details->hit_sample.data(),
+                        details->hit_sample.size());
+            return true;
+        }
+        case HitObjectKind::Invalid:
+            return false;
     }
-    const auto tail = parse_object_tail(h.type, h.time, p, end);
-    if (!tail) return false;
-    h.end_time = tail->end_time;
-    sink.sample(h, tail->sample.data(), tail->sample.size());
-    return true;
+    return false;
 }
 
 // Lines the fast prefix does not accept: the scalar prefix parser handles
@@ -99,21 +128,23 @@ inline bool finish_hitobject(Sink& sink, typename Sink::HitObject& h, const char
 // Kept out of line so the hot loop keeps its registers.
 template <typename Sink>
 __attribute__((noinline))
-inline bool slow_hitobject_line(Sink& sink, typename Sink::HitObject& h, const char* p,
-                                const char* line_end, const HitConsts& k) {
-    h.end_time = 0;
-    h.slider = Sink::HitObject::kNoSlider;
-    const int sn = scalar_parse_prefix(p, static_cast<size_t>(line_end - p), h);
-    if (sn < 0) return false;
+inline bool parse_hitobject_line_scalar(
+    Sink& sink, typename Sink::HitObject& h, const char* p,
+    const char* line_end, const HitObjectParseConstants& k) {
+    const auto prefix = parse_hitobject_prefix_scalar(
+        p, static_cast<size_t>(line_end - p));
+    if (!prefix) return false;
+    initialize_hitobject(h, prefix->value);
     ++sink.stats().slow_path_lines;
-    return finish_hitobject(sink, h, p + sn, line_end, k);
+    return parse_hitobject_details(sink, h, prefix->next, line_end, k);
 }
 
 // Scalar section loop (scalar builds and ParseOptions::use_simd = false).
 // Returns the position after the section.
 template <typename Sink>
 inline const char* parse_hitobject_lines_scalar(Sink& sink, const char* p,
-                                                const char* file_end, const HitConsts& k) {
+                                                const char* file_end,
+                                                const HitObjectParseConstants& k) {
     while (p < file_end) {
         const char c = *p;
         if (c == '\r' || c == '\n') { ++p; continue; }
@@ -124,7 +155,8 @@ inline const char* parse_hitobject_lines_scalar(Sink& sink, const char* p,
         const char* next_line = nl ? nl + 1 : file_end;
         if (!ignored_line(p, line_end)) {
             auto& h = sink.begin(static_cast<size_t>(line_end - p));
-            if (slow_hitobject_line(sink, h, p, line_end, k)) sink.commit(h);
+            if (parse_hitobject_line_scalar(sink, h, p, line_end, k))
+                sink.commit(h);
             else [[unlikely]] { sink.rollback(h); ++sink.stats().malformed_lines; }
         }
         p = next_line;
@@ -140,7 +172,7 @@ inline const char* parse_hitobject_lines_scalar(Sink& sink, const char* p,
 // fast path. Returns the position after the section.
 template <typename Sink>
 inline const char* parse_hitobject_lines(Sink& sink, const char* p, const char* file_end,
-                                         const HitConsts& k) {
+                                         const HitObjectParseConstants& k) {
     const ByteVector k_nl = k.nl, k_comma = k.comma, k_bias = k.bias, k_thr = k.thr, k_zero = k.zero;
     uint32_t fast_lines = 0, malformed = 0;
     while (p < file_end) {
@@ -152,33 +184,44 @@ inline const char* parse_hitobject_lines(Sink& sink, const char* p, const char* 
         const char* next_line = nl + (nl < file_end);
         const char* line_end = nl - (nl > p && nl[-1] == '\r');
         const auto len = static_cast<size_t>(line_end - p);
-        const PrefixShape sh = classify_prefix(nondig, commas);
-        const char after = p[sh.p4];  // p4 <= 32: inside the window or its padding
-        if (sh.ok && (sh.p4 == len || after == ',' || after == '\0')) [[likely]] {
+        const auto prefix_shape = classify_hitobject_prefix(nondig, commas);
+        const char after = p[prefix_shape.p4];
+        if (prefix_shape.ok &&
+            (prefix_shape.p4 == len || after == ',' || after == '\0'))
+            [[likely]] {
             auto& h = sink.begin(len);
-            uint32_t type;
             bool ok;
-            if (convert_prefix(ascii, k_zero, sh, p, h, type)) [[likely]] {
+            const auto prefix = decode_hitobject_prefix(
+                ascii, k_zero, prefix_shape, p);
+            if (prefix) [[likely]] {
+                initialize_hitobject(h, *prefix);
                 ++fast_lines;
-                if (type & 1) {
+                const HitObjectKind kind =
+                    classify_hitobject_kind(prefix->type);
+                if (kind == HitObjectKind::Circle) {
                     // Circle precedence: the tail is empty or ",sample".
-                    if (sh.p4 == len) {
+                    if (prefix_shape.p4 == len) {
                         sink.sample(h, line_end, 0);
                         ok = true;
-                    } else if (len - sh.p4 == 9 && after == ',' && short_sample(p + sh.p4 + 1)) {
-                        sink.sample(h, p + sh.p4 + 1, 8);
+                    } else if (len - prefix_shape.p4 == 9 && after == ',' &&
+                               short_sample(p + prefix_shape.p4 + 1)) {
+                        sink.sample(h, p + prefix_shape.p4 + 1, 8);
                         ok = true;
                     } else {
-                        ok = finish_hitobject(sink, h, p + sh.p4, line_end, k);
+                        ok = parse_hitobject_details(
+                            sink, h, p + prefix_shape.p4, line_end, k);
                     }
-                } else if (type & 2) {
-                    ok = sh.p4 < len && after == ',' &&
-                         parse_slider(sink, h, p + sh.p4 + 1, line_end, k);
+                } else if (kind == HitObjectKind::Slider) {
+                    ok = prefix_shape.p4 < len && after == ',' &&
+                         parse_slider(
+                             sink, h, p + prefix_shape.p4 + 1, line_end, k);
                 } else {
-                    ok = finish_hitobject(sink, h, p + sh.p4, line_end, k);
+                    ok = parse_hitobject_details(
+                        sink, h, p + prefix_shape.p4, line_end, k);
                 }
             } else {
-                ok = slow_hitobject_line(sink, h, p, line_end, k);
+                ok = parse_hitobject_line_scalar(
+                    sink, h, p, line_end, k);
             }
             if (ok) sink.commit(h);
             else [[unlikely]] { sink.rollback(h); ++malformed; }
@@ -188,7 +231,9 @@ inline const char* parse_hitobject_lines(Sink& sink, const char* p, const char* 
             if (c == '[') break;
             if (!ignored_line(p, line_end)) {
                 auto& h = sink.begin(len);
-                if (slow_hitobject_line(sink, h, p, line_end, k)) sink.commit(h);
+                if (parse_hitobject_line_scalar(
+                        sink, h, p, line_end, k))
+                    sink.commit(h);
                 else [[unlikely]] { sink.rollback(h); ++malformed; }
             }
         }

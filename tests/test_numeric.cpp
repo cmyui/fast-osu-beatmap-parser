@@ -80,8 +80,11 @@ static void test_fuzz_parse_coord() {
         buf[len++] = (rng() % 2) ? ':' : '|';
         memset(buf + len, 0, sizeof(buf) - (size_t)len);
 
-        int32_t got = -777, want = -777;
-        const char* gp = fosu::internal::parse_coord(buf, buf + payload, got);
+        const auto coordinate =
+            fosu::internal::parse_slider_coordinate(buf, buf + payload);
+        const char* gp = coordinate ? coordinate->next : buf;
+        const int32_t got = coordinate ? coordinate->value : -777;
+        int32_t want = -777;
         int64_t v;
         const char* wp = fosu::internal::parse_i64(buf, buf + payload, v);
         if (wp != buf && (v < -131072 || v > 131072)) wp = buf;
@@ -125,13 +128,18 @@ static void test_prefix_shapes() {
             std::string(t, '1') + ',' + std::string(type, '3') + ',' + sound;
         const auto len = line.size();
         line.append(fosu::kBufferPadding, '\0');
-        fosu::HitObject fast{}, scalar{};
-        uint32_t newline;
-        CHECK_EQ(fast_parse_prefix(line.data(), fast, newline), int(len));
-        CHECK_EQ(scalar_parse_prefix(line.data(), len, scalar), int(len));
-        CHECK_EQ(fast.x, scalar.x); CHECK_EQ(fast.y, scalar.y);
-        CHECK_EQ(fast.time, scalar.time); CHECK_EQ(fast.type, scalar.type);
-        CHECK_EQ(fast.hitsound, scalar.hitsound); CHECK_EQ(newline, 0u);
+        const auto fast = try_parse_hitobject_prefix_fast(line.data());
+        const auto scalar = parse_hitobject_prefix_scalar(line.data(), len);
+        CHECK(fast.has_value());
+        CHECK(scalar.has_value());
+        if (!fast || !scalar) continue;
+        CHECK_EQ(fast->next - line.data(), int(len));
+        CHECK_EQ(scalar->next - line.data(), int(len));
+        CHECK_EQ(fast->value.x, scalar->value.x);
+        CHECK_EQ(fast->value.y, scalar->value.y);
+        CHECK_EQ(fast->value.time, scalar->value.time);
+        CHECK_EQ(fast->value.type, scalar->value.type);
+        CHECK_EQ(fast->value.hit_sound, scalar->value.hit_sound);
     }
 }
 
@@ -242,19 +250,20 @@ static void test_fuzz_equivalence() {
             buf[pos] = junk[rng() % sizeof junk];
         }
 
-        fosu::HitObject fast{}, ref{};
-        uint32_t nl_mask;
-        const int fn = fosu::internal::fast_parse_prefix(buf, fast, nl_mask);
-        const int rn = fosu::internal::scalar_parse_prefix(buf, strlen(buf), ref);
-        if (fn < 0) continue;
+        const auto fast =
+            fosu::internal::try_parse_hitobject_prefix_fast(buf);
+        const auto reference =
+            fosu::internal::parse_hitobject_prefix_scalar(buf, strlen(buf));
+        if (!fast) continue;
         ++fast_taken;
-        CHECK(rn >= 0);
-        CHECK_EQ(fn, rn);
-        CHECK_EQ(fast.x, ref.x);
-        CHECK_EQ(fast.y, ref.y);
-        CHECK_EQ(fast.time, ref.time);
-        CHECK_EQ(fast.type, ref.type);
-        CHECK_EQ(fast.hitsound, ref.hitsound);
+        CHECK(reference.has_value());
+        if (!reference) continue;
+        CHECK_EQ(fast->next, reference->next);
+        CHECK_EQ(fast->value.x, reference->value.x);
+        CHECK_EQ(fast->value.y, reference->value.y);
+        CHECK_EQ(fast->value.time, reference->value.time);
+        CHECK_EQ(fast->value.type, reference->value.type);
+        CHECK_EQ(fast->value.hit_sound, reference->value.hit_sound);
         if (g_failures) {
             printf("  failing line: %s\n", buf);
             return;

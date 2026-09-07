@@ -87,7 +87,7 @@ struct VectorSink {
     }
     void sample(HitObject& h, const char* s, size_t n) { h.hit_sample = bm.view({s, n}); }
     auto view(const char* s, size_t n) { return bm.view({s, n}); }
-    Point* point_slot(size_t bound) {
+    Point* reserve_slider_points(size_t bound) {
         if constexpr (kDirect) {
             if (!pw || static_cast<size_t>(pend - pw) < bound) [[unlikely]] grow_points(bound);
             for (size_t i = 0; i < bound; ++i) construct_record(pw + i);
@@ -103,13 +103,13 @@ struct VectorSink {
     uint32_t point_index(Point* w) const {
         return static_cast<uint32_t>(w - bm.slider_points.data());
     }
-    void slider_rollback(Point*, Point* w_end, bool keep_points) {
-        if (keep_points) pw = w_end;
+    void reject_slider(Point*, Point* retained_end) {
+        pw = retained_end;
         if constexpr (!kDirect)
             bm.slider_points.resize(static_cast<size_t>(pw - bm.slider_points.data()));
     }
     using SliderRecord = Slider;
-    Slider& slider_slot() {
+    Slider& begin_slider() {
         if constexpr (kDirect) {
             if (sw == send) [[unlikely]] grow_sliders();
             construct_record(sw);
@@ -119,7 +119,8 @@ struct VectorSink {
         }
         return *sw;
     }
-    void slider_commit(HitObject& h, Slider&, Point* w_end, const char* hs, size_t hs_len) {
+    void commit_slider(HitObject& h, Slider&, Point* w_end,
+                       const char* hs, size_t hs_len) {
         if constexpr (!kDirect)
             bm.slider_points.resize(static_cast<size_t>(w_end - bm.slider_points.data()));
         h.hit_sample = bm.view({hs, hs_len});
@@ -135,14 +136,15 @@ template <typename Map>
 inline const char* parse_hitobjects_section(Map& bm, const char* p, const char* file_end,
                                             bool use_simd) {
     VectorSink<Map> sink(bm, static_cast<size_t>(file_end - p));
-    const HitConsts k;
+    const HitObjectParseConstants constants;
 #if FOSU_SIMD
-    if (use_simd) p = parse_hitobject_lines(sink, p, file_end, k);
+    if (use_simd)
+        p = parse_hitobject_lines(sink, p, file_end, constants);
     else
 #else
     (void)use_simd;
 #endif
-        p = parse_hitobject_lines_scalar(sink, p, file_end, k);
+        p = parse_hitobject_lines_scalar(sink, p, file_end, constants);
     sink.publish();
     return p;
 }

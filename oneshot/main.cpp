@@ -19,7 +19,7 @@
 #define FASTFLOAT_ASSERT(x) ((void)0)
 #define FASTFLOAT_DEBUG_ASSERT(x) ((void)0)
 #include <fosu/internal/prefix.hpp>
-#include <fosu/internal/object_tail.hpp>
+#include <fosu/internal/hitobject_details.hpp>
 #include <fosu/internal/timing.hpp>
 #include <fosu/internal/slider.hpp>
 #include <fosu/internal/metadata.hpp>
@@ -405,17 +405,16 @@ struct StreamHits {
         memcpy(g_out, s, n);
         g_out += n;
     }
-    Pt* point_slot(size_t) {
+    Pt* reserve_slider_points(size_t) {
         // begin() ensured 4 bytes per line byte plus slack: room for every point.
         return reinterpret_cast<Pt*>(g_out + 8);
     }
     u32 point_index(Pt*) const { return S.n_points; }
     sv view(const char* s, size_t n) const { return {s, n}; }
-    void slider_rollback(Pt* w0, Pt* w_end, bool keep_points) {
-        if (!keep_points) return;
-        const auto n = static_cast<u32>(w_end - w0);
+    void reject_slider(Pt* first, Pt* retained_end) {
+        const auto n = static_cast<u32>(retained_end - first);
         S.n_points += n;
-        keep_orphans(w0, n);
+        keep_orphans(first, n);
     }
     struct SliderRecord {
         u32 point_begin, point_count;
@@ -425,8 +424,9 @@ struct StreamHits {
         sv edge_sounds, edge_sets;
     };
     SliderRecord record;
-    SliderRecord& slider_slot() { return record; }
-    void slider_commit(HO& h, SliderRecord& s, Pt* w_end, const char* hs, size_t hs_len) {
+    SliderRecord& begin_slider() { return record; }
+    void commit_slider(HO& h, SliderRecord& s, Pt* w_end,
+                       const char* hs, size_t hs_len) {
         memcpy(g_out, &s.point_begin, 4);
         memcpy(g_out + 4, &s.point_count, 4);
         S.n_points += s.point_count;
@@ -443,8 +443,9 @@ struct StreamHits {
 };
 const char* parse_hitobjects_section(const char* p, const char* file_end) {
     StreamHits sink;
-    const fosu::internal::HitConsts k;
-    return fosu::internal::parse_hitobject_lines(sink, p, file_end, k);
+    const fosu::internal::HitObjectParseConstants constants;
+    return fosu::internal::parse_hitobject_lines(
+        sink, p, file_end, constants);
 }
 
 const char* parse_events_section(const char* p, const char* file_end) {
