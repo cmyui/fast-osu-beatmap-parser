@@ -2,7 +2,7 @@
 #include "text.hpp"
 #include "metadata.hpp"
 
-namespace fosu::detail {
+namespace fosu::internal {
 
 template <typename Map>
 inline void parse_general_line(Map& bm, const char* p, size_t len) {
@@ -42,4 +42,4 @@ inline void parse_colour_kv(Map& bm, std::string_view k, std::string_view v) {
     bm.combo_colours.push_back(rgb);
 }
 
-}  // namespace fosu::detail
+}  // namespace fosu::internal

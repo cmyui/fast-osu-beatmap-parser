@@ -1,7 +1,7 @@
 #pragma once
 #include "prefix.hpp"
 
-namespace fosu::detail {
+namespace fosu::internal {
 #if FOSU_SIMD_X86
 // Newline search past the first window, 32 bytes per step. Bytes beyond
 // `end` are zero padding, so a hit is always inside the input. Returns `end`
@@ -16,4 +16,4 @@ inline const char* find_newline32(const char* p, const char* end, __m256i nl) {
     return end;
 }
 #endif
-}  // namespace fosu::detail
+}  // namespace fosu::internal

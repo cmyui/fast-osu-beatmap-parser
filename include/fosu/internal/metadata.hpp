@@ -4,7 +4,7 @@
 #include "beatmap_header.hpp"
 #include "scalar_parse.hpp"
 
-namespace fosu::detail {
+namespace fosu::internal {
 
 inline constexpr uint32_t key4(char a, char b, char c, char d) {
     return static_cast<uint32_t>(static_cast<uint8_t>(a)) |
@@ -178,4 +178,4 @@ inline bool parse_kv_line(BeatmapHeader& bm, const KvEntry (&table)[N],
     return false;
 }
 
-}  // namespace fosu::detail
+}  // namespace fosu::internal

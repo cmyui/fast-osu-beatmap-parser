@@ -1,36 +1,81 @@
 #include "support/test.hpp"
-#include "support/maps.hpp"
 #include "support/equality.hpp"
 
-void test_parse_into_reuse() {
-    printf("parse_into reuse\n");
-    fosu::FileBuffer full = fosu::make_padded(kFullMap);
-    fosu::FileBuffer small = fosu::make_padded(kSmallMap);
-    fosu::FileBuffer empty = fosu::make_padded("osu file format v14\r\n");
-
+static void test_reuse_shrinks_without_reallocating() {
+    auto initial = fosu::make_padded(
+        "[HitObjects]\n16,32,100,1,0\n32,64,200,1,0\n48,96,300,1,0\n");
+    auto replacement = fosu::make_padded("[HitObjects]\n80,160,400,1,2\n");
     fosu::Beatmap bm;
-    fosu::parse_into(full, bm);
-    CHECK_EQ(canonical(bm), canonical(fosu::parse(full)));
-    const size_t cap_objs = bm.hit_objects.capacity();
+    fosu::parse_into(initial, bm);
+    const auto* allocation = bm.hit_objects.data();
+    const size_t capacity = bm.hit_objects.capacity();
+    fosu::parse_into(replacement, bm);
+    CHECK_EQ(bm.hit_objects.size(), 1u);
+    CHECK(bm.hit_objects.data() == allocation);
+    CHECK_EQ(bm.hit_objects.capacity(), capacity);
+    CHECK_EQ(canonical(bm), canonical(fosu::parse(replacement)));
+}
 
-    // Shrinking reuse: stale fullmap state must not leak into the result.
-    fosu::parse_into(small, bm);
-    CHECK_EQ(canonical(bm), canonical(fosu::parse(small)));
-    CHECK(bm.hit_objects.capacity() >= cap_objs);  // capacity kept
-    CHECK(bm.title == "Second");
-    CHECK(bm.background.empty());
-    CHECK_EQ(bm.combo_colours.size(), 0u);
+static void test_reuse_grows_past_existing_capacity() {
+    auto initial = fosu::make_padded("[HitObjects]\n24,48,500,1,0\n");
+    fosu::Beatmap bm;
+    fosu::parse_into(initial, bm);
+    const size_t old_capacity = bm.hit_objects.capacity();
+    std::string text = "[HitObjects]\n";
+    for (size_t i = 0; i <= old_capacity; ++i)
+        text += "72,144,600,1,4\n";
+    auto replacement = fosu::make_padded(text);
+    fosu::parse_into(replacement, bm);
+    CHECK_EQ(bm.hit_objects.size(), old_capacity + 1);
+    CHECK(bm.hit_objects.capacity() > old_capacity);
+    CHECK_EQ(canonical(bm), canonical(fosu::parse(replacement)));
+}
 
-    // Growing reuse.
-    fosu::parse_into(full, bm);
-    CHECK_EQ(canonical(bm), canonical(fosu::parse(full)));
+static void test_reuse_clears_omitted_sections() {
+    auto initial = fosu::make_padded(
+        "[General]\nAudioFilename:previous.mp3\nSampleSet:Soft\n"
+        "[Editor]\nGridSize:16\n"
+        "[Metadata]\nTitle:Previous title\nBeatmapID:123\n"
+        "[Difficulty]\nOverallDifficulty:9\nApproachRate:10\n"
+        "[Events]\n0,0,\"previous.jpg\",0,0\n2,50,100\n"
+        "[TimingPoints]\n0,500\n"
+        "[Colours]\nCombo1:0,128,255\n"
+        "[HitObjects]\n64,96,700,2,0,B|128:192|192:96,1,200\n");
+    auto replacement = fosu::make_padded("[Metadata]\nTitle:Replacement title\n");
+    fosu::Beatmap bm;
+    fosu::parse_into(initial, bm);
+    CHECK(!bm.sliders.empty() && !bm.timing_points.empty());
+    fosu::parse_into(replacement, bm);
+    CHECK(bm.title == "Replacement title");
+    CHECK_EQ(bm.beatmap_id, -1);
+    CHECK(bm.audio_filename.empty() && bm.background.empty());
+    CHECK(bm.sample_set == "Normal");
+    CHECK_EQ(bm.grid_size, 4);
+    CHECK_EQ(bm.od, 5);
+    CHECK_EQ(bm.ar, 5);
+    CHECK(bm.breaks.empty() && bm.combo_colours.empty());
+    CHECK(bm.timing_points.empty() && bm.hit_objects.empty());
+    CHECK(bm.sliders.empty() && bm.slider_points.empty());
+    CHECK_EQ(canonical(bm), canonical(fosu::parse(replacement)));
+}
 
-    // Near-empty file: everything back at defaults.
+static void test_reuse_resets_empty_document() {
+    auto initial = fosu::make_padded(
+        "[General]\nStackLeniency:0.2\nSampleSet:Drum\n"
+        "[Metadata]\nTitle:Before empty input\n"
+        "[HitObjects]\ninvalid\n96,192,800,1,0\n");
+    auto empty = fosu::make_padded("");
+    fosu::Beatmap bm;
+    fosu::parse_into(initial, bm);
+    CHECK_EQ(bm.stats.malformed_lines, 1u);
     fosu::parse_into(empty, bm);
-    CHECK_EQ(canonical(bm), canonical(fosu::parse(empty)));
-    CHECK_EQ(bm.hit_objects.size(), 0u);
+    CHECK(bm.title.empty() && bm.hit_objects.empty());
+    CHECK_EQ(bm.stats.malformed_lines, 0u);
+    CHECK_EQ(bm.stats.fast_path_lines, 0u);
+    CHECK_EQ(bm.stats.slow_path_lines, 0u);
     CHECK(std::abs(bm.stack_leniency - 0.7) < 1e-12);
     CHECK(bm.sample_set == "Normal");
+    CHECK_EQ(canonical(bm), canonical(fosu::parse(empty)));
 }
 
 void test_read_into_reuse() {
@@ -82,12 +127,12 @@ inline bool vector_layout_ok(const std::vector<T>& v) {
 // debug standard libraries may give vector a different representation.
 template <typename T>
 static void test_vector_layout() {
-    if constexpr (fosu::detail::kDirectVectorWrites) {
+    if constexpr (fosu::internal::kDirectVectorWrites) {
         std::vector<T> records;
         records.reserve(9);
         records.resize(3);
         CHECK(vector_layout_ok(records));
-        fosu::detail::set_vector_size(records, 2);
+        fosu::internal::set_vector_size(records, 2);
         CHECK_EQ(records.size(), (size_t)2);
         CHECK_EQ(records.capacity(), (size_t)9);
     }
@@ -186,7 +231,10 @@ static void test_fractional_reuse() {
 int main() {
     test_vector_storage<fosu::Beatmap>();
     test_vector_storage<fosu::OffsetBeatmap>();
-    test_parse_into_reuse();
+    test_reuse_shrinks_without_reallocating();
+    test_reuse_grows_past_existing_capacity();
+    test_reuse_clears_omitted_sections();
+    test_reuse_resets_empty_document();
     test_read_into_reuse();
     test_fractional_reuse();
     return test_result();

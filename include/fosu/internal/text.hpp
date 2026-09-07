@@ -1,7 +1,7 @@
 #pragma once
 #include "scalar_parse.hpp"
 
-namespace fosu::detail {
+namespace fosu::internal {
 
 inline std::string_view trim(const char* p, const char* end) {
     while (p < end && (*p == ' ' || *p == '\t')) ++p;
@@ -18,4 +18,4 @@ inline bool split_kv(const char* p, size_t len, std::string_view& key,
     return !key.empty();
 }
 
-}  // namespace fosu::detail
+}  // namespace fosu::internal

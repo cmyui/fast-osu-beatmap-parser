@@ -2,7 +2,7 @@
 #include <string_view>
 #include "prefix.hpp"
 
-namespace fosu::detail {
+namespace fosu::internal {
 
 // Four ASCII digits in the low byte of four 16-bit lanes. The empty high
 // bytes keep these additions independent; bit 8 tests both bounds per lane.
@@ -111,4 +111,4 @@ inline bool parse_object_tail(H& h, const char* p, const char* end,
     return valid_sample(sample);
 }
 
-} // namespace fosu::detail
+} // namespace fosu::internal

@@ -73,7 +73,7 @@ MODULE_LINK_FLAGS =
 endif
 LIB = $(BUILD_DIR)/libfosu.$(LIB_EXT)
 LINK_FOSU = -L$(BUILD_DIR) -lfosu -Wl,-rpath,$(abspath $(BUILD_DIR))
-HEADERS := $(wildcard include/fosu/*.hpp include/fosu/*.h include/fosu/detail/*.hpp include/fosu/detail/*.h)
+HEADERS := $(wildcard include/fosu/*.hpp include/fosu/*.h include/fosu/internal/*.hpp include/fosu/internal/*.h)
 TEST_HEADERS := $(wildcard tests/support/*.hpp)
 ONESHOT_CXX ?= g++
 ONESHOT_FLAGS ?=

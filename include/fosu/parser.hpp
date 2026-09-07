@@ -1,11 +1,11 @@
 #pragma once
 #include "beatmap.hpp"
 #include "io.hpp"
-#include "detail/document_sections.hpp"
-#include "detail/events.hpp"
-#include "detail/timing_section.hpp"
-#include "detail/vector_sink.hpp"
-#include "detail/section_names.hpp"
+#include "internal/document_sections.hpp"
+#include "internal/events.hpp"
+#include "internal/timing_section.hpp"
+#include "internal/vector_sink.hpp"
+#include "internal/section_names.hpp"
 
 namespace fosu {
 
@@ -33,7 +33,7 @@ struct ParseOptions {
     uint32_t sections = kAllSections;  // bitmask of kSection*
 };
 
-namespace detail {
+namespace internal {
 
 static_assert(offsetof(HitObject, x) == 0 && offsetof(HitObject, y) == 4 &&
                   offsetof(HitObject, type) == 8 &&
@@ -47,7 +47,7 @@ static_assert(kSectionGeneral == 1u << static_cast<int>(Section::General) &&
                       1u << static_cast<int>(Section::HitObjects),
               "public section bits mirror the internal Section ordinals");
 
-}  // namespace detail
+}  // namespace internal
 
 // `data` must be followed by kBufferPadding readable zero bytes (io.hpp).
 // String fields of the result view into `data`; keep the buffer alive.
@@ -56,7 +56,7 @@ static_assert(kSectionGeneral == 1u << static_cast<int>(Section::General) &&
 template <typename Map>
 inline void parse_into(const char* data, size_t size, Map& bm,
                        [[maybe_unused]] ParseOptions opts = {}) {
-    using namespace detail;
+    using namespace internal;
     if (size > kMaxInputSize) throw std::length_error("beatmap input exceeds 64 MiB");
     reset_for_reuse(bm);
     bm.set_input(data);
@@ -137,7 +137,7 @@ inline void parse_into(const char* data, size_t size, Map& bm,
 #endif
             goto next_line;
         }
-        if (fosu::detail::ignored_line(p, line_end)) goto next_line;
+        if (fosu::internal::ignored_line(p, line_end)) goto next_line;
 
         switch (sec) {
             case Section::None: {

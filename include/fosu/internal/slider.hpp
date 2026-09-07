@@ -5,7 +5,7 @@
 
 #include "prefix.hpp"
 
-namespace fosu::detail {
+namespace fosu::internal {
 
 // Slider control point coordinate: overwhelmingly 1-4 plain digits, parsed
 // branchlessly via SWAR. Signs, 5+ digit values, and empty fields take the
@@ -195,4 +195,4 @@ inline bool parse_slider_points(const char*& p, const char* end, Point*& w,
     return true;
 }
 
-}  // namespace fosu::detail
+}  // namespace fosu::internal

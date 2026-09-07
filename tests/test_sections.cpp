@@ -1,9 +1,75 @@
 #include "support/test.hpp"
-#include "support/maps.hpp"
+#include "support/equality.hpp"
 
-static void test_full_map() {
+static void test_all_sections() {
+    const char* input =
+        "\xEF\xBB\xBFosu file format v14\r\n"
+        "\r\n"
+        "[General]\r\n"
+        "AudioFilename: audio.mp3\r\n"
+        "AudioLeadIn: 0\r\n"
+        "PreviewTime: 53342\r\n"
+        "Countdown: 0\r\n"
+        "SampleSet: Soft\r\n"
+        "StackLeniency: 0.7\r\n"
+        "Mode: 0\r\n"
+        "LetterboxInBreaks: 0\r\n"
+        "WidescreenStoryboard: 1\r\n"
+        "\r\n"
+        "[Editor]\r\n"
+        "Bookmarks: 11240,22540\r\n"
+        "DistanceSpacing: 1.1\r\n"
+        "BeatDivisor: 4\r\n"
+        "GridSize: 32\r\n"
+        "TimelineZoom: 2.4\r\n"
+        "\r\n"
+        "[Metadata]\r\n"
+        "Title:Painters of the Tempest\r\n"
+        "TitleUnicode:Painters of the Tempest\r\n"
+        "Artist:Ne Obliviscaris\r\n"
+        "ArtistUnicode:Ne Obliviscaris\r\n"
+        "Creator:cmyui\r\n"
+        "Version:Extreme\r\n"
+        "Source:\r\n"
+        "Tags:prog metal akatsuki\r\n"
+        "BeatmapID:1193177\r\n"
+        "BeatmapSetID:562454\r\n"
+        "\r\n"
+        "[Difficulty]\r\n"
+        "HPDrainRate:5.5\r\n"
+        "CircleSize:4\r\n"
+        "OverallDifficulty:9\r\n"
+        "ApproachRate:9.3\r\n"
+        "SliderMultiplier:1.8\r\n"
+        "SliderTickRate:1\r\n"
+        "\r\n"
+        "[Events]\r\n"
+        "//Background and Video events\r\n"
+        "0,0,\"bg.jpg\",0,0\r\n"
+        "Video,-320,\"intro.mp4\"\r\n"
+        "//Break Periods\r\n"
+        "2,133342,140010\r\n"
+        "//Storyboard Layer 0 (Background)\r\n"
+        "Sprite,Background,Centre,\"sb/flash.png\",320,240\r\n"
+        " F,0,133342,,1,0\r\n"
+        "\r\n"
+        "[TimingPoints]\r\n"
+        "1240,342.857142857143,4,2,1,60,1,0\r\n"
+        "11240,-83.3333333333333,4,2,1,60,0,1\r\n"
+        "\r\n"
+        "[Colours]\r\n"
+        "Combo1 : 255,128,0\r\n"
+        "Combo2 : 0,64,255\r\n"
+        "\r\n"
+        "[HitObjects]\r\n"
+        "256,192,11240,1,0,0:0:0:0:\r\n"
+        "100,100,11583,5,12,0:0:0:0:\r\n"
+        "52,84,11926,2,0,B|172:44|292:84,1,240,2|0,0:0|0:0,0:0:0:0:\r\n"
+        "256,192,13297,12,4,15354,0:0:0:0:\r\n"
+        "448,320,15697,6,2,P|384:236|306:222,2,180.599999999999\r\n"
+        "77,406,17068,1,2\r\n";
     for (bool simd : {true, false}) {
-        auto bm = parse_str(kFullMap, simd);
+        auto bm = parse_str(input, simd);
         CHECK_EQ(bm.format_version, 14);
         CHECK(bm.audio_filename == "audio.mp3");
         CHECK_EQ(bm.preview_time, 53342);
@@ -184,67 +250,121 @@ static void test_malformed() {
     CHECK_EQ(bm.stats.malformed_lines, 5u);
 }
 
-void test_selective_parsing() {
-    printf("selective parsing\n");
-    fosu::FileBuffer full = fosu::make_padded(kFullMap);
-    const fosu::Beatmap ref = fosu::parse(full);
+static void test_omitted_sections_use_defaults() {
+    for (bool simd : {false, true}) {
+        auto bm = parse_str("[Metadata]\nTitle:Only metadata\n", simd);
+        CHECK(bm.title == "Only metadata");
+        CHECK(bm.audio_filename.empty());
+        CHECK(bm.sample_set == "Normal");
+        CHECK_EQ(bm.preview_time, -1);
+        CHECK_EQ(bm.grid_size, 4);
+        CHECK_EQ(bm.hp, 5);
+        CHECK_EQ(bm.cs, 5);
+        CHECK_EQ(bm.od, 5);
+        CHECK_EQ(bm.ar, 5);
+        CHECK(bm.background.empty() && bm.video.empty());
+        CHECK(bm.timing_points.empty() && bm.breaks.empty());
+        CHECK(bm.combo_colours.empty() && bm.hit_objects.empty());
+        CHECK(bm.sliders.empty() && bm.slider_points.empty());
+        CHECK_EQ(bm.stats.malformed_lines, 0u);
+    }
+}
 
-    for (int simd = 0; simd <= 1; ++simd) {
-        // Difficulty only: correct values there, defaults elsewhere.
-        fosu::Beatmap d = fosu::parse(
-            full, {.use_simd = simd != 0,
-                   .sections = fosu::kSectionDifficulty});
-        CHECK(std::abs(d.od - ref.od) < 1e-12);
-        CHECK(std::abs(d.ar - ref.ar) < 1e-12);
-        CHECK(std::abs(d.hp - ref.hp) < 1e-12);
-        CHECK(std::abs(d.cs - ref.cs) < 1e-12);
-        CHECK(d.title.empty());
-        CHECK_EQ(d.hit_objects.size(), 0u);
-        CHECK_EQ(d.timing_points.size(), 0u);
-        CHECK_EQ(d.combo_colours.size(), 0u);
+static void test_difficulty_selection_skips_other_sections() {
+    auto input = fosu::make_padded(
+        "[Metadata]\nTitle:Unrequested\n"
+        "[Difficulty]\nHPDrainRate:3\nCircleSize:4\nOverallDifficulty:7\nApproachRate:8\n"
+        "[TimingPoints]\n0,500\n"
+        "[Colours]\nCombo1:255,0,0\n"
+        "[HitObjects]\n64,96,1000,1,0\n");
+    for (bool simd : {false, true}) {
+        auto bm = fosu::parse(input, {.use_simd = simd, .sections = fosu::kSectionDifficulty});
+        CHECK_EQ(bm.hp, 3);
+        CHECK_EQ(bm.cs, 4);
+        CHECK_EQ(bm.od, 7);
+        CHECK_EQ(bm.ar, 8);
+        CHECK(bm.title.empty());
+        CHECK(bm.timing_points.empty() && bm.combo_colours.empty());
+        CHECK(bm.hit_objects.empty());
+    }
+}
 
-        // Metadata + Difficulty.
-        fosu::Beatmap md = fosu::parse(
-            full, {.use_simd = simd != 0,
-                   .sections =
-                       fosu::kSectionMetadata | fosu::kSectionDifficulty});
-        CHECK(md.title == ref.title);
-        CHECK_EQ(md.beatmap_id, ref.beatmap_id);
-        CHECK(std::abs(md.od - ref.od) < 1e-12);
-        CHECK_EQ(md.hit_objects.size(), 0u);
+static void test_metadata_and_difficulty_selection() {
+    auto input = fosu::make_padded(
+        "[General]\nAudioFilename:unrequested.mp3\n"
+        "[Metadata]\nTitle:Selected metadata\nBeatmapID:42\n"
+        "[Difficulty]\nOverallDifficulty:6\n"
+        "[HitObjects]\n128,192,2000,1,0\n");
+    for (bool simd : {false, true}) {
+        auto bm = fosu::parse(input, {.use_simd = simd,
+            .sections = fosu::kSectionMetadata | fosu::kSectionDifficulty});
+        CHECK(bm.title == "Selected metadata");
+        CHECK_EQ(bm.beatmap_id, 42);
+        CHECK_EQ(bm.od, 6);
+        CHECK_EQ(bm.ar, 6);
+        CHECK(bm.audio_filename.empty());
+        CHECK(bm.hit_objects.empty());
+    }
+}
 
-        // HitObjects only: everything before it skipped, objects intact.
-        fosu::Beatmap ho = fosu::parse(
-            full, {.use_simd = simd != 0,
-                   .sections = fosu::kSectionHitObjects});
-        CHECK_EQ(ho.hit_objects.size(), ref.hit_objects.size());
-        for (size_t i = 0; i < ho.hit_objects.size(); ++i) {
-            CHECK_EQ(ho.hit_objects[i].x, ref.hit_objects[i].x);
-            CHECK_EQ(ho.hit_objects[i].time, ref.hit_objects[i].time);
-            CHECK_EQ(ho.hit_objects[i].type, ref.hit_objects[i].type);
-        }
-        CHECK(ho.title.empty());
-        CHECK_EQ(ho.timing_points.size(), 0u);
+static void test_hitobject_selection_skips_preceding_sections() {
+    auto input = fosu::make_padded(
+        "[Metadata]\nTitle:Skipped metadata\n"
+        "[TimingPoints]\n100,400\n"
+        "[HitObjects]\n32,48,3000,1,2\n256,192,4000,8,0,5000\n");
+    for (bool simd : {false, true}) {
+        auto bm = fosu::parse(input, {.use_simd = simd, .sections = fosu::kSectionHitObjects});
+        CHECK(bm.title.empty() && bm.timing_points.empty());
+        CHECK_EQ(bm.hit_objects.size(), 2u);
+        CHECK_EQ(bm.hit_objects[0].x, 32);
+        CHECK_EQ(bm.hit_objects[0].time, 3000);
+        CHECK_EQ(bm.hit_objects[0].hitsound, 2u);
+        CHECK(bm.hit_objects[1].is_spinner());
+        CHECK_EQ(bm.hit_objects[1].end_time, 5000);
+    }
+}
 
-        // Full mask == default behaviour.
-        fosu::Beatmap all = fosu::parse(
-            full, {.use_simd = simd != 0, .sections = fosu::kAllSections});
-        CHECK_EQ(all.hit_objects.size(), ref.hit_objects.size());
-        CHECK(all.title == ref.title);
-        if (g_failures) {
-            printf("  simd=%d\n", simd);
-            return;
-        }
+static void test_selected_missing_section_uses_defaults() {
+    auto input = fosu::make_padded(
+        "[Metadata]\nTitle:No difficulty section\n"
+        "[HitObjects]\n96,64,6000,1,0\n");
+    for (bool simd : {false, true}) {
+        auto bm = fosu::parse(input, {.use_simd = simd, .sections = fosu::kSectionDifficulty});
+        CHECK_EQ(bm.hp, 5);
+        CHECK_EQ(bm.cs, 5);
+        CHECK_EQ(bm.od, 5);
+        CHECK_EQ(bm.ar, 5);
+        CHECK(bm.title.empty() && bm.hit_objects.empty());
+        CHECK_EQ(bm.stats.malformed_lines, 0u);
+    }
+}
+
+static void test_all_section_mask_matches_default() {
+    auto input = fosu::make_padded(
+        "[General]\nMode:3\n"
+        "[Metadata]\nTitle:Explicit all sections\n"
+        "[Events]\n2,100.25,200.75\n"
+        "[TimingPoints]\n300,250\n"
+        "[HitObjects]\n320,192,7000,128,0,7500:0:0:0:0:\n");
+    for (bool simd : {false, true}) {
+        auto explicit_mask = fosu::parse(input, {.use_simd = simd, .sections = fosu::kAllSections});
+        auto default_mask = fosu::parse(input, {.use_simd = simd});
+        CHECK_EQ(canonical(explicit_mask), canonical(default_mask));
     }
 }
 
 int main() {
-    test_full_map();
+    test_all_sections();
     test_old_format();
     test_mania_hold();
     test_aspire_edge_cases();
     test_malformed();
     test_long_timing_offsets();
-    test_selective_parsing();
+    test_omitted_sections_use_defaults();
+    test_difficulty_selection_skips_other_sections();
+    test_metadata_and_difficulty_selection();
+    test_hitobject_selection_skips_preceding_sections();
+    test_selected_missing_section_uses_defaults();
+    test_all_section_mask_matches_default();
     return test_result();
 }

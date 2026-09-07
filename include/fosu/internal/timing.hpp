@@ -3,7 +3,7 @@
 #include <bit>
 #include "prefix.hpp"
 
-namespace fosu::detail {
+namespace fosu::internal {
 
 // Shared bounded fallback. Optional legacy fields may be absent, but a
 // present field must parse completely; NaN is meaningful only when inherited.
@@ -347,4 +347,4 @@ inline void tp_shape_convert(const TpShapeRow& r, const char* p,
 
 #endif
 
-}  // namespace fosu::detail
+}  // namespace fosu::internal

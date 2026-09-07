@@ -24,7 +24,7 @@
 #include "prefix.hpp"
 #include "slider.hpp"
 
-namespace fosu::detail {
+namespace fosu::internal {
 
 // Slider params after "type,hitSound,":
 //   curveType|x:y|x:y...,slides,length[,edgeSounds,edgeSets][,hitSample]
@@ -292,4 +292,4 @@ inline const char* parse_hitobject_lines(Sink& sink, const char* p, const char* 
 }
 #endif
 
-}  // namespace fosu::detail
+}  // namespace fosu::internal

@@ -2,7 +2,7 @@
 #include "text.hpp"
 #include "prefix.hpp"
 
-namespace fosu::detail {
+namespace fosu::internal {
 
 inline std::string_view strip_quotes(std::string_view v) {
     if (v.size() >= 2 && v.front() == '"' && v.back() == '"')
@@ -42,9 +42,9 @@ inline void parse_event_line(Map& bm, const char* p, size_t len) {
         bm.video = strip_quotes(trim(fname, fend));
     } else if (f0 == "2" || f0 == "Break") {
         double start, stop;
-        const char* q = fosu::detail::parse_osu_double(rest, end, start);
+        const char* q = fosu::internal::parse_osu_double(rest, end, start);
         if (q == rest || q >= end || *q != ',') { ++bm.stats.malformed_lines; return; }
-        const char* r = fosu::detail::parse_osu_double(q + 1, end, stop);
+        const char* r = fosu::internal::parse_osu_double(q + 1, end, stop);
         if (r == q + 1 || r != end) { ++bm.stats.malformed_lines; return; }
         bm.breaks.push_back({start, stop});
     } else {
@@ -97,7 +97,7 @@ inline const char* parse_events_section(Map& bm, const char* p,
         if (line_end[-1] == '\r') --line_end;  // line_end > line: c is not CR
         p = next_line;
 
-        if (fosu::detail::ignored_line(line, line_end)) continue;
+        if (fosu::internal::ignored_line(line, line_end)) continue;
         if (c == ' ' || c == '_') {  // indented storyboard command
             ++storyboard_lines;
             continue;
@@ -111,4 +111,4 @@ inline const char* parse_events_section(Map& bm, const char* p,
 }
 #endif  // FOSU_SIMD_X86
 
-}  // namespace fosu::detail
+}  // namespace fosu::internal

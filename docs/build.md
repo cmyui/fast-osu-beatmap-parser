@@ -4,6 +4,10 @@ The header-only C++ interface needs no build step: add `include` to your include
 path and compile as C++20. The Makefile builds the C ABI and development tools.
 The Python package uses its own setuptools/CFFI build (see [Python](python.md)).
 
+Public headers live directly under `include/fosu/`. The `internal/` directory
+contains their numeric conversion, section parsing, SIMD, and storage
+implementation; the public headers include these automatically.
+
 ```sh
 make                     # C ABI shared library only
 make -j4 test            # native parser, C ABI, ownership and failure checks
@@ -86,14 +90,18 @@ ISA overrides. The syscall runtime is intentionally specific to this target.
 
 - `test_build.py`: compiler-flag changes, partial builds and idle reuse.
 - `test_numeric.cpp`: bounded conversion, prefix and timing-shape equivalence.
-- `test_sections.cpp`: metadata, sections, object kinds and selection.
-- `test_storage.cpp`: growth, lifetime, full-result reuse and both record layouts.
+- `test_sections.cpp`: metadata, object kinds, omitted-section defaults and section selection.
+- `test_storage.cpp`: growth, lifetime, shrinking/growing result reuse, stale-state reset and both record layouts.
 - `test_hardening.cpp` and `fuzz_parser.cpp`: malformed input and scalar/SIMD parity.
 - C ABI tests: all field values, independent/concurrent handles, failures,
   recycling, unload, and late host exit callbacks.
 - Python tests: installed API, ownership, errors, array views and generated types.
 - `test_oneshot*.py`: complete stream equality, I/O boundaries and explicit limits.
 - `test_official.py`: acceptance against the pinned official legacy decoder.
+
+Each parser test defines its own input beside its assertions. Section omission,
+selection, and reuse are separate cases, so their expected behavior can be read
+without following shared beatmap fixtures.
 
 `tests/support/canonical_dump.hpp` independently serializes all logical fields,
 float bits, counters and pool indices. It is a test oracle for equality between

@@ -1,20 +1,25 @@
 """Compile the same C ABI into self-contained scalar and AVX2 extensions."""
-from pathlib import Path
+
 import os
 import re
 import sys
+from pathlib import Path
+
 from cffi import FFI
 
 ROOT = Path(__file__).resolve().parents[1]
 header = (ROOT / "include/fosu/c_api.h").read_text()
 header = re.sub(r"#ifdef __cplusplus\n.*?#endif", "", header, flags=re.S)
-header = "\n".join(line for line in header.splitlines()
-                   if not line.startswith("#") or line.startswith((
-                       "#define FOSU_ABI_VERSION ", "#define FOSU_NO_SLIDER ")))
+header = "\n".join(
+    line
+    for line in header.splitlines()
+    if not line.startswith("#")
+    or line.startswith(("#define FOSU_ABI_VERSION ", "#define FOSU_NO_SLIDER "))
+)
 header = header.replace("FOSU_API ", "")
 
 
-def builder(variant):
+def builder(variant: str) -> FFI:
     ffi = FFI()
     ffi.cdef(header + "\nint fosu_python_has_avx2(void);\n")
     flags = ["-std=c++20", "-O3", "-g0", "-fvisibility=hidden"]
@@ -28,17 +33,19 @@ def builder(variant):
         flags += ["-fno-plt"]
         # Many distributions install static C++ archives separately. Ordinary
         # source builds use the system runtime; release wheels bundle it.
-        if os.environ.get("FOSU_BUNDLE_RUNTIME", os.environ.get("CIBUILDWHEEL", "0")) == "1":
+        if (
+            os.environ.get("FOSU_BUNDLE_RUNTIME", os.environ.get("CIBUILDWHEEL", "0"))
+            == "1"
+        ):
             link += ["-static-libstdc++", "-static-libgcc"]
-        link += ["-Wl,--exclude-libs,ALL",
-                 f"-Wl,--version-script=python/{variant}.map"]
+        link += ["-Wl,--exclude-libs,ALL", f"-Wl,--version-script=python/{variant}.map"]
     elif sys.platform == "darwin":
         link += [f"-Wl,-exported_symbol,_PyInit__native_{variant}"]
     else:
         raise RuntimeError("fosu currently supports Linux and macOS")
     ffi.set_source(
         f"fosu._native_{variant}",
-        '''#include <fosu/c_api.h>
+        """#include <fosu/c_api.h>
 extern "C" int fosu_python_has_avx2(void) {
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
     __builtin_cpu_init();
@@ -49,7 +56,7 @@ extern "C" int fosu_python_has_avx2(void) {
     return 0;
 #endif
 }
-''',
+""",
         sources=[f"python/native_{variant}.cpp"],
         include_dirs=["include"],
         source_extension=".cpp",

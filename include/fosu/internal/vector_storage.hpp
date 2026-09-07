@@ -4,7 +4,7 @@
 #include <cstring>
 #include "../beatmap.hpp"
 
-namespace fosu::detail {
+namespace fosu::internal {
 
 // Publishes records written directly into a vector's reserved capacity.
 // libstdc++ and libc++ lay a vector out as {begin, end, capacity_end};
@@ -62,4 +62,4 @@ inline T* construct_record(T* slot) {
         return ::new (static_cast<void*>(slot)) T;
 }
 
-}  // namespace fosu::detail
+}  // namespace fosu::internal

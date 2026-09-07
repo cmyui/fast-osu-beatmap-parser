@@ -10,7 +10,7 @@
 
 #include "swar.hpp"
 
-namespace fosu::detail {
+namespace fosu::internal {
 
 inline bool is_digit(char c) {
     return static_cast<uint8_t>(c - '0') <= 9;
@@ -208,4 +208,4 @@ inline const char* parse_beat_length(const char* p, const char* end, double& out
     return parse_osu_double(p, end, out);
 }
 
-}  // namespace fosu::detail
+}  // namespace fosu::internal

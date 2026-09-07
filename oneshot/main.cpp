@@ -18,13 +18,13 @@
 #include "runtime.hpp"
 #define FASTFLOAT_ASSERT(x) ((void)0)
 #define FASTFLOAT_DEBUG_ASSERT(x) ((void)0)
-#include <fosu/detail/prefix.hpp>
-#include <fosu/detail/object_tail.hpp>
-#include <fosu/detail/timing.hpp>
-#include <fosu/detail/slider.hpp>
-#include <fosu/detail/metadata.hpp>
-#include <fosu/detail/hitobjects.hpp>
-#include <fosu/detail/section_names.hpp>
+#include <fosu/internal/prefix.hpp>
+#include <fosu/internal/object_tail.hpp>
+#include <fosu/internal/timing.hpp>
+#include <fosu/internal/slider.hpp>
+#include <fosu/internal/metadata.hpp>
+#include <fosu/internal/hitobjects.hpp>
+#include <fosu/internal/section_names.hpp>
 
 namespace {
 
@@ -69,10 +69,10 @@ inline void put_f64(double v);
 inline void put_str(sv s);
 
 // Shared bounded numeric kernels.
-using fosu::detail::parse_i64;
-using fosu::detail::clamp_i32;
+using fosu::internal::parse_i64;
+using fosu::internal::clamp_i32;
 
-using fosu::detail::parse_double;
+using fosu::internal::parse_double;
 
 // Both output representations use the library's prefix kernel. Numeric fields
 // have the library layout; the final word is the sample length.
@@ -84,8 +84,8 @@ struct __attribute__((packed)) HO {
     static constexpr u32 kNoSlider = 0xFFFFFFFF;
 };
 constexpr u32 kNoSlider = HO::kNoSlider;
-using fosu::detail::comma_mask32;
-using fosu::detail::nondigit_mask32;
+using fosu::internal::comma_mask32;
+using fosu::internal::nondigit_mask32;
 
 // ---------------------------------------------------------------- parse state (the trailer)
 struct __attribute__((packed)) TPRec {
@@ -184,13 +184,13 @@ inline bool split_kv(const char* p, size_t len, sv& key, sv& val) {
     val = trim(colon + 1, p + len);
     return key.n != 0;
 }
-using fosu::detail::kGeneral;
-using fosu::detail::kEditor;
-using fosu::detail::kMetadata;
-using fosu::detail::kDifficulty;
+using fosu::internal::kGeneral;
+using fosu::internal::kEditor;
+using fosu::internal::kMetadata;
+using fosu::internal::kDifficulty;
 template <size_t N>
-inline void parse_kv_line(const fosu::detail::KvEntry (&table)[N], const char* p, size_t len) {
-    S.ar_specified |= fosu::detail::parse_kv_line<parse_double>(S, table, p, len, &S.malformed_lines);
+inline void parse_kv_line(const fosu::internal::KvEntry (&table)[N], const char* p, size_t len) {
+    S.ar_specified |= fosu::internal::parse_kv_line<parse_double>(S, table, p, len, &S.malformed_lines);
 }
 
 inline sv strip_quotes(sv v) {
@@ -218,9 +218,9 @@ void parse_event_line(const char* p, size_t len) {
         S.video = strip_quotes(trim(fname, c3 ? c3 : end));
     } else if (sv_eq(f0, "2") || sv_eq(f0, "Break")) {
         double start, stop;
-        const char* q = fosu::detail::parse_osu_double(rest, end, start);
+        const char* q = fosu::internal::parse_osu_double(rest, end, start);
         if (q == rest || q >= end || *q != ',') { ++S.malformed_lines; return; }
-        const char* r = fosu::detail::parse_osu_double(q + 1, end, stop);
+        const char* r = fosu::internal::parse_osu_double(q + 1, end, stop);
         if (r == q + 1 || r != end) { ++S.malformed_lines; return; }
         if (g->n_breaks == kBreaksInline + (1u << 15)) rt::exit(6);
         break_at(g->n_breaks++) = {start, stop};
@@ -271,17 +271,17 @@ inline void tp_commit() { S.tp_out += sizeof(TPRec); ++S.tp_blocks[S.n_tp_blocks
 
 void parse_timing_point_line(const char* p, size_t len) {
     TPRec& tp = tp_slot();
-    if (fosu::detail::parse_timing_fields(p, p + len, tp)) tp_commit();
+    if (fosu::internal::parse_timing_fields(p, p + len, tp)) tp_commit();
     else ++S.malformed_lines;
 }
 
-using fosu::detail::TpGeom;
-using fosu::detail::TpShapeCache;
-using fosu::detail::TpShapeRow;
-using fosu::detail::tp_shape_match;
-using fosu::detail::tp_shape_insert;
-using fosu::detail::tp_shape_convert;
-using fosu::detail::fast_parse_timing_point_masked;
+using fosu::internal::TpGeom;
+using fosu::internal::TpShapeCache;
+using fosu::internal::TpShapeRow;
+using fosu::internal::tp_shape_match;
+using fosu::internal::tp_shape_insert;
+using fosu::internal::tp_shape_convert;
+using fosu::internal::fast_parse_timing_point_masked;
 
 // Allocates a timing block sized like the library's reserve (section
 // bytes / 17 + 4 entries) from the output arena; if the hitobject stream
@@ -338,7 +338,7 @@ const char* parse_timing_points_section(const char* p, const char* file_end) {
             len = static_cast<size_t>(le - p) - (le > p && le[-1] == '\r');
             next_line = m ? m + 1 : file_end;
         }
-        if (fosu::detail::ignored_line(p, p + len)) { p = next_line; continue; }
+        if (fosu::internal::ignored_line(p, p + len)) { p = next_line; continue; }
         if (len <= 64 && len >= 15) [[likely]] {
             const u64 line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
             const u64 commas = (comma_mask32(a) | static_cast<u64>(comma_mask32(b)) << 32) & line_mask;
@@ -443,8 +443,8 @@ struct StreamHits {
 };
 const char* parse_hitobjects_section(const char* p, const char* file_end) {
     StreamHits sink;
-    const fosu::detail::HitConsts k;
-    return fosu::detail::parse_hitobject_lines(sink, p, file_end, k);
+    const fosu::internal::HitConsts k;
+    return fosu::internal::parse_hitobject_lines(sink, p, file_end, k);
 }
 
 const char* parse_events_section(const char* p, const char* file_end) {
@@ -470,7 +470,7 @@ const char* parse_events_section(const char* p, const char* file_end) {
         }
         if (line_end[-1] == '\r') --line_end;
         p = next_line;
-        if (fosu::detail::ignored_line(line, line_end)) continue;
+        if (fosu::internal::ignored_line(line, line_end)) continue;
         if (c == ' ' || c == '_') { ++storyboard_lines; continue; }
         const auto len = static_cast<size_t>(line_end - line);
         if (len >= 2 && c == '/' && line[1] == '/') continue;
@@ -481,9 +481,9 @@ const char* parse_events_section(const char* p, const char* file_end) {
 }
 
 // ---------------------------------------------------------------- sections / main loop
-using fosu::detail::Section;
+using fosu::internal::Section;
 inline Section match_section(const char* p, size_t len) {
-    return fosu::detail::match_section({p, len});
+    return fosu::internal::match_section({p, len});
 }
 inline const char* find_version_tag(const char* p, size_t len) {
     static constexpr char tag[] = "osu file format v";
@@ -525,7 +525,7 @@ void parse(const char* data, size_t size) {
             }
             goto next_line;
         }
-        if (fosu::detail::ignored_line(p, line_end)) goto next_line;
+        if (fosu::internal::ignored_line(p, line_end)) goto next_line;
         switch (sec) {
             case Section::None: {
                 if (const char* vp = find_version_tag(p, len)) {

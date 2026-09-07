@@ -2,7 +2,7 @@
 #include "hitobjects.hpp"
 #include "vector_storage.hpp"
 
-namespace fosu::detail {
+namespace fosu::internal {
 
 // Storage policy for the ordinary library: records are written into the
 // Beatmap's vectors through raw cursors (direct mode) and published once per
@@ -173,4 +173,4 @@ inline void reset_for_reuse(Map& bm) {
     bm.slider_points = std::move(points);
 }
 
-}  // namespace fosu::detail
+}  // namespace fosu::internal

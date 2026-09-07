@@ -4,9 +4,9 @@
 #include <cmath>
 #include <cstdlib>
 #include <string>
-#include <fosu/detail/scalar_parse.hpp>
+#include <fosu/internal/scalar_parse.hpp>
 
-namespace fosu::detail {
+namespace fosu::internal {
 inline const char* libc_number(const char* p, const char* end, double& out, bool nan) {
     std::string bounded(p, end);
     char* next;

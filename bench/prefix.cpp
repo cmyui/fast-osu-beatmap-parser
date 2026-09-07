@@ -35,9 +35,9 @@ int main() {
             fosu::HitObject h{};
             if (simd) {
                 uint32_t mask;
-                fosu::detail::fast_parse_prefix(line.data(), h, mask);
+                fosu::internal::fast_parse_prefix(line.data(), h, mask);
             } else {
-                fosu::detail::scalar_parse_prefix(line.data(), line.size(), h);
+                fosu::internal::scalar_parse_prefix(line.data(), line.size(), h);
             }
             sink += static_cast<uint32_t>(h.time);
         }

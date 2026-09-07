@@ -1,26 +1,22 @@
 # fosu — fast osu! beatmap parsing
 
-A C++20 parsing library for legacy `.osu` beatmap files: a header-only C++
-interface, a small in-process C ABI with owned storage, and an installable
-Python package backed by CFFI. The same kernels also power a freestanding
-one-shot executable used as a process-level benchmark and demonstration.
-Correctness follows the official osu! legacy decoder's acceptance rules;
-unusual or malformed input is skipped and counted rather than trusted.
+Parse `.osu` beatmaps into named fields and records from Python, C++, or C.
+fosu combines SIMD parsing with the official osu! legacy decoder's acceptance
+rules, including unusual numeric forms and malformed records.
 
-| Interface | Result | Use |
-|---|---|---|
-| [C++ library](docs/library.md) | `Beatmap` with vectors and borrowed strings | Direct parsing in a C++ application |
-| [C API](docs/c-api.md) | Handle-owned arena: input copy and contiguous arrays | C and other FFI callers |
-| [Python package](docs/python.md) | Owned `Beatmap` with named fields and records | Python apps; optional zero-copy NumPy arrays |
-| [One-shot executable](oneshot/README.md) | Complete binary stream on stdout | Process-lifetime benchmark on Linux/Zen 4 |
+```python
+import fosu
 
-The native representations are checked on a fixed corpus of **10,000
-ranked/approved maps, 402,593,897 bytes**. Comparisons
-cover strings, raw float bits, every pool entry/index and parser counters.
-Prior releases are regression baselines; intentional correctness fixes are
-accounted for separately. See [compatibility](docs/compatibility.md) for the
-parsing contract and independent references, and
-[performance](docs/performance.md) for measured boundaries and reproduction.
+beatmap = fosu.parse_file("map.osu")
+print(beatmap.title, beatmap.ar, beatmap.hit_objects[0].time)
+```
+
+Python results own their native storage. Strings and records are exposed as
+needed, and optional NumPy views give you read-only arrays without copying.
+Install a prebuilt wheel, or run `python -m pip install .` in a source checkout.
+See the [Python guide](docs/python.md) for installation and the complete API.
+
+The C++20 interface is header-only:
 
 ```cpp
 #include <fosu/parser.hpp>
@@ -32,25 +28,33 @@ fosu::Beatmap map = fosu::parse(input);
 // Keep input alive and unchanged while using map's string views.
 ```
 
+Recorded warm parsing times on our **10,000-map corpus** are roughly **19 µs
+per map in C++** and **25 µs from Python**. These are means of per-map minima
+on a pinned Zen 4 core, starting with resident input bytes; they exclude file
+I/O and process startup. See [performance](docs/performance.md) for the exact
+measurements, host, repetition counts, and reproduction commands.
+
+| Interface | Result | Use |
+|---|---|---|
+| [C++ library](docs/library.md) | `Beatmap` with vectors and borrowed strings | Direct parsing in a C++ application |
+| [C API](docs/c-api.md) | Handle-owned arena: input copy and contiguous arrays | C and other FFI callers |
+| [Python package](docs/python.md) | Owned `Beatmap` with named fields and records | Python apps; optional zero-copy NumPy arrays |
+| [One-shot executable](oneshot/README.md) | Complete binary stream on stdout | Process-lifetime benchmark on Linux/Zen 4 |
+
+All native representations are checked on the same fixed corpus of **10,000
+ranked/approved maps, 402,593,897 bytes**. Comparisons cover strings, raw float
+bits, every pool entry/index and parser counters. Prior releases are regression
+baselines; intentional correctness fixes are accounted for separately. See
+[compatibility](docs/compatibility.md) for the parsing contract and independent
+references.
+
 ```sh
 make                       # build the C ABI library
 make -j4 test              # native correctness and storage checks
-python -m pip install .    # install the Python package from source
 ```
 
 See [builds and checks](docs/build.md) for compiler/ISA profiles, sanitizers,
 benchmarks and the optional Linux one-shot executable.
-
-```python
-import fosu
-
-beatmap = fosu.parse_file("map.osu")
-print(beatmap.title, beatmap.ar, beatmap.hit_objects[0].time)
-```
-
-Install a prebuilt wheel or run `python -m pip install .` in a source checkout.
-The [Python guide](docs/python.md) covers installation, automatic ownership,
-section selection and NumPy access.
 
 ## Implementation
 

@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <cstring>
 
-namespace fosu::detail {
+namespace fosu::internal {
 
 inline uint32_t load_u32_le(const char* p) {
     uint32_t v;
@@ -69,4 +69,4 @@ inline uint64_t swar_parse_u64(const char* p, uint32_t len) {
     return ((c & 0x0000FFFF0000FFFFull) * 42949672960001ull) >> 32;  // 1e4*2^32 + 1
 }
 
-}  // namespace fosu::detail
+}  // namespace fosu::internal

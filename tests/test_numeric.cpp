@@ -43,7 +43,7 @@ static void test_fuzz_parse_double() {
 
         double got = -1, want = -2;
         const char* gp =
-            fosu::detail::parse_double(buf, buf + payload, got);
+            fosu::internal::parse_double(buf, buf + payload, got);
         const char* wp = reference_parse_double(buf, buf + payload, want);
         CHECK_EQ(gp - buf, wp - buf);
         CHECK(got == want);
@@ -59,7 +59,7 @@ static void test_fuzz_parse_double() {
         std::string padded(c);
         padded.append(64, '\0');
         double got = 0;
-        fosu::detail::parse_double(padded.data(), padded.data() + strlen(c), got);
+        fosu::internal::parse_double(padded.data(), padded.data() + strlen(c), got);
         CHECK(got == strtod(c, nullptr));
     }
 }
@@ -81,9 +81,9 @@ static void test_fuzz_parse_coord() {
         memset(buf + len, 0, sizeof(buf) - (size_t)len);
 
         int32_t got = -777, want = -777;
-        const char* gp = fosu::detail::parse_coord(buf, buf + payload, got);
+        const char* gp = fosu::internal::parse_coord(buf, buf + payload, got);
         int64_t v;
-        const char* wp = fosu::detail::parse_i64(buf, buf + payload, v);
+        const char* wp = fosu::internal::parse_i64(buf, buf + payload, v);
         if (wp != buf && (v < -131072 || v > 131072)) wp = buf;
         if (wp != buf) want = static_cast<int32_t>(v);
         CHECK_EQ(gp - buf, wp - buf);
@@ -139,11 +139,11 @@ static void test_fuzz_timing_point() {
         const auto a = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(buf));
         const auto b =
             _mm256_loadu_si256(reinterpret_cast<const __m256i*>(buf + 32));
-        if (!fosu::detail::fast_parse_timing_point(a, b, buf, (size_t)len, tp))
+        if (!fosu::internal::fast_parse_timing_point(a, b, buf, (size_t)len, tp))
             continue;
         ++accepted;
         fosu::Beatmap ref;
-        fosu::detail::parse_timing_point_line(ref, buf, (size_t)len);
+        fosu::internal::parse_timing_point_line(ref, buf, (size_t)len);
         CHECK(!ref.timing_points.empty());
         if (!ref.timing_points.empty()) {
             const fosu::TimingPoint& w = ref.timing_points[0];
@@ -167,10 +167,10 @@ static void test_fuzz_timing_point() {
 
 // Generate a value that renders with exactly `digits` decimal digits.
 static uint64_t value_with_digits(int digits, uint64_t max) {
-    const uint64_t lo = digits == 1 ? 0 : fosu::detail::kPow10[digits - 1] < 1e19
-                            ? (uint64_t)fosu::detail::kPow10[digits - 1]
+    const uint64_t lo = digits == 1 ? 0 : fosu::internal::kPow10[digits - 1] < 1e19
+                            ? (uint64_t)fosu::internal::kPow10[digits - 1]
                             : 0;
-    uint64_t hi = (uint64_t)fosu::detail::kPow10[digits] - 1;
+    uint64_t hi = (uint64_t)fosu::internal::kPow10[digits] - 1;
     if (hi > max) hi = max;
     if (lo > hi) return hi;
     return lo + rng() % (hi - lo + 1);
@@ -205,8 +205,8 @@ static void test_fuzz_equivalence() {
 
         fosu::HitObject fast{}, ref{};
         uint32_t nl_mask;
-        const int fn = fosu::detail::fast_parse_prefix(buf, fast, nl_mask);
-        const int rn = fosu::detail::scalar_parse_prefix(buf, strlen(buf), ref);
+        const int fn = fosu::internal::fast_parse_prefix(buf, fast, nl_mask);
+        const int rn = fosu::internal::scalar_parse_prefix(buf, strlen(buf), ref);
         if (fn < 0) continue;
         ++fast_taken;
         CHECK(rn >= 0);
@@ -232,7 +232,7 @@ static void test_fuzz_equivalence() {
 // (b) convert bit-identically through tp_shape_convert.
 void test_fuzz_tp_shape_cache() {
     printf("timing shape-cache fuzz\n");
-    using namespace fosu::detail;
+    using namespace fosu::internal;
     const char* seeds[] = {
         "277,342.466666666667,4,2,1,60,1,0",
         "1234,-100,4,2,1,60,0,1",

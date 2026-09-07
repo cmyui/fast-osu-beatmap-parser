@@ -32,7 +32,7 @@ int main() {
             sample[pos] = static_cast<char>(byte);
             auto padded = fosu::make_padded(sample);
             const bool exact_shape = pos % 2 ? byte == ':' : byte >= '0' && byte <= '9';
-            assert(fosu::detail::short_sample(padded.data.get()) == exact_shape);
+            assert(fosu::internal::short_sample(padded.data.get()) == exact_shape);
             check("[HitObjects]\n1,2,3,1,0," + sample);
         }
     }
@@ -124,6 +124,6 @@ int main() {
     auto input = fosu::make_padded("1.234567890123456789e2junk");
     double value;
     const char* start = input.data.get();
-    assert(fosu::detail::parse_double(start, start + 20, value) <= start + 20);
+    assert(fosu::internal::parse_double(start, start + 20, value) <= start + 20);
     puts("Hardening: numeric boundaries, fractional times, NaN, framing and path parity passed");
 }

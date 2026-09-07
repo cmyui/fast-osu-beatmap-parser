@@ -3,7 +3,7 @@
 #include "timing.hpp"
 #include "vector_storage.hpp"
 
-namespace fosu::detail {
+namespace fosu::internal {
 
 template <typename Map>
 inline void parse_timing_point_line(Map& bm, const char* p, size_t len) {
@@ -116,4 +116,4 @@ inline const char* parse_timing_points_section(Map& bm, const char* p,
 }
 #endif  // FOSU_SIMD_X86
 
-}  // namespace fosu::detail
+}  // namespace fosu::internal

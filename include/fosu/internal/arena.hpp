@@ -18,7 +18,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace fosu::detail {
+namespace fosu::internal {
 
 struct Arena {
     char* base = nullptr;
@@ -203,4 +203,4 @@ public:
 // empty cache and may leave one final spare for the OS to release at exit.
 inline constinit SpareArena::Cleanup SpareArena::cleanup_{};
 
-}  // namespace fosu::detail
+}  // namespace fosu::internal

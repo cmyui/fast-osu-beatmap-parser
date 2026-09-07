@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <string_view>
-namespace fosu::detail {
+namespace fosu::internal {
 enum class Section : uint8_t { None, General, Editor, Metadata, Difficulty, Events, TimingPoints, Colours, HitObjects, Unknown };
 inline Section match_section(std::string_view line) {
     if (line.size() < 3) return Section::Unknown;
@@ -19,4 +19,4 @@ inline Section match_section(std::string_view line) {
     }
     return Section::Unknown;
 }
-}  // namespace fosu::detail
+}  // namespace fosu::internal

@@ -1,5 +1,5 @@
 #include <fosu/c_api.h>
-#include <fosu/detail/arena.hpp>
+#include <fosu/internal/arena.hpp>
 #include <fosu/offset_beatmap.hpp>
 #include <fosu/parser.hpp>
 
@@ -17,7 +17,7 @@
 namespace {
 // Compact C records in arena-backed arrays. The public OffsetBeatmap keeps
 // std::vector storage; this type is private to the handle.
-struct ArenaOffsetBeatmap : fosu::BasicBeatmap<fosu::OffsetRecords, fosu::detail::ArenaVector> {};
+struct ArenaOffsetBeatmap : fosu::BasicBeatmap<fosu::OffsetRecords, fosu::internal::ArenaVector> {};
 
 constexpr size_t kExtra = fosu::kBufferPadding + 6;  // "Normal" default sample set
 constexpr size_t kMaxInput = FOSU_MAX_INPUT_SIZE;
@@ -25,7 +25,7 @@ static_assert(kMaxInput == fosu::kMaxInputSize);
 }  // namespace
 
 struct fosu_handle {
-    fosu::detail::Arena* arena = nullptr;
+    fosu::internal::Arena* arena = nullptr;
     size_t input_size = 0;
     ArenaOffsetBeatmap map;
     fosu_view result{};
@@ -34,7 +34,7 @@ struct fosu_handle {
     fosu_handle() { bind(); }
     ~fosu_handle() {
         drop_arrays();
-        fosu::detail::SpareArena::give(arena);
+        fosu::internal::SpareArena::give(arena);
     }
     void bind() {
         map.breaks.set_arena(arena);
@@ -67,8 +67,8 @@ size_t arena_bytes(size_t size) {
 // Makes room for `size` input bytes, keeping `data` (which may alias the
 // old arena) readable until it has been copied. Returns false on OOM.
 bool prepare_input(fosu_handle& h, size_t size, const char* data) {
-    using fosu::detail::Arena;
-    using fosu::detail::SpareArena;
+    using fosu::internal::Arena;
+    using fosu::internal::SpareArena;
     const size_t need = arena_bytes(size);
     h.drop_arrays();
     if (!h.arena || h.arena->size < need) {

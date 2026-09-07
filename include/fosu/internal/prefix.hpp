@@ -35,7 +35,7 @@
 #define FOSU_SIMD_X86 0
 #endif
 
-namespace fosu::detail {
+namespace fosu::internal {
 
 #if !FOSU_SIMD_X86
 struct HitConsts {};  // the scalar path has no vector constants
@@ -337,4 +337,4 @@ inline int fast_parse_prefix(const char* line, H& h, uint32_t& nl_mask) {
 
 #endif  // FOSU_SIMD_X86
 
-}  // namespace fosu::detail
+}  // namespace fosu::internal

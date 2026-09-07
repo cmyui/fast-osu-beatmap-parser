@@ -43,7 +43,7 @@ Numeric conversion, prefix parsing, metadata tables/defaults and the hitobject
 framing loop are shared with the C++ library. Vector allocation, streamed
 slider rollback, event loops, timing-section loop and storage and top-level dispatch
 retain their representation-specific implementations. The
-[vendored fast_float header](../include/fosu/detail/fast_float.md) supplies
+[vendored fast_float header](../include/fosu/internal/fast_float.md) supplies
 the bounded, locale-independent fallback for every representation.
 
 ## Optional host configuration
