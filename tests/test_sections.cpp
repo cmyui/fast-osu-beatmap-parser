@@ -369,18 +369,40 @@ static void test_all_section_mask_matches_default() {
     }
 }
 
+static void test_exact_keys_and_event_aliases() {
+  const auto map = parse_str(
+      "[General]\nCountdown:Normal,HalfSpeed\nSampleSet:Soft\n"
+      "[Metadata]\nTitle:\tkept \nTitleUnicode : unicode\n"
+      "TitleExtra:ignored\n Title:ignored\nTitle\t: final: title \n"
+      "[MetadataExtra]\nTitle:ignored section\n"
+      "[Events]\n0,0,\"background.jpg\"\n"
+      "1,0,\"old.mp4\"\nVideo,0,\"new.mp4\"\n"
+      "2,10,20\nBreak,30,40\nVideoExtra,0,\"ignored.mp4\"\n");
+  CHECK_EQ(map.countdown, 3);
+  CHECK_EQ(map.sample_set, "Soft");
+  CHECK_EQ(map.title, "final: title ");
+  CHECK_EQ(map.title_unicode, "unicode");
+  CHECK_EQ(map.background, "background.jpg");
+  CHECK_EQ(map.video, "new.mp4");
+  CHECK_EQ(map.breaks.size(), 2u);
+  CHECK_EQ(map.breaks[0].start, 10);
+  CHECK_EQ(map.breaks[1].end, 40);
+  CHECK_EQ(map.stats.storyboard_lines, 1u);
+}
+
 int main() {
-    test_all_sections();
-    test_old_format();
-    test_mania_hold();
-    test_aspire_edge_cases();
-    test_malformed();
-    test_long_timing_offsets();
-    test_omitted_sections_use_defaults();
-    test_difficulty_selection_skips_other_sections();
-    test_metadata_and_difficulty_selection();
-    test_hitobject_selection_skips_preceding_sections();
-    test_selected_missing_section_uses_defaults();
-    test_all_section_mask_matches_default();
-    return test_result();
+  test_exact_keys_and_event_aliases();
+  test_all_sections();
+  test_old_format();
+  test_mania_hold();
+  test_aspire_edge_cases();
+  test_malformed();
+  test_long_timing_offsets();
+  test_omitted_sections_use_defaults();
+  test_difficulty_selection_skips_other_sections();
+  test_metadata_and_difficulty_selection();
+  test_hitobject_selection_skips_preceding_sections();
+  test_selected_missing_section_uses_defaults();
+  test_all_section_mask_matches_default();
+  return test_result();
 }

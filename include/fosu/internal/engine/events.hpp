@@ -1,7 +1,9 @@
 #pragma once
+#include <optional>
 #include "../../beatmap.hpp"
-#include "text.hpp"
+#include "../string_lookup.hpp"
 #include "prefix.hpp"
+#include "text.hpp"
 
 namespace fosu::internal {
 
@@ -10,6 +12,56 @@ inline std::string_view strip_quotes(std::string_view v) {
         return v.substr(1, v.size() - 2);
     return v;
 }
+
+inline std::optional<std::string_view> parse_event_filename(const char* rest,
+                                                            const char* end) {
+  const auto* comma = static_cast<const char*>(memchr(rest, ',', end - rest));
+  if (!comma)
+    return std::nullopt;
+  const char* filename = comma + 1;
+  const auto* next = static_cast<const char*>(memchr(filename, ',', end - filename));
+  return strip_quotes(trim(filename, next ? next : end));
+}
+
+inline void parse_background_event(Beatmap& bm,
+                                   size_t&,
+                                   const char* rest,
+                                   const char* end) {
+  if (const auto filename = parse_event_filename(rest, end))
+    bm.background = *filename;
+}
+
+inline void parse_video_event(Beatmap& bm, size_t&, const char* rest, const char* end) {
+  if (const auto filename = parse_event_filename(rest, end))
+    bm.video = *filename;
+}
+
+inline void parse_break_event(Beatmap& bm,
+                              size_t& break_count,
+                              const char* rest,
+                              const char* end) {
+  double start, stop;
+  const char* q = parse_osu_double(rest, end, start);
+  if (q == rest || q >= end || *q != ',') {
+    ++bm.stats.malformed_lines;
+    return;
+  }
+  const char* r = parse_osu_double(q + 1, end, stop);
+  if (r == q + 1 || r != end) {
+    ++bm.stats.malformed_lines;
+    return;
+  }
+  bm.breaks[break_count++] = {start, stop};
+}
+
+using EventHandler = void (*)(Beatmap&, size_t&, const char*, const char*);
+inline constexpr auto kEventHandlers = make_string_lookup<EventHandler>({
+    {"0", parse_background_event},
+    {"1", parse_video_event},
+    {"Video", parse_video_event},
+    {"2", parse_break_event},
+    {"Break", parse_break_event},
+});
 
 inline void parse_event_line(
     Beatmap& bm, size_t& break_count, const char* p, size_t len) {
@@ -26,31 +78,10 @@ inline void parse_event_line(
     }
     const std::string_view f0{p, static_cast<size_t>(c1 - p)};
     const char* rest = c1 + 1;
-    if (f0 == "0") {
-        // 0,0,"bg.jpg",xOffset,yOffset
-        const auto* c2 = static_cast<const char*>(memchr(rest, ',', end - rest));
-        if (!c2) return;
-        const char* fname = c2 + 1;
-        const auto* c3 = static_cast<const char*>(memchr(fname, ',', end - fname));
-        const char* fend = c3 ? c3 : end;
-        bm.background = strip_quotes(trim(fname, fend));
-    } else if (f0 == "1" || f0 == "Video") {
-        const auto* c2 = static_cast<const char*>(memchr(rest, ',', end - rest));
-        if (!c2) return;
-        const char* fname = c2 + 1;
-        const auto* c3 = static_cast<const char*>(memchr(fname, ',', end - fname));
-        const char* fend = c3 ? c3 : end;
-        bm.video = strip_quotes(trim(fname, fend));
-    } else if (f0 == "2" || f0 == "Break") {
-        double start, stop;
-        const char* q = fosu::internal::parse_osu_double(rest, end, start);
-        if (q == rest || q >= end || *q != ',') { ++bm.stats.malformed_lines; return; }
-        const char* r = fosu::internal::parse_osu_double(q + 1, end, stop);
-        if (r == q + 1 || r != end) { ++bm.stats.malformed_lines; return; }
-        bm.breaks[break_count++] = {start, stop};
-    } else {
-        ++bm.stats.storyboard_lines;
-    }
+    if (const auto* handler = kEventHandlers.find(f0))
+      (*handler)(bm, break_count, rest, end);
+    else
+      ++bm.stats.storyboard_lines;
 }
 
 #if FOSU_SIMD

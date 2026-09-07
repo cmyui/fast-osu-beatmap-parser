@@ -1,6 +1,7 @@
 #include "engine_loader.hpp"
-#include "cpu_features.hpp"
 #include <fosu/internal/engine/parse_document.hpp>
+#include <fosu/internal/string_lookup.hpp>
+#include "cpu_features.hpp"
 
 #include <atomic>
 #include <cstdio>
@@ -18,6 +19,11 @@ constinit std::atomic<const ParsingEngine*> selected{nullptr};
 constinit std::atomic_flag selecting = ATOMIC_FLAG_INIT;
 constinit void* library = nullptr;
 constexpr ParsingEngine unavailable{};
+constexpr auto kEngineKinds = make_string_lookup<EngineKind>({
+    {"scalar", EngineKind::Scalar},
+    {"avx2", EngineKind::Avx2},
+    {"neon", EngineKind::Neon},
+});
 
 bool engine_path(const char* name, char (&path)[PATH_MAX]) {
     Dl_info info{};
@@ -52,7 +58,6 @@ const ParsingEngine* choose() {
         request = scalar && std::strcmp(scalar, "1") == 0
                       ? "scalar" : FOSU_DEFAULT_BACKEND;
     }
-    if (std::strcmp(request, "scalar") == 0) return &scalar_engine;
     if (std::strcmp(request, "auto") == 0) {
         for (EngineKind kind : {EngineKind::Avx2, EngineKind::Neon}) {
             if (engine_available(kind))
@@ -60,13 +65,18 @@ const ParsingEngine* choose() {
         }
         return &scalar_engine;
     }
-    for (EngineKind kind : {EngineKind::Avx2, EngineKind::Neon}) {
-        if (std::strcmp(request, engine_name(kind)) == 0 && engine_available(kind))
-            return load(request);
-    }
-    return nullptr;
+    const auto* kind = find_engine_kind(request);
+    if (!kind)
+      return nullptr;
+    if (*kind == EngineKind::Scalar)
+      return &scalar_engine;
+    return engine_available(*kind) ? load(request) : nullptr;
 }
 }  // namespace
+
+const EngineKind* find_engine_kind(std::string_view name) {
+  return kEngineKinds.find(name);
+}
 
 const char* engine_name(EngineKind kind) {
     switch (kind) {

@@ -246,11 +246,8 @@ extern "C" const char* fosu_backend_name() {
 }
 extern "C" int fosu_backend_available(const char* name) {
     if (!name) return false;
-    for (auto kind : {fosu::EngineKind::Scalar, fosu::EngineKind::Avx2, fosu::EngineKind::Neon}) {
-        if (std::strcmp(name, fosu::internal::engine_name(kind)) == 0)
-            return fosu::internal::engine_available(kind);
-    }
-    return false;
+    const auto* kind = fosu::internal::find_engine_kind(name);
+    return kind && fosu::internal::engine_available(*kind);
 }
 extern "C" fosu_handle* fosu_new() {
     const auto* engine = fosu::internal::selected_engine();
