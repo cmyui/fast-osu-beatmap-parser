@@ -143,9 +143,16 @@ extern "C" int fosu_parse_file(fosu_handle* h, const char* path, uint32_t sectio
     const int fd = open(path, O_RDONLY);
     if (fd < 0) return FOSU_IO_ERROR;
     struct stat st;
-    if (fstat(fd, &st) || st.st_size < 0) { close(fd); return FOSU_IO_ERROR; }
+    const int stat_result = fstat(fd, &st);
+    if (stat_result || st.st_size < 0) {
+        const int error = stat_result ? errno : EIO;
+        close(fd);
+        errno = error;
+        return FOSU_IO_ERROR;
+    }
     if (static_cast<uint64_t>(st.st_size) > kMaxInput) { close(fd); return FOSU_INVALID_ARGUMENT; }
     int status = FOSU_OK;
+    int error = 0;
     try {
         const size_t size = static_cast<size_t>(st.st_size);
         reserve(*h, size);
@@ -153,13 +160,18 @@ extern "C" int fosu_parse_file(fosu_handle* h, const char* path, uint32_t sectio
         while (got < size) {
             const ssize_t n = read(fd, h->input.data.get() + got, size - got);
             if (n < 0 && errno == EINTR) continue;
-            if (n <= 0) { status = FOSU_IO_ERROR; break; }
+            if (n <= 0) {
+                error = n < 0 ? errno : EIO;
+                status = FOSU_IO_ERROR;
+                break;
+            }
             got += static_cast<size_t>(n);
         }
         if (status == FOSU_OK) h->input.size = got;
     } catch (const std::bad_alloc&) { status = FOSU_OUT_OF_MEMORY; }
       catch (const std::length_error&) { status = FOSU_OUT_OF_MEMORY; }
     close(fd);
+    if (status == FOSU_IO_ERROR) errno = error;
     if (status != FOSU_OK) return status;
     try { return parse_owned(*h, sections); }
     catch (const std::bad_alloc&) { return FOSU_OUT_OF_MEMORY; }

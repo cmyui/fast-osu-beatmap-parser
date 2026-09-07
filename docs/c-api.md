@@ -1,5 +1,9 @@
 # C API and Python CFFI
 
+Python applications should start with the [Python package](python.md), which
+provides `fosu.parse_file(path)` and manages ownership automatically. This page
+documents the lower-level C interface and manual CFFI example.
+
 ```sh
 make lib test-c-api CXX=g++
 ```
@@ -73,6 +77,8 @@ require a version bump and rebuilding bindings.
 - Status is `FOSU_OK`, `FOSU_INVALID_ARGUMENT`, `FOSU_IO_ERROR` or
   `FOSU_OUT_OF_MEMORY`. Input must be smaller than 4 GiB minus 134 bytes.
   This interface retains the valid-editor-input assumption of the C++ parser.
+- On `FOSU_IO_ERROR`, `fosu_parse_file` preserves the failing operation's
+  `errno`; an unexpected early EOF sets `EIO`.
 - Separate handles may be used concurrently. Serialize mutations to one
   handle and finish consuming its view before reparsing or freeing it.
 
@@ -81,7 +87,7 @@ format. Use the [one-shot stream](../oneshot/README.md) for serialized results.
 The library does not change process allocator settings, CPU affinity or host
 huge-page configuration.
 
-## Python
+## Manual CFFI example
 
 The example uses CFFI's compiled API mode, reading declarations from the actual
 C header. This lets the C compiler check sizes and field offsets. It exposes

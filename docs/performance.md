@@ -97,6 +97,68 @@ training runtime have different GCC control-flow counters from the
 freestanding runtime. They cannot be treated as valid profiles for that binary.
 PGO results above are for the hosted library, with matching training/use builds.
 
+## Python package
+
+The locally built package uses the same unprofiled C API, compiled with GCC
+13.3 for AVX2/BMI1/BMI2 and Zen 4 scheduling, with its private runtime bundled.
+On CPython 3.12, a paired run over all
+10,000 maps with five repetitions per file measured:
+
+| Python call boundary | Mean of all runs, µs | Mean of file minima, µs |
+|---|---:|---:|
+| Raw CFFI: allocate, parse bytes, get count, free | 21.97 | 20.83 |
+| `fosu.parse(bytes)` and `len(beatmap.hit_objects)` | **23.88** | 22.52 |
+| Raw CFFI: allocate, read/parse file, get count, free | 27.54 | 26.02 |
+| `fosu.parse_file(path)` and `len(beatmap.hit_objects)` | **29.61** | 27.99 |
+| `fosu.parse(bytes)` and `beatmap.hit_objects.to_numpy()` | 27.08 | 25.31 |
+
+Each timed call creates and releases a fresh result. Variants rotate within
+each file/repetition; the input and file data are resident. Imports and NumPy
+dtype construction happen before timing. The owned Python interface costs
+about 2 µs over direct CFFI in this run. Accessing every field as Python objects
+adds conversion and iteration work; these timings do not include that traversal.
+The package adds convenience and ownership to the current parser, with no new
+parser-kernel speedup over the C++ measurements above.
+
+A separate run of the distributable manylinux wheel (built with GCC 14.2.1)
+measured 24.41 µs from bytes and 30.26 µs from a file, against 22.45/28.08 µs
+through raw CFFI in that same run. These are means of all runs at the same
+boundary; both builds place the Python ownership overhead near 2 µs. The
+10,000-file exact comparison also covers the distributable Linux wheel.
+
+For cold Python use, a separate 100-file subset with three fresh interpreters
+per file compared otherwise identical Linux wheels. The private bundled C++
+runtime took 5.13 ms to import `fosu`, versus 6.00 ms with the system runtime;
+the full interpreter/import/parse/release/exit interval was 16.38 versus
+17.36 ms. These are means of all runs, including parent launch and timing-output
+collection for the full interval. The first `parse_file` call itself averaged
+155 µs bundled / 148 µs system. The bundled wheel was 259 KB versus 77 KB.
+The package keeps the private runtime for its lower import and process time.
+Already-loaded application dependencies can change that tradeoff. These cold
+Python intervals are distinct from the warmed-call table and from the one-shot
+native executable's process time.
+
+```sh
+FOSU_BUNDLE_RUNTIME=1 python -m pip install -e '.[test]'
+taskset -c 5 python bench/python_compare.py /path/to/corpus --reps 5
+python bench/python_verify.py build/master_reference /path/to/corpus
+
+# Extract each wheel into its own directory, with cffi installed in the driver.
+taskset -c 5 python bench/python_first_compare.py /path/to/corpus \
+  /path/to/extracted-bundled-wheel /path/to/extracted-system-wheel --limit 100 --reps 3
+```
+
+Build the runtime comparison wheels from clean source copies using the same
+compiler, with `FOSU_BUNDLE_RUNTIME=1 python -m build` for the bundled variant
+and `FOSU_BUNDLE_RUNTIME=0 python -m build` for the system-runtime variant.
+The build always keeps symbol hiding enabled.
+The Python verifier checks both bytes and file entry points against the
+canonical reference: all fields, raw string bytes, floating-point bits, pool
+indices and parser counters match on all 10,000 files. Package tests additionally
+cover buffer inputs, lazy views, section selection, Unicode and embedded NULs,
+errors, threading, scalar selection and ownership through NumPy view chains.
+Installed wheels are tested on CPython 3.10 and 3.14 on Linux and Apple Silicon.
+
 ## Reproduce exact equality
 
 Use the same compiler ISA for reference and candidate: disabling SIMD changes

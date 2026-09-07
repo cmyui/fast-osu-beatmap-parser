@@ -3,3 +3,9 @@ build/
 bench/corpus/
 bench/corpus-large/
 __pycache__/
+dist/
+*.egg-info/
+python/fosu/*.so
+python/fosu/*.dylib
+.pytest_cache/
+.mypy_cache/

@@ -3,20 +3,23 @@
 A C++20 parser for valid, editor-emitted `.osu` files. Its primary target is
 **one fresh Linux process → read one original beatmap → parse → write the complete
 result → exit**. It also provides a header-only C++ library and a small C ABI for
-in-process callers, including Python through CFFI.
+in-process callers, plus an installable Python package backed by CFFI.
 
 | Interface | Result | Use |
 |---|---|---|
 | [One-shot executable](oneshot/README.md) | Complete binary stream on stdout | Lowest measured process lifetime on Linux/Zen 4 |
 | [C++ library](docs/library.md) | `Beatmap` with vectors and borrowed strings | Direct parsing in a C++ application |
-| [C API and CFFI](docs/c-api.md) | Handle-owned input and contiguous arrays | C, Python and other FFI callers |
+| [C API](docs/c-api.md) | Handle-owned input and contiguous arrays | C and other FFI callers |
+| [Python package](docs/python.md) | Owned `Beatmap` with named fields and records | Python apps; optional zero-copy NumPy arrays |
 
-All three paths are checked against master on a fixed corpus of **10,000
+The native representations are checked against master on a fixed corpus of **10,000
 ranked/approved maps, 402,593,897 bytes**. Equality includes strings, raw float
 bits, every pool entry and index, and all four parser counters. Addresses,
 allocation capacities and C++ padding are excluded. See
 [measurements and reproduction](docs/performance.md) for timing boundaries,
 compiler choices, exact verification and host configuration.
+Both Python entry points are also checked field by field against the native
+reference across that corpus.
 
 ```cpp
 #include <fosu/parser.hpp>
@@ -35,6 +38,17 @@ make oneshot CXX=g++                # Linux x86-64, Zen 4 target
 build/fosu_oneshot map.osu > map.fosu
 python3 examples/decode_oneshot.py < map.fosu
 ```
+
+```python
+import fosu
+
+beatmap = fosu.parse_file("map.osu")
+print(beatmap.title, beatmap.ar, beatmap.hit_objects[0].time)
+```
+
+Install a prebuilt wheel or run `python -m pip install .` in a source checkout.
+The [Python guide](docs/python.md) covers installation, automatic ownership,
+section selection and NumPy access.
 
 ## Parsing strategy
 
