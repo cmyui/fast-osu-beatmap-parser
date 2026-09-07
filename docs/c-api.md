@@ -52,8 +52,8 @@ int main(int argc, char **argv) {
 
 Compile on Linux with `cc -Iinclude examples/c_example.c -Lbuild -lfosu
 -Wl,-rpath,"$PWD/build" -o build/example`. Check the ABI version before accessing
-records. Version 1 defines the current structs; incompatible struct changes
-require a version bump and rebuilding bindings.
+records. Version 2 defines the current structs, including double timestamps.
+Incompatible struct changes require a version bump and rebuilding bindings.
 
 ## Contract
 
@@ -64,8 +64,8 @@ require a version bump and rebuilding bindings.
   parse, or `NULL` before success/after failure. **Every new parse call,
   including a failed or argument-rejected call, invalidates the previous view.**
 - Array records are produced directly by the parser. There is no second array
-  conversion or one FFI call per object. Hitobjects and sliders occupy 40 bytes
-  each on the supported 64-bit ABIs; point pairs occupy 8 and timing points 40.
+  conversion or one FFI call per object. Hitobjects occupy 48 bytes and sliders
+  40 bytes on the supported 64-bit ABIs; point pairs occupy 8 and timing points 40.
 - Every `fosu_string_ref` addresses `view->text` using `offset` and `length`.
   Empty strings have length zero. `source_size` is the original input size;
   `text_size` also includes 128 zero-padding bytes and six bytes for the
@@ -75,8 +75,9 @@ require a version bump and rebuilding bindings.
 - Section bits such as `FOSU_DIFFICULTY` or `FOSU_HIT_OBJECTS` can be ORed
   together; use `FOSU_ALL` for a complete parse.
 - Status is `FOSU_OK`, `FOSU_INVALID_ARGUMENT`, `FOSU_IO_ERROR` or
-  `FOSU_OUT_OF_MEMORY`. Input must be smaller than 4 GiB minus 134 bytes.
-  This interface retains the valid-editor-input assumption of the C++ parser.
+  `FOSU_OUT_OF_MEMORY`. Input is limited to `FOSU_MAX_INPUT_SIZE` (64 MiB);
+  unknown section bits are rejected. Successful parsing can contain skipped malformed records;
+  inspect the counters and [input contract](compatibility.md).
 - On `FOSU_IO_ERROR`, `fosu_parse_file` preserves the failing operation's
   `errno`; an unexpected early EOF sets `EIO`.
 - Separate handles may be used concurrently. Serialize mutations to one

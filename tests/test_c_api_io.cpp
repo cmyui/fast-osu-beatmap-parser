@@ -1,5 +1,6 @@
 // Linux-only fault injection: errno must survive cleanup, including early EOF.
 #include <fosu/c_api.h>
+#include <fosu/io.hpp>
 #include <cassert>
 #include <cerrno>
 #include <cstdlib>
@@ -39,6 +40,8 @@ int main() {
         const int expected = mode == Failure::stat ? EBADF : mode == Failure::read ? EACCES : EIO;
         assert(errno == expected);
         assert(fosu_get_view(h) == nullptr);
+        assert(!fosu::read_file_padded(path));
+        assert(errno == expected);
     }
     failure = Failure::none;
     assert(fosu_parse_file(h, path, FOSU_ALL) == FOSU_OK);

@@ -9,9 +9,9 @@
 // are explicit, including each orphan's position. Slider points follow
 // their record inline, so the format can be streamed while parsing.
 //
-//   "FOSUDMP4"
+//   "FOSUDMP5"
 //   hit objects, in file order, each:
-//     i32 x, y; u32 type, hitsound; i32 time, end_time; u32 slider
+//     i32 x, y; u32 type, hitsound; f64 time, end_time; u32 slider
 //     (kNoSlider or the running slider index); u32 hit_sample length;
 //     if a slider was parsed (slider != kNoSlider): u32 point_begin, point_count;
 //     {i32 x, y} x point_count; i32 slides; f64 length; u8 curve_type;
@@ -32,7 +32,7 @@
 //                 creator, version, source, tags; i64 beatmap_id,
 //                 beatmap_set_id
 //     [Difficulty] f64 hp, cs, od, ar, slider_multiplier, slider_tick_rate
-//     [Events]    str background, video; u32 n; {i32 start, end} x n
+//     [Events]    str background, video; u32 n; {f64 start, end} x n
 //     [Colours]   u32 n; u32 rgb x n
 //     [TimingPoints] u32 n; {f64 time, beat_length; i32 meter, sample_set,
 //                 sample_index, volume; u8 uninherited; u32 effects} x n
@@ -75,15 +75,15 @@ inline std::string_view resolve(const Map& bm, String s) {
 template <typename Map>
 inline void dump(const Map& bm, std::string& out) {
     Out o{out};
-    o.raw("FOSUDMP4", 8);
+    o.raw("FOSUDMP5", 8);
     for (const auto& h : bm.hit_objects) {
         const auto sample = resolve(bm, h.hit_sample);
         o.i32(h.x);
         o.i32(h.y);
         o.u32(h.type);
         o.u32(h.hitsound);
-        o.i32(h.time);
-        o.i32(h.end_time);
+        o.f64(h.time);
+        o.f64(h.end_time);
         o.u32(h.slider);
         o.u32(static_cast<uint32_t>(sample.size()));
         if (h.slider != fosu::HitObject::kNoSlider) {
@@ -150,8 +150,8 @@ inline void dump(const Map& bm, std::string& out) {
     o.str(bm.video);
     o.u32(static_cast<uint32_t>(bm.breaks.size()));
     for (const auto& b : bm.breaks) {
-        o.i32(b.start);
-        o.i32(b.end);
+        o.f64(b.start);
+        o.f64(b.end);
     }
     o.u32(static_cast<uint32_t>(bm.combo_colours.size()));
     for (uint32_t c : bm.combo_colours) o.u32(c);

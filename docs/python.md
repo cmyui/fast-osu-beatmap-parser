@@ -19,7 +19,7 @@ Download the wheel for your platform from the **Python wheels** GitHub Actions
 artifact, extract the artifact ZIP, then install the wheel:
 
 ```sh
-python -m pip install ./fosu-0.1.0-*.whl
+python -m pip install ./fosu-0.2.0-*.whl
 ```
 
 Wheels target standard CPython 3.10+ on Linux x86-64 (glibc 2.28+) and macOS
@@ -34,7 +34,9 @@ GCC; macOS builds use Apple Clang. Build dependencies are installed by pip.
 Linux source builds use the system C++ runtime. To bundle it as the release
 wheels do, install your compiler's static runtime archives and run
 `FOSU_BUNDLE_RUNTIME=1 python -m pip install .`. On distributions that split
-the archives into a separate package, install that package first.
+the archives into a separate package, install that package first. Native extension
+builds always recompile so header edits and runtime-selection changes cannot
+reuse stale object files.
 
 NumPy is optional: `python -m pip install numpy`. Importing `fosu` does not
 import NumPy.
@@ -61,9 +63,11 @@ Unrequested sections retain defaults, with empty collections; `Sections.ALL`
 is the default. Available flags are `GENERAL`, `EDITOR`, `METADATA`,
 `DIFFICULTY`, `EVENTS`, `TIMING_POINTS`, `COLOURS`, and `HIT_OBJECTS`.
 
-The parser assumes valid editor-emitted beatmaps, as the C++ library does;
-it is not a strict validator for hostile input. See the root README for format
-coverage. Files must be smaller than 4 GiB minus 134 bytes.
+Inputs are limited to 64 MiB. Malformed numeric records are skipped and counted
+in `beatmap.stats.malformed_lines`; successful parsing does not establish
+playability. See the [input and compatibility contract](compatibility.md),
+including inherited NaN timing points and the distinction between raw records
+and gameplay objects.
 
 Wrong Python argument types raise `TypeError`; invalid section bits, embedded
 NULs in paths and oversized input raise `ValueError`. I/O errors raise the
@@ -90,7 +94,8 @@ for note in beatmap.hit_objects:
             print(point.x, point.y)
 ```
 
-`time` and `end_time` are integer milliseconds. `is_circle`, `is_slider`,
+`time` and `end_time` are double milliseconds, preserving fractions. A circle
+or slider has `end_time == 0`; slider duration requires gameplay calculation. `is_circle`, `is_slider`,
 `is_spinner`, `is_hold` and `is_new_combo` are boolean properties. `slider` is
 a `Slider` or `None`; `slider_index` retains the raw array index or
 `fosu.NO_SLIDER` (`0xFFFFFFFF`). Slider `points` exclude the head position,
@@ -140,7 +145,8 @@ an independent, writable array. Converting a whole sequence to Python objects
 or copying arrays naturally adds work beyond parsing.
 
 The structured dtype retains native field offsets and record sizes: hitobjects
-and sliders are 40 bytes, points 8, timing points 40. String fields in arrays
+are 48 bytes, sliders 40, points 8, timing points 40. Timestamp columns are
+float64. String fields in arrays
 are nested `{offset, length}` records. Normal Python record attributes return
 decoded strings; bulk callers can resolve the offsets against `beatmap.text`,
 a read-only memoryview of the original `.osu` bytes. NumPy's `slider_index` column

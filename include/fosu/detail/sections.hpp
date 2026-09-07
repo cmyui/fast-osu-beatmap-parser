@@ -27,6 +27,7 @@ inline const char* parse_hitobject_lines(Sink& sink, const char* p, const char* 
         if (line_end > p && line_end[-1] == '\r') --line_end;
         const char* next_line = nl ? nl + 1 : file_end;
         const auto len = static_cast<size_t>(line_end - p);
+        if (ignored_line(p, line_end)) { p = next_line; continue; }
         auto& h = sink.begin(len);
         const int next = fast_parse_prefix(ascii, p, h);
         bool ok;

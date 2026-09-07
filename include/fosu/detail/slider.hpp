@@ -9,15 +9,15 @@ namespace fosu::detail {
 // general path. Returns the advanced pointer, or `p` unchanged on failure.
 inline const char* parse_coord(const char* p, const char* end, int32_t& out) {
     const uint32_t run = digit_run8(p);
-    if (run - 1 <= 3) {  // 1..4 digits; a run never crosses `end` (the line
-                         // terminator and buffer padding are non-digits)
+    if (run - 1 <= 3 && run <= static_cast<size_t>(end - p) &&
+        (p[run] == ':' || p[run] == '|' || p[run] == ',')) {
         out = static_cast<int32_t>(swar_parse_u32(p, run));
         return p + run;
     }
-    int64_t v;
-    const char* q = parse_i64(p, end, v);
+    float v;
+    const char* q = parse_osu_float(p, end, v, 131072);
     if (q == p) return p;
-    out = clamp_i32(v);
+    out = static_cast<int32_t>(v);
     return q;
 }
 
@@ -35,6 +35,7 @@ inline const char* parse_slider_length(const char* p, double& out) {
         _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
     const uint64_t nd = nondigit_mask32(v);
     const auto il = static_cast<uint32_t>(_tzcnt_u64(nd));  // 1..8 if valid
+    if (il - 1 > 7) return nullptr;
     const bool has_dot = p[il] == '.';  // il <= 32 stays inside the padding
     const uint32_t fl =
         has_dot ? static_cast<uint32_t>(_tzcnt_u64(nd >> (il + 1))) : 0;
@@ -45,10 +46,12 @@ inline const char* parse_slider_length(const char* p, double& out) {
     const char* fp = p + il + 1;
     if (fl1) mant = mant * kPow10u[fl1] + swar_parse_u64(fp, fl1);
     if (fl2) mant = mant * kPow10u[fl2] + swar_parse_u64(fp + 8, fl2);
+    if (mant > kMaxExactDoubleInteger) return nullptr;
     double d = static_cast<double>(mant);
     if (fl) d /= kPow10[fl];
     out = d;
-    return has_dot ? fp + fl : p + il;
+    const char* q = has_dot ? fp + fl : p + il;
+    return *q == 'e' || *q == 'E' ? nullptr : q;
 }
 #endif
 
@@ -69,8 +72,11 @@ inline bool parse_slider_points(const char*& p, const char* end, Point*& w) {
         const auto colon = static_cast<uint32_t>(_mm_movemask_epi8(
             _mm_cmpeq_epi8(v, _mm_set1_epi8(':'))));
         const uint32_t xl = _tzcnt_u32(nd);
+        if (xl - 1 > 3) break;
         const uint32_t yl = _tzcnt_u32(nd >> (xl + 1));
         if ((xl - 1) > 3 || (yl - 1) > 3 || !((colon >> xl) & 1)) break;
+        const char after_y = p[2 + xl + yl];
+        if (after_y != '|' && after_y != ',') break;
         w->x = static_cast<int32_t>(swar_parse_u32(p + 1, xl));
         w->y = static_cast<int32_t>(swar_parse_u32(p + 2 + xl, yl));
         ++w;

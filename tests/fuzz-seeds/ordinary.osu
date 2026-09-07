@@ -1,0 +1,21 @@
+osu file format v14
+[General]
+AudioFilename: audio.mp3
+StackLeniency:0.7
+[Metadata]
+Title:synthetic fixture
+BeatmapID:1
+[Difficulty]
+OverallDifficulty:8
+SliderMultiplier:1.4
+[TimingPoints]
+0,500,4,2,1,100,1,0
+1000,-100,4,2,1,100,0,1
+[HitObjects]
+256,192,1000,1,0,0:0:0:0:
+100,200,2000,2,0,B|123:456|234:123,2,300.125,0|2,0:0|0:0,0:0:0:0:
+256,192,3000,8,0,4000,0:0:0:0:
+[Events]
+2,0,1000
+[Colours]
+Combo1 : 1,2,3

@@ -1,4 +1,5 @@
 #pragma once
+#include "detail/object_tail.hpp"
 
 #include <bit>
 #include <cstddef>
@@ -12,6 +13,7 @@
 #include "detail/slider.hpp"
 #include "detail/metadata.hpp"
 #include "detail/sections.hpp"
+#include "detail/section_names.hpp"
 #include "io.hpp"
 #include "scalar_parse.hpp"
 
@@ -48,19 +50,6 @@ static_assert(offsetof(HitObject, x) == 0 && offsetof(HitObject, y) == 4 &&
                   offsetof(HitObject, hitsound) == 12,
               "AVX2 prefix path stores {x,y,type,hitsound} as one vector");
 
-enum class Section : uint8_t {
-    None,
-    General,
-    Editor,
-    Metadata,
-    Difficulty,
-    Events,
-    TimingPoints,
-    Colours,
-    HitObjects,
-    Unknown,
-};
-
 static_assert(kSectionGeneral == 1u << static_cast<int>(Section::General) &&
                   kSectionDifficulty ==
                       1u << static_cast<int>(Section::Difficulty) &&
@@ -74,22 +63,6 @@ inline std::string_view trim(const char* p, const char* end) {
     return {p, static_cast<size_t>(end - p)};
 }
 
-// Editor-emitted section names are unique on their second byte except
-// [Editor]/[Events], which the third byte splits. No full compares.
-inline Section match_section(std::string_view line) {
-    if (line.size() < 3) return Section::Unknown;
-    switch (line[1]) {
-        case 'G': return Section::General;
-        case 'E': return line[2] == 'd' ? Section::Editor : Section::Events;
-        case 'M': return Section::Metadata;
-        case 'D': return Section::Difficulty;
-        case 'T': return Section::TimingPoints;
-        case 'C': return Section::Colours;
-        case 'H': return Section::HitObjects;
-        default: return Section::Unknown;
-    }
-}
-
 inline bool split_kv(const char* p, size_t len, std::string_view& key,
                      std::string_view& val) {
     const auto* colon = static_cast<const char*>(memchr(p, ':', len));
@@ -101,19 +74,19 @@ inline bool split_kv(const char* p, size_t len, std::string_view& key,
 
 template <typename Map>
 inline void parse_general_line(Map& bm, const char* p, size_t len) {
-    parse_kv_line<parse_double>(bm, kGeneral, p, len);
+    parse_kv_line<parse_double>(bm, kGeneral, p, len, &bm.stats.malformed_lines);
 }
 template <typename Map>
 inline void parse_editor_line(Map& bm, const char* p, size_t len) {
-    parse_kv_line<parse_double>(bm, kEditor, p, len);
+    parse_kv_line<parse_double>(bm, kEditor, p, len, &bm.stats.malformed_lines);
 }
 template <typename Map>
 inline void parse_metadata_line(Map& bm, const char* p, size_t len) {
-    parse_kv_line<parse_double>(bm, kMetadata, p, len);
+    parse_kv_line<parse_double>(bm, kMetadata, p, len, &bm.stats.malformed_lines);
 }
 template <typename Map>
 inline void parse_difficulty_line(Map& bm, const char* p, size_t len, bool& ar_specified) {
-    ar_specified |= parse_kv_line<parse_double>(bm, kDifficulty, p, len);
+    ar_specified |= parse_kv_line<parse_double>(bm, kDifficulty, p, len, &bm.stats.malformed_lines);
 }
 
 inline std::string_view strip_quotes(std::string_view v) {
@@ -154,12 +127,11 @@ inline void parse_event_line(Map& bm, const char* p, size_t len) {
         bm.video = strip_quotes(trim(fname, fend));
     } else if (f0 == "2" || f0 == "Break") {
         double start, stop;
-        const char* q = parse_double(rest, end, start);
-        if (q == rest || q >= end || *q != ',') return;
-        const char* r = parse_double(q + 1, end, stop);
-        if (r == q + 1) return;
-        bm.breaks.push_back({clamp_i32(static_cast<int64_t>(start)),
-                             clamp_i32(static_cast<int64_t>(stop))});
+        const char* q = fosu::detail::parse_osu_double(rest, end, start);
+        if (q == rest || q >= end || *q != ',') { ++bm.stats.malformed_lines; return; }
+        const char* r = fosu::detail::parse_osu_double(q + 1, end, stop);
+        if (r == q + 1 || r != end) { ++bm.stats.malformed_lines; return; }
+        bm.breaks.push_back({start, stop});
     } else {
         ++bm.stats.storyboard_lines;
     }
@@ -188,39 +160,9 @@ inline void parse_colour_kv(Map& bm, std::string_view k, std::string_view v) {
 
 template <typename Map>
 inline void parse_timing_point_line(Map& bm, const char* p, size_t len) {
-    const char* end = p + len;
     typename Map::TimingPoint tp;
-    const char* q = parse_double(p, end, tp.time);
-    if (q == p) {
-        ++bm.stats.malformed_lines;
-        return;
-    }
-    p = q;
-    if (p >= end || *p != ',') {
-        ++bm.stats.malformed_lines;
-        return;
-    }
-    q = parse_double(++p, end, tp.beat_length);
-    if (q == p) {
-        ++bm.stats.malformed_lines;
-        return;
-    }
-    p = q;
-    // Remaining fields are optional (old format versions have fewer).
-    int64_t rest[6] = {4, 0, 0, 100, 1, 0};
-    for (auto& field : rest) {
-        if (p >= end || *p != ',') break;
-        q = parse_i64(++p, end, field);
-        if (q == p) break;
-        p = q;
-    }
-    tp.meter = clamp_i32(rest[0]);
-    tp.sample_set = clamp_i32(rest[1]);
-    tp.sample_index = clamp_i32(rest[2]);
-    tp.volume = clamp_i32(rest[3]);
-    tp.uninherited = rest[4] != 0;
-    tp.effects = static_cast<uint32_t>(rest[5]);
-    bm.timing_points.push_back(tp);
+    if (parse_timing_fields(p, p + len, tp)) bm.timing_points.push_back(tp);
+    else ++bm.stats.malformed_lines;
 }
 
 #if FOSU_SIMD_X86
@@ -272,6 +214,7 @@ inline const char* parse_timing_points_section(Map& bm, const char* p,
             next_line = m ? m + 1 : file_end;
         }
 
+        if (fosu::detail::ignored_line(p, p + len)) { p = next_line; continue; }
         typename Map::TimingPoint tp;
         if (len <= 64 && len >= 15) [[likely]] {
             const uint64_t line_mask =
@@ -345,27 +288,35 @@ inline bool parse_slider_params(Map& bm, typename Map::HitObject& h, const char*
     }
     ++p;
     const uint32_t srun = digit_run8(p);  // slides: a bare small integer
-    if (srun - 1 > 6) {
+    if (srun - 1 <= 6) {
+        s.slides = static_cast<int32_t>(swar_parse_u64(p, srun));
+        p = fosu::detail::skip_numeric_space(p + srun, end);
+    } else {
+        int64_t slides;
+        const char* next = parse_osu_int(p, end, slides);
+        if (next == p) { sliders.pop_back(); return false; }
+        s.slides = clamp_i32(slides);
+        p = next;
+    }
+    if (s.slides > 9000 || (p < end && *p != ',')) {
         sliders.pop_back();
         return false;
     }
-    s.slides = static_cast<int32_t>(swar_parse_u64(p, srun));
-    p += srun;
-    if (p >= end || *p != ',') {
-        sliders.pop_back();
-        return false;
-    }
+    s.length = 0;
+    if (p < end) {
 #if FOSU_SIMD_X86
-    const char* q = parse_slider_length(p + 1, s.length);
-    if (!q) q = parse_double(p + 1, end, s.length);
+        const char* q = parse_slider_length(p + 1, s.length);
+        if (!q) q = parse_osu_double(p + 1, end, s.length, 131072);
 #else
-    const char* q = parse_double(p + 1, end, s.length);
+        const char* q = parse_osu_double(p + 1, end, s.length, 131072);
 #endif
-    if (q == p + 1) {
-        sliders.pop_back();
-        return false;
+        if (q != p + 1) q = skip_numeric_space(q, end);
+        if (q == p + 1 || (q < end && *q != ',') || s.length > 131072 || s.length < -131072) {
+            sliders.pop_back();
+            return false;
+        }
+        p = q;
     }
-    p = q;
 
     // Optional: edgeSounds, edgeSets, hitSample, assigned positionally;
     // absent fields are empty.
@@ -413,6 +364,11 @@ inline bool parse_slider_params(Map& bm, typename Map::HitObject& h, const char*
             hit_sample = extra[2];
         }
     }
+    if (!valid_sample(hit_sample, true) ||
+        !valid_edge_sets(bm.resolve(s.edge_sets), s.slides)) {
+        sliders.pop_back();
+        return false;
+    }
     h.hit_sample = bm.view(hit_sample);
     h.slider = static_cast<uint32_t>(sliders.size() - 1);
     return true;
@@ -423,7 +379,9 @@ inline bool parse_slider_params(Map& bm, typename Map::HitObject& h, const char*
 template <typename Map>
 inline bool finish_hitobject(Map& bm, typename Map::HitObject& h, const char* p,
                              const char* end, size_t bytes_remaining) {
-    if (h.type & 2) {  // slider
+    if (!(h.type & (1 | 2 | 8 | 128))) return false;
+    if (p < end && *p != ',') return false;
+    if (!(h.type & 1) && (h.type & 2)) {  // slider
         if (p >= end || *p != ',') return false;
         // Size the slider pools once, when a map first proves it has
         // sliders — reserving eagerly per map wastes multi-MB allocations
@@ -435,27 +393,9 @@ inline bool finish_hitobject(Map& bm, typename Map::HitObject& h, const char* p,
         }
         return parse_slider_params(bm, h, p + 1, end);
     }
-    if (h.type & 8 || h.type & 128) {  // spinner / mania hold
-        if (p >= end || *p != ',') return false;
-        int64_t t;
-        const char* q = parse_i64(p + 1, end, t);
-        if (q == p + 1) return false;
-        h.end_time = clamp_i32(t);
-        p = q;
-        if ((h.type & 128) && p < end && *p == ':') ++p;
-        else if (p < end && *p == ',') ++p;
-        else {
-            h.hit_sample = {};
-            return true;
-        }
-        h.hit_sample = bm.view({p, static_cast<size_t>(end - p)});
-        return true;
-    }
-    // circle: optional trailing hitSample (every path assigns the field,
-    // so callers need not clear it)
-    h.hit_sample = bm.view((p < end && *p == ',')
-                       ? std::string_view{p + 1, static_cast<size_t>(end - (p + 1))}
-                       : std::string_view{});
+    std::string_view sample;
+    if (!parse_object_tail(h, p, end, sample)) return false;
+    h.hit_sample = bm.view(sample);
     return true;
 }
 
@@ -549,6 +489,7 @@ inline const char* parse_events_section(Map& bm, const char* p,
         if (line_end[-1] == '\r') --line_end;  // line_end > line: c is not CR
         p = next_line;
 
+        if (fosu::detail::ignored_line(line, line_end)) continue;
         if (c == ' ' || c == '_') {  // indented storyboard command
             ++storyboard_lines;
             continue;
@@ -598,8 +539,10 @@ template <typename Map>
 inline void parse_into(const char* data, size_t size, Map& bm,
                        [[maybe_unused]] ParseOptions opts = {}) {
     using namespace detail;
+    if (size > kMaxInputSize) throw std::length_error("beatmap input exceeds 64 MiB");
     reset_for_reuse(bm);
     bm.set_input(data);
+    if (size == 0) return;
     const char* p = data;
     const char* file_end = data + size;
     if (size >= 3 && static_cast<uint8_t>(p[0]) == 0xEF &&
@@ -618,6 +561,7 @@ inline void parse_into(const char* data, size_t size, Map& bm,
         // and events, where per-line memchr is free. (A 32-byte SIMD line
         // probe here measured exactly zero in the ablation audit: its
         // value was eroded to nothing when the fused sections landed.)
+        if (*p == '\r' || *p == '\n') { ++p; continue; }
         const char* nl =
             static_cast<const char*>(memchr(p, '\n', file_end - p));
         const char* line_end = nl ? nl : file_end;
@@ -633,6 +577,11 @@ inline void parse_into(const char* data, size_t size, Map& bm,
                 const char* start = nl ? nl + 1 : file_end;
                 const auto* nb = static_cast<const char*>(memchr(
                     start, '[', static_cast<size_t>(file_end - start)));
+                // A bracket inside a value/comment is not a section header.
+                while (nb && nb != start && nb[-1] != '\n' && nb[-1] != '\r') {
+                    nb = static_cast<const char*>(memchr(
+                        nb + 1, '[', static_cast<size_t>(file_end - nb - 1)));
+                }
                 p = nb ? nb : file_end;
                 sec = Section::Unknown;
                 continue;
@@ -674,7 +623,7 @@ inline void parse_into(const char* data, size_t size, Map& bm,
 #endif
             goto next_line;
         }
-        if (len >= 2 && p[0] == '/' && p[1] == '/') goto next_line;
+        if (fosu::detail::ignored_line(p, line_end)) goto next_line;
 
         switch (sec) {
             case Section::None: {
@@ -684,7 +633,7 @@ inline void parse_into(const char* data, size_t size, Map& bm,
                     int64_t ver;
                     const char* vp = p + v + 17;
                     if (parse_i64(vp, line_end, ver) != vp)
-                        bm.format_version = static_cast<int>(ver);
+                        bm.format_version = clamp_i32(ver);
                 }
                 break;
             }

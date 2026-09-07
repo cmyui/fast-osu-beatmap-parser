@@ -5,6 +5,48 @@
 
 namespace fosu::detail {
 
+// Shared bounded fallback. Optional legacy fields may be absent, but a
+// present field must parse completely; NaN is meaningful only when inherited.
+template <typename T>
+inline bool parse_timing_fields(const char* p, const char* end, T& tp) {
+    double time, beat_length;
+    const char* q = parse_osu_double(p, end, time);
+    if (q == p || q >= end || *q != ',') return false;
+    p = q + 1;
+    q = parse_beat_length(p, end, beat_length);
+    if (q == p) return false;
+    p = q;
+    int64_t rest[6] = {4, 0, 0, 100, 1, 0};
+    for (int i = 0; i < 6 && p < end; ++i) {
+        if (*p++ != ',') return false;
+        const auto* comma = static_cast<const char*>(memchr(p, ',', end - p));
+        const char* field_end = comma ? comma : end;
+        if (p == field_end) return false;
+        if (i == 4) rest[i] = *p == '1';
+        else if (i == 0 && *p == '0') {
+            // The official decoder treats any meter field beginning in 0 as
+            // 4/4. Preserve a plain raw zero; use 4 for nonnumeric spellings.
+            q = parse_osu_int(p, field_end, rest[i]);
+            if (q != field_end) rest[i] = 4;
+        } else {
+            q = parse_osu_int(p, field_end, rest[i]);
+            if (q == p || q != field_end || (i == 0 && rest[i] <= 0)) return false;
+        }
+        p = field_end;
+    }
+    // Additional legacy columns are ignored by the official decoder.
+    if ((p < end && *p != ',') || (rest[4] != 0 && std::isnan(beat_length))) return false;
+    tp.time = time;
+    tp.beat_length = beat_length;
+    tp.meter = clamp_i32(rest[0]);
+    tp.sample_set = clamp_i32(rest[1]);
+    tp.sample_index = clamp_i32(rest[2]);
+    tp.volume = clamp_i32(rest[3]);
+    tp.uninherited = rest[4] != 0;
+    tp.effects = static_cast<uint32_t>(rest[5]);
+    return true;
+}
+
 #if FOSU_SIMD_X86
 // One-pass timing point parse for the editor-emitted 8-field shape.
 // Two preloaded 32-byte vectors cover the whole line (real max: 39
@@ -47,7 +89,8 @@ inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
     const auto c5 = static_cast<uint32_t>(_tzcnt_u64(m5));
     const auto c6 = static_cast<uint32_t>(_tzcnt_u64(m6));
 
-    bool valid = _mm_popcnt_u64(commas) == 7;
+    if (_mm_popcnt_u64(commas) != 7) return false;
+    bool valid = true;
 
     // Offset: an integer with 1..8 digits — editor-emitted files never
     // produce negative or decimal offsets (those defer via the purity
@@ -72,6 +115,7 @@ inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
     const uint32_t frac_len = flen - int_len - has_dot;
     valid &= (int_len - 1) <= 7;
     valid &= frac_len <= 13;  // real files: 0 (67%) or 12-13
+    valid &= int_len + frac_len <= 18;  // avoid uint64 mantissa wrap
     const uint32_t il = ((int_len - 1) & 7) + 1;
     const uint32_t fl1 = frac_len <= 8 ? frac_len : 8;
     const uint32_t fl2 = frac_len - fl1;
@@ -112,10 +156,15 @@ inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
         static_cast<int32_t>(swar_parse_u64_safe(p + c3 + 1, ((t2 - 1) & 7) + 1));
     tp.volume =
         static_cast<int32_t>(swar_parse_u64_safe(p + c4 + 1, ((t3 - 1) & 7) + 1));
-    tp.uninherited = swar_parse_u64_safe(p + c5 + 1, ((t4 - 1) & 7) + 1) != 0;
+    tp.uninherited = p[c5 + 1] == '1';
     tp.effects =
         static_cast<uint32_t>(swar_parse_u64_safe(p + c6 + 1, ((t5 - 1) & 7) + 1));
 
+    if (valid && mant > kMaxExactDoubleInteger) {
+        double exact;
+        if (bounded_double(p + c0 + 1, p + c1, exact) != p + c1) return false;
+        tp.beat_length = exact;
+    }
     if (geom && valid) {
         geom->c[0] = static_cast<uint8_t>(c0);
         geom->c[1] = static_cast<uint8_t>(c1);
@@ -249,7 +298,11 @@ inline void tp_shape_convert(const TpShapeRow& r, const char* p,
         g.bl_fl2 ? swar_parse_u64_safe(fp + 8, g.bl_fl2) : 0;
     mant = mant * kPow10u[g.bl_fl1] + fm1;
     mant = mant * kPow10u[g.bl_fl2] + fm2;
-    double bl = static_cast<double>(mant) / kPow10[g.bl_frac];
+    double bl;
+    if (mant > kMaxExactDoubleInteger)
+        bounded_double(f, p + g.c[1], bl);  // digit shape was validated; excludes sign
+    else
+        bl = static_cast<double>(mant) / kPow10[g.bl_frac];
     bl = std::bit_cast<double>(std::bit_cast<uint64_t>(bl) |
                                (static_cast<uint64_t>(g.bl_neg) << 63));
     tp.beat_length = bl;
@@ -270,7 +323,7 @@ inline void tp_shape_convert(const TpShapeRow& r, const char* p,
         tp.sample_set = t[1];
         tp.sample_index = t[2];
         tp.volume = t[3];
-        tp.uninherited = t[4] != 0;
+        tp.uninherited = p[g.c[5] + 1] == '1';
         tp.effects = t[5];
     } else {
         const uint32_t len = r.len;
@@ -278,7 +331,6 @@ inline void tp_shape_convert(const TpShapeRow& r, const char* p,
         const uint32_t t1 = g.c[3] - g.c[2] - 1;
         const uint32_t t2 = g.c[4] - g.c[3] - 1;
         const uint32_t t3 = g.c[5] - g.c[4] - 1;
-        const uint32_t t4 = g.c[6] - g.c[5] - 1;
         const uint32_t t5 = len - g.c[6] - 1;
         tp.meter = static_cast<int32_t>(swar_parse_u64(p + g.c[1] + 1, t0));
         tp.sample_set =
@@ -286,7 +338,7 @@ inline void tp_shape_convert(const TpShapeRow& r, const char* p,
         tp.sample_index =
             static_cast<int32_t>(swar_parse_u64(p + g.c[3] + 1, t2));
         tp.volume = static_cast<int32_t>(swar_parse_u64(p + g.c[4] + 1, t3));
-        tp.uninherited = swar_parse_u64(p + g.c[5] + 1, t4) != 0;
+        tp.uninherited = p[g.c[5] + 1] == '1';
         tp.effects =
             static_cast<uint32_t>(swar_parse_u64(p + g.c[6] + 1, t5));
     }

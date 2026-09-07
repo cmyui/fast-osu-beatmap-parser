@@ -45,10 +45,11 @@ create background threads.
 vectors `hit_objects`, `sliders`, `slider_points`, `timing_points`, `breaks`,
 `combo_colours`. `HitObject::slider` is an index, or `HitObject::kNoSlider`.
 Each slider's `[point_begin, point_begin + point_count)` selects its control
-points, excluding its head position. Point coordinates and times stay signed
-32-bit; double fields retain the parser's arithmetic and bit patterns.
+points, excluding its head position. Point coordinates are signed 32-bit
+integers; object and break times are double milliseconds. See the [numeric contract](compatibility.md) for bounds,
+fractional values, inherited NaN timing points and skipped malformed records.
 
-On the supported 64-bit ABIs, native hitobjects occupy 48 bytes and sliders 56
+On the supported 64-bit ABIs, native hitobjects occupy 56 bytes and sliders 56
 bytes, with `std::string_view` fields. A separate compact representation is
 available without changing the native public record types:
 
@@ -60,12 +61,11 @@ fosu::parse_into(input, compact);
 auto sample = compact.resolve(compact.hit_objects[0].hit_sample);
 ```
 
-`OffsetBeatmap` uses the C API's 40-byte hitobjects and 40-byte sliders. Record
+`OffsetBeatmap` uses the C API's 48-byte hitobjects and 40-byte sliders. Record
 strings contain 32-bit offsets/lengths into the borrowed input; metadata still
-uses `std::string_view`. Input and record-string spans must fit in `uint32_t`.
-The C++ offset path does not check sizes: exceeding 32-bit spans truncates
-offsets. `parse_into` sets the string base automatically. Both representations instantiate
-the same parser; the C API adds input ownership and checked size limits.
+uses `std::string_view`. The shared 64 MiB input limit keeps parsed spans within `uint32_t`.
+`parse_into` sets the string base automatically. Both representations instantiate
+the same parser; the C API adds input ownership and status-code translation.
 
 The header-only C++ object layout is not a versioned binary ABI: rebuild callers
 when updating headers. Use the [versioned C interface](c-api.md) across an FFI.

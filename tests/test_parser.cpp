@@ -220,11 +220,11 @@ static void test_long_timing_offsets() {
             "osu file format v14\n"
             "[TimingPoints]\n"
             "123456789,300.5,4,2,1,60,1,0\n"
-            "4123456789,-50,4,2,1,60,0,0\n",
+            "2123456789,-50,4,2,1,60,0,0\n",
             simd);
         CHECK_EQ(bm.timing_points.size(), 2u);
         CHECK(bm.timing_points[0].time == 123456789.0);
-        CHECK(bm.timing_points[1].time == 4123456789.0);
+        CHECK(bm.timing_points[1].time == 2123456789.0);
         CHECK_EQ(bm.timing_points[0].volume, 60);
         CHECK_EQ(bm.stats.malformed_lines, 0u);
     }
@@ -255,18 +255,17 @@ static void test_aspire_edge_cases() {
         "256.5,112.2,4000,1,0\n"                   // decimal coords
         "0,0,4294967290,1,0\n"                     // time > INT32_MAX
         "100,100,5000,2,0,B|-64:-32|700:512,1,600\n");  // negative ctrl points
-    CHECK_EQ(bm.hit_objects.size(), 7u);
+    CHECK_EQ(bm.hit_objects.size(), 6u);
     CHECK_EQ(bm.hit_objects[0].x, -48);
     CHECK_EQ(bm.hit_objects[1].y, -24);
     CHECK_EQ(bm.hit_objects[2].time, -1000);
     CHECK_EQ(bm.hit_objects[3].x, 5120);
     CHECK_EQ(bm.hit_objects[4].x, 256);   // truncated
     CHECK_EQ(bm.hit_objects[4].y, 112);
-    CHECK_EQ(bm.hit_objects[5].time, INT32_MAX);  // saturated
-    const auto& s = bm.sliders[bm.hit_objects[6].slider];
+    const auto& s = bm.sliders[bm.hit_objects[5].slider];
     CHECK_EQ(bm.slider_points[s.point_begin].x, -64);
     CHECK_EQ(bm.slider_points[s.point_begin].y, -32);
-    CHECK_EQ(bm.stats.malformed_lines, 0u);
+    CHECK_EQ(bm.stats.malformed_lines, 1u);
 #if FOSU_SIMD_X86
     CHECK_EQ(bm.stats.fast_path_lines, 1u);  // only the slider line is regular
 #endif
@@ -288,53 +287,14 @@ static void test_malformed() {
     CHECK_EQ(bm.stats.malformed_lines, 5u);
 }
 
-// Reference: the pre-SWAR byte-loop parse_double, kept verbatim as the
-// behavioral baseline for <=18 significant digit inputs.
+// Independent numeric oracle: libc conversion over a bounded copy, rather
+// than a second copy of the parser's mantissa arithmetic.
 static const char* reference_parse_double(const char* p, const char* end,
                                           double& out) {
-    const char* start = p;
-    bool neg = false;
-    if (p < end && *p == '-') {
-        neg = true;
-        ++p;
-    }
-    uint64_t mant = 0;
-    int digits = 0;
-    int frac = 0;
-    bool any = false;
-    bool overflow = false;
-    while (p < end && fosu::detail::is_digit(*p)) {
-        any = true;
-        if (digits < 18) {
-            mant = mant * 10 + static_cast<uint64_t>(*p - '0');
-            ++digits;
-        } else {
-            overflow = true;
-        }
-        ++p;
-    }
-    if (p < end && *p == '.') {
-        ++p;
-        while (p < end && fosu::detail::is_digit(*p)) {
-            any = true;
-            if (digits < 18) {
-                mant = mant * 10 + static_cast<uint64_t>(*p - '0');
-                ++digits;
-                ++frac;
-            }
-            ++p;
-        }
-    }
-    if (!any) return start;
-    if (overflow || (p < end && (*p == 'e' || *p == 'E'))) {
-        char* e;
-        out = strtod(start, &e);
-        return e;
-    }
-    double v = static_cast<double>(mant);
-    if (frac) v /= fosu::detail::kPow10[frac];
-    out = neg ? -v : v;
-    return p;
+    std::string bounded(p, end);
+    char* next;
+    out = strtod(bounded.c_str(), &next);
+    return std::isfinite(out) ? p + (next - bounded.c_str()) : p;
 }
 
 static uint64_t rng_state = 0x243F6A8885A308D3ull;
@@ -346,9 +306,8 @@ static uint64_t rng() {
     return z ^ (z >> 31);
 }
 
-// Fuzz the SWAR parse_double against the byte-loop reference: results must
-// be bit-identical (identical mantissa accumulation) for <=16 significant
-// digits, and identical to strtod beyond that (both delegate).
+// Compare decimal conversion against libc, including significands that
+// require correct rounding rather than rounding an intermediate integer.
 static void test_fuzz_parse_double() {
     char buf[96];
     for (int iter = 0; iter < 300000; ++iter) {
@@ -380,7 +339,7 @@ static void test_fuzz_parse_double() {
             return;
         }
     }
-    // Long-mantissa inputs delegate to strtod and must match it exactly.
+    // The bounded fast_float fallback must agree with the independent libc result.
     const char* long_cases[] = {"342.857142857142857142857",
                                 "123456789012345678901", "0.6999999999999999556"};
     for (const char* c : long_cases) {
@@ -412,7 +371,8 @@ static void test_fuzz_parse_coord() {
         const char* gp = fosu::detail::parse_coord(buf, buf + payload, got);
         int64_t v;
         const char* wp = fosu::detail::parse_i64(buf, buf + payload, v);
-        if (wp != buf) want = fosu::detail::clamp_i32(v);
+        if (wp != buf && (v < -131072 || v > 131072)) wp = buf;
+        if (wp != buf) want = static_cast<int32_t>(v);
         CHECK_EQ(gp - buf, wp - buf);
         CHECK_EQ(got, want);
         if (g_failures) {

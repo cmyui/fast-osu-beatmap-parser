@@ -41,8 +41,8 @@ Numeric conversion, prefix parsing, metadata tables/defaults and the hitobject
 framing loop are shared with the C++ library. Vector allocation, streamed
 slider rollback, event loops, timing-section loop and storage and top-level dispatch
 retain their representation-specific implementations. The
-[vendored fast_float header](third_party/README.md) supplies the executable's
-rare general decimal fallback; native callers retain `strtod`.
+[vendored fast_float header](../include/fosu/detail/fast_float.md) supplies
+the bounded, locale-independent fallback for every representation.
 
 ## Optional host configuration
 
@@ -67,10 +67,11 @@ input, not cold disk/S3 fetches.
 
 ## Output contract
 
-`FOSUDMP4` is a little-endian stream containing every logical `Beatmap` field,
+`FOSUDMP5` is a little-endian stream containing every logical `Beatmap` field,
 all four counters, explicit slider/pool indices and points left by failed
 slider lines. Strings are length-prefixed bytes and doubles retain raw IEEE-754
-bits. The last eight bytes give the trailer's length, excluding that footer;
+bits, including object and break timestamps. The example decoder also reads
+legacy FOSUDMP4 streams with integer timestamps. The last eight bytes give the trailer's length, excluding that footer;
 consumers locate the trailer from the end and read its object count before
 walking the variable-length records. Searching for `TRLR` inside data is not a
 valid way to find a record boundary.
@@ -83,13 +84,15 @@ partial write. There is no `--dump` switch; output is always written.
 
 ## Limits and errors
 
-This is a Linux/Zen 4 executable for valid editor-emitted beatmaps, with 4 KiB
+This is a Linux/Zen 4 executable for legacy beatmaps, with 4 KiB
 base pages and the runtime/ELF choices above. It accepts one regular file path
-and a blocking stdout. Input must be at most `UINT32_MAX - 128` bytes;
+and a blocking stdout. Input must be at most 64 MiB;
 wire lengths and pool indices are 32-bit. It supports up to eight timing
 sections, 32,784 breaks, 4,104 colours and 1,048,576 orphaned slider points.
 Those limits exceed the evaluation corpus and fail explicitly when exceeded.
 The ordinary C++ library does not have these fixed section/overflow limits.
+The shared [parsing contract](../docs/compatibility.md) defines numeric bounds,
+malformed-record handling and the consumer's gameplay responsibilities.
 
 | Exit | Meaning |
 |---|---|
