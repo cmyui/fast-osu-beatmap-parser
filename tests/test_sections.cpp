@@ -1,6 +1,76 @@
 #include "support/test.hpp"
 #include "support/equality.hpp"
 
+// The table factory must reject incompatible storage, not merely document it.
+template <fosu::internal::MetadataKind Kind, typename T>
+concept CanDeclareMetadataField = requires {
+    fosu::internal::metadata_field<Kind, T, 0>("TestField");
+};
+static_assert(CanDeclareMetadataField<fosu::internal::MetadataKind::Text, std::string_view>);
+static_assert(!CanDeclareMetadataField<fosu::internal::MetadataKind::Text, int32_t>);
+static_assert(CanDeclareMetadataField<fosu::internal::MetadataKind::Float32Domain, double>);
+static_assert(!CanDeclareMetadataField<fosu::internal::MetadataKind::Float32Domain, float>);
+static_assert(!CanDeclareMetadataField<fosu::internal::MetadataKind::IntegerBoolean, int32_t>);
+
+static void test_metadata_assignment_identifies_the_written_field() {
+    fosu::BeatmapHeader header;
+    uint32_t malformed = 0;
+    auto input = fosu::make_padded("OverallDifficulty:8");
+    auto assignment = fosu::internal::parse_kv_line<fosu::internal::parse_double>(
+        header, fosu::internal::kDifficulty, input.data.get(), input.size, &malformed);
+    CHECK(assignment.assigned_to(header.od));
+    CHECK(!assignment.assigned_to(header.ar));
+    CHECK_EQ(header.od, 8);
+
+    input = fosu::make_padded("ApproachRate:5");  // Assigning the default still counts.
+    assignment = fosu::internal::parse_kv_line<fosu::internal::parse_double>(
+        header, fosu::internal::kDifficulty, input.data.get(), input.size, &malformed);
+    CHECK(assignment.assigned_to(header.ar));
+    CHECK_EQ(malformed, 0u);
+
+    input = fosu::make_padded("ApproachRate:invalid");
+    assignment = fosu::internal::parse_kv_line<fosu::internal::parse_double>(
+        header, fosu::internal::kDifficulty, input.data.get(), input.size, &malformed);
+    CHECK(assignment.destination == nullptr);
+    CHECK_EQ(header.ar, 5);
+    CHECK_EQ(malformed, 1u);
+
+    input = fosu::make_padded("UnknownField:8");
+    assignment = fosu::internal::parse_kv_line<fosu::internal::parse_double>(
+        header, fosu::internal::kDifficulty, input.data.get(), input.size, &malformed);
+    CHECK(assignment.destination == nullptr);
+    CHECK_EQ(malformed, 1u);
+
+    input = fosu::make_padded("Title:");  // An empty string is also an assignment.
+    assignment = fosu::internal::parse_kv_line<fosu::internal::parse_double>(
+        header, fosu::internal::kMetadata, input.data.get(), input.size, &malformed);
+    CHECK(assignment.assigned_to(header.title));
+    CHECK(header.title.empty());
+}
+
+static void test_approach_rate_defaults_follow_successful_assignments() {
+    struct Case {
+        const char* fields;
+        double approach_rate;
+        uint32_t malformed;
+    };
+    const Case cases[] = {
+        {"OverallDifficulty:7\nApproachRate:invalid\n", 7, 1},
+        {"ApproachRate:9\nApproachRate:invalid\nOverallDifficulty:7\n", 9, 1},
+        {"ApproachRate:invalid\nApproachRate:9\nOverallDifficulty:7\n", 9, 1},
+        {"ApproachRate:0\nOverallDifficulty:8\n", 0, 0},
+        {"OverallDifficulty:7\nOverallDifficulty:8\n", 8, 0},
+        {"ApproachRate:5\n[Difficulty]\nOverallDifficulty:8\n", 5, 0},
+    };
+    for (const auto& test : cases) {
+        for (bool simd : {false, true}) {
+            const auto map = parse_str(std::string("[Difficulty]\n") + test.fields, simd);
+            CHECK_EQ(map.ar, test.approach_rate);
+            CHECK_EQ(map.stats.malformed_lines, test.malformed);
+        }
+    }
+}
+
 static void test_all_sections() {
     const char* input =
         "\xEF\xBB\xBFosu file format v14\r\n"
@@ -354,6 +424,8 @@ static void test_all_section_mask_matches_default() {
 }
 
 int main() {
+    test_metadata_assignment_identifies_the_written_field();
+    test_approach_rate_defaults_follow_successful_assignments();
     test_all_sections();
     test_old_format();
     test_mania_hold();

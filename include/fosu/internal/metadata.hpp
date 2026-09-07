@@ -15,60 +15,90 @@ inline constexpr uint32_t key4(char a, char b, char c, char d) {
 
 static_assert(std::is_standard_layout_v<BeatmapHeader>);
 
-enum class KT : uint8_t { Str, I32, F32, F64, Bool, I64, Mode, Countdown, RawBool, SampleSet };
-struct KvEntry {
-    const char* name;
-    uint32_t key;      // first four bytes of the key
-    uint8_t key_len;
-    KT type;
-    uint16_t off;      // offset within the BeatmapHeader subobject
+// Acceptance rules are separate from storage types: both floating-point
+// categories retain a double, even when the decoder validates as float32.
+enum class MetadataKind : uint8_t {
+    Text, Int32, Float32Domain, Float64Domain, IntegerBoolean, Int64,
+    Mode, Countdown, LeadingOneBoolean, SampleSet,
 };
-#define KV(k, t, field) \
-    KvEntry{k, key4(k[0], k[1], k[2], k[3]), sizeof(k) - 1, KT::t, static_cast<uint16_t>(__builtin_offsetof(BeatmapHeader, field))}
-constexpr KvEntry kGeneral[] = {
-    KV("AudioFilename", Str, audio_filename),
-    KV("AudioLeadIn", I32, audio_lead_in),
-    KV("PreviewTime", I32, preview_time),
-    KV("CountdownOffset", I32, countdown_offset),
+
+template <MetadataKind Kind, typename T>
+concept MetadataStorage =
+    ((Kind == MetadataKind::Text || Kind == MetadataKind::SampleSet) &&
+     std::is_same_v<T, std::string_view>) ||
+    ((Kind == MetadataKind::Int32 || Kind == MetadataKind::Mode ||
+      Kind == MetadataKind::Countdown) && std::is_same_v<T, int32_t>) ||
+    ((Kind == MetadataKind::Float32Domain || Kind == MetadataKind::Float64Domain) &&
+     std::is_same_v<T, double>) ||
+    ((Kind == MetadataKind::IntegerBoolean || Kind == MetadataKind::LeadingOneBoolean) &&
+     std::is_same_v<T, bool>) ||
+    (Kind == MetadataKind::Int64 && std::is_same_v<T, int64_t>);
+
+struct MetadataField {
+    const char* name;
+    uint32_t key_prefix;  // first four bytes of the key
+    uint8_t key_length;
+    MetadataKind kind;
+    uint16_t offset;      // offset within the BeatmapHeader subobject
+};
+
+// Keep the compact offset table, but reject incompatible field declarations
+// while compiling it. The macro derives the member type and offset together.
+template <MetadataKind Kind, typename T, size_t Offset, size_t N>
+    requires MetadataStorage<Kind, T>
+consteval MetadataField metadata_field(const char (&name)[N]) {
+    static_assert(N >= 5 && N - 1 <= UINT8_MAX);
+    static_assert(Offset <= UINT16_MAX);
+    return {name, key4(name[0], name[1], name[2], name[3]),
+            N - 1, Kind, static_cast<uint16_t>(Offset)};
+}
+#define KV(k, kind, field) \
+    metadata_field<MetadataKind::kind, decltype(BeatmapHeader::field), \
+                   __builtin_offsetof(BeatmapHeader, field)>(k)
+constexpr MetadataField kGeneral[] = {
+    KV("AudioFilename", Text, audio_filename),
+    KV("AudioLeadIn", Int32, audio_lead_in),
+    KV("PreviewTime", Int32, preview_time),
+    KV("CountdownOffset", Int32, countdown_offset),
     KV("Countdown", Countdown, countdown),
     KV("SampleSet", SampleSet, sample_set),
-    KV("SamplesMatchPlaybackRate", Bool, samples_match_playback_rate),
-    KV("StackLeniency", F32, stack_leniency),
+    KV("SamplesMatchPlaybackRate", IntegerBoolean, samples_match_playback_rate),
+    KV("StackLeniency", Float32Domain, stack_leniency),
     KV("Mode", Mode, mode),
-    KV("LetterboxInBreaks", Bool, letterbox_in_breaks),
-    KV("WidescreenStoryboard", Bool, widescreen_storyboard),
-    KV("EpilepsyWarning", Bool, epilepsy_warning),
-    KV("SpecialStyle", Bool, special_style),
-    KV("UseSkinSprites", RawBool, use_skin_sprites),
-    KV("OverlayPosition", Str, overlay_position),
-    KV("SkinPreference", Str, skin_preference),
+    KV("LetterboxInBreaks", IntegerBoolean, letterbox_in_breaks),
+    KV("WidescreenStoryboard", IntegerBoolean, widescreen_storyboard),
+    KV("EpilepsyWarning", IntegerBoolean, epilepsy_warning),
+    KV("SpecialStyle", IntegerBoolean, special_style),
+    KV("UseSkinSprites", LeadingOneBoolean, use_skin_sprites),
+    KV("OverlayPosition", Text, overlay_position),
+    KV("SkinPreference", Text, skin_preference),
 };
-constexpr KvEntry kEditor[] = {
-    KV("Bookmarks", Str, bookmarks),
-    KV("DistanceSpacing", F64, distance_spacing),
-    KV("BeatDivisor", I32, beat_divisor),
-    KV("GridSize", I32, grid_size),
-    KV("TimelineZoom", F64, timeline_zoom),
+constexpr MetadataField kEditor[] = {
+    KV("Bookmarks", Text, bookmarks),
+    KV("DistanceSpacing", Float64Domain, distance_spacing),
+    KV("BeatDivisor", Int32, beat_divisor),
+    KV("GridSize", Int32, grid_size),
+    KV("TimelineZoom", Float64Domain, timeline_zoom),
 };
-constexpr KvEntry kMetadata[] = {
-    KV("TitleUnicode", Str, title_unicode),
-    KV("Title", Str, title),
-    KV("ArtistUnicode", Str, artist_unicode),
-    KV("Artist", Str, artist),
-    KV("Creator", Str, creator),
-    KV("Version", Str, version),
-    KV("Source", Str, source),
-    KV("Tags", Str, tags),
-    KV("BeatmapSetID", I64, beatmap_set_id),
-    KV("BeatmapID", I64, beatmap_id),
+constexpr MetadataField kMetadata[] = {
+    KV("TitleUnicode", Text, title_unicode),
+    KV("Title", Text, title),
+    KV("ArtistUnicode", Text, artist_unicode),
+    KV("Artist", Text, artist),
+    KV("Creator", Text, creator),
+    KV("Version", Text, version),
+    KV("Source", Text, source),
+    KV("Tags", Text, tags),
+    KV("BeatmapSetID", Int64, beatmap_set_id),
+    KV("BeatmapID", Int64, beatmap_id),
 };
-constexpr KvEntry kDifficulty[] = {
-    KV("HPDrainRate", F32, hp),
-    KV("CircleSize", F32, cs),
-    KV("OverallDifficulty", F32, od),
-    KV("ApproachRate", F32, ar),
-    KV("SliderMultiplier", F64, slider_multiplier),
-    KV("SliderTickRate", F64, slider_tick_rate),
+constexpr MetadataField kDifficulty[] = {
+    KV("HPDrainRate", Float32Domain, hp),
+    KV("CircleSize", Float32Domain, cs),
+    KV("OverallDifficulty", Float32Domain, od),
+    KV("ApproachRate", Float32Domain, ar),
+    KV("SliderMultiplier", Float64Domain, slider_multiplier),
+    KV("SliderTickRate", Float64Domain, slider_tick_rate),
 };
 #undef KV
 
@@ -99,56 +129,65 @@ inline bool parse_legacy_enum(std::string_view value, const std::string_view (&n
     return false;
 }
 
-// Returns true exactly when an ApproachRate line was consumed.
+// Identifies the member actually assigned, without giving the generic parser
+// knowledge of difficulty defaults. An ignored/rejected line assigns nothing.
+struct FieldAssignment {
+    const void* destination = nullptr;
+
+    template <typename T>
+    bool assigned_to(const T& field) const { return destination == &field; }
+};
+
 // Floating fallback is selected at compile time by the caller.
 template <auto ParseDouble, size_t N>
-inline bool parse_kv_line(BeatmapHeader& bm, const KvEntry (&table)[N],
-                          const char* p, size_t len, uint32_t* malformed = nullptr) {
+inline FieldAssignment parse_kv_line(
+    BeatmapHeader& bm, const MetadataField (&table)[N], const char* p, size_t len,
+    uint32_t* malformed = nullptr) {
     const uint32_t key = load_u32_le(p);
     for (size_t i = 0; i < N; ++i) {
-        const KvEntry& e = table[i];
-        if (e.key != key) continue;
-        if (len <= e.key_len || memcmp(p, e.name, e.key_len) != 0) continue;
-        size_t off = e.key_len;
+        const MetadataField& e = table[i];
+        if (e.key_prefix != key) continue;
+        if (len <= e.key_length || memcmp(p, e.name, e.key_length) != 0) continue;
+        size_t off = e.key_length;
         while (off < len && (p[off] == ' ' || p[off] == '\t')) ++off;
         if (off == len || p[off] != ':') continue;
         ++off;
         if (off < len && p[off] == ' ') ++off;
         const std::string_view v(p + off, len - off);
-        auto invalid = [&] { if (malformed) ++*malformed; return false; };
+        auto invalid = [&] { if (malformed) ++*malformed; return FieldAssignment{}; };
         auto complete = [&](const char* q) {
             if (q == v.data()) return false;
             const char* end = v.data() + v.size();
             while (q < end && (*q == ' ' || *q == '\t')) ++q;
             return q == end;
         };
-        char* f = reinterpret_cast<char*>(&bm) + e.off;
-        switch (e.type) {
-            case KT::Str: *reinterpret_cast<std::string_view*>(f) = v; break;
-            case KT::Countdown:
-            case KT::SampleSet: {
+        char* f = reinterpret_cast<char*>(&bm) + e.offset;
+        switch (e.kind) {
+            case MetadataKind::Text: *reinterpret_cast<std::string_view*>(f) = v; break;
+            case MetadataKind::Countdown:
+            case MetadataKind::SampleSet: {
                 constexpr std::string_view countdown[] = {"None", "Normal", "HalfSpeed", "DoubleSpeed"};
                 constexpr std::string_view samples[] = {"None", "Normal", "Soft", "Drum"};
                 int32_t value;
-                if (!parse_legacy_enum(v, e.type == KT::Countdown ? countdown : samples, value)) return invalid();
-                if (e.type == KT::Countdown) *reinterpret_cast<int32_t*>(f) = value;
+                if (!parse_legacy_enum(v, e.kind == MetadataKind::Countdown ? countdown : samples, value)) return invalid();
+                if (e.kind == MetadataKind::Countdown) *reinterpret_cast<int32_t*>(f) = value;
                 else *reinterpret_cast<std::string_view*>(f) = v;
                 break;
             }
-            case KT::I32:
-            case KT::Mode: {
+            case MetadataKind::Int32:
+            case MetadataKind::Mode: {
                 int64_t value;
                 const char* q = parse_osu_int(v.data(), v.data() + v.size(), value);
-                if (!complete(q) || (e.type == KT::Mode && (value < 0 || value > 3))) return invalid();
+                if (!complete(q) || (e.kind == MetadataKind::Mode && (value < 0 || value > 3))) return invalid();
                 *reinterpret_cast<int32_t*>(f) = static_cast<int32_t>(value);
                 break;
             }
-            case KT::F32:
-            case KT::F64: {
+            case MetadataKind::Float32Domain:
+            case MetadataKind::Float64Domain: {
                 double value;
                 const char* q = ParseDouble(v.data(), v.data() + v.size(), value);
                 if (!complete(q)) return invalid();
-                if (e.type == KT::F32) {
+                if (e.kind == MetadataKind::Float32Domain) {
                     // Preserve the raw double, but test the official float domain.
                     // Only large boundary values need a second conversion.
                     if (value < -2147483520.0 || value > 2147483520.0) {
@@ -159,23 +198,23 @@ inline bool parse_kv_line(BeatmapHeader& bm, const KvEntry (&table)[N],
                 *reinterpret_cast<double*>(f) = value;
                 break;
             }
-            case KT::Bool: {
+            case MetadataKind::IntegerBoolean: {
                 int64_t value;
                 if (!complete(parse_osu_int(v.data(), v.data() + v.size(), value))) return invalid();
                 *reinterpret_cast<bool*>(f) = value == 1;
                 break;
             }
-            case KT::RawBool: *reinterpret_cast<bool*>(f) = !v.empty() && v[0] == '1'; break;
-            case KT::I64: {
+            case MetadataKind::LeadingOneBoolean: *reinterpret_cast<bool*>(f) = !v.empty() && v[0] == '1'; break;
+            case MetadataKind::Int64: {
                 int64_t id;
                 if (!complete(parse_osu_int(v.data(), v.data() + v.size(), id))) return invalid();
                 *reinterpret_cast<int64_t*>(f) = id;
                 break;
             }
         }
-        return e.off == __builtin_offsetof(BeatmapHeader, ar);
+        return {f};
     }
-    return false;
+    return {};
 }
 
 }  // namespace fosu::internal

@@ -189,8 +189,10 @@ using fosu::internal::kEditor;
 using fosu::internal::kMetadata;
 using fosu::internal::kDifficulty;
 template <size_t N>
-inline void parse_kv_line(const fosu::internal::KvEntry (&table)[N], const char* p, size_t len) {
-    S.ar_specified |= fosu::internal::parse_kv_line<parse_double>(S, table, p, len, &S.malformed_lines);
+inline void parse_kv_line(const fosu::internal::MetadataField (&table)[N], const char* p, size_t len) {
+    const auto assignment = fosu::internal::parse_kv_line<parse_double>(
+        S, table, p, len, &S.malformed_lines);
+    S.ar_specified |= assignment.assigned_to(S.ar);
 }
 
 inline sv strip_quotes(sv v) {

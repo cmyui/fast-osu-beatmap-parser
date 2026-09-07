@@ -18,7 +18,9 @@ inline void parse_metadata_line(Map& bm, const char* p, size_t len) {
 }
 template <typename Map>
 inline void parse_difficulty_line(Map& bm, const char* p, size_t len, bool& ar_specified) {
-    ar_specified |= parse_kv_line<parse_double>(bm, kDifficulty, p, len, &bm.stats.malformed_lines);
+    const auto assignment = parse_kv_line<parse_double>(
+        bm, kDifficulty, p, len, &bm.stats.malformed_lines);
+    ar_specified |= assignment.assigned_to(bm.ar);
 }
 
 template <typename Map>
