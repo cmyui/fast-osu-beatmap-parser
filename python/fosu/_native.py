@@ -1,13 +1,10 @@
-"""Select instructions once at import; parser calls need no runtime dispatch."""
+"""Load the native library and its process-local backend selection."""
 
-from os import environ
+from ._core import ffi as ffi
+from ._core import lib as lib
 
-from ._native_scalar import ffi as ffi
-from ._native_scalar import lib as lib
-
-SIMD_ENABLED = False
-if environ.get("FOSU_FORCE_SCALAR") != "1" and lib.fosu_python_has_avx2():
-    from ._native_avx2 import ffi as ffi
-    from ._native_avx2 import lib as lib
-
-    SIMD_ENABLED = True
+_name = lib.fosu_backend_name()
+if _name == ffi.NULL:
+    raise ImportError("FOSU_BACKEND requests an unknown or unavailable backend (use auto, scalar or avx2)")
+backend = ffi.string(_name).decode("ascii")
+SIMD_ENABLED = backend != "scalar"

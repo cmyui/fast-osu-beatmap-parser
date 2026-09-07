@@ -57,30 +57,37 @@ On the target above, 2026-09-07, with resident input and one pinned core:
 |---|---:|
 | C++ fresh result, resident bytes | 18.44–18.94 µs |
 | C++ reused result | 18.03–18.42 µs |
-| C ABI fresh handle, input copy included | 20.64–20.96 µs |
-| C ABI reused handle | 19.59–19.68 µs |
+| C ABI fresh handle, input copy included | 19.85–20.10 µs |
+| C ABI reused handle | 19.47–19.55 µs |
 | Complete one-shot process | 163.12 µs |
 
 Library ranges are two full-corpus comparisons with reversed starting order,
-15 repetitions per map. The one-shot measurement uses three repetitions per map.
-The library uses GCC `-O3 -march=x86-64-v3 -mtune=znver4`; the process uses its
+15 repetitions per map for C++ and seven for the C ABI. The one-shot measurement
+uses three repetitions per map. The AVX2 kernels use GCC
+`-O3 -march=x86-64-v3 -mtune=znver4`, with baseline code selecting the C ABI
+backend once per loaded library; the process uses its
 GCC `-O2 -march=znver4` build. No PGO is applied. Differences between runs are
 one reason to retain all-run statistics and compare variants together.
 
-Python 3.11.15, release wheels with the private C++ runtime, full 10k corpus
+Python 3.12.3, builds with the private C++ runtime, full 10k corpus
 and seven repetitions per map in both starting orders:
 
 | Python boundary | Mean per-map minimum |
 |---|---:|
-| Warm `parse(bytes)` and result release | 24.70–25.90 µs |
-| Warm `parse_file(path)` and result release | 32.00–33.65 µs |
+| Warm `parse(bytes)` and result release | 23.52–23.63 µs |
+| Warm `parse_file(path)` and result release | 29.53–29.54 µs |
 
-First-use measurements select 500 evenly spaced maps and launch a fresh
+Python first-use measurements select 100 evenly spaced maps and launch a fresh
 CPython process three times per map/variant, with identical dependencies and
 precompiled bytecode. The first `parse_file`/result-release interval averages
-138.48 µs of per-file minima; import averages 5.26 ms and the complete Python
-process 15.82 ms. These are separate timed boundaries, with separate minima;
+129.42 µs of per-file minima; import averages 4.77 ms and the complete Python
+process 15.37 ms. These are separate timed boundaries, with separate minima;
 they should not be added together.
+
+First C ABI use in a fresh C process averages 187.96 µs across 1,000 evenly
+spaced maps, three repetitions each. This includes `dlopen`, CPU selection,
+file I/O, parsing, view acquisition, destruction and `dlclose`, excluding the
+C process's startup. CPU detection is paid once per library load, not once per map.
 
 ## Build and verify
 

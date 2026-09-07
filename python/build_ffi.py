@@ -18,29 +18,12 @@ header = "\n".join(
 header = header.replace("FOSU_API ", "")
 
 
-def builder(variant: str) -> FFI:
+def builder() -> FFI:
     ffi = FFI()
-    ffi.cdef(header + "\nint fosu_python_has_avx2(void);\n")
-    ffi.set_source(
-        f"fosu._native_{variant}",
-        """#include <fosu/c_api.h>
-extern "C" int fosu_python_has_avx2(void) {
-#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
-    __builtin_cpu_init();
-    return __builtin_cpu_supports("avx2") &&
-           __builtin_cpu_supports("bmi") && __builtin_cpu_supports("bmi2") &&
-           __builtin_cpu_supports("popcnt");
-#else
-    return 0;
-#endif
-}
-""",
-    )
+    ffi.cdef(header)
+    ffi.set_source("fosu._core", "#include <fosu/c_api.h>\n")
     return ffi
 
 
 if __name__ == "__main__":
-    variant, output = sys.argv[1:]
-    if variant not in ("scalar", "avx2"):
-        raise ValueError("unknown native variant")
-    builder(variant).emit_c_code(output)
+    builder().emit_c_code(sys.argv[1])

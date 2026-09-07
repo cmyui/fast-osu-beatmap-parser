@@ -17,6 +17,7 @@ else:
 
 _T = TypeVar("_T", covariant=True)
 NO_SLIDER: int
+backend: str
 
 class Sections(IntFlag):
     GENERAL = 2

@@ -156,6 +156,12 @@ enum fosu_sections {
 extern "C" {
 #endif
 FOSU_API uint32_t fosu_abi_version(void);
+
+// Selection is fixed on first use for this loaded library. FOSU_BACKEND may be
+// auto, scalar or avx2. NULL means the requested backend is unknown/unavailable;
+// fosu_new then returns NULL. Availability includes CPU and OS support.
+FOSU_API const char* fosu_backend_name(void);
+FOSU_API int fosu_backend_available(const char* name);
 FOSU_API fosu_handle* fosu_new(void);
 FOSU_API void fosu_free(fosu_handle* handle);
 // Copies data into owned, padded storage. Capacity is reused across calls.

@@ -168,12 +168,15 @@ private:
 struct SpareArena {
 private:
     inline static constinit std::atomic<Arena*> spare_{nullptr};
+#ifndef FOSU_MANAGED_ARENA_CLEANUP
     struct Cleanup {
         ~Cleanup() { Arena::destroy(spare_.exchange(nullptr, std::memory_order_relaxed)); }
     };
     static Cleanup cleanup_;
+#endif
 
 public:
+    static void clear() { Arena::destroy(spare_.exchange(nullptr, std::memory_order_relaxed)); }
     static constexpr size_t kMaxSpareBytes = 8u << 20;
     static std::atomic<Arena*>& slot() {
         return spare_;
@@ -201,6 +204,8 @@ public:
 // the take/give paths. Keep the atomic independent of cleanup so a host's
 // later exit callback can still parse through the loaded library. It sees an
 // empty cache and may leave one final spare for the OS to release at exit.
+#ifndef FOSU_MANAGED_ARENA_CLEANUP
 inline constinit SpareArena::Cleanup SpareArena::cleanup_{};
+#endif
 
 }  // namespace fosu::internal
