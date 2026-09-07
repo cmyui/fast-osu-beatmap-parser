@@ -5,6 +5,9 @@
 //   proc_bench ref    <bin> <dir> <ref.tsv>        write name/hash/bytes per file
 //   proc_bench verify <bin> <dir> <ref.tsv>        compare stdout hashes
 //   proc_bench time   <bin> <dir> [reps] [limit]   stdout -> /dev/null, best-of-reps
+//   proc_bench compare <dir> <reps> <limit|0> <bin1> <bin2> ...
+//                       every (file, rep) runs all binaries in rotating
+//                       order, so VM drift hits them equally
 //
 // Run under taskset; children inherit the affinity.
 #define _GNU_SOURCE
@@ -67,7 +70,8 @@ static double run_once(const char* bin, const char* path, uint64_t* hash, size_t
     } else {
         posix_spawn_file_actions_addopen(&fa, 1, "/dev/null", O_WRONLY, 0);
     }
-    char* argv[] = {(char*)bin, (char*)path, NULL};
+    // PROC_BENCH_ARG, if set, is passed as a third argument (e.g. "--dump").
+    char* argv[] = {(char*)bin, (char*)path, getenv("PROC_BENCH_ARG"), NULL};
     pid_t pid;
     const double t0 = now_us();
     const int rc = posix_spawn(&pid, bin, &fa, NULL, argv, environ);
@@ -95,6 +99,7 @@ static int cmp_d(const void* a, const void* b) { double x = *(const double*)a, y
 int main(int argc, char** argv) {
     if (argc < 4) { fprintf(stderr, "usage: see header\n"); return 2; }
     const char* mode = argv[1]; const char* bin = argv[2]; const char* dir = argv[3];
+    if (!strcmp(mode, "compare")) dir = argv[2];
     size_t n; char** names = list_osu(dir, &n);
     char path[4096];
 
@@ -127,6 +132,41 @@ int main(int argc, char** argv) {
         return bad || failed ? 1 : 0;
     }
 
+    if (!strcmp(mode, "compare")) {
+        if (argc < 6) { fprintf(stderr, "compare <dir> <reps> <limit|0> <bin>...\n"); return 2; }
+        const int reps = atoi(argv[3]);
+        size_t limit = (size_t)atol(argv[4]);
+        const int nb = argc - 5;
+        char** bins = argv + 5;
+        const size_t total = n;
+        if (limit && limit < n) n = limit;  // evenly spaced sample over the sorted corpus
+        double* best = malloc((size_t)nb * n * sizeof *best);
+        double* sum_all = calloc((size_t)nb, sizeof *sum_all);
+        double* flt = calloc((size_t)nb, sizeof *flt);
+        for (size_t i = 0; i < n; ++i) {
+            const char* name = names[i * total / n];
+            snprintf(path, sizeof path, "%s/%s", dir, name);
+            for (int b = 0; b < nb; ++b) best[b * n + i] = 1e18;
+            for (int r = 0; r < reps; ++r)
+                for (int j = 0; j < nb; ++j) {
+                    const int b = (int)((j + r + (int)i) % nb);
+                    struct rusage ru; int st;
+                    const double w = run_once(bins[b], path, NULL, NULL, &ru, &st);
+                    if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) { fprintf(stderr, "FAILED exit: %s %s\n", bins[b], name); return 1; }
+                    sum_all[b] += w;
+                    if (w < best[b * n + i]) { best[b * n + i] = w; }
+                    if (r == reps - 1) flt[b] += ru.ru_minflt;
+                }
+        }
+        printf("%zu files x %d reps, rotating order; per binary: mean of per-file minima | p50 p90 p99 of minima | mean of all runs | minflt\n", n, reps);
+        for (int b = 0; b < nb; ++b) {
+            double* v = best + (size_t)b * n; double sum = 0;
+            for (size_t i = 0; i < n; ++i) sum += v[i];
+            qsort(v, n, sizeof *v, cmp_d);
+            printf("  %-40s %8.1f us | %8.1f %8.1f %8.1f | %8.1f us | %5.1f\n", bins[b], sum / n, v[n / 2], v[n * 9 / 10], v[n * 99 / 100], sum_all[b] / (n * reps), flt[b] / n);
+        }
+        return 0;
+    }
     if (strcmp(mode, "time")) { fprintf(stderr, "unknown mode\n"); return 2; }
     const int reps = argc > 4 ? atoi(argv[4]) : 3;
     const size_t limit = argc > 5 ? (size_t)atol(argv[5]) : n;

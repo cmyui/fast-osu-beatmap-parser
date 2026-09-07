@@ -2,10 +2,13 @@
 // Canonical binary dump of a parsed Beatmap: the "output" a one-shot
 // parse process must produce byte-for-byte. Little-endian fixed-width
 // fields, strings by value (u32 length + bytes), doubles as raw bit
-// patterns, so equality means bit-identical parsing. Implementation
-// counters (fast/slow path lines) are excluded; semantic ones are kept.
-// Derived indices (Slider::point_begin) are omitted; a slider's points
-// follow it inline, so the format can be streamed while parsing.
+// patterns, so equality means bit-identical parsing, plus the parser's
+// own path counters and the pool points no slider references (left
+// behind by slider lines that failed after their point loop), so nothing
+// the library's Beatmap holds is outside the comparison. Only derived
+// indices (Slider::point_begin, the running slider index's redundancy)
+// are not stored as such: a slider's points follow it inline, so the
+// format can be streamed while parsing.
 //
 //   "FOSUDMP3"
 //   hit objects, in file order, each:
@@ -34,12 +37,16 @@
 //     [Colours]   u32 n; u32 rgb x n
 //     [TimingPoints] u32 n; {f64 time, beat_length; i32 meter, sample_set,
 //                 sample_index, volume; u8 uninherited; u32 effects} x n
-//     stats       u32 malformed_lines, storyboard_lines
+//     stats       u32 malformed_lines, storyboard_lines, fast_path_lines,
+//                 slow_path_lines
+//     orphans     u32 n; {i32 x, y} x n  (pool points no slider covers,
+//                 in pool order)
 
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <fosu/beatmap.hpp>
 
@@ -151,6 +158,19 @@ inline void dump(const fosu::Beatmap& bm, std::string& out) {
     }
     o.u32(bm.stats.malformed_lines);
     o.u32(bm.stats.storyboard_lines);
+    o.u32(bm.stats.fast_path_lines);
+    o.u32(bm.stats.slow_path_lines);
+    std::vector<char> covered(bm.slider_points.size(), 0);
+    for (const auto& s : bm.sliders)
+        for (uint32_t i = 0; i < s.point_count; ++i) covered[s.point_begin + i] = 1;
+    uint32_t n_orphans = 0;
+    for (char c : covered) n_orphans += !c;
+    o.u32(n_orphans);
+    for (size_t i = 0; i < covered.size(); ++i)
+        if (!covered[i]) {
+            o.i32(bm.slider_points[i].x);
+            o.i32(bm.slider_points[i].y);
+        }
 }
 
 }  // namespace fosu_dump

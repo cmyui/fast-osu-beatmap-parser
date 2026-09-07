@@ -326,8 +326,8 @@ struct State {
     i64 beatmap_id = -1, beatmap_set_id = -1;
     double hp = 5, cs = 5, od = 5, ar = 5, slider_multiplier = 1.4, slider_tick_rate = 1;
     sv background, video;
-    u32 malformed_lines = 0, storyboard_lines = 0;
-    u32 n_hitobjects = 0, n_sliders = 0, n_points = 0;
+    u32 malformed_lines = 0, storyboard_lines = 0, fast_path_lines = 0, slow_path_lines = 0;
+    u32 n_hitobjects = 0, n_sliders = 0, n_points = 0, n_orphans = 0;
     bool ar_specified = false;
     // timing point blocks (one per [TimingPoints] section; real files have one)
     struct Block { const char* p; u32 n; } tp_blocks[8] = {};
@@ -339,7 +339,7 @@ struct Ctx {
     char* out_begin;  // start of the output stream area
     char* out;        // cursor
     char* out_end;    // end of the arena
-    char* spill;      // overflow arrays (arena tail)
+    char* spill;      // overflow arrays and orphaned points (arena tail)
     bool stream_started;  // a hit object record has been written
     State st;
     u32 n_breaks, n_colours;
@@ -350,7 +350,8 @@ struct Ctx {
 // Overflow storage for absurd break/colour counts sits at the far end of
 // the arena (address space only; never touched on real maps), so the
 // binary has no .bss and exec creates no extra VMA for it.
-constexpr size_t kSpillBytes = (1u << 15) * sizeof(Break) + (1u << 12) * sizeof(u32);
+constexpr u32 kOrphanCap = 1u << 20;  // pool points left by failed slider lines
+constexpr size_t kSpillBytes = (1u << 15) * sizeof(Break) + (1u << 12) * sizeof(u32) + kOrphanCap * 8;
 inline Break& break_at(u32 i) {
     return i < kBreaksInline ? g->breaks[i] : reinterpret_cast<Break*>(g->spill)[i - kBreaksInline];
 }
@@ -845,6 +846,14 @@ inline const char* parse_slider_length(const char* p, double& out) {
 
 struct Pt { i32 x, y; };
 
+// The library leaves a failed slider line's points in its pool once the
+// point loop has finished; they are part of the output (trailer).
+inline void keep_orphans(const Pt* p, u32 n) {
+    if (S.n_orphans + n > kOrphanCap) rt::exit(6);
+    memcpy(g->spill + (1u << 15) * sizeof(Break) + (1u << 12) * sizeof(u32) + size_t(S.n_orphans) * 8, p, size_t(n) * 8);
+    S.n_orphans += n;
+}
+
 // Slider block: u32 point_count, points, i32 slides, f64 length,
 // u8 curve_type, str edge_sounds, str edge_sets. Returns false to reject
 // the line (the caller rewinds the whole record). `hs` receives the
@@ -883,17 +892,17 @@ bool parse_slider_params(const char* p, const char* end, sv& hs) {
     g_out = reinterpret_cast<char*>(w);
     // From here on the library leaves the points in its pool on failure.
     S.n_points += npts;
-    if (p >= end || *p != ',') return false;
+    if (p >= end || *p != ',') { keep_orphans(w0, npts); return false; }
     ++p;
     const u32 srun = digit_run8(p);
-    if (srun - 1 > 6) return false;
+    if (srun - 1 > 6) { keep_orphans(w0, npts); return false; }
     const auto slides = static_cast<i32>(swar_parse_u64(p, srun));
     p += srun;
-    if (p >= end || *p != ',') return false;
+    if (p >= end || *p != ',') { keep_orphans(w0, npts); return false; }
     double length;
     const char* q = parse_slider_length(p + 1, length);
     if (!q) q = parse_double(p + 1, end, length);
-    if (q == p + 1) return false;
+    if (q == p + 1) { keep_orphans(w0, npts); return false; }
     p = q;
     sv edge_sounds{}, edge_sets{};
     hs = {};
@@ -1002,13 +1011,19 @@ const char* parse_hitobjects_section(const char* p, const char* file_end) {
         g_out += sizeof(HO);
         bool ok;
         if (next >= 0) {
+            ++S.fast_path_lines;
             ok = finish_hitobject(h, p + next, line_end);
         } else {
             h.end_time = 0;
             h.slider = kNoSlider;
             h.hs_len = 0;
             const int sn = scalar_parse_prefix(p, len, h);
-            ok = sn >= 0 && finish_hitobject(h, p + sn, line_end);
+            if (sn >= 0) {
+                ++S.slow_path_lines;
+                ok = finish_hitobject(h, p + sn, line_end);
+            } else {
+                ok = false;
+            }
         }
         if (ok) {
             ++S.n_hitobjects;
@@ -1140,7 +1155,7 @@ void emit_trailer() {
                         S.audio_filename.n + S.sample_set.n + S.overlay_position.n + S.skin_preference.n + S.bookmarks.n +
                         S.title.n + S.title_unicode.n + S.artist.n + S.artist_unicode.n + S.creator.n + S.version.n +
                         S.source.n + S.tags.n + S.background.n + S.video.n + 4 + 8 * g->n_breaks + 4 + 4 * g->n_colours + 4 +
-                        tp_bytes + 8 + 22 * 4;
+                        tp_bytes + 8 + 22 * 4 + 12 + size_t(S.n_orphans) * 8;
     ensure(need);
     put_raw("TRLR", 4);
     put_u32(S.n_hitobjects);
@@ -1196,6 +1211,10 @@ void emit_trailer() {
     for (u32 i = 0; i < S.n_tp_blocks; ++i) put_raw(S.tp_blocks[i].p, S.tp_blocks[i].n * sizeof(TPRec));
     put_u32(S.malformed_lines);
     put_u32(S.storyboard_lines);
+    put_u32(S.fast_path_lines);
+    put_u32(S.slow_path_lines);
+    put_u32(S.n_orphans);
+    put_raw(g->spill + (1u << 15) * sizeof(Break) + (1u << 12) * sizeof(u32), size_t(S.n_orphans) * 8);
 }
 
 // Arena placement. With multi-size THP in madvise mode, an anonymous

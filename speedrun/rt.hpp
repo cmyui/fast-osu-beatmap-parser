@@ -106,8 +106,10 @@ void* memcpy(void* d, const void* s, size_t n) {
 }
 void* memmove(void* d, const void* s, size_t n) {
     if (d <= s || (const char*)d >= (const char*)s + n) return memcpy(d, s, n);
-    char* dd = (char*)d + n;
-    const char* ss = (const char*)s + n;
+    // Backward copy: with DF set, rep movsb starts at the addresses given
+    // and decrements, so they must point at the LAST byte, not one past it.
+    char* dd = (char*)d + n - 1;
+    const char* ss = (const char*)s + n - 1;
     __asm__ volatile("std\n\trep movsb\n\tcld" : "+D"(dd), "+S"(ss), "+c"(n) : : "memory");
     return d;
 }

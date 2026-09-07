@@ -17,12 +17,16 @@ taskset -c 5 build/proc_bench time   build/speedrun <dir> 3         # spawn-to-e
 
 `proc_bench` spawns one process per (file, rep) with `posix_spawn`, times
 `posix_spawn` -> `wait4`, sends stdout to `/dev/null` while timing and
-hashes it while verifying. Children inherit the driver's CPU affinity.
+hashes it while verifying. `compare <dir> <reps> <limit|0> <bin>...` runs
+several binaries in rotating order within every (file, rep), so drift on
+a shared VM lands on all of them equally. Children inherit the driver's
+CPU affinity.
 
 ## What "the same output" means
 
 `dump.hpp` defines a canonical binary serialization of a parsed
-`Beatmap`: every field the library exposes, strings by value, doubles as
+`Beatmap`: every parsed value the library exposes plus its path counters
+and the pool points no slider references, strings by value, doubles as
 raw bit patterns, in a fixed order. `run1.cpp` is the obvious program
 written against the library (`read_file_padded`, `parse`, dump, `write`)
 and produces the reference. `speedrun` must produce the identical byte
