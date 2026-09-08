@@ -31,6 +31,8 @@ fosu::Beatmap& map = *parsed.value();
 
 ## Performance
 
+### Python APIs
+
 FOSU's AVX2 Python interface averages **41 µs per map** from resident bytes on our
 Hetzner Zen 4 VM. We compared public parser APIs on the fixed **10,000-map
 corpus**, using the same **9,758 mutually accepted maps** for every row below.
@@ -42,17 +44,38 @@ Lower is better.
 | FOSU Python scalar | 79.1 | 88.0 |
 | rosu-pp-py 4.0.2 | 299.4 | 312.0 |
 | pyttanko 2.1.0 | 2,501.5 | 2,501.2 |
-| OsuPyParser 1.0.7 | — | 5,070.8 |
+| OsuPyParser 1.0.7 | Unsupported (file-only API) | 5,070.8 |
 | slider 0.8.4 | 14,091.0 | 14,119.7 |
 
 Two complete batch passes on one pinned CPU, CPython 3.12; imports and startup
 excluded. File inputs are in the OS page cache. FOSU decodes native records
-with lazy Python wrappers; competitors differ in output and may also build
-slider geometry or derived statistics. No PP/difficulty calculation is requested.
-These are practical API costs, not identical-work or full-materialization claims.
+eagerly but creates Python wrappers on access; these timings do not include
+materializing every record into Python objects.
 
-See the [full comparison](docs/comparison.md) for C++ scalar/AVX2, Rust, C# and
-JavaScript results, Python object traversal, per-pass variation, failure counts,
+### C++ and other languages
+
+Resident-input API latency on the same Hetzner host, using **9,986 common maps**
+for every row. These are means of two interleaved per-call passes, **not directly
+comparable to the Python batch measurements above**. Lower is better.
+
+| Library / interface | Mean µs/map |
+|---|---:|
+| FOSU C++ AVX2 | 42.9 |
+| FOSU C++ scalar | 84.0 |
+| rosu-pp (Rust) | 332.9 |
+| Coosu (C#) | 619.6 |
+| rosu-map (Rust) | 680.0 |
+| OsuParsers (C#) | 851.0 |
+| Official osu!lazer decoder (C#) | 2,839.7 |
+| osu-parsers (TypeScript/JS) | 2,842.5 |
+| osu-parser (JavaScript) | 54,387.8 |
+
+Parsers differ in output and may also build slider geometry, apply gameplay
+defaults, or derive statistics. No PP/difficulty calculation is requested in either comparison.
+These are practical API costs, not identical-work claims.
+
+See the [full comparison](docs/comparison.md) for versions, exact APIs,
+Python object traversal, per-pass variation, failure counts,
 and the [reproducible harness](bench/comparison/README.md). The older
 [FOSU-only hot-loop benchmarks](docs/performance.md) use per-map minima and are
 not mixed into this comparison.
