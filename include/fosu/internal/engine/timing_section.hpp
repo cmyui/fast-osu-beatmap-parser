@@ -8,9 +8,8 @@ namespace fosu::internal {
 
 inline void parse_timing_point_line(
     Beatmap& beatmap, size_t& point_count, const char* p, size_t length) {
-    TimingPoint point{};
-    if (parse_timing_fields(p, p + length, point))
-        beatmap.timing_points[point_count++] = point;
+    if (const auto point = parse_timing_point(p, p + length))
+        beatmap.timing_points[point_count++] = *point;
     else
         ++beatmap.stats.malformed_lines;
 }
@@ -47,8 +46,6 @@ inline const char* parse_timing_points_section(
         const char* line_end =
             newline - (newline > p && newline[-1] == '\r');
         const auto length = static_cast<size_t>(line_end - p);
-        TimingPoint point{};
-        bool accepted = false;
         const uint64_t line_mask = length >= 64 ? ~0ull : ((1ull << length) - 1);
         const uint64_t commas =
             (equal_mask32(first, comma_value) |
@@ -60,14 +57,12 @@ inline const char* parse_timing_points_section(
               (nondigit_mask32(first, bias, threshold) |
                static_cast<uint64_t>(nondigit_mask32(second, bias, threshold)) << 32) &
               line_mask;
-          accepted = fast_parse_timing_point_masked(
-              commas, nondigits, p, length, point);
-        }
-
-        if (accepted) {
-            beatmap.timing_points[point_count++] = point;
-            p = next_line;
-            continue;
+          if (const auto point = try_parse_timing_point_fast_masked(
+                  commas, nondigits, p, length)) {
+              beatmap.timing_points[point_count++] = *point;
+              p = next_line;
+              continue;
+          }
         }
 
         const char c = *p;
@@ -77,12 +72,11 @@ inline const char* parse_timing_points_section(
         }
         if (c == '[') break;
         if (!ignored_line(p, line_end)) {
-          TimingPoint fallback{};
-          const bool valid = length <= 64
-                                 ? parse_timing_fields<true>(p, line_end, fallback, commas)
-                                 : parse_timing_fields(p, line_end, fallback);
-          if (valid)
-            beatmap.timing_points[point_count++] = fallback;
+          const auto point = length <= 64
+              ? parse_timing_point<true>(p, line_end, commas)
+              : parse_timing_point(p, line_end);
+          if (point)
+            beatmap.timing_points[point_count++] = *point;
           else
             ++malformed;
         }

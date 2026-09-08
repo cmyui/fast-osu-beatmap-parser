@@ -182,18 +182,19 @@ static void test_fuzz_timing_point() {
         }
         memset(buf + len, 0, sizeof(buf) - (size_t)len);
 
-        fosu::TimingPoint tp{};
         const auto a = fosu::internal::load32(buf);
         const auto b =
             fosu::internal::load32(buf + 32);
-        if (!fosu::internal::fast_parse_timing_point(a, b, buf, (size_t)len, tp))
+        const auto point = fosu::internal::try_parse_timing_point_fast(
+            a, b, buf, (size_t)len);
+        if (!point)
             continue;
         ++accepted;
-        fosu::TimingPoint reference{};
-        CHECK(fosu::internal::parse_timing_fields(
-            buf, buf + len, reference));
-        {
-            const fosu::TimingPoint& w = reference;
+        const auto reference = fosu::internal::parse_timing_point(buf, buf + len);
+        CHECK(reference.has_value());
+        if (reference) {
+            const auto& tp = *point;
+            const auto& w = *reference;
             CHECK(memcmp(&tp.time, &w.time, 8) == 0);
             CHECK(memcmp(&tp.beat_length, &w.beat_length, 8) == 0);
             CHECK_EQ(tp.meter, w.meter);

@@ -444,13 +444,14 @@ static void test_masked_timing_fallback() {
       for (size_t i = 0; i < text.size(); ++i)
         if (p[i] == ',')
           commas |= 1ull << i;
-      fosu::TimingPoint scalar{}, masked{};
-      const bool expected =
-          fosu::internal::parse_timing_fields(p, p + text.size(), scalar);
-      const bool actual =
-          fosu::internal::parse_timing_fields<true>(p, p + text.size(), masked, commas);
-      CHECK_EQ(actual, expected);
-      if (actual) {
+      const auto expected =
+          fosu::internal::parse_timing_point(p, p + text.size());
+      const auto actual =
+          fosu::internal::parse_timing_point<true>(p, p + text.size(), commas);
+      CHECK_EQ(actual.has_value(), expected.has_value());
+      if (actual && expected) {
+        const auto& masked = *actual;
+        const auto& scalar = *expected;
         CHECK_EQ(masked.time, scalar.time);
         CHECK(masked.beat_length == scalar.beat_length ||
               (std::isnan(masked.beat_length) && std::isnan(scalar.beat_length)));
