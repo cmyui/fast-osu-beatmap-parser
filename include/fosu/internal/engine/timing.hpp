@@ -5,6 +5,7 @@
 #include <optional>
 #include "../../beatmap.hpp"
 #include "byte_scan.hpp"
+#include "digit_groups.hpp"
 #include "prefix.hpp"
 
 namespace fosu::internal {
@@ -70,6 +71,42 @@ inline std::optional<TimingPoint> parse_timing_point(
   };
 }
 
+#if FOSU_SIMD_X86
+consteval auto make_timing_tail_masks() {
+    std::array<std::array<uint8_t, 16>, 6> masks{};
+    for (int index = 1; index <= 2; ++index)
+    for (int volume = 1; volume <= 3; ++volume) {
+        auto& mask = masks[(index - 1) * 3 + volume - 1];
+        mask.fill(0x80);
+        mask[3] = 0;
+        mask[7] = 2;
+        for (int i = 0; i < index; ++i) mask[12 - index + i] = 4 + i;
+        for (int i = 0; i < volume; ++i) mask[16 - volume + i] = 5 + index + i;
+    }
+    return masks;
+}
+inline constexpr auto kTimingTailMasks = make_timing_tail_masks();
+
+// Already-validated "meter,set,index,volume": one digit each for meter/set,
+// one or two for index, and one to three for volume. Return all four together.
+inline std::array<int32_t, 4> decode_timing_tail(
+    const char* p, uint32_t index_digits, uint32_t volume_digits) {
+    const auto& mask = kTimingTailMasks[(index_digits - 1) * 3 + volume_digits - 1];
+    const auto digits = _mm_shuffle_epi8(
+        _mm_sub_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(p)),
+                     _mm_set1_epi8('0')),
+        _mm_loadu_si128(reinterpret_cast<const __m128i*>(mask.data())));
+    const auto values = _mm_madd_epi16(
+        _mm_maddubs_epi16(digits,
+            _mm_setr_epi8(10, 1, 10, 1, 10, 1, 10, 1,
+                         10, 1, 10, 1, 10, 1, 10, 1)),
+        _mm_setr_epi16(100, 1, 100, 1, 100, 1, 100, 1));
+    std::array<int32_t, 4> fields;
+    _mm_storeu_si128(reinterpret_cast<__m128i*>(fields.data()), values);
+    return fields;
+}
+#endif
+
 #if FOSU_SIMD
 // Common eight-field timing rows: an unsigned integer timestamp, a signed
 // decimal beat length, and small integer tail fields. Validate their spelling
@@ -130,13 +167,24 @@ inline std::optional<TimingPoint> try_parse_timing_point_fast_masked(
         return static_cast<int32_t>(swar_parse_u32(field, digits));
     };
 
+#if FOSU_SIMD_X86
+    const auto chunks = decode_decimal_chunks(
+        magnitude, integer_digits, magnitude + integer_digits + 1,
+        std::min(fraction_digits, 8u));
+    uint64_t mantissa = chunks.integer;
+#else
     uint64_t mantissa = swar_parse_u64(magnitude, integer_digits);
+#endif
     if (fraction_digits) {
         const uint32_t first_digits = std::min(fraction_digits, 8u);
         const uint32_t second_digits = fraction_digits - first_digits;
         const char* fraction = magnitude + integer_digits + 1;
         mantissa = mantissa * kPow10u[first_digits] +
+#if FOSU_SIMD_X86
+                   chunks.fraction;
+#else
                    swar_parse_u64(fraction, first_digits);
+#endif
         if (second_digits)
             mantissa = mantissa * kPow10u[second_digits] +
                        swar_parse_u64(fraction + 8, second_digits);
@@ -152,14 +200,29 @@ inline std::optional<TimingPoint> try_parse_timing_point_fast_masked(
         if (fraction_digits) beat_length /= kPow10[fraction_digits];
         if (negative) beat_length = -beat_length;
     }
+    std::array<int32_t, 4> fields;
+#if FOSU_SIMD_X86
+    if (meter_digits == 1 && sample_set_digits == 1 &&
+        sample_index_digits <= 2 && volume_digits <= 3) {
+        fields = decode_timing_tail(
+            p + beat_length_end + 1, sample_index_digits, volume_digits);
+    } else
+#endif
+    {
+        fields = {
+            parse_small_integer(p + beat_length_end + 1, meter_digits),
+            parse_small_integer(p + meter_end + 1, sample_set_digits),
+            parse_small_integer(p + sample_set_end + 1, sample_index_digits),
+            parse_small_integer(p + sample_index_end + 1, volume_digits),
+        };
+    }
     return TimingPoint{
         .time = static_cast<double>(swar_parse_u64(p, time_end)),
         .beat_length = beat_length,
-        .meter = parse_small_integer(p + beat_length_end + 1, meter_digits),
-        .sample_set = parse_small_integer(p + meter_end + 1, sample_set_digits),
-        .sample_index =
-            parse_small_integer(p + sample_set_end + 1, sample_index_digits),
-        .volume = parse_small_integer(p + sample_index_end + 1, volume_digits),
+        .meter = fields[0],
+        .sample_set = fields[1],
+        .sample_index = fields[2],
+        .volume = fields[3],
         .uninherited = p[volume_end + 1] == '1',
         .effects = static_cast<uint32_t>(
             parse_small_integer(p + uninherited_end + 1, effects_digits)),

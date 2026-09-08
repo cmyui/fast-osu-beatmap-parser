@@ -206,19 +206,23 @@ inline uint32_t comma_mask32(Bytes32 v) { return equal_mask32(v, broadcast_byte<
 
 // TBL directly addresses both 16-byte input registers. No lane permutation
 // is needed, so each prefix shape occupies 32 bytes instead of AVX2's 64.
+// The first shuffle decodes x, y, type and hitSound; the second decodes time.
 struct alignas(32) PrefixShuffle { uint8_t bytes[32]; };
 consteval auto make_prefix_shuffles() {
-    std::array<PrefixShuffle, kNPrefixVariants> out{};
+    std::array<PrefixShuffle, kNPrefixVariants * 2> out{};
     for (int x = 1; x <= 3; ++x)
     for (int y = 1; y <= 3; ++y)
     for (int t = 1; t <= 10; ++t)
-    for (int type = 1; type <= 3; ++type) {
-        auto& m = out[(((x - 1) * 3 + y - 1) * 10 + t - 1) * 3 + type - 1];
+    for (int type = 1; type <= 3; ++type)
+    for (int sound = 1; sound <= 2; ++sound) {
+        auto& m = out[((((x - 1) * 3 + y - 1) * 10 + t - 1) * 3 + type - 1) * 2 + sound - 1];
         for (auto& b : m.bytes) b = 255;
         for (int i = 0; i < x; ++i) m.bytes[4 - x + i] = i;
         for (int i = 0; i < y; ++i) m.bytes[8 - y + i] = x + 1 + i;
         for (int i = 0; i < type; ++i) m.bytes[12 - type + i] = x + y + t + 3 + i;
         for (int i = 0; i < t; ++i) m.bytes[32 - t + i] = x + y + 2 + i;
+        for (int i = 0; i < sound; ++i)
+            m.bytes[16 - sound + i] = x + y + t + type + 4 + i;
     }
     return out;
 }
@@ -236,7 +240,7 @@ inline constexpr auto kPrefixShuffles = make_prefix_shuffles();
 struct HitObjectPrefixShape {
     uint32_t index;
     uint32_t time_span;  // p2 - p1: time digits + 1
-    uint32_t p3, p4;
+    uint32_t p4;
     bool ok;
 };
 
@@ -271,11 +275,8 @@ inline HitObjectPrefixShape classify_hitobject_prefix(
     // 60*p0 + 27*p1 + 2*p2 + p3 lands in the top lane; lower lanes cannot carry.
     shape.index =
         static_cast<uint32_t>((pk * 0x003C001B00020001ull) >> 48) - 158;
-#if FOSU_SIMD_X86
     shape.index = shape.index * 2 + hl - 1;
-#endif
     shape.time_span = static_cast<uint32_t>(p2 - p1);
-    shape.p3 = static_cast<uint32_t>(p3);
     shape.p4 = p4;
     shape.ok = lens_ok & commas_ok & hs_ok;
     return shape;
@@ -286,8 +287,7 @@ inline HitObjectPrefixShape classify_hitobject_prefix(
 // scalar parser also rejects.
 __attribute__((always_inline))
 inline std::optional<HitObjectPrefix> decode_hitobject_prefix(
-    Bytes32 ascii, ByteVector zero, const HitObjectPrefixShape& shape,
-    [[maybe_unused]] const char* line) {
+    Bytes32 ascii, ByteVector zero, const HitObjectPrefixShape& shape) {
     HitObjectPrefix prefix;
     static_assert(offsetof(HitObjectPrefix, x) == 0 &&
                       offsetof(HitObjectPrefix, y) == 4 &&
@@ -337,17 +337,22 @@ inline std::optional<HitObjectPrefix> decode_hitobject_prefix(
 #else
     const Bytes32 digits{{vsubq_u8(ascii.val[0], zero), vsubq_u8(ascii.val[1], zero)}};
     const auto& shuf = kPrefixShuffles[shape.index];
-    auto fields = decimal_groups(vqtbl2q_u8(digits, vld1q_u8(shuf.bytes)));
+    const auto fields = decimal_groups(vqtbl2q_u8(digits, vld1q_u8(shuf.bytes)));
     const auto times = decimal_groups(vqtbl2q_u8(digits, vld1q_u8(shuf.bytes + 16)));
-    const uint32_t d0 = static_cast<uint8_t>(line[shape.p3 + 1] - '0');
-    const uint32_t d1 = static_cast<uint8_t>(line[shape.p3 + 2] - '0');
-    const uint32_t two = shape.p4 - shape.p3 - 2;
-    fields = vsetq_lane_u32(d0 + two * (d0 * 9 + d1), fields, 3);
     vst1q_u32(reinterpret_cast<uint32_t*>(&prefix), fields);
-    const uint64_t t = uint64_t(vgetq_lane_u32(times, 1)) * 100000000 +
-                      uint64_t(vgetq_lane_u32(times, 2)) * 10000 + vgetq_lane_u32(times, 3);
-    if (t > INT32_MAX) return std::nullopt;
-    prefix.time = static_cast<double>(t);
+    if (shape.time_span <= 9) [[likely]] {
+        // Up to eight digits fit in uint32; combine the two four-digit groups
+        // before converting to double.
+        const uint32_t weights[2] = {10000, 1};
+        const auto terms = vmul_u32(vget_high_u32(times), vld1_u32(weights));
+        const auto sum = vpadd_u32(terms, terms);
+        prefix.time = vgetq_lane_f64(vcvtq_f64_u64(vmovl_u32(sum)), 0);
+    } else {
+        const uint64_t t = uint64_t(vgetq_lane_u32(times, 1)) * 100000000 +
+                          uint64_t(vgetq_lane_u32(times, 2)) * 10000 + vgetq_lane_u32(times, 3);
+        if (t > INT32_MAX) return std::nullopt;
+        prefix.time = static_cast<double>(t);
+    }
 #endif
     return prefix;
 }
@@ -366,7 +371,7 @@ inline std::optional<ParsedHitObjectPrefix> try_parse_hitobject_prefix_fast(
            (line[shape.p4 + 1] == '\n' || line[shape.p4 + 1] == '\0'))))
         return std::nullopt;
     const auto prefix = decode_hitobject_prefix(
-        ascii, broadcast_byte<'0'>(), shape, line);
+        ascii, broadcast_byte<'0'>(), shape);
     if (!prefix) return std::nullopt;
     return ParsedHitObjectPrefix{*prefix, line + shape.p4};
 }

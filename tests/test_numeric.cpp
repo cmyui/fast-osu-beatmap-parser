@@ -152,6 +152,50 @@ static void test_prefix_shapes() {
     }
 }
 
+static void test_prefix_timestamp_boundaries() {
+    using namespace fosu::internal;
+    for (const char* time : {"99999999", "100000000", "2147483647",
+                             "2147483648", "000000001", "0000000001"}) {
+        std::string line = std::string("123,45,") + time + ",1,42";
+        const auto length = line.size();
+        line.append(fosu::kBufferPadding, '\0');
+        const auto fast = try_parse_hitobject_prefix_fast(line.data());
+        const auto scalar = parse_hitobject_prefix_scalar(line.data(), length);
+        CHECK_EQ(fast.has_value(), scalar.has_value());
+        if (!fast || !scalar) continue;
+        CHECK_EQ(fast->value.time, scalar->value.time);
+        CHECK_EQ(fast->value.hit_sound, scalar->value.hit_sound);
+        CHECK_EQ(fast->next, scalar->next);
+    }
+}
+
+// Exercise both eight-digit chunks, the optional fraction, and a second
+// fractional chunk. Accepted fast lengths must match libc bit for bit.
+static void test_fuzz_slider_length() {
+    using namespace fosu::internal;
+    for (int iter = 0; iter < 30000; ++iter) {
+        std::string line = std::to_string(rng() % 131074);
+        line.insert(0, rng() % (9 - line.size()), '0');
+        if (rng() % 4 != 0) {
+            line += '.';
+            const auto digits = rng() % 14;
+            for (uint64_t i = 0; i < digits; ++i)
+                line += static_cast<char>('0' + rng() % 10);
+        }
+        const auto length = line.size();
+        line += ",0:0";
+        line.append(fosu::kBufferPadding, '\0');
+        const auto fast = try_parse_slider_length_fast(line.data());
+        if (!fast) continue;
+        double expected;
+        const auto next = reference_parse_double(
+            line.data(), line.data() + length, expected);
+        CHECK_EQ(fast->next, next);
+        CHECK(expected <= 131072);
+        CHECK(memcmp(&fast->value, &expected, sizeof(expected)) == 0);
+    }
+}
+
 // Fuzz the one-pass timing point parser against the generic reference:
 // whenever it accepts a line, every field must be bitwise identical.
 // Shapes: 8-field editor lines plus old 2..7-field forms, decimal and
@@ -290,6 +334,8 @@ int main() {
 #if FOSU_SIMD
     test_byte_masks();
     test_prefix_shapes();
+    test_prefix_timestamp_boundaries();
+    test_fuzz_slider_length();
     test_fuzz_equivalence();
     test_fuzz_timing_point();
     puts("SIMD path: enabled");

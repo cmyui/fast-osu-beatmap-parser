@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "prefix.hpp"
+#include "digit_groups.hpp"
 
 namespace fosu::internal {
 
@@ -41,7 +42,7 @@ inline std::optional<ParsedSliderCoordinate> parse_slider_coordinate(
 // Slider length on the editor-emitted shape: up to 8 integer digits, an
 // optional '.', up to 13 fraction digits, at most 18 digits in all. One
 // 32-byte load classifies the whole number; the mantissa is assembled from
-// the same SWAR pieces parse_double accumulates and divided by the same
+// the same integer chunks parse_double accumulates and divided by the same
 // power of ten, so the result is bit-identical. Returns nullptr for any
 // other shape (sign, exponent, longer or empty numbers) so the caller can
 // run parse_double. Values above the official length bound also defer.
@@ -69,9 +70,15 @@ inline std::optional<ParsedSliderLength> try_parse_slider_length_fast(const char
     if (fl > 13 || il + fl > 18) return std::nullopt;
     const uint32_t fl1 = fl <= 8 ? fl : 8;
     const uint32_t fl2 = fl - fl1;
-    uint64_t mant = swar_parse_u64(p, il);
     const char* fp = p + il + 1;
+#if FOSU_SIMD_X86
+    const auto chunks = decode_decimal_chunks(p, il, fp, fl1);
+    uint64_t mant = chunks.integer;
+    if (fl1) mant = mant * kPow10u[fl1] + chunks.fraction;
+#else
+    uint64_t mant = swar_parse_u64(p, il);
     if (fl1) mant = mant * kPow10u[fl1] + swar_parse_u64(fp, fl1);
+#endif
     if (fl2) mant = mant * kPow10u[fl2] + swar_parse_u64(fp + 8, fl2);
     if (mant > kMaxExactDoubleInteger) return std::nullopt;
     double d = static_cast<double>(mant);
