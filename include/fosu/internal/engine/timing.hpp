@@ -1,6 +1,7 @@
 #pragma once
 
 #include <bit>
+#include "byte_scan.hpp"
 #include "prefix.hpp"
 
 namespace fosu::internal {
@@ -33,8 +34,7 @@ inline bool parse_timing_fields(const char* p,
       commas = offset < 64 ? commas & (~0ull << offset) : 0;
       field_end = commas ? line + std::countr_zero(commas) : end;
     } else {
-      const auto* comma = static_cast<const char*>(memchr(p, ',', end - p));
-      field_end = comma ? comma : end;
+      field_end = find_byte<','>(p, end);
     }
     if (p == field_end)
       return false;

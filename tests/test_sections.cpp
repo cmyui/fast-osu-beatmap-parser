@@ -440,7 +440,65 @@ static void test_masked_timing_fallback() {
   }
 }
 
+template <char Delimiter>
+static void test_byte_scan_boundaries() {
+  // Include non-vector-aligned inputs and a matching byte just outside end.
+  for (size_t alignment = 0; alignment < 32; ++alignment) {
+    for (size_t length = 0; length <= 97; ++length) {
+      for (size_t position : {size_t(0), length / 2, length ? length - 1 : 0, length}) {
+        std::string text(alignment + length + 1, 'x');
+        text[alignment + length] = Delimiter;
+        if (position < length)
+          text[alignment + position] = Delimiter;
+        const auto input = fosu::make_padded(text);
+        const char* p = input.data.get() + alignment;
+        CHECK_EQ(fosu::internal::find_byte<Delimiter>(p, p + length), p + position);
+        CHECK_EQ((fosu::internal::find_byte<Delimiter, false>(p, p + length)),
+                 p + position);
+      }
+    }
+  }
+}
+
+static void test_event_filename_boundaries() {
+  for (size_t timestamp_length : {0u, 30u, 31u, 32u, 64u}) {
+    for (size_t filename_length : {0u, 1u, 30u, 31u, 32u, 63u, 64u, 96u}) {
+      const std::string filename(filename_length, 'x');
+      const std::string event =
+          "Video," + std::string(timestamp_length, '0') + ",\"" + filename + "\"";
+      for (const auto suffix : {"", ",0,0", "\nVideo,0"}) {
+        const auto map = parse_str("[Events]\n" + event + suffix);
+        CHECK_EQ(map.video, filename);
+      }
+    }
+  }
+}
+
+static void test_section_skip_boundaries() {
+  for (size_t padding : {0u, 30u, 31u, 32u, 63u, 64u, 95u}) {
+    for (bool simd : {false, true}) {
+      fosu::Parser parser(simd ? fosu::internal::native_engine
+                               : fosu::internal::scalar_engine);
+      const std::string text = "[Unknown]\nvalue:" + std::string(padding, 'x') +
+                               "[Metadata]\nTitle:ignored\n[Metadata]\nTitle:retained";
+      auto& map = require_parse(
+          parser.parse(text.data(), text.size(), {.sections = fosu::kSectionMetadata}));
+      CHECK_EQ(map.title, "retained");
+      const std::string missing = "[Unknown]\nvalue:[Metadata]";
+      auto& empty = require_parse(parser.parse(missing.data(), missing.size(),
+                                               {.sections = fosu::kSectionMetadata}));
+      CHECK(empty.title.empty());
+    }
+  }
+}
+
 int main() {
+  test_byte_scan_boundaries<','>();
+  test_byte_scan_boundaries<':'>();
+  test_byte_scan_boundaries<'\n'>();
+  test_byte_scan_boundaries<'\0'>();
+  test_event_filename_boundaries();
+  test_section_skip_boundaries();
   test_long_event_lines();
   test_masked_timing_fallback();
   test_exact_keys_and_event_aliases();

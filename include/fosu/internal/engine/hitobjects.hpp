@@ -3,8 +3,8 @@
 #include <cstring>
 
 #include "../../beatmap.hpp"
+#include "byte_scan.hpp"
 #include "hitobject_details.hpp"
-#include "line_scan.hpp"
 #include "prefix.hpp"
 #include "slider_tail.hpp"
 
@@ -169,10 +169,8 @@ inline const char* parse_hitobject_lines(
         const auto newline_mask = equal_mask32(ascii, newline_value);
         const auto commas = equal_mask32(ascii, comma_value);
         const uint32_t nondigits = nondigit_mask32(ascii, bias, threshold);
-        const char* newline = newline_mask
-                                  ? p + trailing_zeros(newline_mask)
-                                  : find_newline32(p + 32, file_end,
-                                                   newline_value);
+        const char* newline = newline_mask ? p + trailing_zeros(newline_mask)
+                                           : find_byte<'\n'>(p + 32, file_end);
         const char* next_line = newline + (newline < file_end);
         const char* line_end =
             newline - (newline > p && newline[-1] == '\r');

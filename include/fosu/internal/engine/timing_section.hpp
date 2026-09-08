@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../beatmap.hpp"
-#include "line_scan.hpp"
+#include "byte_scan.hpp"
 #include "timing.hpp"
 
 namespace fosu::internal {
@@ -42,10 +42,8 @@ inline const char* parse_timing_points_section(
         const uint64_t newline_mask =
             equal_mask32(first, newline_value) |
             static_cast<uint64_t>(equal_mask32(second, newline_value)) << 32;
-        const char* newline = newline_mask
-                                  ? p + trailing_zeros(newline_mask)
-                                  : find_newline32(p + 64, file_end,
-                                                   newline_value);
+        const char* newline = newline_mask ? p + trailing_zeros(newline_mask)
+                                           : find_byte<'\n'>(p + 64, file_end);
         const char* next_line = newline + (newline < file_end);
         const char* line_end =
             newline - (newline > p && newline[-1] == '\r');

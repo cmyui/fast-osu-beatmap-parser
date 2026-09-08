@@ -45,57 +45,56 @@ inline void parse_document(
     uint32_t pending = opts.sections & 0x1FEu;
 
     while (p < file_end) {
-        // The fused section loops consume [TimingPoints]/[HitObjects] —
-        // 95%+ of file bytes — so this loop only walks headers, metadata,
-        // and events, where per-line memchr is free. (A 32-byte SIMD line
-        // probe here measured exactly zero in the ablation audit: its
-        // value was eroded to nothing when the fused sections landed.)
-        if (*p == '\r' || *p == '\n') { ++p; continue; }
-        const char* nl =
-            static_cast<const char*>(memchr(p, '\n', file_end - p));
-        const char* line_end = nl ? nl : file_end;
-        if (line_end > p && line_end[-1] == '\r') --line_end;
-        const size_t len = static_cast<size_t>(line_end - p);
+      // The section loops consume the bulk records; this loop handles
+      // section headers, metadata and the portable parsing path.
+      if (*p == '\r' || *p == '\n') {
+        ++p;
+        continue; }
+      const char* nl = find_byte<'\n', UseSimd>(p, file_end);
+      const char* line_end = nl;
+      if (line_end > p && line_end[-1] == '\r')
+        --line_end;
+      const size_t len = static_cast<size_t>(line_end - p);
 
-        if (len == 0) goto next_line;
-        if (*p == '[') {
-            sec = match_section({p, len});
-            const uint32_t sec_bit = 1u << static_cast<int>(sec);
-            if (!(opts.sections & sec_bit)) {
-                if (pending == 0) break;  // everything wanted is done
-                const char* start = nl ? nl + 1 : file_end;
-                const auto* nb = static_cast<const char*>(memchr(
-                    start, '[', static_cast<size_t>(file_end - start)));
-                // A bracket inside a value/comment is not a section header.
-                while (nb && nb != start && nb[-1] != '\n' && nb[-1] != '\r') {
-                    nb = static_cast<const char*>(memchr(
-                        nb + 1, '[', static_cast<size_t>(file_end - nb - 1)));
-                }
-                p = nb ? nb : file_end;
-                sec = Section::Unknown;
-                continue;
-            }
-            pending &= ~sec_bit;
-            if (sec == Section::HitObjects) {
-                p = parse_hitobjects_section<UseSimd>(
-                    bm, hit_object_count, slider_count, slider_point_count,
-                    nl ? nl + 1 : file_end, file_end);
-                sec = Section::Unknown;
-                continue;
-            }
+      if (len == 0)
+        goto next_line;
+      if (*p == '[') {
+        sec = match_section({p, len});
+        const uint32_t sec_bit = 1u << static_cast<int>(sec);
+        if (!(opts.sections & sec_bit)) {
+          if (pending == 0)
+            break;  // everything wanted is done
+          const char* start = nl + (nl < file_end);
+          const auto* nb = find_byte<'[', UseSimd>(start, file_end);
+          // A bracket inside a value/comment is not a section header.
+          while (nb < file_end && nb != start && nb[-1] != '\n' && nb[-1] != '\r') {
+            nb = find_byte<'[', UseSimd>(nb + 1, file_end);
+          }
+          p = nb;
+          sec = Section::Unknown;
+          continue;
+        }
+        pending &= ~sec_bit;
+        if (sec == Section::HitObjects) {
+          p = parse_hitobjects_section<UseSimd>(bm, hit_object_count, slider_count,
+                                                slider_point_count, nl + (nl < file_end),
+                                                file_end);
+          sec = Section::Unknown;
+          continue;
+        }
 #if FOSU_SIMD
             if constexpr (UseSimd) {
                 if (sec == Section::TimingPoints) {
-                    p = parse_timing_points_section(
-                        bm, timing_point_count, nl ? nl + 1 : file_end, file_end);
-                    sec = Section::Unknown;
-                    continue;
+                  p = parse_timing_points_section(bm, timing_point_count,
+                                                  nl + (nl < file_end), file_end);
+                  sec = Section::Unknown;
+                  continue;
                 }
                 if (sec == Section::Events) {
-                    p = parse_events_section(
-                        bm, break_count, nl ? nl + 1 : file_end, file_end);
-                    sec = Section::Unknown;
-                    continue;
+                  p = parse_events_section(bm, break_count, nl + (nl < file_end),
+                                           file_end);
+                  sec = Section::Unknown;
+                  continue;
                 }
             }
 #endif
@@ -146,7 +145,7 @@ inline void parse_document(
         }
 
     next_line:
-        p = nl ? nl + 1 : file_end;
+      p = nl + (nl < file_end);
     }
 
     // Old format versions omit ApproachRate; it mirrors OverallDifficulty.
