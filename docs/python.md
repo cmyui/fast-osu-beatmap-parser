@@ -187,6 +187,13 @@ generated. The Python model is in `python/fosu/_model.py`; the conversion is in
 `src/fosu/bindings/python.cc`. A small private extension stub types the compiled entry
 points; public typing comes directly from the dataclasses and functions.
 
+The converter constructs complete records from named Python values. Dataclass
+types and writable slot descriptors are cached in interpreter-local module
+state, so populating each field does not repeat attribute-name lookup. This uses
+the supported descriptor API, not CPython object-layout offsets. Garbage
+collection remains enabled according to the caller's settings; records and
+lists retain normal Python ownership and mutation behavior.
+
 Linux release wheels bundle a private C++ runtime and export only the Python
 initialization symbol. macOS uses its system C++ runtime. Both use the
 [compiled-target hardening policy](build.md#hardening). Bundled-runtime updates

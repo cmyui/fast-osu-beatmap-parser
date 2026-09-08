@@ -204,6 +204,30 @@ def test_points_are_independent_between_results():
     assert other.hit_objects[0].control_points[1].x == 40
 
 
+def test_repeated_timestamp_fields_remain_independently_assignable():
+    b = fosu.parse(
+        b"[HitObjects]\n1,2,1000.5,1,0\n1,2,2000.5,8,0,3000.5\n"
+        b"1,2,4000.5,128,0,5000.5\n"
+    )
+    circle, spinner, hold = b.hit_objects
+    circle.end_time = 10
+    assert circle.start_time == 1000.5
+    for note, end in ((spinner, 3000.5), (hold, 5000.5)):
+        note.end_time = 20
+        assert note.raw_end_time == end
+
+
+def test_hitsound_flags_preserve_combinations_and_unknown_bits():
+    values = [*range(16), 32, 33]
+    data = b"[HitObjects]\n" + b"".join(
+        f"1,2,{i},1,{value}\n".encode() for i, value in enumerate(values)
+    )
+    b = fosu.parse(data)
+    assert b.stats.malformed_lines == 0
+    assert [int(note.hit_sound) for note in b.hit_objects] == values
+    assert all(isinstance(note.hit_sound, fosu.HitSound) for note in b.hit_objects)
+
+
 def test_standard_python_copy_and_export():
     b = fosu.parse(b"[Metadata]\nTitle:Copy\n[HitObjects]\n2,4,6,2,0,B|8:10,1,12\n")
     restored = pickle.loads(pickle.dumps(b))
