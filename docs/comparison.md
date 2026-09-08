@@ -107,27 +107,27 @@ Same **9,758 maps / 392,122,516 bytes / 7,863,673 hitobjects** in every batch.
 Microseconds per map, lower is better. Means include both complete passes;
 OsuPyParser has no published resident-input API.
 
-FOSU rows use a separate two-pass measurement of the eager Python API on the
-same host, interpreter and cohort. The other libraries retain the original
-measurements. Full Python value construction and release are included;
-[eager batch evidence](../bench/comparison/results/hetzner-2026-09-08.eager-python-batch.json)
-records both passes and the matching corpus fingerprint. All refreshed FOSU
-measurements use source `d31cddf`; the original third-party sweep is retained.
+FOSU and rosu-pp-py rows use a two-pass measurement on the same host, interpreter
+and cohort. Other libraries retain the original measurements. Full Python
+value construction and release are included for FOSU;
+[batch evidence](../bench/comparison/results/hetzner-2026-09-08.cached-slots-python-batch.json)
+records both passes and the matching corpus fingerprint. These FOSU Python
+batches use source `2d010a1`; native and traversal rows below retain `d31cddf`.
 
 | Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---:|---:|
-| FOSU Python AVX2 (eager) | 619.8 | 644.4 |
-| FOSU Python scalar (eager) | 672.3 | 693.0 |
-| rosu-pp-py 4.0.2 | 299.4 | 312.0 |
+| FOSU Python AVX2 (eager) | 498.3 | 510.7 |
+| FOSU Python scalar (eager) | 548.7 | 554.7 |
+| rosu-pp-py 4.0.2 | 310.5 | 319.1 |
 | pyttanko 2.1.0 | 2,501.5 | 2,501.2 |
 | OsuPyParser 1.0.7 | Unsupported (file-only API) | 5,070.8 |
 | slider 0.8.4 | 14,091.0 | 14,119.7 |
 
 | Python interface | Resident bytes: pass 1 / 2 | Warm file: pass 1 / 2 |
 |---|---:|---:|
-| FOSU Python AVX2 (eager) | 625.5 / 614.1 | 640.1 / 648.8 |
-| FOSU Python scalar (eager) | 657.5 / 687.2 | 704.2 / 681.7 |
-| rosu-pp-py 4.0.2 | 294.0 / 304.7 | 314.3 / 309.7 |
+| FOSU Python AVX2 (eager) | 496.0 / 500.6 | 507.0 / 514.3 |
+| FOSU Python scalar (eager) | 551.1 / 546.3 | 556.7 / 552.8 |
+| rosu-pp-py 4.0.2 | 315.7 / 305.2 | 314.9 / 323.3 |
 | pyttanko 2.1.0 | 2,510.7 / 2,492.3 | 2,510.2 / 2,492.2 |
 | OsuPyParser 1.0.7 | — | 5,080.7 / 5,060.9 |
 | slider 0.8.4 | 14,067.5 / 14,114.5 | 14,004.4 / 14,235.0 |
@@ -235,7 +235,8 @@ gameplay or geometry functionality without implementing those missing pieces.
 
 Published evidence:
 
-- [Current FOSU eager Python batches](../bench/comparison/results/hetzner-2026-09-08.eager-python-batch.json)
+- [Current FOSU and rosu-pp-py batches](../bench/comparison/results/hetzner-2026-09-08.cached-slots-python-batch.json)
+- [Python construction experiments and full-corpus comparisons](../bench/results/2026-09-08-python-conversion.json)
 - [Current FOSU-only refresh](../bench/comparison/results/hetzner-2026-09-08.fosu-refresh.json)
 - [All 160,000 refresh records](../bench/comparison/results/hetzner-2026-09-08.fosu-refresh.samples.csv.gz)
 - [Refresh corpus manifest](../bench/comparison/results/hetzner-2026-09-08.fosu-refresh.corpus.csv.gz)

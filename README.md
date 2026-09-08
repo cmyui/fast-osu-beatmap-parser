@@ -33,24 +33,24 @@ fosu::Beatmap& map = *parsed.value();
 
 ### Python APIs
 
-FOSU's eager AVX2 Python interface averages **620 µs per map** from resident bytes on our
+FOSU's eager AVX2 Python interface averages **498 µs per map** from resident bytes on our
 Hetzner Zen 4 VM. We compared public parser APIs on the fixed **10,000-map
 corpus**, using the same **9,758 mutually accepted maps** for every row below.
 Lower is better.
 
 | Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---:|---:|
-| FOSU Python AVX2 (eager) | 619.8 | 644.4 |
-| FOSU Python scalar (eager) | 672.3 | 693.0 |
-| rosu-pp-py 4.0.2 | 299.4 | 312.0 |
+| FOSU Python AVX2 (eager) | 498.3 | 510.7 |
+| FOSU Python scalar (eager) | 548.7 | 554.7 |
+| rosu-pp-py 4.0.2 | 310.5 | 319.1 |
 | pyttanko 2.1.0 | 2,501.5 | 2,501.2 |
 | OsuPyParser 1.0.7 | Unsupported (file-only API) | 5,070.8 |
 | slider 0.8.4 | 14,091.0 | 14,119.7 |
 
 Two complete batch passes on one pinned CPU, CPython 3.12; imports and startup
 excluded. File inputs are in the OS page cache. FOSU's timings include constructing
-and releasing every supported field as detached Python values. FOSU was measured
-again for this API; other libraries retain the same-cohort measurements from the
+and releasing every supported field as detached Python values. FOSU and rosu-pp-py
+were measured together again; other libraries retain the same-cohort measurements from the
 [comparison report](docs/comparison.md). Native PP-oriented results, such as
 rosu-pp-py's, do not construct an equivalent Python object graph.
 

@@ -49,10 +49,11 @@ uncontended lower envelope; it is not the median map, average user latency, or
 a confidence interval. Shared-VM scheduling can move results. MB/s is total
 input bytes divided by the sum of per-file minima, using decimal megabytes.
 
-## Measurement snapshot
+## Measurement snapshots
 
-Measured source: [`d31cddf`](https://github.com/cmyui/fast-osu-beatmap-parser/commit/d31cddf90f6c7c5d35f2c5f6a4c0ccc39e716866),
-2026-09-08 UTC. Both machines use the same full **10,000-map corpus** and
+Native and one-shot source: [`d31cddf`](https://github.com/cmyui/fast-osu-beatmap-parser/commit/d31cddf90f6c7c5d35f2c5f6a4c0ccc39e716866).
+Python source: [`2d010a1`](https://github.com/cmyui/fast-osu-beatmap-parser/commit/2d010a190deda8df71d2607c0b8c8dfdbac8df44).
+Measured 2026-09-08 UTC. Both machines use the same full **10,000-map corpus** and
 validate all 8,070,193 objects before timing. Builds and tests finish before
 measurements start; each host runs only one benchmark at a time.
 
@@ -69,6 +70,10 @@ unless marked ms. Ranges are the two reversed-order runs, not confidence
 intervals. The [Linux summary](../bench/results/2026-09-08-hetzner.json) and
 [Mac summary](../bench/results/2026-09-08-m3-max.json) retain each run's minima,
 all-sample means/medians, repetitions, raw CSV hashes and corpus fingerprint.
+The [Python conversion evidence](../bench/results/2026-09-08-python-conversion.json)
+contains the updated Python measurements, their `b8af09c` controls, screening
+experiments and first-use comparisons. Python package variants rotate within
+each map, as well as the four workloads; the second run reverses both orders.
 
 ### Warm native calls
 
@@ -96,22 +101,14 @@ remains enabled. Traversal timings include parsing, not just the extra loop.
 
 | Machine / backend | Workload | Mean minimum | All-call mean |
 |---|---|---:|---:|
-| Hetzner / Zen 4 / AVX2 | Resident bytes | 488.0–494.0 | 549.8–558.4 |
-| Hetzner / Zen 4 / AVX2 | Warm file | 500.3–506.3 | 555.7–565.3 |
-| Hetzner / Zen 4 / AVX2 | Bytes + timestamps | 513.1–519.9 | 568.6–579.2 |
-| Hetzner / Zen 4 / AVX2 | Bytes + slider lengths | 520.6–526.4 | 579.8–592.0 |
-| Hetzner / Zen 4 / SCALAR | Resident bytes | 533.7–541.6 | 600.2–607.9 |
-| Hetzner / Zen 4 / SCALAR | Warm file | 546.3–554.8 | 606.5–615.8 |
-| Hetzner / Zen 4 / SCALAR | Bytes + timestamps | 558.7–567.5 | 618.6–630.1 |
-| Hetzner / Zen 4 / SCALAR | Bytes + slider lengths | 565.8–573.8 | 632.2–640.2 |
-| M3 Max / NEON | Resident bytes | 321.8–324.6 | 350.0–353.2 |
-| M3 Max / NEON | Warm file | 344.9–346.9 | 376.6–377.6 |
-| M3 Max / NEON | Bytes + timestamps | 338.7–341.3 | 370.6–371.3 |
-| M3 Max / NEON | Bytes + slider lengths | 341.7–344.6 | 372.2–373.5 |
-| M3 Max / SCALAR | Resident bytes | 361.9–362.3 | 389.8–391.7 |
-| M3 Max / SCALAR | Warm file | 384.8–385.7 | 417.1–418.1 |
-| M3 Max / SCALAR | Bytes + timestamps | 378.5–378.9 | 409.2–411.4 |
-| M3 Max / SCALAR | Bytes + slider lengths | 381.5–382.3 | 409.1–414.8 |
+| Hetzner / Zen 4 / AVX2 | Resident bytes | 385.1–400.0 | 427.1–440.4 |
+| Hetzner / Zen 4 / AVX2 | Warm file | 398.5–403.0 | 442.5–446.3 |
+| Hetzner / Zen 4 / AVX2 | Bytes + timestamps | 414.3–416.1 | 457.7–458.9 |
+| Hetzner / Zen 4 / AVX2 | Bytes + slider lengths | 420.4–432.2 | 468.5–480.9 |
+| M3 Max / NEON | Resident bytes | 236.6–238.3 | 270.0–270.5 |
+| M3 Max / NEON | Warm file | 253.0–256.4 | 290.1–296.0 |
+| M3 Max / NEON | Bytes + timestamps | 251.0–255.9 | 281.8–292.4 |
+| M3 Max / NEON | Bytes + slider lengths | 254.0–263.4 | 285.3–300.0 |
 
 These are full-corpus, per-call statistics. The README's Python comparison
 instead uses isolated complete-pass means on the fixed **9,758-map** common
@@ -137,17 +134,15 @@ work, not just C-versus-C++ binding overhead.**
 | M3 Max / SCALAR | 92.43–92.56 | 402.10–404.38 |
 
 Python: 100 evenly spaced maps, three fresh interpreters per map, two runs
-with reversed backend order. Python bytecode is precompiled. File pages are
+with reversed package order. Python bytecode is precompiled. File pages are
 resident. Import, first file parse/result release, and the whole subprocess are
 timed separately. Each column is a mean of its own per-map minima, so columns
 are not additive. The whole-process column includes startup and shutdown.
 
 | Machine / backend | Import (ms) | First file (µs) | Whole Python process (ms) |
 |---|---:|---:|---:|
-| Hetzner / Zen 4 / AVX2 | 21.00–21.12 | 868.64–871.31 | 35.30–35.40 |
-| Hetzner / Zen 4 / SCALAR | 20.28–20.36 | 894.81–895.39 | 33.86–33.89 |
-| M3 Max / NEON | 12.03–12.11 | 491.55–497.17 | 31.41–31.90 |
-| M3 Max / SCALAR | 11.83–11.92 | 536.49–538.92 | 31.17–31.55 |
+| Hetzner / Zen 4 / AVX2 | 20.91–20.92 | 724.45–724.79 | 34.46–34.53 |
+| M3 Max / NEON | 12.06–12.09 | 381.42–383.13 | 31.94–32.00 |
 
 ### Linux one-shot process
 
