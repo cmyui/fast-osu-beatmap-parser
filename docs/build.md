@@ -146,7 +146,7 @@ The production target is Zen 4. For x86-64-v3 CI runners configure with
 ## Test responsibilities
 
 - `test_build.py`: installed header-only and compiled CMake targets.
-- `test_numeric.cpp`: bounded conversion, prefix and timing-shape equivalence.
+- `test_numeric.cpp`: bounded conversion, prefix and timing-point equivalence.
 - `test_sections.cpp`: metadata, object kinds, omitted sections and selection.
 - `test_storage.cpp`: growth, lifetime, reuse and both record layouts.
 - `test_hardening.cpp` and `fuzz_parser.cpp`: malformed input and scalar/SIMD parity.

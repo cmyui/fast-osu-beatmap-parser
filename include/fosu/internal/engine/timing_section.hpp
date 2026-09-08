@@ -22,7 +22,6 @@ inline void parse_timing_point_line(
 inline const char* parse_timing_points_section(
     Beatmap& beatmap, size_t& point_count, const char* p,
     const char* file_end) {
-    TpShapeCache cache{};
 #if FOSU_SIMD_X86
     const ByteVector newline_value = bcast256(kByteNewline);
     const ByteVector comma_value = bcast256(kByteComma);
@@ -61,17 +60,8 @@ inline const char* parse_timing_points_section(
               (nondigit_mask32(first, bias, threshold) |
                static_cast<uint64_t>(nondigit_mask32(second, bias, threshold)) << 32) &
               line_mask;
-          const TpShapeRow& row = cache.rows[TpShapeCache::slot(commas)];
-          if (tp_shape_match(row, commas, nondigits, length, p)) {
-            tp_shape_convert(row, p, point);
-            accepted = true;
-          } else {
-            TpGeom geometry;
-            accepted = fast_parse_timing_point_masked(commas, nondigits, p, length, point,
-                                                      &geometry);
-            if (accepted)
-              tp_shape_insert(cache, commas, nondigits, length, geometry);
-          }
+          accepted = fast_parse_timing_point_masked(
+              commas, nondigits, p, length, point);
         }
 
         if (accepted) {
@@ -87,11 +77,12 @@ inline const char* parse_timing_points_section(
         }
         if (c == '[') break;
         if (!ignored_line(p, line_end)) {
+          TimingPoint fallback{};
           const bool valid = length <= 64
-                                 ? parse_timing_fields<true>(p, line_end, point, commas)
-                                 : parse_timing_fields(p, line_end, point);
+                                 ? parse_timing_fields<true>(p, line_end, fallback, commas)
+                                 : parse_timing_fields(p, line_end, fallback);
           if (valid)
-            beatmap.timing_points[point_count++] = point;
+            beatmap.timing_points[point_count++] = fallback;
           else
             ++malformed;
         }

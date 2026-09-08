@@ -404,6 +404,31 @@ static void test_long_event_lines() {
   }
 }
 
+static void test_timing_integer_widths() {
+  for (int value : {9, 99, 999, 9999, 10000, 99999999, INT32_MAX}) {
+    const auto field = std::to_string(value);
+    const std::string input = "[TimingPoints]\n0,-100," + field + "," + field +
+        "," + field + "," + field + ",0," + field;
+    for (bool simd : {false, true}) {
+      fosu::Parser parser(simd ? fosu::internal::native_engine
+                               : fosu::internal::scalar_engine);
+      const auto& map = require_parse(parser.parse(input.data(), input.size()));
+      CHECK_EQ(map.timing_points.size(), 1u);
+      CHECK_EQ(map.stats.malformed_lines, 0u);
+      if (map.timing_points.size() != 1) continue;
+      const auto& point = map.timing_points[0];
+      CHECK_EQ(point.time, 0.0);
+      CHECK_EQ(point.beat_length, -100.0);
+      CHECK_EQ(point.meter, value);
+      CHECK_EQ(point.sample_set, value);
+      CHECK_EQ(point.sample_index, value);
+      CHECK_EQ(point.volume, value);
+      CHECK(!point.uninherited);
+      CHECK_EQ(point.effects, static_cast<uint32_t>(value));
+    }
+  }
+}
+
 static void test_masked_timing_fallback() {
   // Exercise the general numeric rules, not just the fast editor shape.
   for (const std::string line :
@@ -501,6 +526,7 @@ int main() {
   test_section_skip_boundaries();
   test_long_event_lines();
   test_masked_timing_fallback();
+  test_timing_integer_widths();
   test_exact_keys_and_event_aliases();
   test_all_sections();
   test_old_format();

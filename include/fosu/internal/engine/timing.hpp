@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <bit>
 #include "byte_scan.hpp"
 #include "prefix.hpp"
@@ -68,32 +69,16 @@ inline bool parse_timing_fields(const char* p,
 }
 
 #if FOSU_SIMD
-// One-pass timing point parse for the editor-emitted 8-field shape.
-// Two preloaded 32-byte vectors cover the whole line (real max: 39
-// bytes); one comma mask and one non-digit mask yield every field
-// boundary; every value is computed speculatively and a single `valid`
-// predicate — accumulated arithmetically, never branched on per field —
-// decides. Structural surprises (old 2/7-field formats, decimal or >8
-// digit offsets, junk bytes) return false to defer to the generic parser.
-//
-// All eight TimingPoint fields are written unconditionally; the caller
-// discards the write by not advancing its cursor when this returns false.
-// always_inline: gcc leaves this out of line otherwise — a call plus
-// per-call constant rebuilds on every timing line (disassembly audit).
-// Geometry derived by a successful parse, exported so the section loop's
-// shape cache can replay identically-shaped lines without re-deriving it.
-struct TpGeom {
-    uint8_t c[7];                          // comma positions
-    uint8_t bl_il, bl_fl1, bl_fl2, bl_frac;  // beatLength digit layout
-    uint8_t bl_neg, bl_has_dot;
-};
-
+// Common eight-field timing rows: an unsigned integer timestamp, a signed
+// decimal beat length, and small integer tail fields. Validate their spelling
+// and widths before decoding. Wider values and legacy spellings use the
+// general parser; these limits constrain only the fast path.
+// Keep this inlined in the section loop so accepted records need no call.
 template <typename T>
 __attribute__((always_inline))
 inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
                                            const char* p, size_t len,
-                                           T& tp,
-                                           TpGeom* geom = nullptr) {
+                                           T& tp) {
     if (std::popcount(commas) != 7) return false;
 
     // Seven comma positions -> eight fields.
@@ -103,103 +88,79 @@ inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
     const uint64_t m4 = (m3 & (m3 - 1));
     const uint64_t m5 = (m4 & (m4 - 1));
     const uint64_t m6 = (m5 & (m5 - 1));
-    const auto c0 = static_cast<uint32_t>(trailing_zeros(commas));
-    const auto c1 = static_cast<uint32_t>(trailing_zeros(m1));
-    const auto c2 = static_cast<uint32_t>(trailing_zeros(m2));
-    const auto c3 = static_cast<uint32_t>(trailing_zeros(m3));
-    const auto c4 = static_cast<uint32_t>(trailing_zeros(m4));
-    const auto c5 = static_cast<uint32_t>(trailing_zeros(m5));
-    const auto c6 = static_cast<uint32_t>(trailing_zeros(m6));
+    const auto time_end = static_cast<uint32_t>(trailing_zeros(commas));
+    const auto beat_length_end = static_cast<uint32_t>(trailing_zeros(m1));
+    const auto meter_end = static_cast<uint32_t>(trailing_zeros(m2));
+    const auto sample_set_end = static_cast<uint32_t>(trailing_zeros(m3));
+    const auto sample_index_end = static_cast<uint32_t>(trailing_zeros(m4));
+    const auto volume_end = static_cast<uint32_t>(trailing_zeros(m5));
+    const auto uninherited_end = static_cast<uint32_t>(trailing_zeros(m6));
 
-    // Offset: an integer with 1..8 digits — editor-emitted files never
-    // produce negative or decimal offsets (those defer via the purity
-    // check below). Speculative lengths are clamped into 1..8 so shifts
-    // stay defined; `valid` already rules the clamped cases out.
-    bool valid = (c0 - 1) <= 7;
-    tp.time = static_cast<double>(swar_parse_u64_safe(p, ((c0 - 1) & 7) + 1));
+    const uint32_t meter_digits = meter_end - beat_length_end - 1;
+    const uint32_t sample_set_digits = sample_set_end - meter_end - 1;
+    const uint32_t sample_index_digits = sample_index_end - sample_set_end - 1;
+    const uint32_t volume_digits = volume_end - sample_index_end - 1;
+    const uint32_t uninherited_digits = uninherited_end - volume_end - 1;
+    const uint32_t effects_digits = static_cast<uint32_t>(len) - uninherited_end - 1;
+    // Subtracting one makes zero-length fields fail this unsigned range check.
+    if (time_end - 1 > 7 ||
+        ((meter_digits - 1) | (sample_set_digits - 1) |
+         (sample_index_digits - 1) | (volume_digits - 1) |
+         (uninherited_digits - 1) | (effects_digits - 1)) > 3)
+        return false;
 
-    // beatLength: [c0+1, c1), optional leading '-', optional fraction.
-    const char* f = p + c0 + 1;
-    const bool neg = *f == '-';
-    f += neg;
-    const uint32_t flen = c1 - c0 - 1 - neg;
-    // Distance from f to the first non-digit: the '.' if present, else
-    // the comma at c1.
-    const auto int_len = static_cast<uint32_t>(trailing_zeros(nondig >> (f - p)));
-    const bool has_dot = int_len < flen;
-    // The purity popcount below counts "one extra non-digit" for the dot;
-    // verify that byte actually is '.' (fuzz-found: any junk byte in the
-    // field would otherwise be accepted as the decimal point).
-    valid &= !has_dot || f[int_len] == '.';
-    const uint32_t frac_len = flen - int_len - has_dot;
-    valid &= (int_len - 1) <= 7;
-    valid &= frac_len <= 13;  // real files: 0 (67%) or 12-13
-    valid &= int_len + frac_len <= 18;  // avoid uint64 mantissa wrap
-    const uint32_t il = ((int_len - 1) & 7) + 1;
-    const uint32_t fl1 = frac_len <= 8 ? frac_len : 8;
-    const uint32_t fl2 = frac_len - fl1;
-    const char* fp = f + il + 1;  // il, not int_len: bounds speculative
-                                  // reads within kBufferPadding on garbage
-    uint64_t mant = swar_parse_u64_safe(f, il);
-    const uint64_t fm1 = fl1 ? swar_parse_u64_safe(fp, fl1) : 0;
-    const uint64_t fm2 = fl2 ? swar_parse_u64_safe(fp + 8, fl2) : 0;
-    mant = mant * kPow10u[fl1] + fm1;
-    mant = mant * kPow10u[fl2 & 7] + fm2;  // fl2 <= 5 when valid
-    double bl =
-        static_cast<double>(mant) / kPow10[frac_len <= 13 ? frac_len : 0];
-    // mant >= 0, so the sign bit can be OR'd in directly (no fp select).
-    bl = std::bit_cast<double>(std::bit_cast<uint64_t>(bl) |
-                               (static_cast<uint64_t>(neg) << 63));
-    tp.beat_length = bl;
+    const char* magnitude = p + time_end + 1;
+    const bool negative = *magnitude == '-';
+    magnitude += negative;
+    const uint32_t magnitude_length = beat_length_end - time_end - 1 - negative;
+    const uint32_t integer_digits = trailing_zeros(nondig >> (magnitude - p));
+    const bool has_dot = integer_digits < magnitude_length;
+    const uint32_t fraction_digits = magnitude_length - integer_digits - has_dot;
+    if (integer_digits - 1 > 7 || fraction_digits > 13 ||
+        integer_digits + fraction_digits > 18 ||
+        (has_dot && magnitude[integer_digits] != '.') ||
+        std::popcount(nondig) !=
+            7 + static_cast<int>(has_dot) + static_cast<int>(negative))
+        return false;
 
-    // Whole-line digit purity in one predicate: the only non-digit bytes
-    // allowed are the 7 commas, the optional dot, and the optional minus.
-    valid &= std::popcount(nondig) ==
-             7 + static_cast<int>(has_dot) + static_cast<int>(neg);
-
-    // Six small-int tail fields, straight-line (no arrays, no loop — gcc
-    // spills indexed locals to the stack).
-    const uint32_t t0 = c2 - c1 - 1;
-    const uint32_t t1 = c3 - c2 - 1;
-    const uint32_t t2 = c4 - c3 - 1;
-    const uint32_t t3 = c5 - c4 - 1;
-    const uint32_t t4 = c6 - c5 - 1;
-    const uint32_t t5 = static_cast<uint32_t>(len) - c6 - 1;
-    valid &= ((t0 - 1) | (t1 - 1) | (t2 - 1) | (t3 - 1) | (t4 - 1) |
-              (t5 - 1)) <= 7;
-    tp.meter =
-        static_cast<int32_t>(swar_parse_u64_safe(p + c1 + 1, ((t0 - 1) & 7) + 1));
-    tp.sample_set =
-        static_cast<int32_t>(swar_parse_u64_safe(p + c2 + 1, ((t1 - 1) & 7) + 1));
+    tp.time = static_cast<double>(swar_parse_u64(p, time_end));
+    const auto parse_small_integer = [](const char* field, uint32_t digits) {
+        if (digits == 1)
+            return static_cast<uint32_t>(static_cast<uint8_t>(*field - '0'));
+        return swar_parse_u32(field, digits);
+    };
+    tp.meter = parse_small_integer(p + beat_length_end + 1, meter_digits);
+    tp.sample_set = parse_small_integer(p + meter_end + 1, sample_set_digits);
     tp.sample_index =
-        static_cast<int32_t>(swar_parse_u64_safe(p + c3 + 1, ((t2 - 1) & 7) + 1));
-    tp.volume =
-        static_cast<int32_t>(swar_parse_u64_safe(p + c4 + 1, ((t3 - 1) & 7) + 1));
-    tp.uninherited = p[c5 + 1] == '1';
-    tp.effects =
-        static_cast<uint32_t>(swar_parse_u64_safe(p + c6 + 1, ((t5 - 1) & 7) + 1));
+        parse_small_integer(p + sample_set_end + 1, sample_index_digits);
+    tp.volume = parse_small_integer(p + sample_index_end + 1, volume_digits);
+    tp.uninherited = p[volume_end + 1] == '1';
+    tp.effects = parse_small_integer(p + uninherited_end + 1, effects_digits);
 
-    if (valid && mant > kMaxExactDoubleInteger) {
-        double exact;
-        if (bounded_double(p + c0 + 1, p + c1, exact) != p + c1) return false;
-        tp.beat_length = exact;
+    uint64_t mantissa = swar_parse_u64(magnitude, integer_digits);
+    if (fraction_digits) {
+        const uint32_t first_digits = std::min(fraction_digits, 8u);
+        const uint32_t second_digits = fraction_digits - first_digits;
+        const char* fraction = magnitude + integer_digits + 1;
+        mantissa = mantissa * kPow10u[first_digits] +
+                   swar_parse_u64(fraction, first_digits);
+        if (second_digits)
+            mantissa = mantissa * kPow10u[second_digits] +
+                       swar_parse_u64(fraction + 8, second_digits);
     }
-    if (geom && valid) {
-        geom->c[0] = static_cast<uint8_t>(c0);
-        geom->c[1] = static_cast<uint8_t>(c1);
-        geom->c[2] = static_cast<uint8_t>(c2);
-        geom->c[3] = static_cast<uint8_t>(c3);
-        geom->c[4] = static_cast<uint8_t>(c4);
-        geom->c[5] = static_cast<uint8_t>(c5);
-        geom->c[6] = static_cast<uint8_t>(c6);
-        geom->bl_il = static_cast<uint8_t>(il);
-        geom->bl_fl1 = static_cast<uint8_t>(fl1);
-        geom->bl_fl2 = static_cast<uint8_t>(fl2);
-        geom->bl_frac = static_cast<uint8_t>(frac_len);
-        geom->bl_neg = neg;
-        geom->bl_has_dot = has_dot;
+    double beat_length;
+    if (mantissa > kMaxExactDoubleInteger) {
+        // Preserve correct rounding when the integer mantissa is not exact.
+        if (bounded_double(p + time_end + 1, p + beat_length_end, beat_length) !=
+            p + beat_length_end)
+            return false;
+    } else {
+        beat_length = static_cast<double>(mantissa);
+        if (fraction_digits) beat_length /= kPow10[fraction_digits];
+        if (negative) beat_length = -beat_length;
     }
-    return valid;
+    tp.beat_length = beat_length;
+    return true;
 }
 
 // Compatibility entry (tests/fuzzers): computes the masks itself.
@@ -207,7 +168,7 @@ template <typename T>
 __attribute__((always_inline))
 inline bool fast_parse_timing_point(Bytes32 a, Bytes32 b, const char* p,
                                     size_t len, T& tp) {
-    if (len > 64 || len < 15) return false;  // real lines: 20..39 bytes
+    if (len > 64 || len < 15) return false;
     const uint64_t line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
     const uint64_t commas =
         (comma_mask32(a) | static_cast<uint64_t>(comma_mask32(b)) << 32) &
@@ -218,159 +179,6 @@ inline bool fast_parse_timing_point(Bytes32 a, Bytes32 b, const char* p,
         line_mask;
     return fast_parse_timing_point_masked(commas, nondig, p, len, tp);
 }
-
-// --- Timing-line shape cache -------------------------------------------
-//
-// A [TimingPoints] section reuses a handful of byte-level line layouts:
-// on the 10k-map production census, the top 8 exact (comma mask, nondigit
-// mask, length) shapes cover a median 98.1% of a file's timing lines. A
-// line whose masks equal an already-accepted shape is structurally
-// identical to it — same comma positions, same dot/minus placement, all
-// other bytes digits — so validation collapses to the key comparison and
-// every field converts at cached offsets. The six 1-2 digit tail fields
-// convert together with one cached-shuffle maddubs when they fit a
-// 16-byte window; wider shapes fall back to cached-offset SWAR.
-struct TpShapeRow {
-    uint64_t commas = 0, nondig = 0;
-    uint32_t len = 0;  // 0 = empty slot (never matches: len >= 15)
-    TpGeom g{};
-    uint8_t simd_tails = 0;
-    alignas(16) int8_t shuf[16];   // gathers tail digits, 2B lanes
-    alignas(16) uint8_t subv[16];  // '0' on digit lanes, 0 on padding
-};
-
-struct TpShapeCache {
-    TpShapeRow rows[16];
-    static uint32_t slot(uint64_t commas) {
-        return static_cast<uint32_t>((commas * 0x9E3779B97F4A7C15ull) >> 60);
-    }
-};
-
-// The masks pin every byte's class (clear nondigit bit == digit, comma
-// bit == literal comma), but not WHICH non-digit character occupies the
-// beatLength's sign/dot slots — a fuzz-found hole. Two byte compares
-// close it; everything else follows from mask equality.
-inline bool tp_shape_match(const TpShapeRow& row, uint64_t commas,
-                           uint64_t nondig, size_t len, const char* p) {
-    if (row.commas != commas || row.nondig != nondig ||
-        row.len != static_cast<uint32_t>(len))
-        return false;
-    const TpGeom& g = row.g;
-    const bool neg_ok = !g.bl_neg || p[g.c[0] + 1] == '-';
-    const bool dot_ok =
-        !g.bl_has_dot || p[g.c[0] + 1 + g.bl_neg + g.bl_il] == '.';
-    return neg_ok && dot_ok;
-}
-
-inline void tp_shape_insert(TpShapeCache& cache, uint64_t commas,
-                            uint64_t nondig, size_t len, const TpGeom& g) {
-    TpShapeRow& r = cache.rows[TpShapeCache::slot(commas)];
-    r.commas = commas;
-    r.nondig = nondig;
-    r.len = static_cast<uint32_t>(len);
-    r.g = g;
-    // Tail SIMD layout: all six fields 1-2 digits and spanning <= 16
-    // bytes from the first tail digit. Lane i bytes {2i, 2i+1} gather
-    // {tens, ones} (0x80 = zero lane), built as two integers — inserts
-    // are ~15% of a short section's timing cost, so no byte loops here.
-    const uint32_t base = g.c[1] + 1;
-    const uint32_t span = static_cast<uint32_t>(len) - base;
-    uint64_t shuf_lo = 0, shuf_hi = 0, sub_lo = 0, sub_hi = 0;
-    uint32_t maxlen = 0;
-    for (int i = 0; i < 6; ++i) {
-        const uint32_t hi = i < 5 ? g.c[i + 2] : static_cast<uint32_t>(len);
-        const uint32_t off = g.c[i + 1] + 1 - base;
-        const uint32_t flen = hi - g.c[i + 1] - 1;
-        maxlen = flen > maxlen ? flen : maxlen;
-        // flen 1: {0x80, off}; flen 2: {off, off+1}
-        const uint64_t pair = flen == 2 ? (off | ((off + 1) << 8)) : (0x80u | (off << 8));
-        const uint64_t sub = flen == 2 ? 0x3030u : 0x3000u;
-        if (i < 4) {
-            shuf_lo |= pair << (16 * i);
-            sub_lo |= sub << (16 * i);
-        } else {
-            shuf_hi |= pair << (16 * (i - 4));
-            sub_hi |= sub << (16 * (i - 4));
-        }
-    }
-    r.simd_tails = span <= 16 && maxlen <= 2;
-    shuf_hi |= 0x8080808000000000ull;  // lanes 6-7 (bytes 12-15) unused: zero
-    memcpy(r.shuf, &shuf_lo, 8);
-    memcpy(r.shuf + 8, &shuf_hi, 8);
-    memcpy(r.subv, &sub_lo, 8);
-    memcpy(r.subv + 8, &sub_hi, 8);
-}
-
-// Replays a cached shape. Arithmetic mirrors the one-pass parser exactly,
-// so results are bit-identical (pinned by fuzz).
-template <typename T>
-inline void tp_shape_convert(const TpShapeRow& r, const char* p,
-                             T& tp) {
-    const TpGeom& g = r.g;
-    tp.time = static_cast<double>(swar_parse_u64(p, g.c[0]));
-
-    const char* f = p + g.c[0] + 1 + g.bl_neg;
-    uint64_t mant = swar_parse_u64_safe(f, g.bl_il);
-    const char* fp = f + g.bl_il + 1;
-    const uint64_t fm1 = g.bl_fl1 ? swar_parse_u64_safe(fp, g.bl_fl1) : 0;
-    const uint64_t fm2 =
-        g.bl_fl2 ? swar_parse_u64_safe(fp + 8, g.bl_fl2) : 0;
-    mant = mant * kPow10u[g.bl_fl1] + fm1;
-    mant = mant * kPow10u[g.bl_fl2] + fm2;
-    double bl;
-    if (mant > kMaxExactDoubleInteger)
-        bounded_double(f, p + g.c[1], bl);  // digit shape was validated; excludes sign
-    else
-        bl = static_cast<double>(mant) / kPow10[g.bl_frac];
-    bl = std::bit_cast<double>(std::bit_cast<uint64_t>(bl) |
-                               (static_cast<uint64_t>(g.bl_neg) << 63));
-    tp.beat_length = bl;
-
-    if (r.simd_tails) {
-        alignas(16) uint16_t t[8];
-#if FOSU_SIMD_X86
-        const __m128i v = _mm_loadu_si128(
-            reinterpret_cast<const __m128i*>(p + g.c[1] + 1));
-        const __m128i gathered = _mm_shuffle_epi8(
-            v, _mm_load_si128(reinterpret_cast<const __m128i*>(r.shuf)));
-        const __m128i digits = _mm_sub_epi8(
-            gathered,
-            _mm_load_si128(reinterpret_cast<const __m128i*>(r.subv)));
-        const __m128i vals =
-            _mm_maddubs_epi16(digits, _mm_set1_epi16(0x010A));
-        _mm_store_si128(reinterpret_cast<__m128i*>(t), vals);
-#else
-        const auto v = vld1q_u8(reinterpret_cast<const uint8_t*>(p + g.c[1] + 1));
-        const auto gathered = vqtbl1q_u8(v, vld1q_u8(reinterpret_cast<const uint8_t*>(r.shuf)));
-        const auto digits = vsubq_u8(gathered, vld1q_u8(reinterpret_cast<const uint8_t*>(r.subv)));
-        constexpr uint8_t weights[16] = {10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1};
-        vst1q_u16(t, vpaddlq_u8(vmulq_u8(digits, vld1q_u8(weights))));
-#endif
-        tp.meter = t[0];
-        tp.sample_set = t[1];
-        tp.sample_index = t[2];
-        tp.volume = t[3];
-        tp.uninherited = p[g.c[5] + 1] == '1';
-        tp.effects = t[5];
-    } else {
-        const uint32_t len = r.len;
-        const uint32_t t0 = g.c[2] - g.c[1] - 1;
-        const uint32_t t1 = g.c[3] - g.c[2] - 1;
-        const uint32_t t2 = g.c[4] - g.c[3] - 1;
-        const uint32_t t3 = g.c[5] - g.c[4] - 1;
-        const uint32_t t5 = len - g.c[6] - 1;
-        tp.meter = static_cast<int32_t>(swar_parse_u64(p + g.c[1] + 1, t0));
-        tp.sample_set =
-            static_cast<int32_t>(swar_parse_u64(p + g.c[2] + 1, t1));
-        tp.sample_index =
-            static_cast<int32_t>(swar_parse_u64(p + g.c[3] + 1, t2));
-        tp.volume = static_cast<int32_t>(swar_parse_u64(p + g.c[4] + 1, t3));
-        tp.uninherited = p[g.c[5] + 1] == '1';
-        tp.effects =
-            static_cast<uint32_t>(swar_parse_u64(p + g.c[6] + 1, t5));
-    }
-}
-
 
 #endif
 
