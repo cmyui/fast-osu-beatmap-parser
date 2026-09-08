@@ -132,7 +132,7 @@ static void test_prefix_shapes() {
     for (unsigned y = 1; y <= 3; ++y)
     for (unsigned t = 1; t <= 10; ++t)
     for (unsigned type = 1; type <= 3; ++type)
-    for (const char* sound : {"0", "15"}) {
+    for (const char* sound : {"0", "9", "00", "01", "10", "15", "42", "99"}) {
         std::string line = std::string(x, '1') + ',' + std::string(y, '2') + ',' +
             std::string(t, '1') + ',' + std::string(type, '3') + ',' + sound;
         const auto len = line.size();
