@@ -10,6 +10,7 @@ import weakref
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import asdict, fields, is_dataclass, replace
+from enum import Enum
 from pathlib import Path
 from typing import get_type_hints
 
@@ -76,7 +77,11 @@ def test_complete_map(tmp_path):
     assert circle.end_time == circle.start_time == 1000
     assert circle.raw_end_time == 0
     assert isinstance(slider, fosu.Slider) and slider.end_time is None
-    assert (slider.span_count, slider.curve_type, slider.length) == (2, "B", 240)
+    assert (slider.span_count, slider.curve_type, slider.length) == (
+        2,
+        fosu.CurveType.BEZIER,
+        240,
+    )
     assert (
         slider.hit_sound
         == fosu.HitSound.WHISTLE | fosu.HitSound.FINISH | fosu.HitSound.CLAP
@@ -98,7 +103,7 @@ def test_complete_map(tmp_path):
 
 def test_empty_input_defaults():
     b = fosu.parse(b"")
-    assert b.title == "" and b.sample_set == "Normal"
+    assert b.title == "" and b.sample_set is fosu.SampleSet.NORMAL
     assert b.hit_objects == b.timing_points == b.breaks == b.bookmarks == []
     assert b.mode is fosu.GameMode.OSU
     assert b.beatmap_id is None and b.preview_time is None
@@ -335,7 +340,7 @@ def test_all_fields_are_detached_python_values():
             for item in value:
                 visit(item)
         else:
-            assert isinstance(value, (int, float, str, bytes, type(None)))
+            assert isinstance(value, (int, float, str, bytes, Enum, type(None)))
 
     visit(b)
 
@@ -375,6 +380,32 @@ def test_native_stub_contract():
         ],
         check=True,
     )
+
+
+def test_enum_values_and_malformed_records():
+    b = fosu.parse(
+        b"[General]\nSampleSet:2\nSampleSet:99\n"
+        b"[TimingPoints]\n0,500,4,0,0,100,1,0\n1,500,4,9,0,100,1,0\n"
+        b"[HitObjects]\n0,0,1,2,0,X|1:2,1,30\n0,0,2,2,0,P|1:2,1,30\n"
+    )
+    assert b.sample_set is fosu.SampleSet.SOFT
+    assert b.stats.malformed_lines == 3
+    assert len(b.timing_points) == len(b.hit_objects) == 1
+    assert b.timing_points[0].sample_set is fosu.SampleSet.NONE
+    assert b.hit_objects[0].curve_type is fosu.CurveType.PERFECT_CURVE
+    assert fosu.parse(b"[General]\nSampleSet:None\n").sample_set is fosu.SampleSet.NONE
+
+
+def test_record_constructors_are_keyword_only():
+    b = fosu.parse(
+        b"[TimingPoints]\n0,500\n[HitObjects]\n0,0,1,1,0\n"
+        b"0,0,2,2,0,L|1:2,1,30\n0,0,3,8,0,4\n0,0,5,128,0,6\n"
+    )
+    for record in [b, b.stats, *b.timing_points, *b.hit_objects]:
+        values = {field.name: getattr(record, field.name) for field in fields(record)}
+        assert type(record)(**values) == record
+        with pytest.raises(TypeError):
+            type(record)(*values.values())
 
 
 def test_bookmark_field_trimming_and_internal_whitespace():

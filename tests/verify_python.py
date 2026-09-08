@@ -4,6 +4,7 @@ Run on the corpus host; no beatmap data is written out by this verifier.
 """
 
 import argparse
+from enum import Enum
 import struct
 import subprocess
 import sys
@@ -16,6 +17,8 @@ from decode import decode
 
 
 def compare(actual, expected):
+    if isinstance(actual, Enum):
+        actual = actual.value
     if isinstance(expected, bytes):
         assert actual.encode("utf-8", "surrogateescape") == expected
     elif isinstance(expected, float):
@@ -28,6 +31,8 @@ def check(bm, ref):
     for name, expected in ref["metadata"].items():
         public = "raw_" + name if name in ("tags", "bookmarks") else name
         actual = getattr(bm, public)
+        if name == "sample_set":
+            expected = fosu.SampleSet[expected.decode().upper()].value
         if name in ("beatmap_id", "beatmap_set_id", "preview_time") and actual is None:
             actual = -1
         compare(actual, expected)

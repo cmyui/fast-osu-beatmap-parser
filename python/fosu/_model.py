@@ -1,8 +1,8 @@
 """Mutable, detached beatmap values; all fields are populated during parsing."""
 
 from dataclasses import dataclass
-from enum import IntEnum, IntFlag
-from typing import ClassVar
+from enum import Enum, IntEnum, IntFlag
+from typing import ClassVar, TypeAlias
 
 
 class GameMode(IntEnum):
@@ -10,6 +10,20 @@ class GameMode(IntEnum):
     TAIKO = 1
     CATCH = 2
     MANIA = 3
+
+
+class CurveType(Enum):
+    BEZIER = "B"
+    CATMULL = "C"
+    LINEAR = "L"
+    PERFECT_CURVE = "P"
+
+
+class SampleSet(IntEnum):
+    NONE = 0
+    NORMAL = 1
+    SOFT = 2
+    DRUM = 3
 
 
 class HitSound(IntFlag):
@@ -25,10 +39,9 @@ class Point:
     y: int
 
 
-@dataclass(slots=True)
-class HitObject:
+@dataclass(slots=True, kw_only=True)
+class _HitObject:
     start_time: float
-    end_time: float | None
     x: int
     y: int
     hit_sound: HitSound
@@ -43,17 +56,17 @@ class HitObject:
     is_hold: ClassVar[bool] = False
 
 
-@dataclass(slots=True)
-class Circle(HitObject):
+@dataclass(slots=True, kw_only=True)
+class Circle(_HitObject):
     end_time: float
     is_circle: ClassVar[bool] = True
 
 
-@dataclass(slots=True)
-class Slider(HitObject):
+@dataclass(slots=True, kw_only=True)
+class Slider(_HitObject):
     end_time: None
     span_count: int
-    curve_type: str
+    curve_type: CurveType
     length: float
     raw_edge_sounds: str
     raw_edge_sets: str
@@ -61,24 +74,27 @@ class Slider(HitObject):
     is_slider: ClassVar[bool] = True
 
 
-@dataclass(slots=True)
-class Spinner(HitObject):
+@dataclass(slots=True, kw_only=True)
+class Spinner(_HitObject):
     end_time: float
     is_spinner: ClassVar[bool] = True
 
 
-@dataclass(slots=True)
-class HoldNote(HitObject):
+@dataclass(slots=True, kw_only=True)
+class HoldNote(_HitObject):
     end_time: float
     is_hold: ClassVar[bool] = True
 
 
-@dataclass(slots=True)
+HitObject: TypeAlias = Circle | Slider | Spinner | HoldNote
+
+
+@dataclass(slots=True, kw_only=True)
 class TimingPoint:
     time: float
     beat_length: float
     meter: int
-    sample_set: int
+    sample_set: SampleSet
     sample_index: int
     volume: int
     uninherited: bool
@@ -91,7 +107,7 @@ class Break:
     end: float
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, kw_only=True)
 class ParseStats:
     fast_path_lines: int
     slow_path_lines: int
@@ -99,14 +115,14 @@ class ParseStats:
     storyboard_lines: int
 
 
-@dataclass(slots=True, repr=False)
+@dataclass(slots=True, repr=False, kw_only=True)
 class Beatmap:
     format_version: int
     audio_filename: str
     audio_lead_in: int
     preview_time: int | None
     countdown: int
-    sample_set: str
+    sample_set: SampleSet
     stack_leniency: float
     mode: GameMode
     letterbox_in_breaks: bool

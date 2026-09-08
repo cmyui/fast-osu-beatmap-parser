@@ -56,7 +56,7 @@ bool publish(Handle& handle, const fosu::Beatmap& map) {
   view.metadata.audio_lead_in = map.audio_lead_in;
   view.metadata.preview_time = map.preview_time;
   view.metadata.countdown = map.countdown;
-  view.metadata.sample_set = string_ref(storage, map.sample_set);
+  view.metadata.sample_set = static_cast<fosu_sample_set>(map.sample_set);
   view.metadata.stack_leniency = map.stack_leniency;
   view.metadata.mode = map.mode;
   view.metadata.letterbox_in_breaks = map.letterbox_in_breaks;
@@ -126,8 +126,7 @@ bool publish(Handle& handle, const fosu::Beatmap& map) {
         source.point_begin,
         source.point_count,
         source.slides,
-        source.curve_type,
-        {},
+        static_cast<fosu_curve_type>(source.curve_type),
         source.length,
         string_ref(storage, source.edge_sounds),
         string_ref(storage, source.edge_sets),
@@ -154,7 +153,7 @@ bool publish(Handle& handle, const fosu::Beatmap& map) {
         source.time,
         source.beat_length,
         source.meter,
-        source.sample_set,
+        static_cast<fosu_sample_set>(source.sample_set),
         source.sample_index,
         source.volume,
         static_cast<uint8_t>(source.uninherited),

@@ -19,8 +19,15 @@ the consumer. Input order and raw sample strings are retained.
   Slider lengths use ±131,072. Out-of-range fields are rejected, not saturated.
 - Integer fields use the official symmetric ±2,147,483,647 range, even when
   fosu stores them in a wider integer. Boolean fields parse a complete integer
-  and compare it with 1. Mode must name a legacy ruleset (0–3). Countdown and
-  sample-bank enums accept official names and underlying int32 values.
+  and compare it with 1. Mode must name a legacy ruleset (0–3). Countdown
+  accepts official names and underlying int32 values.
+- Sample sets are enums with values `None` (0), `Normal` (1), `Soft` (2), and
+  `Drum` (3). General metadata accepts those names or their integer spellings;
+  timing points accept 0–3. Zero is the legacy default selector, not an error:
+  timing points use the beatmap default, and a General `None` denotes normal.
+  Unknown values and comma-separated sample-set combinations are malformed.
+  Slider curve types must be `B` (Bezier), `C` (Catmull), `L` (linear), or `P`
+  (perfect curve). Unknown curve types reject the hitobject, not the whole map.
 - Difficulty values and stack leniency are stored as raw doubles, but acceptance
   uses the official float32 domain. Float rounding matters at the upper bound;
   these are parsing limits, not the subsequent gameplay difficulty clamps.
@@ -44,7 +51,7 @@ the consumer. Input order and raw sample strings are retained.
 - Invalid hitobjects and timing points are skipped and counted in
   `stats.malformed_lines`. A rejected slider can retain unreferenced points in
   the native pool; use each slider's explicit point range. Python exposes only
-  the points of accepted sliders. Invalid known numeric
+  the points of accepted sliders. Invalid known numeric or enum
   metadata retains its previous/default value and increments the same counter.
 - Section and metadata names must match completely. Unknown fields/sections
   are ignored. An empty input produces an empty/default result; successful
@@ -75,8 +82,11 @@ own gameplay and resource constraints before expanding slider curves/repeats.
 ## Sources of truth
 
 A previous fosu release is a regression baseline, not the definition of osu!
-correctness. **The official osu! decoder determines acceptance and rejection
-policy.** Third-party parsers are not the authority for those decisions. Raw
+correctness. The official osu! decoder is the reference for legacy syntax and
+numeric behavior. FOSU deliberately rejects unknown enum values rather than
+exposing undefined choices through its typed APIs, even where the official
+decoder accepts them. These domain checks are not a ranking validator.
+Third-party parsers are not the authority for those decisions. Raw
 storage is separate from gameplay transformations such as clamping difficulty,
 resolving timing points, applying format-version offsets and sorting objects.
 
@@ -87,7 +97,8 @@ the closed-source stable client. Its
 [numeric helpers](https://github.com/ppy/osu/blob/48c4800e3ae4ee752452cdff83bd3787ccf3105f/osu.Game/Beatmaps/Formats/Parsing.cs),
 [legacy decoder](https://github.com/ppy/osu/blob/48c4800e3ae4ee752452cdff83bd3787ccf3105f/osu.Game/Beatmaps/Formats/LegacyBeatmapDecoder.cs)
 and [object decoder](https://github.com/ppy/osu/blob/48c4800e3ae4ee752452cdff83bd3787ccf3105f/osu.Game/Rulesets/Objects/Legacy/ConvertHitObjectParser.cs)
-define the tested numeric limits, inherited-NaN behavior and record acceptance.
+define the tested numeric limits and inherited-NaN behavior. Record acceptance
+also follows the explicit enum restrictions above.
 
 Rejection is usually **per line**, not per file. For example,
 `OverallDifficulty:7` followed by `ApproachRate:1e309` leaves AR at 7 and continues
@@ -106,6 +117,8 @@ python tests/test_official.py --corpus /path/to/maps --report /private/report.js
 ```
 
 The synthetic suite checks field rejection and retained object counts. The
+explicit enum-policy cases assert both osu!'s acceptance and FOSU's rejection;
+they are not skipped comparisons. The
 corpus audit compares whole-map completion, rejection counts and object counts;
 it does not prove equality of every gameplay value or identify every rejected
 line in fosu. Keep corpus reports private: they contain local paths.

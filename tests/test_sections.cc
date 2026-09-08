@@ -73,7 +73,7 @@ static void test_all_sections() {
     CHECK_EQ(bm.format_version, 14);
     CHECK(bm.audio_filename == "audio.mp3");
     CHECK_EQ(bm.preview_time, 53342);
-    CHECK(bm.sample_set == "Soft");
+    CHECK(bm.sample_set == fosu::SampleSet::Soft);
     CHECK(bm.widescreen_storyboard);
     CHECK(!bm.letterbox_in_breaks);
     CHECK(bm.bookmarks == "11240,22540");
@@ -117,7 +117,7 @@ static void test_all_sections() {
     CHECK(sl.is_slider());
     CHECK(sl.slider != fosu::HitObject::kNoSlider);
     const auto& s = bm.sliders[sl.slider];
-    CHECK_EQ(s.curve_type, 'B');
+    CHECK_EQ(s.curve_type, fosu::CurveType::Bezier);
     CHECK_EQ(s.point_count, 2u);
     CHECK_EQ(bm.slider_points[s.point_begin].x, 172);
     CHECK_EQ(bm.slider_points[s.point_begin].y, 44);
@@ -256,7 +256,7 @@ static void test_omitted_sections_use_defaults() {
     auto bm = parse_str("[Metadata]\nTitle:Only metadata\n", simd);
     CHECK(bm.title == "Only metadata");
     CHECK(bm.audio_filename.empty());
-    CHECK(bm.sample_set == "Normal");
+    CHECK(bm.sample_set == fosu::SampleSet::Normal);
     CHECK_EQ(bm.preview_time, -1);
     CHECK_EQ(bm.grid_size, 4);
     CHECK_EQ(bm.hp, 5);
@@ -380,7 +380,7 @@ static void test_exact_keys_and_event_aliases() {
       "1,0,\"old.mp4\"\nVideo,0,\"new.mp4\"\n"
       "2,10,20\nBreak,30,40\nVideoExtra,0,\"ignored.mp4\"\n");
   CHECK_EQ(map.countdown, 3);
-  CHECK_EQ(map.sample_set, "Soft");
+  CHECK_EQ(map.sample_set, fosu::SampleSet::Soft);
   CHECK_EQ(map.title, "final: title ");
   CHECK_EQ(map.title_unicode, "unicode");
   CHECK_EQ(map.background, "background.jpg");
@@ -408,8 +408,8 @@ static void test_long_event_lines() {
 static void test_timing_integer_widths() {
   for (int value : {9, 99, 999, 9999, 10000, 99999999, INT32_MAX}) {
     const auto field = std::to_string(value);
-    const std::string input = "[TimingPoints]\n0,-100," + field + "," + field + "," +
-                              field + "," + field + ",0," + field;
+    const std::string input =
+        "[TimingPoints]\n0,-100," + field + ",2," + field + "," + field + ",0," + field;
     for (bool simd : {false, true}) {
       fosu::Parser parser(simd ? fosu::internal::native_engine
                                : fosu::internal::scalar_engine);
@@ -422,7 +422,7 @@ static void test_timing_integer_widths() {
       CHECK_EQ(point.time, 0.0);
       CHECK_EQ(point.beat_length, -100.0);
       CHECK_EQ(point.meter, value);
-      CHECK_EQ(point.sample_set, value);
+      CHECK_EQ(point.sample_set, fosu::SampleSet::Soft);
       CHECK_EQ(point.sample_index, value);
       CHECK_EQ(point.volume, value);
       CHECK(!point.uninherited);
@@ -519,7 +519,49 @@ static void test_section_skip_boundaries() {
   }
 }
 
+static void test_enum_contracts() {
+  const std::string names[] = {"None", "Normal", "Soft", "Drum"};
+  for (bool simd : {false, true}) {
+    for (int value = 0; value < 4; ++value) {
+      for (const auto& spelling :
+           {names[value], std::to_string(value), " +" + std::to_string(value) + " ",
+            "0" + std::to_string(value)}) {
+        const auto map = parse_str("[General]\nSampleSet:" + spelling + "\n", simd);
+        CHECK_EQ(map.stats.malformed_lines, 0u);
+        CHECK_EQ(map.sample_set, static_cast<fosu::SampleSet>(value));
+      }
+    }
+    for (const std::string value :
+         {"-1", "4", "99", "2147483647", "Unknown", "Normal,Soft"}) {
+      const auto map =
+          parse_str("[General]\nSampleSet:Soft\nSampleSet:" + value + "\n", simd);
+      CHECK_EQ(map.sample_set, fosu::SampleSet::Soft);
+      CHECK_EQ(map.stats.malformed_lines, 1u);
+    }
+    for (const std::string value : {"-1", "4", "9", "99", "2147483647"}) {
+      const auto map = parse_str(
+          "[TimingPoints]\n0,500,4," + value + ",0,100,1,0\n1,500,4,2,0,100,1,0\n", simd);
+      CHECK_EQ(map.stats.malformed_lines, 1u);
+      CHECK_EQ(map.timing_points.size(), 1u);
+      CHECK_EQ(map.timing_points[0].sample_set, fosu::SampleSet::Soft);
+    }
+    for (char value : {'B', 'C', 'L', 'P', 'X', 'b', '0'}) {
+      const auto map = parse_str(
+          std::string("[HitObjects]\n0,0,1,2,0,") + value + "|1:2,1,30\n0,0,2,1,0\n",
+          simd);
+      const bool valid = value == 'B' || value == 'C' || value == 'L' || value == 'P';
+      CHECK_EQ(map.stats.malformed_lines, valid ? 0u : 1u);
+      CHECK_EQ(map.hit_objects.size(), valid ? 2u : 1u);
+      CHECK_EQ(map.sliders.size(), valid ? 1u : 0u);
+      CHECK_EQ(map.slider_points.size(), valid ? 1u : 0u);
+      if (valid)
+        CHECK_EQ(static_cast<char>(map.sliders[0].curve_type), value);
+    }
+  }
+}
+
 int main() {
+  test_enum_contracts();
   test_byte_scan_boundaries<','>();
   test_byte_scan_boundaries<':'>();
   test_byte_scan_boundaries<'\n'>();

@@ -33,6 +33,7 @@ enable_error_code = [
   "unused-awaitable",
   "redundant-expr",
   "possibly-undefined",
+  "mutable-override",
 ]
 
 [project.urls]

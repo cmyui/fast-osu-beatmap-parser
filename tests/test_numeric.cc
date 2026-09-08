@@ -235,6 +235,10 @@ static void test_fuzz_timing_point() {
     const int nf = shape == 7 ? (int)(rng() % 6) : 6;
     for (int f = 0; f < nf; ++f) {
       buf[len++] = ',';
+      if (f == 1) {
+        buf[len++] = char('0' + rng() % 4);
+        continue;
+      }
       const int fd = 1 + (int)(rng() % 3);
       for (int i = 0; i < fd; ++i)
         buf[len++] = char('0' + rng() % 10);

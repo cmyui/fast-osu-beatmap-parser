@@ -245,6 +245,9 @@ struct BeatmapConverter {
   PyObject** keys;
   PythonRef point_type, circle_type, slider_type, spinner_type, hold_type;
   PythonRef timing_type, break_type, stats_type, beatmap_type, sound_type, mode_type;
+  PythonRef sample_type, curve_type;
+  PythonRef samples[4];
+  PythonRef bezier, catmull, linear, perfect_curve;
   PythonRef sounds{PyDict_New()};
   BeatmapConverter(const fosu::Beatmap& map, PyObject* model, PyObject** keys)
       : map(map),
@@ -259,7 +262,35 @@ struct BeatmapConverter {
         stats_type(PyObject_GetAttrString(model, "ParseStats")),
         beatmap_type(PyObject_GetAttrString(model, "Beatmap")),
         sound_type(PyObject_GetAttrString(model, "HitSound")),
-        mode_type(PyObject_GetAttrString(model, "GameMode")) {}
+        mode_type(PyObject_GetAttrString(model, "GameMode")),
+        sample_type(PyObject_GetAttrString(model, "SampleSet")),
+        curve_type(PyObject_GetAttrString(model, "CurveType")),
+        samples{PythonRef(PyObject_GetAttrString(sample_type, "NONE")),
+                PythonRef(PyObject_GetAttrString(sample_type, "NORMAL")),
+                PythonRef(PyObject_GetAttrString(sample_type, "SOFT")),
+                PythonRef(PyObject_GetAttrString(sample_type, "DRUM"))},
+        bezier(PyObject_GetAttrString(curve_type, "BEZIER")),
+        catmull(PyObject_GetAttrString(curve_type, "CATMULL")),
+        linear(PyObject_GetAttrString(curve_type, "LINEAR")),
+        perfect_curve(PyObject_GetAttrString(curve_type, "PERFECT_CURVE")) {}
+
+  PythonRef sample_set(fosu::SampleSet value) {
+    return retain(samples[static_cast<int>(value)]);
+  }
+
+  PythonRef curve(fosu::CurveType value) {
+    switch (value) {
+      case fosu::CurveType::Bezier:
+        return retain(bezier);
+      case fosu::CurveType::Catmull:
+        return retain(catmull);
+      case fosu::CurveType::Linear:
+        return retain(linear);
+      case fosu::CurveType::PerfectCurve:
+        return retain(perfect_curve);
+    }
+    __builtin_unreachable();  // Only validated native enums reach conversion.
+  }
 
   PythonRef make(PyObject* type) {
     // Fixed, plain dataclasses: no custom __new__, __init__, or post-init hooks.
@@ -320,8 +351,7 @@ struct BeatmapConverter {
       const auto& s = map.sliders[h.slider];
       set(out, f_span_count, integer(s.slides));
       set(out, f_length, number(s.length));
-      set(out, f_curve_type,
-          PythonRef(PyUnicode_DecodeASCII(&s.curve_type, 1, "surrogateescape")));
+      set(out, f_curve_type, curve(s.curve_type));
       set(out, f_raw_edge_sounds, string(s.edge_sounds));
       set(out, f_raw_edge_sets, string(s.edge_sets));
       set(out, f_control_points, list(s.point_count + 1, [&](size_t j) {
@@ -338,7 +368,7 @@ struct BeatmapConverter {
     set(out, f_time, number(t.time));
     set(out, f_beat_length, number(t.beat_length));
     set(out, f_meter, integer(t.meter));
-    set(out, f_sample_set, integer(t.sample_set));
+    set(out, f_sample_set, sample_set(t.sample_set));
     set(out, f_sample_index, integer(t.sample_index));
     set(out, f_volume, integer(t.volume));
     set(out, f_uninherited, boolean(t.uninherited));
@@ -396,7 +426,7 @@ struct BeatmapConverter {
     set(out, f_audio_lead_in, integer(m.audio_lead_in));
     set(out, f_preview_time, optional_integer(m.preview_time));
     set(out, f_countdown, integer(m.countdown));
-    set(out, f_sample_set, string(m.sample_set));
+    set(out, f_sample_set, sample_set(m.sample_set));
     set(out, f_stack_leniency, number(m.stack_leniency));
     set(out, f_mode,
         PythonRef(PyObject_CallFunctionObjArgs(mode_type.p, integer(m.mode).p, nullptr)));

@@ -35,9 +35,9 @@ void check(fosu_handle* h, const std::string& input, uint32_t sections = FOSU_AL
     assert(uint64_t(ref.offset) + ref.length <= v->text_size);
   };
   const auto& m = v->metadata;
-  for (auto ref : {m.audio_filename, m.sample_set, m.overlay_position, m.skin_preference,
-                   m.bookmarks, m.title, m.title_unicode, m.artist, m.artist_unicode,
-                   m.creator, m.version, m.source, m.tags, m.background, m.video})
+  for (auto ref : {m.audio_filename, m.overlay_position, m.skin_preference, m.bookmarks,
+                   m.title, m.title_unicode, m.artist, m.artist_unicode, m.creator,
+                   m.version, m.source, m.tags, m.background, m.video})
     string(ref);
   for (size_t i = 0; i < v->hit_object_count; ++i) {
     string(v->hit_objects[i].hit_sample);
@@ -47,8 +47,6 @@ void check(fosu_handle* h, const std::string& input, uint32_t sections = FOSU_AL
     const auto& slider = v->sliders[i];
     string(slider.edge_sounds);
     string(slider.edge_sets);
-    for (auto byte : slider.reserved)
-      assert(byte == 0);
   }
   for (size_t i = 0; i < v->timing_point_count; ++i)
     for (auto byte : v->timing_points[i].reserved)
@@ -118,8 +116,23 @@ void check_empty_input_resets_defaults() {
   check(handle, "");
   const auto* view = fosu_get_view(handle);
   assert(view->metadata.title.length == 0);
-  assert(view->metadata.sample_set.length == 6);
-  assert(memcmp(view->text + view->metadata.sample_set.offset, "Normal", 6) == 0);
+  assert(view->metadata.sample_set == FOSU_SAMPLE_NORMAL);
+  fosu_free(handle);
+}
+
+void check_enum_contracts() {
+  auto* handle = fosu_new();
+  const std::string input =
+      "[General]\nSampleSet:2\nSampleSet:99\n"
+      "[TimingPoints]\n0,500,4,0,0,100,1,0\n1,500,4,9,0,100,1,0\n"
+      "[HitObjects]\n0,0,1,2,0,X|1:2,1,30\n0,0,2,2,0,P|1:2,1,30\n";
+  check(handle, input);
+  const auto* view = fosu_get_view(handle);
+  assert(view->metadata.sample_set == FOSU_SAMPLE_SOFT);
+  assert(view->stats.malformed_lines == 3);
+  assert(view->timing_point_count == 1 && view->slider_count == 1);
+  assert(view->timing_points[0].sample_set == FOSU_SAMPLE_NONE);
+  assert(view->sliders[0].curve_type == FOSU_CURVE_PERFECT_CURVE);
   fosu_free(handle);
 }
 
@@ -246,6 +259,7 @@ int main() {
   check_all_fields();
   check_same_input_reuses_capacity();
   check_empty_input_resets_defaults();
+  check_enum_contracts();
   check_hitobject_section_selection();
   check_difficulty_section_selection();
   check_reparse_owned_input();

@@ -96,7 +96,9 @@ parser's text values, not the complete source file.
 ## Hitobjects and sliders
 
 `hit_objects` is a `list[HitObject]` containing `Circle`, `Slider`, `Spinner` and
-`HoldNote` instances in file order. Common stored attributes are:
+`HoldNote` instances in file order. `HitObject` is the union of these four types,
+not a constructible base class. Use `isinstance` to narrow to a concrete type.
+Common stored attributes are:
 
 - `start_time`, `end_time`: milliseconds. A circle ends at its start time;
   spinner/hold endpoints are parsed from the file. A slider's endpoint is `None`
@@ -116,6 +118,8 @@ A `Slider` additionally stores `span_count`, `curve_type`, `length`,
 points include the head followed by the path's remaining points in file order.
 Native pool offsets and indices are not part of the Python model.
 `span_count=2` means forward and back.
+`curve_type` is a `CurveType` enum: `BEZIER`, `CATMULL`, `LINEAR`, or
+`PERFECT_CURVE`. Its `.value` is the file's `B`, `C`, `L`, or `P` code.
 No curve evaluation, slider duration, stacking, ruleset conversion or mod
 adjustment is performed.
 
@@ -124,11 +128,25 @@ adjustment is performed.
 beat lengths are preserved. `Break` stores `start` and `end`. `combo_colours` is
 a list of packed `0xRRGGBB` integers.
 
+Both `Beatmap.sample_set` and `TimingPoint.sample_set` use `SampleSet`:
+`NONE=0`, `NORMAL=1`, `SOFT=2`, and `DRUM=3`. `NONE` preserves the legacy
+default selector: a timing point uses the beatmap default, and a beatmap's
+`NONE` denotes normal. Unknown enum values are rejected during native parsing;
+see the [malformed-input contract](compatibility.md).
+
 `ParseStats` contains `fast_path_lines`, `slow_path_lines`, `malformed_lines` and
 `storyboard_lines`, describing the original parse. Storyboard bodies are counted
 and skipped. Invalid bookmark tokens do not count as rejected records.
 
 ## Mutation, copying and export
+
+Beatmaps, hitobjects, timing points and parse statistics have keyword-only
+constructors. `Point(x, y)` and `Break(start, end)` also accept positional values.
+Annotations describe parsed values and guide type checking; these ordinary
+mutable dataclasses do not validate assignments at runtime.
+Narrow a `HitObject` with `isinstance` before changing type-specific fields:
+mypy checks a concrete circle's `end_time` as `float`, but currently permits
+`None` assignment through the unnarrowed union.
 
 All result values are detached. Repeated list indexing returns the same object,
 and mutations persist in that object. Mutating a result does not change another

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <fosu/enums.h>
 #include <cstdint>
 #include <string_view>
 
@@ -13,7 +14,7 @@ struct BeatmapHeader {
   int32_t audio_lead_in = 0;
   int32_t preview_time = -1;
   int32_t countdown = 1;
-  std::string_view sample_set = "Normal";
+  SampleSet sample_set = SampleSet::Normal;
   double stack_leniency = 0.7;
   int32_t mode = 0;
   bool letterbox_in_breaks = false;

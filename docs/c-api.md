@@ -112,8 +112,11 @@ benchmark on the deployment host.
   supported 64-bit ABIs; point pairs occupy 8 and timing points 40.
 - Every `fosu_string_ref` addresses `view->text` using `offset` and `length`.
   Empty strings have length zero. `source_size` is the original input size;
-  `text_size` also includes 128 zero-padding bytes and six bytes for the
-  default `"Normal"` sample set. Bounds checks use `text_size`.
+  `text_size` also includes 128 zero-padding bytes. Bounds checks use `text_size`.
+- `sample_set` uses `fosu_sample_set` in both metadata and timing points;
+  `curve_type` uses `fosu_curve_type`. Parser-produced values are always named
+  members. `FOSU_SAMPLE_NONE` is the legacy zero/default selector, not an
+  unknown-value sentinel. Invalid enum inputs are counted as malformed.
 - `FOSU_NO_SLIDER` is the sentinel for an object without a slider. Other values
   index the slider array; sliders index the shared point pool.
 - Section bits such as `FOSU_DIFFICULTY` or `FOSU_HIT_OBJECTS` can be ORed

@@ -21,6 +21,17 @@ VALUES = (
     'NaN', 'Infinity', '  7  ', '\t7\t', '7junk', '+-1', '',
 )
 
+# Explicit policy differences, not ignored comparisons: these fixtures must
+# produce zero rejections in osu! and exactly one in FOSU, with no hitobjects.
+STRICT_ENUM_CASES = {
+    f'{field}={value!r}'
+    for field, values in (
+        ('General.SampleSet', ('-1', '2147483647', '-2147483648', '  7  ', '\t7\t', 'Normal, None')),
+        ('timing.sample_set', ('-1', '2147483647', '  7  ', '\t7\t')),
+    )
+    for value in values
+}
+
 
 def fixtures():
     for value in ('', '1,2,3', '10,bad,20', '2147483647,2147483648,-2147483648,-2147483649',
@@ -105,7 +116,12 @@ def main():
             counts['files'] += 1
             counts['official_rejected_lines'] += theirs[1]
             counts['fosu_rejected_lines'] += ours[1]
-            if ours != theirs or actual.bookmarks != expected.get('bookmarks', []):
+            if name in STRICT_ENUM_CASES:
+                acceptance_matches = theirs == (True, 0, 0) and ours == (True, 1, 0)
+                counts['intentional_enum_rejections'] += 1
+            else:
+                acceptance_matches = ours == theirs
+            if not acceptance_matches or actual.bookmarks != expected.get('bookmarks', []):
                 gaps.append({'case': name, 'official': theirs, 'fosu': ours,
                              'official_rejections': expected.get('rejected', []),
                              'official_bookmarks': expected.get('bookmarks', []),

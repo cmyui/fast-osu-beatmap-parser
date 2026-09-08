@@ -12,7 +12,7 @@ names = {line.split()[-1] for line in exports.splitlines()}
 expected = {'fosu_backend_name', 'fosu_backend_available', 'fosu_abi_version', 'fosu_new', 'fosu_free', 'fosu_parse',
             'fosu_parse_file', 'fosu_get_view'}
 if a.engine:
-    expected = {'fosu_engine_v1'}
+    expected = {'fosu_engine_v2'}
 assert names == expected, names ^ expected
 if a.bundled:
     dynamic = subprocess.check_output(['readelf', '-d', a.library], text=True)

@@ -2,6 +2,7 @@
 
 #include <fosu/beatmap_header.h>
 #include <fosu/engine/byte_scan.h>
+#include <fosu/engine/enum_parse.h>
 #include <fosu/engine/scalar_parse.h>
 #include <fosu/engine/string_lookup.h>
 #include <type_traits>
@@ -168,12 +169,19 @@ inline bool parse_kv_line(BeatmapHeader& bm,
           {"Drum", 3},
       });
       int32_t value;
+      // Sample sets are choices, not flags.
+      if (e.type == KT::SampleSet && v.find(',') != std::string_view::npos)
+        return invalid();
       if (!parse_legacy_enum(v, e.type == KT::Countdown ? countdown : samples, value))
         return invalid();
       if (e.type == KT::Countdown)
         *reinterpret_cast<int32_t*>(f) = value;
-      else
-        *reinterpret_cast<std::string_view*>(f) = v;
+      else {
+        const auto sample_set = parse_sample_set(value);
+        if (!sample_set)
+          return invalid();
+        *reinterpret_cast<SampleSet*>(f) = *sample_set;
+      }
       break;
     }
     case KT::I32:

@@ -3,6 +3,7 @@
 #include <fosu/beatmap.h>
 #include <fosu/engine/byte_scan.h>
 #include <fosu/engine/digit_groups.h>
+#include <fosu/engine/enum_parse.h>
 #include <fosu/engine/prefix.h>
 #include <algorithm>
 #include <bit>
@@ -60,11 +61,14 @@ inline std::optional<TimingPoint> parse_timing_point(const char* p,
   // Additional legacy columns are ignored by the official decoder.
   if ((p < end && *p != ',') || (rest[4] != 0 && std::isnan(beat_length)))
     return std::nullopt;
+  const auto sample_set = parse_sample_set(rest[1]);
+  if (!sample_set)
+    return std::nullopt;
   return TimingPoint{
       .time = time,
       .beat_length = beat_length,
       .meter = clamp_i32(rest[0]),
-      .sample_set = clamp_i32(rest[1]),
+      .sample_set = *sample_set,
       .sample_index = clamp_i32(rest[2]),
       .volume = clamp_i32(rest[3]),
       .uninherited = rest[4] != 0,
@@ -222,11 +226,14 @@ try_parse_timing_point_fast_masked(uint64_t commas,
         parse_small_integer(p + sample_index_end + 1, volume_digits),
     };
   }
+  const auto sample_set = parse_sample_set(fields[1]);
+  if (!sample_set)
+    return std::nullopt;
   return TimingPoint{
       .time = static_cast<double>(swar_parse_u64(p, time_end)),
       .beat_length = beat_length,
       .meter = fields[0],
-      .sample_set = fields[1],
+      .sample_set = *sample_set,
       .sample_index = fields[2],
       .volume = fields[3],
       .uninherited = p[volume_end + 1] == '1',
