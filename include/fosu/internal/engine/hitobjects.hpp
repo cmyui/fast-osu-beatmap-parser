@@ -182,7 +182,7 @@ inline const char* parse_hitobject_lines(
             HitObject object{};
             bool accepted;
             const auto prefix = decode_hitobject_prefix(
-                ascii, zero, shape, p);
+                ascii, zero, shape);
             if (prefix) [[likely]] {
                 initialize_hitobject(object, *prefix);
                 ++fast_lines;
