@@ -49,86 +49,114 @@ uncontended lower envelope; it is not the median map, average user latency, or
 a confidence interval. Shared-VM scheduling can move results. MB/s is total
 input bytes divided by the sum of per-file minima, using decimal megabytes.
 
-## Native measurement snapshot
+## Measurement snapshot
 
-Measured source: [`feaf08f`](https://github.com/cmyui/fast-osu-beatmap-parser/commit/feaf08f1f6f3ee3028322d80718e830e1577a308).
-All runs below were serialized after builds and correctness checks completed.
+Measured source: [`d31cddf`](https://github.com/cmyui/fast-osu-beatmap-parser/commit/d31cddf90f6c7c5d35f2c5f6a4c0ccc39e716866),
+2026-09-08 UTC. Both machines use the same full **10,000-map corpus** and
+validate all 8,070,193 objects before timing. Builds and tests finish before
+measurements start; each host runs only one benchmark at a time.
 
-### Linux / Zen 4
+- **Hetzner / Zen 4:** the Linux VM described above, pinned to CPU 3, GCC 13.3,
+  CPython 3.12.3. Native AVX2 uses `-O3 -march=x86-64-v3 -mtune=znver4`;
+  scalar uses the baseline ISA. Linux Python bundles its private C++ runtime.
+- **M3 Max:** macOS 26.2, Apple Clang 17, CPython 3.14.0, `-O3`, NEON or
+  scalar. No CPU affinity control. Different CPUs, operating systems and Python
+  versions mean the cross-machine difference is not an ISA-only comparison.
 
-On the target above, 2026-09-08 UTC, with resident input and one pinned core:
+Both retain the [compiled-target hardening policy](build.md#hardening), including
+strong stack protection and fortification. No PGO. Numbers below are µs/map
+unless marked ms. Ranges are the two reversed-order runs, not confidence
+intervals. The [Linux summary](../bench/results/2026-09-08-hetzner.json) and
+[Mac summary](../bench/results/2026-09-08-m3-max.json) retain each run's minima,
+all-sample means/medians, repetitions, raw CSV hashes and corpus fingerprint.
 
-| Boundary | Mean per-map minimum |
-|---|---:|
-| C++ fresh result, resident bytes | 20.59–20.75 µs |
-| C++ reused result | 20.35–20.47 µs |
-| C ABI fresh handle, input copy included | 22.91–23.21 µs |
-| C ABI reused handle | 22.64–22.85 µs |
-| Complete one-shot process | 279.51 µs |
+### Warm native calls
 
-Library ranges are two full-corpus comparisons with reversed starting order,
-seven repetitions per map for both C++ and the C ABI. The one-shot measurement
-uses six samples per map (the same executable in both rotating driver slots).
-The AVX2 kernels use GCC
-`-O3 -march=x86-64-v3 -mtune=znver4`, with baseline code selecting the C ABI
-backend once per loaded library. Libraries and their benchmarks use the
-[compiled-target hardening policy](build.md#hardening), including strong stack
-protection and fortification. The separate one-shot measurement uses its
-GCC `-O2 -march=znver4` build. No PGO is applied. Differences between runs are
-one reason to retain all-run statistics and compare variants together.
+Seven repetitions per map, rotating C++/C and fresh/reused parsers within each
+map; a second run reverses module order. Input copies and result release are
+included. Neither path caches parsed beatmaps.
 
-First C ABI use in a fresh C process averages 334.28–337.96 µs across 1,000
-evenly spaced maps, three repetitions each in two runs. This includes
-`dlopen`, CPU selection, file I/O, parsing, view acquisition, destruction and
-`dlclose`, excluding the
-C process's startup. CPU detection is paid once per library load, not once per map.
+| Machine / backend / API | Fresh: mean minimum | Reused: mean minimum | Fresh: all-call mean | Reused: all-call mean |
+|---|---:|---:|---:|---:|
+| Hetzner / Zen 4 / AVX2 / C++ | 21.19–21.20 | 19.92–20.06 | 23.79–23.87 | 22.16–22.18 |
+| Hetzner / Zen 4 / AVX2 / C | 24.03–24.08 | 22.56–22.85 | 27.27–27.33 | 25.54–25.60 |
+| Hetzner / Zen 4 / SCALAR / C++ | 59.19–59.56 | 57.66–57.79 | 64.92–65.03 | 63.49–63.74 |
+| Hetzner / Zen 4 / SCALAR / C | 61.57–61.62 | 59.90–59.94 | 67.17–67.39 | 65.16–65.90 |
+| M3 Max / NEON / C++ | 17.75–17.90 | 17.52–17.70 | 20.23–20.67 | 19.23–19.66 |
+| M3 Max / NEON / C | 19.56–19.64 | 19.21–19.36 | 22.31–22.92 | 21.17–21.65 |
+| M3 Max / SCALAR / C++ | 55.84–56.38 | 55.50–56.16 | 59.74–60.85 | 59.01–60.07 |
+| M3 Max / SCALAR / C | 57.65–58.07 | 57.30–57.79 | 61.59–62.90 | 60.66–61.99 |
 
-### Apple Silicon / NEON
+### Warm eager Python calls
 
-Apple M3 Max, macOS 26, Apple Clang 17, `-O3` with strong stack protection
-and fortification level 2, 2026-09-08 UTC. This measures
-**The Unforgiving only**: 243,197 bytes and 6,503 hitobjects, all taking the
-NEON prefix path. It is not a 10k-corpus average. File contents are resident.
-Two rotating comparisons reverse the starting order, with 1,001 repetitions
-per variant in each run:
+Three repetitions per map; bytes, file, timestamp traversal and slider-length
+traversal rotate within each map. The second run reverses workload order.
+Every workload constructs and releases the complete Python result. Normal GC
+remains enabled. Traversal timings include parsing, not just the extra loop.
 
-| Boundary | Minimum | Median of all repetitions |
+| Machine / backend | Workload | Mean minimum | All-call mean |
+|---|---|---:|---:|
+| Hetzner / Zen 4 / AVX2 | Resident bytes | 488.0–494.0 | 549.8–558.4 |
+| Hetzner / Zen 4 / AVX2 | Warm file | 500.3–506.3 | 555.7–565.3 |
+| Hetzner / Zen 4 / AVX2 | Bytes + timestamps | 513.1–519.9 | 568.6–579.2 |
+| Hetzner / Zen 4 / AVX2 | Bytes + slider lengths | 520.6–526.4 | 579.8–592.0 |
+| Hetzner / Zen 4 / SCALAR | Resident bytes | 533.7–541.6 | 600.2–607.9 |
+| Hetzner / Zen 4 / SCALAR | Warm file | 546.3–554.8 | 606.5–615.8 |
+| Hetzner / Zen 4 / SCALAR | Bytes + timestamps | 558.7–567.5 | 618.6–630.1 |
+| Hetzner / Zen 4 / SCALAR | Bytes + slider lengths | 565.8–573.8 | 632.2–640.2 |
+| M3 Max / NEON | Resident bytes | 321.8–324.6 | 350.0–353.2 |
+| M3 Max / NEON | Warm file | 344.9–346.9 | 376.6–377.6 |
+| M3 Max / NEON | Bytes + timestamps | 338.7–341.3 | 370.6–371.3 |
+| M3 Max / NEON | Bytes + slider lengths | 341.7–344.6 | 372.2–373.5 |
+| M3 Max / SCALAR | Resident bytes | 361.9–362.3 | 389.8–391.7 |
+| M3 Max / SCALAR | Warm file | 384.8–385.7 | 417.1–418.1 |
+| M3 Max / SCALAR | Bytes + timestamps | 378.5–378.9 | 409.2–411.4 |
+| M3 Max / SCALAR | Bytes + slider lengths | 381.5–382.3 | 409.1–414.8 |
+
+These are full-corpus, per-call statistics. The README's Python comparison
+instead uses isolated complete-pass means on the fixed **9,758-map** common
+cohort. See [the comparison](comparison.md) for those batch measurements; do not
+use these minima against competitors' all-call means. Python graph construction
+dominates the eager API, so the native SIMD speedup does not translate directly
+into an equally large Python speedup.
+
+### First use
+
+Native: 1,000 evenly spaced maps, three fresh child processes per map per
+executable, two reversed-order runs. The table shows means of per-map minima.
+The C++ timer covers first parse/result allocation, excluding file read and
+destruction. The C timer includes `dlopen`, file read, parse/view/free and
+`dlclose`. Neither includes process startup. **These columns time different
+work, not just C-versus-C++ binding overhead.**
+
+| Machine / backend | C++ first parse (µs) | C first library use (µs) |
 |---|---:|---:|
-| C++ fresh result, resident bytes | 132.5–133.0 µs | 139.8–142.0 µs |
-| C ABI fresh handle, input copy included | 143.1–144.5 µs | 149.8–152.6 µs |
+| Hetzner / Zen 4 / AVX2 | 85.34–86.48 | 339.10–341.27 |
+| Hetzner / Zen 4 / SCALAR | 124.20–125.49 | 279.22–281.21 |
+| M3 Max / NEON | 52.23–52.76 | 623.72–627.22 |
+| M3 Max / SCALAR | 92.43–92.56 | 402.10–404.38 |
 
-## Eager Python measurements
+Python: 100 evenly spaced maps, three fresh interpreters per map, two runs
+with reversed backend order. Python bytecode is precompiled. File pages are
+resident. Import, first file parse/result release, and the whole subprocess are
+timed separately. Each column is a mean of its own per-map minima, so columns
+are not additive. The whole-process column includes startup and shutdown.
 
-On the same Zen 4 host, CPython 3.12.3 with the bundled C++ runtime,
-the eager binding on `aedfc51` was measured with the
-[comparison batch driver](../bench/comparison/README.md). This uses the fixed
-9,758-map common cohort and **means of two complete passes**, not the per-map
-minimum statistic in the native tables:
+| Machine / backend | Import (ms) | First file (µs) | Whole Python process (ms) |
+|---|---:|---:|---:|
+| Hetzner / Zen 4 / AVX2 | 21.00–21.12 | 868.64–871.31 | 35.30–35.40 |
+| Hetzner / Zen 4 / SCALAR | 20.28–20.36 | 894.81–895.39 | 33.86–33.89 |
+| M3 Max / NEON | 12.03–12.11 | 491.55–497.17 | 31.41–31.90 |
+| M3 Max / SCALAR | 11.83–11.92 | 536.49–538.92 | 31.17–31.55 |
 
-| Boundary | AVX2 mean | Scalar mean |
-|---|---:|---:|
-| Resident bytes, complete Python result and release | 635.2 µs/map | 687.9 µs/map |
-| Warm file, complete Python result and release | 647.7 µs/map | 705.7 µs/map |
+### Linux one-shot process
 
-Normal GC is enabled. Imports, input preload and warmup are outside the timed
-loop. All supported Python values are constructed before returning. These
-numbers do not measure native parsing alone; Python graph construction dominates.
-The [batch evidence](../bench/comparison/results/hetzner-2026-09-08.eager-python-batch.json)
-retains both pass times and the corpus fingerprint. First-use measurements must
-also include the dataclass/model import costs; do not substitute native-view
-Python timings for this API.
-
-On Apple M3 Max / macOS 26 / CPython 3.14.0, the same eager implementation
-was also measured over all 10,000 maps, with three repetitions per map and
-bytes/file calls rotated within each repetition:
-
-| NEON Python boundary | Mean per-map minimum | Mean of all calls |
-|---|---:|---:|
-| Resident bytes and complete result release | 326.4 µs | 353.0 µs |
-| Warm file and complete result release | 344.8 µs | 375.1 µs |
-
-These are per-map timings, not the Linux batch statistic, and cover the full
-corpus rather than the single-map native Apple Silicon example above.
+Full 10k corpus, six samples per map, GCC `-O2 -march=znver4`:
+**279.38 µs** mean per-map minimum;
+**306.46 µs** mean of all samples. This includes spawn,
+file read, parse, complete-result serialization to `/dev/null`, exit and reap.
+The same executable occupies both rotating driver slots; this is a current
+measurement, not a baseline-versus-candidate speedup claim.
 
 ## Build and verify
 

@@ -54,6 +54,27 @@ other variants: the reporter uses its decoded object counts as a *cohort filter*
 not as proof that another parser is wrong. Each table intersects matching,
 successful files across every included variant and both rounds.
 
+### Refresh only FOSU
+
+Keep the same build settings and corpus, and retain only the FOSU variants in
+`variants.json`. Use the original report to fix each table's cohort, rather than
+expanding to more maps because fewer libraries are participating:
+
+```sh
+taskset -c 3 "$b/venv/bin/python" bench/comparison/run.py /path/to/corpus \
+  "$b/variants.json" "$b/refresh.jsonl" --warmup 64 --rounds 2 --reps 1
+python3 bench/comparison/report.py "$b/refresh.jsonl" "$b/refresh-summary.json" \
+  --cohorts bench/comparison/results/hetzner-2026-09-08.json
+taskset -c 3 "$b/venv/bin/python" bench/comparison/python_batch.py /path/to/corpus \
+  "$b/variants.json" bench/comparison/results/hetzner-2026-09-08.json "$b/refresh-batch.json"
+```
+
+The reporter rejects a changed corpus or any new failure/count mismatch within
+the fixed cohort. It records the original report's hash. Keep the new evidence
+separate and disclose retained competitor measurements: a FOSU-only interleaved
+run has different cache interference from the multi-runtime sweep, even though
+the timed API, corpus and summary statistic are unchanged.
+
 ## Measurement contract
 
 The Python headline uses `python_batch.py`, not the interleaved per-call means.

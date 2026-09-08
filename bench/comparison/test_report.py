@@ -59,6 +59,20 @@ class ReportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             summarize(self.records, incomplete)
 
+    def test_fixed_cohort_does_not_expand_when_a_variant_is_removed(self):
+        tables = summarize(self.records, self.metadata)["tables"]
+        tables["python"].update(files=2, bytes=200, excluded_files=["c.osu"])
+        refreshed = summarize(self.records, self.metadata, tables)["tables"]["python"]
+        self.assertEqual(refreshed["files"], 2)
+        self.assertEqual(refreshed["excluded_files"], ["c.osu"])
+        self.assertTrue(all(row["samples"] == 4 for row in refreshed["rows"].values()))
+
+    def test_fixed_cohort_cannot_silently_drop_a_new_failure(self):
+        tables = summarize(self.records, self.metadata)["tables"]
+        self.records[-1].update(error="DecodeError")
+        with self.assertRaises(ValueError):
+            summarize(self.records, self.metadata, tables)
+
 
 if __name__ == "__main__":
     unittest.main()

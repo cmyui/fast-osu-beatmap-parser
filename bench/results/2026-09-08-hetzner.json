@@ -1,0 +1,852 @@
+{
+  "source_commit": "d31cddf90f6c7c5d35f2c5f6a4c0ccc39e716866",
+  "machine": "hetzner",
+  "finished_utc": "2026-09-08T20:40:27Z",
+  "environment": {
+    "platform": "Linux-6.8.0-90-generic-x86_64-with-glibc2.39",
+    "python": "Python 3.12.3",
+    "compiler": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "affinity": "CPU 3"
+  },
+  "corpus": {
+    "files": 10000,
+    "bytes": 402593897,
+    "sha256": "77780e68920b3e663edf4063d83bd94f4e9997458c3626f05fada5c5d38f9f89"
+  },
+  "method": "bench/summarize.py; two reversed orders for library/Python comparisons; one-shot has six samples per map in one run; no discarded runs; normal Python GC; resident input",
+  "runs": {
+    "native-forward": {
+      "started_utc": "2026-09-08T20:33:10Z",
+      "raw_csv_sha256": "7a04f80eb65716c9ef0c330662d92d1346e823d4b920687f0fc3d0c06b7ae0b6",
+      "statistics": [
+        {
+          "variant": "avx2/library_native",
+          "workload": "reuse=0",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 21.202528,
+          "p50_file_min_us": 15.339500000000001,
+          "p90_file_min_us": 41.47,
+          "all_mean_us": 23.87127787142857,
+          "all_p50_us": 17.28,
+          "MB_per_second": 1898.8013929282395
+        },
+        {
+          "variant": "avx2/library_native",
+          "workload": "reuse=1",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 19.9160099,
+          "p50_file_min_us": 14.3345,
+          "p90_file_min_us": 39.091,
+          "all_mean_us": 22.159034128571427,
+          "all_p50_us": 15.81,
+          "MB_per_second": 2021.4586105422654
+        },
+        {
+          "variant": "avx2/library_c_api",
+          "workload": "reuse=0",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 24.0793087,
+          "p50_file_min_us": 17.22,
+          "p90_file_min_us": 47.75,
+          "all_mean_us": 27.33032127142857,
+          "all_p50_us": 19.785,
+          "MB_per_second": 1671.9495647314825
+        },
+        {
+          "variant": "avx2/library_c_api",
+          "workload": "reuse=1",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 22.8547981,
+          "p50_file_min_us": 16.4,
+          "p90_file_min_us": 45.1,
+          "all_mean_us": 25.5995405,
+          "all_p50_us": 18.31,
+          "MB_per_second": 1761.529002524857
+        },
+        {
+          "variant": "scalar/library_native",
+          "workload": "reuse=0",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 59.1884154,
+          "p50_file_min_us": 43.081,
+          "p90_file_min_us": 121.17,
+          "all_mean_us": 65.03469058571429,
+          "all_p50_us": 47.471,
+          "MB_per_second": 680.1903620484492
+        },
+        {
+          "variant": "scalar/library_native",
+          "workload": "reuse=1",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 57.6648061,
+          "p50_file_min_us": 42.215,
+          "p90_file_min_us": 116.99,
+          "all_mean_us": 63.74058245714286,
+          "all_p50_us": 45.785,
+          "MB_per_second": 698.1622313995781
+        },
+        {
+          "variant": "scalar/library_c_api",
+          "workload": "reuse=0",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 61.5707719,
+          "p50_file_min_us": 45.1845,
+          "p90_file_min_us": 125.321,
+          "all_mean_us": 67.17208658571428,
+          "all_p50_us": 49.53,
+          "MB_per_second": 653.8717715832306
+        },
+        {
+          "variant": "scalar/library_c_api",
+          "workload": "reuse=1",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 59.8996952,
+          "p50_file_min_us": 43.820499999999996,
+          "p90_file_min_us": 121.27,
+          "all_mean_us": 65.90069307142858,
+          "all_p50_us": 47.8,
+          "MB_per_second": 672.1134317224372
+        }
+      ]
+    },
+    "native-reverse": {
+      "started_utc": "2026-09-08T20:33:39Z",
+      "raw_csv_sha256": "d8c660791af6d31d417c083e835598ba6214dd4e3619de60c84345d33242bd1d",
+      "statistics": [
+        {
+          "variant": "scalar/library_c_api",
+          "workload": "reuse=0",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 61.6180933,
+          "p50_file_min_us": 44.4955,
+          "p90_file_min_us": 125.57,
+          "all_mean_us": 67.39026841428571,
+          "all_p50_us": 49.38,
+          "MB_per_second": 653.3696118117307
+        },
+        {
+          "variant": "scalar/library_c_api",
+          "workload": "reuse=1",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 59.9369389,
+          "p50_file_min_us": 43.305,
+          "p90_file_min_us": 121.04,
+          "all_mean_us": 65.1648697,
+          "all_p50_us": 47.295,
+          "MB_per_second": 671.6957929261216
+        },
+        {
+          "variant": "scalar/library_native",
+          "workload": "reuse=0",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 59.559408,
+          "p50_file_min_us": 43.093999999999994,
+          "p90_file_min_us": 121.36,
+          "all_mean_us": 64.91599458571429,
+          "all_p50_us": 47.585,
+          "MB_per_second": 675.9534900011096
+        },
+        {
+          "variant": "scalar/library_native",
+          "workload": "reuse=1",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 57.7940553,
+          "p50_file_min_us": 41.8655,
+          "p90_file_min_us": 116.81,
+          "all_mean_us": 63.486210142857146,
+          "all_p50_us": 45.439499999999995,
+          "MB_per_second": 696.6008786028207
+        },
+        {
+          "variant": "avx2/library_c_api",
+          "workload": "reuse=0",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 24.033064800000002,
+          "p50_file_min_us": 17.17,
+          "p90_file_min_us": 47.73,
+          "all_mean_us": 27.27206907142857,
+          "all_p50_us": 19.69,
+          "MB_per_second": 1675.1666936794513
+        },
+        {
+          "variant": "avx2/library_c_api",
+          "workload": "reuse=1",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 22.5610858,
+          "p50_file_min_us": 16.035,
+          "p90_file_min_us": 44.719,
+          "all_mean_us": 25.541534342857144,
+          "all_p50_us": 17.931,
+          "MB_per_second": 1784.4615306591315
+        },
+        {
+          "variant": "avx2/library_native",
+          "workload": "reuse=0",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 21.1897545,
+          "p50_file_min_us": 14.97,
+          "p90_file_min_us": 42.01,
+          "all_mean_us": 23.7882358,
+          "all_p50_us": 17.04,
+          "MB_per_second": 1899.946018723341
+        },
+        {
+          "variant": "avx2/library_native",
+          "workload": "reuse=1",
+          "files": 10000,
+          "runs": 70000,
+          "reps_min": 7,
+          "reps_max": 7,
+          "mean_file_min_us": 20.0570662,
+          "p50_file_min_us": 14.2345,
+          "p90_file_min_us": 39.629,
+          "all_mean_us": 22.184702357142857,
+          "all_p50_us": 15.65,
+          "MB_per_second": 2007.2422007561604
+        }
+      ]
+    },
+    "python-avx2-forward": {
+      "started_utc": "2026-09-08T20:34:07Z",
+      "raw_csv_sha256": "17fadf8f9ff63549e5d138aa7f7376ca3683fd167813ab493652ea229e2ea212",
+      "statistics": [
+        {
+          "variant": "avx2",
+          "workload": "bytes",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 493.9589412,
+          "p50_file_min_us": 369.9815,
+          "p90_file_min_us": 1003.904,
+          "all_mean_us": 558.4239059,
+          "all_p50_us": 389.821,
+          "MB_per_second": 81.50351444635416
+        },
+        {
+          "variant": "avx2",
+          "workload": "file",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 506.2617355,
+          "p50_file_min_us": 379.5905,
+          "p90_file_min_us": 1026.212,
+          "all_mean_us": 565.3361425666667,
+          "all_p50_us": 401.62,
+          "MB_per_second": 79.52287695659747
+        },
+        {
+          "variant": "avx2",
+          "workload": "iterate",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 519.9092765,
+          "p50_file_min_us": 389.68550000000005,
+          "p90_file_min_us": 1057.262,
+          "all_mean_us": 579.2163869,
+          "all_p50_us": 411.711,
+          "MB_per_second": 77.43541329176496
+        },
+        {
+          "variant": "avx2",
+          "workload": "slider-lengths",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 526.411232,
+          "p50_file_min_us": 394.55449999999996,
+          "p90_file_min_us": 1066.664,
+          "all_mean_us": 591.9614031333333,
+          "all_p50_us": 415.41700000000003,
+          "MB_per_second": 76.4789716720938
+        }
+      ]
+    },
+    "python-scalar-forward": {
+      "started_utc": "2026-09-08T20:35:17Z",
+      "raw_csv_sha256": "54fbd32bb9026208a854489e81cdc7755e7ec0e6817327265b2ad110ad8af230",
+      "statistics": [
+        {
+          "variant": "scalar",
+          "workload": "bytes",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 541.6374681,
+          "p50_file_min_us": 404.1065,
+          "p90_file_min_us": 1099.322,
+          "all_mean_us": 607.8845898333333,
+          "all_p50_us": 424.5715,
+          "MB_per_second": 74.32903384846172
+        },
+        {
+          "variant": "scalar",
+          "workload": "file",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 554.7544697,
+          "p50_file_min_us": 418.236,
+          "p90_file_min_us": 1116.843,
+          "all_mean_us": 615.7732816,
+          "all_p50_us": 437.831,
+          "MB_per_second": 72.57154633070638
+        },
+        {
+          "variant": "scalar",
+          "workload": "iterate",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 567.4551897,
+          "p50_file_min_us": 425.9515,
+          "p90_file_min_us": 1143.903,
+          "all_mean_us": 630.1338152666667,
+          "all_p50_us": 447.7855,
+          "MB_per_second": 70.94725791702456
+        },
+        {
+          "variant": "scalar",
+          "workload": "slider-lengths",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 573.7980074,
+          "p50_file_min_us": 430.8365,
+          "p90_file_min_us": 1162.383,
+          "all_mean_us": 640.1650357,
+          "all_p50_us": 450.9065,
+          "MB_per_second": 70.16300018611742
+        }
+      ]
+    },
+    "python-scalar-reverse": {
+      "started_utc": "2026-09-08T20:36:34Z",
+      "raw_csv_sha256": "7f600a674d497ab8c1acce47225c9051073d92c9da59b7dda4e9cca7e6100deb",
+      "statistics": [
+        {
+          "variant": "scalar",
+          "workload": "slider-lengths",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 565.8413109,
+          "p50_file_min_us": 422.91499999999996,
+          "p90_file_min_us": 1141.923,
+          "all_mean_us": 632.2133926,
+          "all_p50_us": 444.7865,
+          "MB_per_second": 71.1496119573973
+        },
+        {
+          "variant": "scalar",
+          "workload": "iterate",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 558.6853929,
+          "p50_file_min_us": 419.0415,
+          "p90_file_min_us": 1123.592,
+          "all_mean_us": 618.5569586333334,
+          "all_p50_us": 437.472,
+          "MB_per_second": 72.06093127121743
+        },
+        {
+          "variant": "scalar",
+          "workload": "file",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 546.2718126,
+          "p50_file_min_us": 410.0315,
+          "p90_file_min_us": 1097.782,
+          "all_mean_us": 606.5037882666667,
+          "all_p50_us": 430.01649999999995,
+          "MB_per_second": 73.6984570160851
+        },
+        {
+          "variant": "scalar",
+          "workload": "bytes",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 533.7115464,
+          "p50_file_min_us": 398.286,
+          "p90_file_min_us": 1077.762,
+          "all_mean_us": 600.1643771,
+          "all_p50_us": 417.38199999999995,
+          "MB_per_second": 75.43286251076692
+        }
+      ]
+    },
+    "python-avx2-reverse": {
+      "started_utc": "2026-09-08T20:37:49Z",
+      "raw_csv_sha256": "9198dc27773b19f91b74251659dcf6840a792a23ffdc85ba3c9e02f0afe4adaf",
+      "statistics": [
+        {
+          "variant": "avx2",
+          "workload": "slider-lengths",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 520.6005835,
+          "p50_file_min_us": 389.40599999999995,
+          "p90_file_min_us": 1051.103,
+          "all_mean_us": 579.8230621333333,
+          "all_p50_us": 408.7105,
+          "MB_per_second": 77.33258658554692
+        },
+        {
+          "variant": "avx2",
+          "workload": "iterate",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 513.0700361,
+          "p50_file_min_us": 383.5255,
+          "p90_file_min_us": 1034.273,
+          "all_mean_us": 568.6143732333334,
+          "all_p50_us": 402.6205,
+          "MB_per_second": 78.46762988933004
+        },
+        {
+          "variant": "avx2",
+          "workload": "file",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 500.3493825,
+          "p50_file_min_us": 376.30600000000004,
+          "p90_file_min_us": 1004.123,
+          "all_mean_us": 555.6575270333333,
+          "all_p50_us": 394.7955,
+          "MB_per_second": 80.46255498276746
+        },
+        {
+          "variant": "avx2",
+          "workload": "bytes",
+          "files": 10000,
+          "runs": 30000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 488.0022667,
+          "p50_file_min_us": 365.2305,
+          "p90_file_min_us": 986.182,
+          "all_mean_us": 549.7894591,
+          "all_p50_us": 383.471,
+          "MB_per_second": 82.49836619047818
+        }
+      ]
+    },
+    "native-first-forward": {
+      "started_utc": "2026-09-08T20:38:58Z",
+      "raw_csv_sha256": "bb025c098e63ebdaceb62aa1422e2de57d71a6787a3071fa4f6f49f77e5442c1",
+      "statistics": [
+        {
+          "variant": "avx2/library_first",
+          "workload": "reuse=0",
+          "files": 1000,
+          "runs": 3000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 85.33787,
+          "p50_file_min_us": 75.70949999999999,
+          "p90_file_min_us": 132.761,
+          "all_mean_us": 93.184858,
+          "all_p50_us": 79.922,
+          "MB_per_second": 497.2007152276006
+        },
+        {
+          "variant": "avx2/c_api_first",
+          "workload": "reuse=0",
+          "files": 1000,
+          "runs": 3000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 339.098223,
+          "p50_file_min_us": 326.0115,
+          "p90_file_min_us": 421.632,
+          "all_mean_us": 362.88750833333336,
+          "all_p50_us": 342.6055,
+          "MB_per_second": 125.126134913423
+        },
+        {
+          "variant": "scalar/library_first",
+          "workload": "reuse=0",
+          "files": 1000,
+          "runs": 3000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 124.20208,
+          "p50_file_min_us": 107.036,
+          "p90_file_min_us": 217.911,
+          "all_mean_us": 134.537381,
+          "all_p50_us": 112.561,
+          "MB_per_second": 341.62109040363896
+        },
+        {
+          "variant": "scalar/c_api_first",
+          "workload": "reuse=0",
+          "files": 1000,
+          "runs": 3000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 279.222174,
+          "p50_file_min_us": 256.716,
+          "p90_file_min_us": 406.432,
+          "all_mean_us": 300.689538,
+          "all_p50_us": 273.3415,
+          "MB_per_second": 151.95802465172412
+        }
+      ]
+    },
+    "native-first-reverse": {
+      "started_utc": "2026-09-08T20:39:11Z",
+      "raw_csv_sha256": "325c3a7dabfc6fa9d82acc88e4dbaee647666216094fcb77c5bc00be8f64bbe2",
+      "statistics": [
+        {
+          "variant": "scalar/c_api_first",
+          "workload": "reuse=0",
+          "files": 1000,
+          "runs": 3000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 281.208723,
+          "p50_file_min_us": 258.19,
+          "p90_file_min_us": 412.161,
+          "all_mean_us": 302.63291633333336,
+          "all_p50_us": 273.82550000000003,
+          "MB_per_second": 150.88454421806824
+        },
+        {
+          "variant": "scalar/library_first",
+          "workload": "reuse=0",
+          "files": 1000,
+          "runs": 3000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 125.485799,
+          "p50_file_min_us": 107.74000000000001,
+          "p90_file_min_us": 220.231,
+          "all_mean_us": 136.432855,
+          "all_p50_us": 112.86500000000001,
+          "MB_per_second": 338.12630861919286
+        },
+        {
+          "variant": "avx2/c_api_first",
+          "workload": "reuse=0",
+          "files": 1000,
+          "runs": 3000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 341.273883,
+          "p50_file_min_us": 327.346,
+          "p90_file_min_us": 429.57,
+          "all_mean_us": 364.332229,
+          "all_p50_us": 343.332,
+          "MB_per_second": 124.3284415057334
+        },
+        {
+          "variant": "avx2/library_first",
+          "workload": "reuse=0",
+          "files": 1000,
+          "runs": 3000,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 86.477904,
+          "p50_file_min_us": 76.09049999999999,
+          "p90_file_min_us": 136.67,
+          "all_mean_us": 94.919249,
+          "all_p50_us": 81.65100000000001,
+          "MB_per_second": 490.64614239494057
+        }
+      ]
+    },
+    "python-first-avx2-forward": {
+      "started_utc": "2026-09-08T20:39:25Z",
+      "raw_csv_sha256": "8595c7314e17464ec6453d1681d2220e8eed1ef1e4e13e9a9ee4fd58842e0cf7",
+      "statistics": [
+        {
+          "variant": "avx2",
+          "workload": "import",
+          "files": 100,
+          "runs": 300,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 20998.50745,
+          "p50_file_min_us": 20864.9425,
+          "p90_file_min_us": 21926.805,
+          "all_mean_us": 21738.318516666666,
+          "all_p50_us": 21201.6235,
+          "MB_per_second": 1.9570700488048258
+        },
+        {
+          "variant": "avx2",
+          "workload": "first-file",
+          "files": 100,
+          "runs": 300,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 868.63851,
+          "p50_file_min_us": 769.9825000000001,
+          "p90_file_min_us": 1751.915,
+          "all_mean_us": 905.3854266666667,
+          "all_p50_us": 808.3975,
+          "MB_per_second": 47.310301727239796
+        },
+        {
+          "variant": "avx2",
+          "workload": "process",
+          "files": 100,
+          "runs": 300,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 35300.86134,
+          "p50_file_min_us": 35085.48299999999,
+          "p90_file_min_us": 37594.276,
+          "all_mean_us": 36431.85634666667,
+          "all_p50_us": 35780.5605,
+          "MB_per_second": 1.1641514807298468
+        }
+      ]
+    },
+    "python-first-scalar-forward": {
+      "started_utc": "2026-09-08T20:39:36Z",
+      "raw_csv_sha256": "f2709acc3ba91d8ed301e645516375a1387613921afb9ac5f5a6876765373a9a",
+      "statistics": [
+        {
+          "variant": "scalar",
+          "workload": "import",
+          "files": 100,
+          "runs": 300,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 20360.39923,
+          "p50_file_min_us": 20234.921000000002,
+          "p90_file_min_us": 21107.832,
+          "all_mean_us": 20833.447773333333,
+          "all_p50_us": 20642.9925,
+          "MB_per_second": 2.01840590333061
+        },
+        {
+          "variant": "scalar",
+          "workload": "first-file",
+          "files": 100,
+          "runs": 300,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 895.39177,
+          "p50_file_min_us": 797.8325,
+          "p90_file_min_us": 1798.814,
+          "all_mean_us": 922.01461,
+          "all_p50_us": 807.7775,
+          "MB_per_second": 45.89672518432909
+        },
+        {
+          "variant": "scalar",
+          "workload": "process",
+          "files": 100,
+          "runs": 300,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 33885.05882,
+          "p50_file_min_us": 33834.455,
+          "p90_file_min_us": 35453.549,
+          "all_mean_us": 34645.000673333336,
+          "all_p50_us": 34420.072,
+          "MB_per_second": 1.2127926416861978
+        }
+      ]
+    },
+    "python-first-scalar-reverse": {
+      "started_utc": "2026-09-08T20:39:47Z",
+      "raw_csv_sha256": "ac4d1cbcda8c8d17361ce88754fbb82af7fa72366b9956eed488bff9b742bf2a",
+      "statistics": [
+        {
+          "variant": "scalar",
+          "workload": "import",
+          "files": 100,
+          "runs": 300,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 20281.41442,
+          "p50_file_min_us": 20149.8355,
+          "p90_file_min_us": 20674.522,
+          "all_mean_us": 20753.938486666666,
+          "all_p50_us": 20401.962,
+          "MB_per_second": 2.026266469831348
+        },
+        {
+          "variant": "scalar",
+          "workload": "first-file",
+          "files": 100,
+          "runs": 300,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 894.81458,
+          "p50_file_min_us": 801.0425,
+          "p90_file_min_us": 1838.125,
+          "all_mean_us": 927.0183266666667,
+          "all_p50_us": 808.1914999999999,
+          "MB_per_second": 45.926330346561855
+        },
+        {
+          "variant": "scalar",
+          "workload": "process",
+          "files": 100,
+          "runs": 300,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 33861.1338,
+          "p50_file_min_us": 33593.895000000004,
+          "p90_file_min_us": 35344.558,
+          "all_mean_us": 34621.14757666667,
+          "all_p50_us": 34085.657,
+          "MB_per_second": 1.21364955594015
+        }
+      ]
+    },
+    "python-first-avx2-reverse": {
+      "started_utc": "2026-09-08T20:39:57Z",
+      "raw_csv_sha256": "e7bf2126dbf8aded7729f7c05ff3e7528420d350821a7e8b16fe55b528ed421a",
+      "statistics": [
+        {
+          "variant": "avx2",
+          "workload": "import",
+          "files": 100,
+          "runs": 300,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 21121.38822,
+          "p50_file_min_us": 20892.677499999998,
+          "p90_file_min_us": 22303.257,
+          "all_mean_us": 21803.85631,
+          "all_p50_us": 21319.0545,
+          "MB_per_second": 1.9456841364757604
+        },
+        {
+          "variant": "avx2",
+          "workload": "first-file",
+          "files": 100,
+          "runs": 300,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 871.30691,
+          "p50_file_min_us": 802.8820000000001,
+          "p90_file_min_us": 1778.244,
+          "all_mean_us": 911.17038,
+          "all_p50_us": 839.877,
+          "MB_per_second": 47.16541270170806
+        },
+        {
+          "variant": "avx2",
+          "workload": "process",
+          "files": 100,
+          "runs": 300,
+          "reps_min": 3,
+          "reps_max": 3,
+          "mean_file_min_us": 35402.04975,
+          "p50_file_min_us": 34994.519,
+          "p90_file_min_us": 37473.574,
+          "all_mean_us": 36416.517393333335,
+          "all_p50_us": 35933.1655,
+          "MB_per_second": 1.1608240282753683
+        }
+      ]
+    },
+    "oneshot": {
+      "started_utc": "2026-09-08T20:40:08Z",
+      "raw_csv_sha256": "5ab2be6a26221ae02466abccf6944f9f517cb785637c8669e9b5f5036aefe0bd",
+      "statistics": [
+        {
+          "variant": "avx2/fosu_oneshot",
+          "workload": "process",
+          "files": 10000,
+          "runs": 60000,
+          "reps_min": 6,
+          "reps_max": 6,
+          "mean_file_min_us": 279.3785982,
+          "p50_file_min_us": 259.635,
+          "p90_file_min_us": 378.031,
+          "all_mean_us": 306.4645301,
+          "all_p50_us": 281.121,
+          "MB_per_second": 144.10334205764514,
+          "mean_faults_at_file_min": 26.7056
+        }
+      ]
+    }
+  },
+  "builds": {
+    "avx2": {
+      "native_flags": "-O3 -std=c++20 -fPIC -fvisibility=hidden -Wall -Wextra -march=x86-64-v3 -mtune=znver4 -fno-plt -fstack-protector-strong -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -fstack-clash-protection",
+      "native_definitions": "-Dlibrary_native_EXPORTS",
+      "bundled_runtime": "ON"
+    },
+    "scalar": {
+      "native_flags": "-O3 -std=c++20 -fPIC -fvisibility=hidden -Wall -Wextra -march=x86-64 -fstack-protector-strong -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -fstack-clash-protection",
+      "native_definitions": "-DFOSU_DISABLE_SIMD -Dlibrary_native_EXPORTS",
+      "bundled_runtime": "ON"
+    }
+  }
+}
