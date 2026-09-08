@@ -1,16 +1,27 @@
 #pragma once
 
-#include <type_traits>
 #include <fosu/beatmap_header.h>
-#include <fosu/engine/string_lookup.h>
 #include <fosu/engine/byte_scan.h>
 #include <fosu/engine/scalar_parse.h>
+#include <fosu/engine/string_lookup.h>
+#include <type_traits>
 
 namespace fosu::internal {
 
 static_assert(std::is_standard_layout_v<BeatmapHeader>);
 
-enum class KT : uint8_t { Str, I32, F32, F64, Bool, I64, Mode, Countdown, RawBool, SampleSet };
+enum class KT : uint8_t {
+  Str,
+  I32,
+  F32,
+  F64,
+  Bool,
+  I64,
+  Mode,
+  Countdown,
+  RawBool,
+  SampleSet
+};
 struct KvEntry {
   KT type;
   uint16_t off;  // offset within the BeatmapHeader subobject
@@ -67,7 +78,6 @@ inline constexpr auto kDifficulty = make_string_lookup<KvEntry>({
     KV("SliderTickRate", F64, slider_tick_rate),
 });
 #undef KV
-
 
 // Enum.Parse accepts named constants (including comma-separated combinations)
 // and the full underlying int32 range, unlike Parsing.ParseInt's symmetric bound.

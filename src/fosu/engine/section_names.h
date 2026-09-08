@@ -1,9 +1,20 @@
 #pragma once
+#include <fosu/engine/string_lookup.h>
 #include <cstdint>
 #include <string_view>
-#include <fosu/engine/string_lookup.h>
 namespace fosu::internal {
-enum class Section : uint8_t { None, General, Editor, Metadata, Difficulty, Events, TimingPoints, Colours, HitObjects, Unknown };
+enum class Section : uint8_t {
+  None,
+  General,
+  Editor,
+  Metadata,
+  Difficulty,
+  Events,
+  TimingPoints,
+  Colours,
+  HitObjects,
+  Unknown
+};
 inline constexpr auto kSectionNames = make_string_lookup<Section>({
     {"[General]", Section::General},
     {"[Editor]", Section::Editor},
