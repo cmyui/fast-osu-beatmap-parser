@@ -28,7 +28,7 @@ Repository = "https://github.com/cmyui/fast-osu-beatmap-parser"
 cmake.version = ">=3.26"
 wheel.packages = ["python/fosu"]
 wheel.py-api = "cp310"
-sdist.exclude = ["build", "dist", "tests/reference/official/bin", "tests/reference/official/obj"]
+sdist.exclude = ["build", "dist", "tests/reference/official/bin", "tests/reference/official/obj", "bench/comparison/results"]
 
 [tool.cibuildwheel]
 build = "cp310-*"

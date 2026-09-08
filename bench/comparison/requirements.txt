@@ -1,0 +1,14 @@
+# Published packages used in the Python comparison; FOSU is built from the measured commit.
+slider==0.8.4
+OsuPyParser==1.0.7
+rosu-pp-py==4.0.2
+pyttanko==2.1.0
+cffi==2.1.1
+numpy==2.5.3
+scipy==1.18.1
+certifi==2026.7.22
+charset-normalizer==3.5.1
+idna==3.19
+pycparser==3.0
+requests==2.34.2
+urllib3==2.7.0
