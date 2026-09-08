@@ -18,7 +18,7 @@ def load_parser(name):
             return len(beatmap.hit_objects)
 
         def visit(beatmap):
-            return sum(obj.time for obj in beatmap.hit_objects)
+            return sum(obj.start_time for obj in beatmap.hit_objects)
 
     elif name == "slider":
         import slider

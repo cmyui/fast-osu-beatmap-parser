@@ -48,7 +48,7 @@ static void test_reparse_clears_omitted_sections() {
   CHECK(beatmap.title == "Replacement title");
   CHECK_EQ(beatmap.beatmap_id, -1);
   CHECK(beatmap.audio_filename.empty() && beatmap.background.empty());
-  CHECK(beatmap.sample_set == "Normal");
+  CHECK(beatmap.sample_set == fosu::SampleSet::Normal);
   CHECK_EQ(beatmap.grid_size, 4);
   CHECK_EQ(beatmap.od, 5);
   CHECK_EQ(beatmap.ar, 5);
@@ -75,7 +75,7 @@ static void test_empty_reparse_resets_defaults() {
   CHECK_EQ(beatmap.stats.fast_path_lines, 0u);
   CHECK_EQ(beatmap.stats.slow_path_lines, 0u);
   CHECK(std::abs(beatmap.stack_leniency - 0.7) < 1e-12);
-  CHECK(beatmap.sample_set == "Normal");
+  CHECK(beatmap.sample_set == fosu::SampleSet::Normal);
   fosu::Parser expected;
   CHECK_EQ(canonical(beatmap), canonical(require_parse(expected.parse(empty))));
 }
@@ -307,7 +307,7 @@ static void test_parser_prepares_engine_input_and_output() {
           CHECK_EQ(input.data()[input.size() + i], '\0');
         CHECK(!beatmap.hit_objects.empty());
         CHECK(beatmap.timing_points.empty());
-        CHECK_EQ(beatmap.sample_set, "Normal");
+        CHECK_EQ(beatmap.sample_set, fosu::SampleSet::Normal);
         beatmap.hit_objects[0] = {.x = 42};
         beatmap.hit_objects = beatmap.hit_objects.first(1);
         beatmap.sliders = {};

@@ -176,9 +176,8 @@ int main(int argc, char** argv) {
     require(fresh->source_size == 0 && fresh->hit_object_count == 0 &&
                 fresh->metadata.title.length == 0,
             "recycled arena retained logical results");
-    require(fresh->metadata.sample_set.length == 6 &&
-                memcmp(fresh->text + fresh->metadata.sample_set.offset, "Normal", 6) == 0,
-            "recycled arena lost default text");
+    require(fresh->metadata.sample_set == FOSU_SAMPLE_NORMAL,
+            "recycled arena lost the default sample set");
     release(second);
     require(dlclose(library) == 0, "dlclose failed");
     void* remaining = dlopen(argv[1], RTLD_NOW | RTLD_NOLOAD);

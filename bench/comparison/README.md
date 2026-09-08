@@ -54,6 +54,27 @@ other variants: the reporter uses its decoded object counts as a *cohort filter*
 not as proof that another parser is wrong. Each table intersects matching,
 successful files across every included variant and both rounds.
 
+### Refresh only FOSU
+
+Keep the same build settings and corpus, and retain only the FOSU variants in
+`variants.json`. Use the original report to fix each table's cohort, rather than
+expanding to more maps because fewer libraries are participating:
+
+```sh
+taskset -c 3 "$b/venv/bin/python" bench/comparison/run.py /path/to/corpus \
+  "$b/variants.json" "$b/refresh.jsonl" --warmup 64 --rounds 2 --reps 1
+python3 bench/comparison/report.py "$b/refresh.jsonl" "$b/refresh-summary.json" \
+  --cohorts bench/comparison/results/hetzner-2026-09-08.json
+taskset -c 3 "$b/venv/bin/python" bench/comparison/python_batch.py /path/to/corpus \
+  "$b/variants.json" bench/comparison/results/hetzner-2026-09-08.json "$b/refresh-batch.json"
+```
+
+The reporter rejects a changed corpus or any new failure/count mismatch within
+the fixed cohort. It records the original report's hash. Keep the new evidence
+separate and disclose retained competitor measurements: a FOSU-only interleaved
+run has different cache interference from the multi-runtime sweep, even though
+the timed API, corpus and summary statistic are unchanged.
+
 ## Measurement contract
 
 The Python headline uses `python_batch.py`, not the interleaved per-call means.
@@ -83,7 +104,7 @@ The following describes the supplementary interleaved `run.py` experiment:
   **warm page-cache** file. This is not cold disk performance. Published
   OsuPyParser only offers this input boundary; no artificial bytes API is added.
 - `visit`: `bytes` plus summing every hitobject's start time using public Python
-  record access. This forces FOSU's record wrappers to be created. `slider`
+  record access. FOSU's records are already eager Python values. `slider`
   stacking is explicitly disabled; no PP or difficulty calculation is requested.
 - Normal garbage collection remains enabled. We retain **all** timed samples,
   including slow ones and collection that occurs during measured work. We do

@@ -46,7 +46,7 @@ const ParsingEngine* load(const char* name) {
   if (!loaded)
     return nullptr;
   const auto entry =
-      reinterpret_cast<const ParsingEngine* (*)()>(dlsym(loaded, "fosu_engine_v1"));
+      reinterpret_cast<const ParsingEngine* (*)()>(dlsym(loaded, "fosu_engine_v2"));
   if (!entry) {
     dlclose(loaded);
     return nullptr;

@@ -3,7 +3,7 @@
 The header-only C++ interface needs no build step: add `src` to your include
 path and compile as C++20. CMake 3.26+ builds the C ABI, development tools, and
 Python extensions. Python installations invoke CMake through scikit-build-core;
-CFFI generates the wrapper source and does not compile it independently.
+The Python extension constructs detached Python values directly from the C++ Beatmap.
 
 Sources live under `src/fosu/`, grouped by responsibility. C++ headers use `.h`
 and compiled C++ files use `.cc`:
@@ -13,7 +13,7 @@ src/fosu/
     parser.h, beatmap.h, parse_options.h, result.h
     arena.h, os.h, io.h, beatmap_header.h
     engine/       # Parsing algorithms, SIMD helpers, and runtime loading
-    bindings/     # C API declarations and implementation
+    bindings/     # C ABI and detached Python value conversion
 ```
 
 C++ callers include `<fosu/parser.h>`; C callers include
@@ -23,7 +23,7 @@ the headers needed by consumers and installs them under `include/fosu/`;
 compiled-only loader headers and `.cc` files are not installed. Installed
 consumers use the same include names as source-tree consumers.
 
-## Formatting
+## Formatting and Python typing
 
 Install `pre-commit` (CI uses version 4.6.0), then enable the Git hook for your
 checkout:
@@ -38,6 +38,11 @@ The hook installs the pinned clang-format version and applies the repository's
 excluded. Commits with formatting changes are stopped so you can review and
 stage the fixes before committing again. CI runs the same configuration against
 all tracked files and fails if formatting would change them.
+
+The same hook configuration runs pinned mypy against the entire shipped Python
+package and `tests/typing`, using strict settings from `pyproject.toml`. The
+Python check does not build or import the native extension. Benchmark drivers
+and reference utilities are outside this package-typing check.
 
 ## Native builds
 
@@ -150,7 +155,7 @@ python3 -m pip install .
 python3 -m build                 # source archive, then wheel from that archive
 ```
 
-Build isolation supplies scikit-build-core, CFFI, and a suitable CMake/Ninja when
+Build isolation supplies scikit-build-core and a suitable CMake/Ninja when
 needed. An installed C/C++ compiler and Python development headers are required
 for source builds. The wheel contains a CPython 3.10+ stable-ABI extension with
 the scalar engine, plus an adjacent AVX2 library on x86-64 or NEON library on

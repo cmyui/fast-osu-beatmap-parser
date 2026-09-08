@@ -10,15 +10,29 @@
 #define FOSU_API
 #endif
 
-#define FOSU_ABI_VERSION 2
+#define FOSU_ABI_VERSION 3
 #define FOSU_MAX_INPUT_SIZE (64u * 1024u * 1024u)
 #define FOSU_NO_SLIDER 0xFFFFFFFFu
 
 // Offsets address the backing text returned by fosu_get_view. Empty strings
-// have length zero. The backing text includes input padding and default text.
+// have length zero. The backing text includes input padding.
 typedef struct fosu_string_ref {
   uint32_t offset, length;
 } fosu_string_ref;
+
+typedef enum fosu_curve_type {
+  FOSU_CURVE_BEZIER = 'B',
+  FOSU_CURVE_CATMULL = 'C',
+  FOSU_CURVE_LINEAR = 'L',
+  FOSU_CURVE_PERFECT_CURVE = 'P'
+} fosu_curve_type;
+
+typedef enum fosu_sample_set {
+  FOSU_SAMPLE_NONE = 0,
+  FOSU_SAMPLE_NORMAL = 1,
+  FOSU_SAMPLE_SOFT = 2,
+  FOSU_SAMPLE_DRUM = 3
+} fosu_sample_set;
 
 typedef struct fosu_hit_object {
   int32_t x, y;
@@ -31,8 +45,7 @@ typedef struct fosu_hit_object {
 typedef struct fosu_slider {
   uint32_t point_begin, point_count;
   int32_t slides;
-  char curve_type;
-  uint8_t reserved[3];
+  fosu_curve_type curve_type;
   double length;
   fosu_string_ref edge_sounds, edge_sets;
 } fosu_slider;
@@ -43,7 +56,9 @@ typedef struct fosu_point {
 
 typedef struct fosu_timing_point {
   double time, beat_length;
-  int32_t meter, sample_set, sample_index, volume;
+  int32_t meter;
+  fosu_sample_set sample_set;
+  int32_t sample_index, volume;
   uint8_t uninherited;
   uint8_t reserved[3];
   uint32_t effects;
@@ -63,7 +78,7 @@ typedef struct fosu_metadata {
   int32_t audio_lead_in;
   int32_t preview_time;
   int32_t countdown;
-  fosu_string_ref sample_set;
+  fosu_sample_set sample_set;
   double stack_leniency;
   int32_t mode;
   uint8_t letterbox_in_breaks;

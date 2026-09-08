@@ -114,7 +114,8 @@ inline void dump_to(const Map& bm, Output& o) {
   o.i32(bm.audio_lead_in);
   o.i32(bm.preview_time);
   o.i32(bm.countdown);
-  o.str(bm.sample_set);
+  constexpr std::string_view sample_names[] = {"None", "Normal", "Soft", "Drum"};
+  o.str(sample_names[static_cast<int>(bm.sample_set)]);
   o.f64(bm.stack_leniency);
   o.i32(bm.mode);
   o.u8(bm.letterbox_in_breaks);
@@ -162,7 +163,7 @@ inline void dump_to(const Map& bm, Output& o) {
     o.f64(t.time);
     o.f64(t.beat_length);
     o.i32(t.meter);
-    o.i32(t.sample_set);
+    o.i32(static_cast<int32_t>(t.sample_set));
     o.i32(t.sample_index);
     o.i32(t.volume);
     o.u8(t.uninherited);

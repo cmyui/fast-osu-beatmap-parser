@@ -12,7 +12,7 @@ import shutil
 import statistics
 
 
-def summarize(records, metadata):
+def summarize(records, metadata, cohorts=None):
     if not metadata["complete"]:
         raise ValueError("Benchmark did not finish")
     rounds, reps = metadata["rounds"], metadata["reps"]
@@ -80,6 +80,14 @@ def summarize(records, metadata):
         if not members:
             continue
         cohort = set.intersection(*(matching[m] for m in members))
+        if cohorts is not None:
+            previous = cohorts[group]
+            fixed = files - set(previous["excluded_files"])
+            if (len(fixed) != previous["files"]
+                    or sum(sizes[file] for file in fixed) != previous["bytes"]
+                    or not fixed <= cohort):
+                raise ValueError(f"Cannot reproduce the fixed {group} cohort")
+            cohort = fixed
         if not cohort:
             raise ValueError(f"No common successful maps in {group}")
         byte_count = sum(sizes[file] for file in cohort)
@@ -108,16 +116,23 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("results", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--cohorts", type=Path, help="Keep a prior report's exact table cohorts")
     args = parser.parse_args()
     metadata = json.loads(args.results.with_suffix(".meta.json").read_text())
+    previous = json.loads(args.cohorts.read_text()) if args.cohorts else None
+    if previous and previous["run"]["corpus_sha256"] != metadata["corpus_sha256"]:
+        raise ValueError("Fixed cohorts require the same corpus contents")
     with args.results.open() as source:
-        report = summarize((json.loads(line) for line in source), metadata)
+        report = summarize((json.loads(line) for line in source), metadata,
+                           previous["tables"] if previous else None)
     # Publish evidence without copying machine-specific commands or paths.
     report["run"] = {k: metadata[k] for k in (
         "started_utc", "finished_utc", "platform", "python", "affinity", "files", "bytes",
         "corpus_sha256", "corpus_manifest_sha256", "reps", "rounds", "warmup_maps", "request_timeout_seconds",
     )}
     report["run"]["versions"] = {v["name"]: v["version"] for v in metadata["config"]["variants"]}
+    if args.cohorts:
+        report["run"]["cohort_source_sha256"] = hashlib.sha256(args.cohorts.read_bytes()).hexdigest()
     report["run"]["raw_results_sha256"] = hashlib.sha256(args.results.read_bytes()).hexdigest()
     samples_path = args.output.with_suffix(".samples.csv.gz")
     fields = ("round", "file", "bytes", "variant", "workload", "count", "checksum", "error", "ns")

@@ -40,9 +40,9 @@ struct SliderPoint {
 struct Slider {
   uint32_t point_begin;  // range into Beatmap::slider_points
   uint32_t point_count;
-  int32_t slides;   // 1 = no repeats
-  char curve_type;  // 'B', 'C', 'L', 'P'
-  double length;    // pixel length
+  int32_t slides;  // 1 = no repeats
+  CurveType curve_type;
+  double length;  // pixel length
   std::string_view edge_sounds;
   std::string_view edge_sets;
 };
@@ -51,7 +51,7 @@ struct TimingPoint {
   double time;
   double beat_length;
   int32_t meter;
-  int32_t sample_set;
+  SampleSet sample_set;
   int32_t sample_index;
   int32_t volume;
   bool uninherited;
@@ -97,7 +97,6 @@ struct Beatmap : BeatmapHeader {
     }
 
     auto audio_filename_copy = copy_string(destination, audio_filename);
-    auto sample_set_copy = copy_string(destination, sample_set);
     auto overlay_position_copy = copy_string(destination, overlay_position);
     auto skin_preference_copy = copy_string(destination, skin_preference);
     auto bookmarks_copy = copy_string(destination, bookmarks);
@@ -111,10 +110,10 @@ struct Beatmap : BeatmapHeader {
     auto tags_copy = copy_string(destination, tags);
     auto background_copy = copy_string(destination, background);
     auto video_copy = copy_string(destination, video);
-    if (!audio_filename_copy || !sample_set_copy || !overlay_position_copy ||
-        !skin_preference_copy || !bookmarks_copy || !title_copy || !title_unicode_copy ||
-        !artist_copy || !artist_unicode_copy || !creator_copy || !version_copy ||
-        !source_copy || !tags_copy || !background_copy || !video_copy) {
+    if (!audio_filename_copy || !overlay_position_copy || !skin_preference_copy ||
+        !bookmarks_copy || !title_copy || !title_unicode_copy || !artist_copy ||
+        !artist_unicode_copy || !creator_copy || !version_copy || !source_copy ||
+        !tags_copy || !background_copy || !video_copy) {
       return rewind_failed_copy(destination, checkpoint);
     }
 
@@ -143,7 +142,6 @@ struct Beatmap : BeatmapHeader {
     result.sliders = mutable_sliders;
     result.slider_points = copied_slider_points.value();
     result.audio_filename = audio_filename_copy.value();
-    result.sample_set = sample_set_copy.value();
     result.overlay_position = overlay_position_copy.value();
     result.skin_preference = skin_preference_copy.value();
     result.bookmarks = bookmarks_copy.value();

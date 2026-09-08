@@ -31,7 +31,7 @@ struct CApiView : fosu::BeatmapHeader {
     audio_lead_in = v.metadata.audio_lead_in;
     preview_time = v.metadata.preview_time;
     countdown = v.metadata.countdown;
-    sample_set = resolve(v.metadata.sample_set);
+    sample_set = static_cast<fosu::SampleSet>(v.metadata.sample_set);
     stack_leniency = v.metadata.stack_leniency;
     mode = v.metadata.mode;
     letterbox_in_breaks = v.metadata.letterbox_in_breaks;

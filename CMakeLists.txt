@@ -24,7 +24,7 @@ set(_python OFF)
 if(SKBUILD)
   set(_python ON)
 endif()
-option(FOSU_BUILD_PYTHON "Build CFFI extension modules" ${_python})
+option(FOSU_BUILD_PYTHON "Build the CPython stable-ABI extension" ${_python})
 set(_bundled OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT FOSU_SANITIZE AND NOT SKBUILD)
   set(_bundled ON)
@@ -81,6 +81,7 @@ target_sources(fosu_headers INTERFACE FILE_SET HEADERS BASE_DIRS src FILES
   src/fosu/beatmap.h
   src/fosu/beatmap_header.h
   src/fosu/bindings/c_api.h
+  src/fosu/enums.h
   src/fosu/io.h
   src/fosu/os.h
   src/fosu/parse_options.h
@@ -89,6 +90,7 @@ target_sources(fosu_headers INTERFACE FILE_SET HEADERS BASE_DIRS src FILES
   src/fosu/engine/byte_scan.h
   src/fosu/engine/digit_groups.h
   src/fosu/engine/document_sections.h
+  src/fosu/engine/enum_parse.h
   src/fosu/engine/events.h
   src/fosu/engine/fast_float.h
   src/fosu/engine/hitobject_details.h

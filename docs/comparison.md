@@ -14,7 +14,7 @@ branches. This is a broad selection, not an exhaustive ranking of every parser.
 
 | Library | Version | Entry point and relevant work |
 |---|---|---|
-| [FOSU](https://github.com/cmyui/fast-osu-beatmap-parser) | `8a51ae8` | Python `parse` / `parse_file`; C++ `Parser`. Native records, lazy Python wrappers; no slider geometry or PP calculation. |
+| [FOSU](https://github.com/cmyui/fast-osu-beatmap-parser) | C++ and Python: `d31cddf` | Python `parse` / `parse_file` return detached dataclasses and lists; C++ `Parser` returns native records. No slider geometry or PP calculation. |
 | [slider](https://github.com/llllllllll/slider) | 0.8.4 | `Beatmap.parse` / `from_path`. Eager Python objects and slider-curve construction. Public object access uses `stacking=False`; no difficulty or mods requested. |
 | [rosu-pp-py](https://github.com/MaxOhn/rosu-pp-py) | 4.0.2 | `Beatmap(bytes=...)` / `Beatmap(path=...)`. Native PP-oriented model, not a full document representation. No PP/difficulty calculation requested. |
 | [OsuPyParser](https://github.com/lenforiee/osupyparser) | 1.0.7 | `OsuFile(path).parse_file()`. Eager Python objects, file hash and derived statistics. Published API is file-only. |
@@ -73,7 +73,7 @@ startup or isolated-request latency. File APIs still open/read/close the file;
 preloading ensures warm OS page-cache contents. No concurrent benchmark workers
 run during these batches. Two passes are not a confidence interval.
 
-### Supplement: interleaved full-corpus sweep
+### Supplement: interleaved full-corpus sweeps
 
 Each decoder warms on 64 evenly spaced maps before two complete passes through
 the corpus. We take one timed sample per map per pass, rotate worker/workload
@@ -94,7 +94,7 @@ Resident input and warm-file API calls are separate workloads. File contents
 are already in the OS page cache; no claim about cold disk I/O is made. FOSU
 does not receive pre-parsed input or skip required native input copies.
 
-The Python calls in this sweep share a process per library/backend. Their
+The original `8a51ae8` native-view Python calls shared a process per library/backend. Their
 order materially affects CPU-cache warmth: FOSU AVX2 resident-input means were
 84.3 and 40.3 µs in the two passes. We retain those raw measurements but **do not
 use their pooled means for the Python headline**. Non-Python workers have one
@@ -107,20 +107,27 @@ Same **9,758 maps / 392,122,516 bytes / 7,863,673 hitobjects** in every batch.
 Microseconds per map, lower is better. Means include both complete passes;
 OsuPyParser has no published resident-input API.
 
+FOSU and rosu-pp-py rows use a two-pass measurement on the same host, interpreter
+and cohort. Other libraries retain the original measurements. Full Python
+value construction and release are included for FOSU;
+[batch evidence](../bench/comparison/results/hetzner-2026-09-08.cached-slots-python-batch.json)
+records both passes and the matching corpus fingerprint. These FOSU Python
+batches use source `2d010a1`; native and traversal rows below retain `d31cddf`.
+
 | Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---:|---:|
-| FOSU Python AVX2 | 41.0 | 45.0 |
-| FOSU Python scalar | 79.1 | 88.0 |
-| rosu-pp-py 4.0.2 | 299.4 | 312.0 |
+| FOSU Python AVX2 (eager) | 498.3 | 510.7 |
+| FOSU Python scalar (eager) | 548.7 | 554.7 |
+| rosu-pp-py 4.0.2 | 310.5 | 319.1 |
 | pyttanko 2.1.0 | 2,501.5 | 2,501.2 |
-| OsuPyParser 1.0.7 | — | 5,070.8 |
+| OsuPyParser 1.0.7 | Unsupported (file-only API) | 5,070.8 |
 | slider 0.8.4 | 14,091.0 | 14,119.7 |
 
 | Python interface | Resident bytes: pass 1 / 2 | Warm file: pass 1 / 2 |
 |---|---:|---:|
-| FOSU Python AVX2 | 39.0 / 43.0 | 46.5 / 43.6 |
-| FOSU Python scalar | 81.5 / 76.7 | 90.5 / 85.4 |
-| rosu-pp-py 4.0.2 | 294.0 / 304.7 | 314.3 / 309.7 |
+| FOSU Python AVX2 (eager) | 496.0 / 500.6 | 507.0 / 514.3 |
+| FOSU Python scalar (eager) | 551.1 / 546.3 | 556.7 / 552.8 |
+| rosu-pp-py 4.0.2 | 315.7 / 305.2 | 314.9 / 323.3 |
 | pyttanko 2.1.0 | 2,510.7 / 2,492.3 | 2,510.2 / 2,492.2 |
 | OsuPyParser 1.0.7 | — | 5,080.7 / 5,060.9 |
 | slider 0.8.4 | 14,067.5 / 14,114.5 | 14,004.4 / 14,235.0 |
@@ -132,10 +139,17 @@ microseconds per map, lower is better. These are supplemental interleaved
 per-call measurements, **not directly comparable to the Python batch table**.
 Do not interpret the C++/Python difference as binding overhead.
 
+FOSU rows are a separate **FOSU-only** refresh with the same timer boundary,
+cohort and two-pass mean; third-party rows retain the original multi-runtime
+sweep. A smaller worker mix can change CPU-cache interference. These are not
+a simultaneous rerun of all libraries or a controlled cross-revision speedup.
+The [refresh evidence](../bench/comparison/results/hetzner-2026-09-08.fosu-refresh.json)
+retains every pass and the original cohort-report hash.
+
 | Library / interface | Mean µs/map | Pass 1 / pass 2 |
 |---|---:|---:|
-| FOSU C++ AVX2 | 42.9 | 45.2 / 40.5 |
-| FOSU C++ scalar | 84.0 | 87.4 / 80.7 |
+| FOSU C++ AVX2 | 32.5 | 32.7 / 32.2 |
+| FOSU C++ scalar | 77.8 | 78.0 / 77.6 |
 | rosu-pp (Rust) | 332.9 | 331.9 / 334.0 |
 | Coosu (C#) | 619.6 | 621.3 / 617.9 |
 | rosu-map (Rust) | 680.0 | 683.6 / 676.4 |
@@ -144,7 +158,10 @@ Do not interpret the C++/Python difference as binding overhead.
 | osu-parsers (TypeScript/JS) | 2,842.5 | 3,042.4 / 2,642.5 |
 | osu-parser (JavaScript) | 54,387.8 | 54,456.2 / 54,319.4 |
 
-## Python object traversal: interleaved supplement
+## Python object traversal
+
+FOSU rows use the eager API in the same FOSU-only refresh. Third-party rows
+retain the original sweep; the worker-mix limitation above also applies here.
 
 Parse resident bytes, then sum every hitobject's start time through the public
 Python API. Same **9,948 maps**; counts and summed times agree. These figures
@@ -153,8 +170,8 @@ interleaved sweep's cache-order limitation described above.
 
 | Library | Mean µs/map | Pass 1 / pass 2 |
 |---|---:|---:|
-| FOSU Python AVX2 | 291.6 | 274.9 / 308.4 |
-| FOSU Python scalar | 344.3 | 323.8 / 364.7 |
+| FOSU Python AVX2 (eager) | 588.2 | 577.8 / 598.6 |
+| FOSU Python scalar (eager) | 630.2 | 620.7 / 639.6 |
 | pyttanko | 2,175.7 | 2,119.3 / 2,232.2 |
 | slider (`stacking=False`) | 14,252.8 | 13,793.1 / 14,712.6 |
 
@@ -198,11 +215,12 @@ representations, legacy corrections and derived data. FOSU retains raw hit
 samples and slider edge fields and skips storyboard command bodies. Richer
 libraries can do significantly more work; PP libraries can retain less.
 
-FOSU parses native records eagerly but creates Python record wrappers on access.
+Every current FOSU Python row measures complete, detached Python results.
+The original `8a51ae8` native-view measurements remain only in the historical
+evidence artifacts; they do not describe the current API's result construction.
 The traversal workload additionally sums every hitobject start time through
 public Python objects, making that access cost visible. `rosu-pp-py` does not
 expose an equivalent iterable hitobject API, so it is not included in traversal.
-This still does not materialize every field into Python dictionaries.
 
 For the legacy JavaScript `osu-parser`, slider endpoint calculation is part of
 its public parse call. Its large costs on some maps are not evidence that
@@ -216,6 +234,14 @@ gameplay or geometry functionality without implementing those missing pieces.
 ## Reproduction and evidence
 
 Published evidence:
+
+- [Current FOSU and rosu-pp-py batches](../bench/comparison/results/hetzner-2026-09-08.cached-slots-python-batch.json)
+- [Python construction experiments and full-corpus comparisons](../bench/results/2026-09-08-python-conversion.json)
+- [Current FOSU-only refresh](../bench/comparison/results/hetzner-2026-09-08.fosu-refresh.json)
+- [All 160,000 refresh records](../bench/comparison/results/hetzner-2026-09-08.fosu-refresh.samples.csv.gz)
+- [Refresh corpus manifest](../bench/comparison/results/hetzner-2026-09-08.fosu-refresh.corpus.csv.gz)
+
+Original multi-library measurements (including the obsolete FOSU native-view API):
 
 - [Python batch timings](../bench/comparison/results/hetzner-2026-09-08.python-batch.json)
 - [Full interleaved summary and coverage](../bench/comparison/results/hetzner-2026-09-08.json)
@@ -232,7 +258,7 @@ paths or exception messages. The corpus itself is not bundled.
 A compressed corpus manifest lists the public beatmap file IDs, sizes and
 SHA-256 hashes; it contains neither beatmap contents nor private source keys.
 
-The older [FOSU-only performance measurements](performance.md) use means of
+The [FOSU-only performance measurements](performance.md) use means of
 per-map minima from immediately repeated hot parses. They answer a different
 question and must not be divided into these competitors' all-sample means to
 claim a speedup.

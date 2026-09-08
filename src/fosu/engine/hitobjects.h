@@ -4,6 +4,7 @@
 
 #include <fosu/beatmap.h>
 #include <fosu/engine/byte_scan.h>
+#include <fosu/engine/enum_parse.h>
 #include <fosu/engine/hitobject_details.h>
 #include <fosu/engine/prefix.h>
 #include <fosu/engine/slider_tail.h>
@@ -27,7 +28,9 @@ __attribute__((noinline)) inline bool parse_slider(
   if (p >= end) [[unlikely]]
     return false;
 
-  const char curve_type = *p++;
+  const auto curve_type = parse_curve_type(*p++);
+  if (!curve_type)
+    return false;
   const size_t point_begin = point_count;
 #if FOSU_SIMD
   if (const auto initial_points =
@@ -56,7 +59,7 @@ __attribute__((noinline)) inline bool parse_slider(
       .point_begin = static_cast<uint32_t>(point_begin),
       .point_count = static_cast<uint32_t>(point_count - point_begin),
       .slides = tail->slides,
-      .curve_type = curve_type,
+      .curve_type = *curve_type,
       .length = tail->length,
       .edge_sounds = tail->sounds.edge_sounds,
       .edge_sets = tail->sounds.edge_sets,

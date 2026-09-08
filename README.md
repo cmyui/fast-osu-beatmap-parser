@@ -8,11 +8,11 @@ rules, including unusual numeric forms and malformed records.
 import fosu
 
 beatmap = fosu.parse_file("map.osu")
-print(beatmap.title, beatmap.ar, beatmap.hit_objects[0].time)
+print(beatmap.title, beatmap.ar, beatmap.hit_objects[0].start_time)
 ```
 
-Python results own their native storage. Strings and records are exposed as
-needed, and optional NumPy views give you read-only arrays without copying.
+Python returns fully populated, mutable dataclasses and lists. All supported
+fields are eager; returned values do not retain native memory or depend on a parser.
 Install a prebuilt wheel, or run `python -m pip install .` in a source checkout.
 See the [Python guide](docs/python.md) for installation and the complete API.
 
@@ -33,35 +33,37 @@ fosu::Beatmap& map = *parsed.value();
 
 ### Python APIs
 
-FOSU's AVX2 Python interface averages **41 µs per map** from resident bytes on our
+FOSU's eager AVX2 Python interface averages **498 µs per map** from resident bytes on our
 Hetzner Zen 4 VM. We compared public parser APIs on the fixed **10,000-map
 corpus**, using the same **9,758 mutually accepted maps** for every row below.
 Lower is better.
 
 | Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---:|---:|
-| FOSU Python AVX2 | 41.0 | 45.0 |
-| FOSU Python scalar | 79.1 | 88.0 |
-| rosu-pp-py 4.0.2 | 299.4 | 312.0 |
+| FOSU Python AVX2 (eager) | 498.3 | 510.7 |
+| FOSU Python scalar (eager) | 548.7 | 554.7 |
+| rosu-pp-py 4.0.2 | 310.5 | 319.1 |
 | pyttanko 2.1.0 | 2,501.5 | 2,501.2 |
 | OsuPyParser 1.0.7 | Unsupported (file-only API) | 5,070.8 |
 | slider 0.8.4 | 14,091.0 | 14,119.7 |
 
 Two complete batch passes on one pinned CPU, CPython 3.12; imports and startup
-excluded. File inputs are in the OS page cache. FOSU decodes native records
-eagerly but creates Python wrappers on access; these timings do not include
-materializing every record into Python objects.
+excluded. File inputs are in the OS page cache. FOSU's timings include constructing
+and releasing every supported field as detached Python values. FOSU and rosu-pp-py
+were measured together again; other libraries retain the same-cohort measurements from the
+[comparison report](docs/comparison.md). Native PP-oriented results, such as
+rosu-pp-py's, do not construct an equivalent Python object graph.
 
 ### C++ and other languages
 
 Resident-input API latency on the same Hetzner host, using **9,986 common maps**
-for every row. These are means of two interleaved per-call passes, **not directly
+for every row. These are means of two per-call passes, **not directly
 comparable to the Python batch measurements above**. Lower is better.
 
 | Library / interface | Mean µs/map |
 |---|---:|
-| FOSU C++ AVX2 | 42.9 |
-| FOSU C++ scalar | 84.0 |
+| FOSU C++ AVX2 | 32.5 |
+| FOSU C++ scalar | 77.8 |
 | rosu-pp (Rust) | 332.9 |
 | Coosu (C#) | 619.6 |
 | rosu-map (Rust) | 680.0 |
@@ -70,13 +72,17 @@ comparable to the Python batch measurements above**. Lower is better.
 | osu-parsers (TypeScript/JS) | 2,842.5 |
 | osu-parser (JavaScript) | 54,387.8 |
 
+FOSU rows were refreshed on the same cohort in a FOSU-only interleaved run;
+competitor rows retain the original multi-runtime sweep. Different worker mixes
+can affect CPU-cache warmth. See the report for both runs and their limitations.
+
 Parsers differ in output and may also build slider geometry, apply gameplay
 defaults, or derive statistics. No PP/difficulty calculation is requested in either comparison.
 These are practical API costs, not identical-work claims.
 
 See the [full comparison](docs/comparison.md) for versions, exact APIs,
 Python object traversal, per-pass variation, failure counts,
-and the [reproducible harness](bench/comparison/README.md). The older
+and the [reproducible harness](bench/comparison/README.md). The
 [FOSU-only hot-loop benchmarks](docs/performance.md) use per-map minima and are
 not mixed into this comparison.
 
@@ -86,7 +92,7 @@ not mixed into this comparison.
 |---|---|---|
 | [C++ library](docs/library.md) | Parser-owned `Beatmap` view | Direct parsing in a C++ application |
 | [C API](docs/c-api.md) | Handle-owned parser and result view | C and other FFI callers |
-| [Python package](docs/python.md) | Owned `Beatmap` with named fields and records | Python apps; optional zero-copy NumPy arrays |
+| [Python package](docs/python.md) | Detached `Beatmap` dataclass and lists | Ordinary mutable Python values |
 | [One-shot executable](oneshot/README.md) | Complete binary stream on stdout | Process-lifetime benchmark on Linux/Zen 4 |
 
 All native representations are checked on the same fixed corpus of **10,000

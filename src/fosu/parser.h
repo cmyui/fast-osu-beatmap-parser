@@ -216,7 +216,6 @@ class Parser {
  private:
   friend internal::ParserStorage internal::parser_storage(Parser& parser);
 
-  static constexpr size_t kInputExtra = kBufferPadding + 6;
   static constexpr uint32_t kValidSections = 0x1FEu;
 
   static bool invalid_sections(uint32_t sections) noexcept {
@@ -230,14 +229,12 @@ class Parser {
       arena_ = internal::acquire_parser_arena();
     if (!arena_)
       return Error{ErrorCode::AllocationFailure};
-    input_ = static_cast<char*>(arena_push(arena_, size + kInputExtra, 1));
+    input_ = static_cast<char*>(arena_push(arena_, size + kBufferPadding, 1));
     if (!input_)
       return Error{ErrorCode::AllocationFailure};
     if (data && size)
       std::memmove(input_, data, size);
     std::memset(input_ + size, 0, kBufferPadding);
-    std::memcpy(input_ + size + kBufferPadding, "Normal", 6);
-    beatmap_.sample_set = {input_ + size + kBufferPadding, 6};
     input_size_ = size;
     return input_;
   }
@@ -275,7 +272,7 @@ inline ParserStorage parser_storage(Parser& parser) {
       .arena = parser.arena_,
       .input = parser.input_,
       .input_size = parser.input_size_,
-      .input_storage_size = parser.input_size_ + Parser::kInputExtra,
+      .input_storage_size = parser.input_size_ + kBufferPadding,
   };
 }
 }  // namespace internal
