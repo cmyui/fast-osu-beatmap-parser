@@ -12,7 +12,7 @@ cmake --build build/native --target check -j4
 This builds `build/native/libfosu.so` on Linux x86-64 or
 `build/native/libfosu.dylib` on Apple Silicon. See
 [build configurations](build.md) for all targets.
-`include/fosu/c_api.h` is a C-compatible header. The default library selects
+`src/fosu/bindings/c_api.h` is a C-compatible header. The default library selects
 AVX2 on x86-64-v3 CPUs with OS support for XMM/YMM state, or NEON on
 supported AArch64 systems, otherwise scalar. Apple Silicon uses NEON. The
 Linux AVX2 backend retains Zen 4 scheduling. All backends use the same ABI and
@@ -56,7 +56,7 @@ and allocation-failure translation in a resource-limited child process.
 ## Minimal C usage
 
 ```c
-#include <fosu/c_api.h>
+#include <fosu/bindings/c_api.h>
 #include <stdio.h>
 
 int main(int argc, char **argv) {
@@ -75,7 +75,7 @@ int main(int argc, char **argv) {
 }
 ```
 
-Compile on Linux with `cc -Iinclude examples/c_example.c -Lbuild/native -lfosu
+Compile on Linux with `cc -Isrc examples/c_example.c -Lbuild/native -lfosu
 -Wl,-rpath,"$PWD/build/native" -o build/example`. Check the ABI version before accessing
 records. Version 2 defines the current structs, including double timestamps.
 Incompatible struct changes require a version bump and rebuilding bindings.

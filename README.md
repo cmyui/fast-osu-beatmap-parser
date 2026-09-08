@@ -19,7 +19,7 @@ See the [Python guide](docs/python.md) for installation and the complete API.
 The C++20 interface is header-only:
 
 ```cpp
-#include <fosu/parser.hpp>
+#include <fosu/parser.h>
 
 fosu::Parser parser;
 auto parsed = parser.parse_file("map.osu");

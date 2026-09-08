@@ -188,7 +188,7 @@ FOSU_FORCE_SCALAR=1 python -m pytest tests/test_python.py
 python python/generate_stubs.py  # after changing public C fields
 ```
 
-The C declarations are read from `include/fosu/c_api.h` during wheel builds.
+The C declarations are read from `src/fosu/bindings/c_api.h` during wheel builds.
 The generated Python property stubs are checked in and verified against the
 compiled declarations. Native APIs are private to the extension module;
 applications should use `fosu`'s public objects. See the

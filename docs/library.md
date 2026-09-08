@@ -1,6 +1,6 @@
 # C++ library
 
-Include `fosu/parser.hpp` and compile as C++20. There is no library to link.
+Include `fosu/parser.h` and compile as C++20. There is no library to link.
 On the measured Linux/Zen 4 host, GCC with `-O3 -march=x86-64-v3 -mtune=znver4`
 is the baseline. Native Linux AVX2 builds also use `-fno-plt` and the
 [compiled-target hardening policy](build.md#hardening). Header-only applications
@@ -13,7 +13,7 @@ use the [C ABI](c-api.md) for automatic backend selection.
 ## Ownership and reuse
 
 ```cpp
-#include <fosu/parser.hpp>
+#include <fosu/parser.h>
 
 fosu::Parser parser;
 for (const char* path : paths) {

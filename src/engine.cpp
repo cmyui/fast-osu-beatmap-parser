@@ -1,7 +1,0 @@
-#include <fosu/internal/engine/parse_document.hpp>
-
-// Private ABI: core and engine libraries are shipped as one build.
-extern "C" __attribute__((visibility("default")))
-const fosu::ParsingEngine* fosu_engine_v1() {
-    return &fosu::internal::native_engine;
-}
