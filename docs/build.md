@@ -23,6 +23,24 @@ the headers needed by consumers and installs them under `include/fosu/`;
 compiled-only loader headers and `.cc` files are not installed. Installed
 consumers use the same include names as source-tree consumers.
 
+## Formatting
+
+Install `pre-commit` (CI uses version 4.6.0), then enable the Git hook for your
+checkout:
+
+```sh
+pre-commit install
+pre-commit run --all-files
+```
+
+The hook installs the pinned clang-format version and applies the repository's
+`.clang-format` to first-party C/C++ files. The vendored `fast_float.h` is
+excluded. Commits with formatting changes are stopped so you can review and
+stage the fixes before committing again. CI runs the same configuration against
+all tracked files and fails if formatting would change them.
+
+## Native builds
+
 ```sh
 cmake -S . -B build/native -G Ninja
 cmake --build build/native -j4                       # C ABI shared library

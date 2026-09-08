@@ -1,6 +1,6 @@
 #pragma once
-#include <cstring>
 #include <fosu/engine/simd.h>
+#include <cstring>
 
 namespace fosu::internal {
 // Input belongs to the parser's padded buffer. Matches are bounded by end,
