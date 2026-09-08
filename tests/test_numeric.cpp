@@ -111,8 +111,17 @@ static void test_byte_masks() {
             const auto v = load32(text);
             const uint32_t bit = uint32_t(1) << lane;
             CHECK_EQ(nondigit_mask32(v), value >= '0' && value <= '9' ? 0u : bit);
+            if (lane < 16) {
+#if FOSU_SIMD_X86
+                const auto first_half = _mm256_castsi256_si128(v);
+#else
+                const auto first_half = v.val[0];
+#endif
+                CHECK_EQ(nondigit_mask16(first_half),
+                         value >= '0' && value <= '9' ? 0u : bit);
+            }
             CHECK_EQ(comma_mask32(v), value == ',' ? bit : 0u);
-            CHECK_EQ(equal_mask32(v, broadcast_byte('\n')), value == '\n' ? bit : 0u);
+            CHECK_EQ(equal_mask32(v, broadcast_byte<'\n'>()), value == '\n' ? bit : 0u);
         }
     }
 }
@@ -182,18 +191,19 @@ static void test_fuzz_timing_point() {
         }
         memset(buf + len, 0, sizeof(buf) - (size_t)len);
 
-        fosu::TimingPoint tp{};
         const auto a = fosu::internal::load32(buf);
         const auto b =
             fosu::internal::load32(buf + 32);
-        if (!fosu::internal::fast_parse_timing_point(a, b, buf, (size_t)len, tp))
+        const auto point = fosu::internal::try_parse_timing_point_fast(
+            a, b, buf, (size_t)len);
+        if (!point)
             continue;
         ++accepted;
-        fosu::TimingPoint reference{};
-        CHECK(fosu::internal::parse_timing_fields(
-            buf, buf + len, reference));
-        {
-            const fosu::TimingPoint& w = reference;
+        const auto reference = fosu::internal::parse_timing_point(buf, buf + len);
+        CHECK(reference.has_value());
+        if (reference) {
+            const auto& tp = *point;
+            const auto& w = *reference;
             CHECK(memcmp(&tp.time, &w.time, 8) == 0);
             CHECK(memcmp(&tp.beat_length, &w.beat_length, 8) == 0);
             CHECK_EQ(tp.meter, w.meter);

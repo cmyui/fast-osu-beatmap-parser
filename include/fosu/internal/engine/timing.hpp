@@ -2,33 +2,34 @@
 
 #include <algorithm>
 #include <bit>
+#include <optional>
+#include "../../beatmap.hpp"
 #include "byte_scan.hpp"
 #include "prefix.hpp"
 
 namespace fosu::internal {
 
-// Shared bounded fallback. Optional legacy fields may be absent, but a
-// present field must parse completely; NaN is meaningful only when inherited.
+// Parse a timing point, including omitted legacy fields. A present field
+// must parse completely; NaN is meaningful only when inherited. Invalid
+// lines return nullopt.
 // UseCommaMask is for lines of at most 64 bytes, with a mask relative to p.
-template <bool UseCommaMask = false, typename T>
-inline bool parse_timing_fields(const char* p,
-                                const char* end,
-                                T& tp,
-                                uint64_t commas = 0) {
+template <bool UseCommaMask = false>
+inline std::optional<TimingPoint> parse_timing_point(
+    const char* p, const char* end, uint64_t commas = 0) {
   [[maybe_unused]] const char* line = p;
   double time, beat_length;
   const char* q = parse_osu_double(p, end, time);
   if (q == p || q >= end || *q != ',')
-    return false;
+    return std::nullopt;
   p = q + 1;
   q = parse_beat_length(p, end, beat_length);
   if (q == p)
-    return false;
+    return std::nullopt;
   p = q;
   int64_t rest[6] = {4, 0, 0, 100, 1, 0};
   for (int i = 0; i < 6 && p < end; ++i) {
     if (*p++ != ',')
-      return false;
+      return std::nullopt;
     const char* field_end;
     if constexpr (UseCommaMask) {
       const size_t offset = static_cast<size_t>(p - line);
@@ -38,7 +39,7 @@ inline bool parse_timing_fields(const char* p,
       field_end = find_byte<','>(p, end);
     }
     if (p == field_end)
-      return false;
+      return std::nullopt;
     if (i == 4)
       rest[i] = *p == '1';
     else if (i == 0 && *p == '0') {
@@ -50,36 +51,36 @@ inline bool parse_timing_fields(const char* p,
     } else {
       q = parse_osu_int(p, field_end, rest[i]);
       if (q == p || q != field_end || (i == 0 && rest[i] <= 0))
-        return false;
+        return std::nullopt;
     }
     p = field_end;
   }
   // Additional legacy columns are ignored by the official decoder.
   if ((p < end && *p != ',') || (rest[4] != 0 && std::isnan(beat_length)))
-    return false;
-  tp.time = time;
-  tp.beat_length = beat_length;
-  tp.meter = clamp_i32(rest[0]);
-  tp.sample_set = clamp_i32(rest[1]);
-  tp.sample_index = clamp_i32(rest[2]);
-  tp.volume = clamp_i32(rest[3]);
-  tp.uninherited = rest[4] != 0;
-  tp.effects = static_cast<uint32_t>(rest[5]);
-  return true;
+    return std::nullopt;
+  return TimingPoint{
+      .time = time,
+      .beat_length = beat_length,
+      .meter = clamp_i32(rest[0]),
+      .sample_set = clamp_i32(rest[1]),
+      .sample_index = clamp_i32(rest[2]),
+      .volume = clamp_i32(rest[3]),
+      .uninherited = rest[4] != 0,
+      .effects = static_cast<uint32_t>(rest[5]),
+  };
 }
 
 #if FOSU_SIMD
 // Common eight-field timing rows: an unsigned integer timestamp, a signed
 // decimal beat length, and small integer tail fields. Validate their spelling
 // and widths before decoding. Wider values and legacy spellings use the
-// general parser; these limits constrain only the fast path.
+// general parser; these limits constrain only the fast path. A nullopt
+// result requests general parsing rather than declaring the line malformed.
 // Keep this inlined in the section loop so accepted records need no call.
-template <typename T>
 __attribute__((always_inline))
-inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
-                                           const char* p, size_t len,
-                                           T& tp) {
-    if (std::popcount(commas) != 7) return false;
+inline std::optional<TimingPoint> try_parse_timing_point_fast_masked(
+    uint64_t commas, uint64_t nondig, const char* p, size_t len) {
+    if (std::popcount(commas) != 7) return std::nullopt;
 
     // Seven comma positions -> eight fields.
     const uint64_t m1 = (commas & (commas - 1));
@@ -107,7 +108,7 @@ inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
         ((meter_digits - 1) | (sample_set_digits - 1) |
          (sample_index_digits - 1) | (volume_digits - 1) |
          (uninherited_digits - 1) | (effects_digits - 1)) > 3)
-        return false;
+        return std::nullopt;
 
     const char* magnitude = p + time_end + 1;
     const bool negative = *magnitude == '-';
@@ -121,21 +122,13 @@ inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
         (has_dot && magnitude[integer_digits] != '.') ||
         std::popcount(nondig) !=
             7 + static_cast<int>(has_dot) + static_cast<int>(negative))
-        return false;
+        return std::nullopt;
 
-    tp.time = static_cast<double>(swar_parse_u64(p, time_end));
     const auto parse_small_integer = [](const char* field, uint32_t digits) {
         if (digits == 1)
-            return static_cast<uint32_t>(static_cast<uint8_t>(*field - '0'));
-        return swar_parse_u32(field, digits);
+            return static_cast<int32_t>(static_cast<uint8_t>(*field - '0'));
+        return static_cast<int32_t>(swar_parse_u32(field, digits));
     };
-    tp.meter = parse_small_integer(p + beat_length_end + 1, meter_digits);
-    tp.sample_set = parse_small_integer(p + meter_end + 1, sample_set_digits);
-    tp.sample_index =
-        parse_small_integer(p + sample_set_end + 1, sample_index_digits);
-    tp.volume = parse_small_integer(p + sample_index_end + 1, volume_digits);
-    tp.uninherited = p[volume_end + 1] == '1';
-    tp.effects = parse_small_integer(p + uninherited_end + 1, effects_digits);
 
     uint64_t mantissa = swar_parse_u64(magnitude, integer_digits);
     if (fraction_digits) {
@@ -153,22 +146,31 @@ inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
         // Preserve correct rounding when the integer mantissa is not exact.
         if (bounded_double(p + time_end + 1, p + beat_length_end, beat_length) !=
             p + beat_length_end)
-            return false;
+            return std::nullopt;
     } else {
         beat_length = static_cast<double>(mantissa);
         if (fraction_digits) beat_length /= kPow10[fraction_digits];
         if (negative) beat_length = -beat_length;
     }
-    tp.beat_length = beat_length;
-    return true;
+    return TimingPoint{
+        .time = static_cast<double>(swar_parse_u64(p, time_end)),
+        .beat_length = beat_length,
+        .meter = parse_small_integer(p + beat_length_end + 1, meter_digits),
+        .sample_set = parse_small_integer(p + meter_end + 1, sample_set_digits),
+        .sample_index =
+            parse_small_integer(p + sample_set_end + 1, sample_index_digits),
+        .volume = parse_small_integer(p + sample_index_end + 1, volume_digits),
+        .uninherited = p[volume_end + 1] == '1',
+        .effects = static_cast<uint32_t>(
+            parse_small_integer(p + uninherited_end + 1, effects_digits)),
+    };
 }
 
-// Compatibility entry (tests/fuzzers): computes the masks itself.
-template <typename T>
+// Compute masks from the input vectors before attempting fast parsing.
 __attribute__((always_inline))
-inline bool fast_parse_timing_point(Bytes32 a, Bytes32 b, const char* p,
-                                    size_t len, T& tp) {
-    if (len > 64 || len < 15) return false;
+inline std::optional<TimingPoint> try_parse_timing_point_fast(
+    Bytes32 a, Bytes32 b, const char* p, size_t len) {
+    if (len > 64 || len < 15) return std::nullopt;
     const uint64_t line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
     const uint64_t commas =
         (comma_mask32(a) | static_cast<uint64_t>(comma_mask32(b)) << 32) &
@@ -177,7 +179,7 @@ inline bool fast_parse_timing_point(Bytes32 a, Bytes32 b, const char* p,
         (nondigit_mask32(a) |
          static_cast<uint64_t>(nondigit_mask32(b)) << 32) &
         line_mask;
-    return fast_parse_timing_point_masked(commas, nondig, p, len, tp);
+    return try_parse_timing_point_fast_masked(commas, nondig, p, len);
 }
 
 #endif

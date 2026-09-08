@@ -158,8 +158,6 @@ inline const char* parse_hitobject_lines(
     const HitObjectParseConstants& constants) {
     const ByteVector newline_value = constants.nl;
     const ByteVector comma_value = constants.comma;
-    const ByteVector bias = constants.bias;
-    const ByteVector threshold = constants.thr;
     const ByteVector zero = constants.zero;
     uint32_t fast_lines = 0;
     uint32_t malformed = 0;
@@ -168,7 +166,7 @@ inline const char* parse_hitobject_lines(
         const Bytes32 ascii = load32(p);
         const auto newline_mask = equal_mask32(ascii, newline_value);
         const auto commas = equal_mask32(ascii, comma_value);
-        const uint32_t nondigits = nondigit_mask32(ascii, bias, threshold);
+        const uint32_t nondigits = nondigit_mask32(ascii);
         const char* newline = newline_mask ? p + trailing_zeros(newline_mask)
                                            : find_byte<'\n'>(p + 32, file_end);
         const char* next_line = newline + (newline < file_end);

@@ -75,6 +75,9 @@ inline void parse_document(
           continue;
         }
         pending &= ~sec_bit;
+
+        // TODO: Why are there so many different approaches of parsing sections here?
+
         if (sec == Section::HitObjects) {
           p = parse_hitobjects_section<UseSimd>(bm, hit_object_count, slider_count,
                                                 slider_point_count, nl + (nl < file_end),
