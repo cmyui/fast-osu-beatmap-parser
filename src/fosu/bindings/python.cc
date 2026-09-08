@@ -4,7 +4,7 @@
 #include <fosu/parser.h>
 #include <cerrno>
 #include <cstring>
-#include <memory>
+#include <new>
 #include <utility>
 
 namespace {
@@ -240,13 +240,13 @@ struct State {
   PyObject* names[field_count];
 };
 
-struct PythonBeatmap {
+struct BeatmapConverter {
   const fosu::Beatmap& map;
   PyObject** keys;
   PythonRef point_type, circle_type, slider_type, spinner_type, hold_type;
   PythonRef timing_type, break_type, stats_type, beatmap_type, sound_type, mode_type;
   PythonRef sounds{PyDict_New()};
-  PythonBeatmap(const fosu::Beatmap& map, PyObject* model, PyObject** keys)
+  BeatmapConverter(const fosu::Beatmap& map, PyObject* model, PyObject** keys)
       : map(map),
         keys(keys),
         point_type(PyObject_GetAttrString(model, "Point")),
@@ -467,10 +467,11 @@ PyObject* parse_impl(PyObject* module, PyObject* arg, bool file) {
     const auto* engine = fosu::internal::selected_engine();
     // Backend selection was checked when the module was imported.
     fosu::Parser parser(*engine);
-    fosu::Result<fosu::Beatmap*> result(fosu::Error{fosu::ErrorCode::InvalidInput});
-    Py_BEGIN_ALLOW_THREADS result =
-        file ? parser.parse_file(bytes) : parser.parse(bytes, size);
-    Py_END_ALLOW_THREADS if (!result) {
+    // Both native entry points are noexcept, including allocation and I/O failures.
+    PyThreadState* thread = PyEval_SaveThread();
+    auto result = file ? parser.parse_file(bytes) : parser.parse(bytes, size);
+    PyEval_RestoreThread(thread);
+    if (!result) {
       const auto error = result.error();
       switch (error.code) {
         case fosu::ErrorCode::AllocationFailure:
@@ -490,7 +491,7 @@ PyObject* parse_impl(PyObject* module, PyObject* arg, bool file) {
       throw PythonError{};
     }
     auto* state = static_cast<State*>(PyModule_GetState(module));
-    PythonBeatmap converter(*result.value(), state->model, state->names);
+    BeatmapConverter converter(*result.value(), state->model, state->names);
     return converter.beatmap().release();
     // Parser destruction releases native storage before the result escapes.
   } catch (PythonError&) {
