@@ -23,7 +23,7 @@ the headers needed by consumers and installs them under `include/fosu/`;
 compiled-only loader headers and `.cc` files are not installed. Installed
 consumers use the same include names as source-tree consumers.
 
-## Formatting
+## Formatting and Python typing
 
 Install `pre-commit` (CI uses version 4.6.0), then enable the Git hook for your
 checkout:
@@ -38,6 +38,11 @@ The hook installs the pinned clang-format version and applies the repository's
 excluded. Commits with formatting changes are stopped so you can review and
 stage the fixes before committing again. CI runs the same configuration against
 all tracked files and fails if formatting would change them.
+
+The same hook configuration runs pinned mypy against the entire shipped Python
+package and `tests/typing`, using strict settings from `pyproject.toml`. The
+Python check does not build or import the native extension. Benchmark drivers
+and reference utilities are outside this package-typing check.
 
 ## Native builds
 

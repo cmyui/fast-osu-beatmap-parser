@@ -5,3 +5,11 @@ repos:
       - id: clang-format
         types_or: [c, c++]
         exclude: ^src/fosu/engine/fast_float\.h$
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v2.3.1
+    hooks:
+      - id: mypy
+        args: [--config-file=pyproject.toml]
+        pass_filenames: false
+        types: [file]
+        files: ^(python/|tests/typing/|pyproject\.toml$|\.pre-commit-config\.yaml$)

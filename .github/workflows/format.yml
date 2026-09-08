@@ -1,4 +1,4 @@
-name: Formatting
+name: Code quality
 
 on:
   pull_request:
@@ -20,4 +20,5 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install pre-commit==4.6.0
-      - run: pre-commit run --all-files --show-diff-on-failure
+      - name: Check formatting and Python types
+        run: pre-commit run --all-files --show-diff-on-failure

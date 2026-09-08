@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import sys
 from os import PathLike
 
-try:
+if sys.version_info >= (3, 12):
     from collections.abc import Buffer
-except ImportError:  # Python 3.10/3.11
+else:
     from typing_extensions import Buffer
 
 from . import _core

@@ -177,10 +177,18 @@ builds.
 
 ```sh
 python -m pip install -e '.[test]'
+python -m mypy --config-file pyproject.toml
 python -m pytest tests/test_python.py
 FOSU_FORCE_SCALAR=1 python -m pytest tests/test_python.py
 ```
 
-Tests run against installed wheels in CI, including static typing and Linux ELF
-protections. The [performance guide](performance.md) separates native parsing,
+Pre-commit and CI check the shipped package and consumer examples with the same
+pinned mypy and strict `pyproject.toml` configuration, targeting Python 3.10.
+Installed-wheel tests additionally check the consumer examples for the running
+Python version and use `stubtest` to compare the private extension stub with the
+loaded module. This checks exposed members/signatures, not every value produced
+by native code; runtime conversion tests cover those values.
+
+Tests run against installed wheels in CI, including Linux ELF protections.
+The [performance guide](performance.md) separates native parsing,
 full Python result construction, first use, and process startup.

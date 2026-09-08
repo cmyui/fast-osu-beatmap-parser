@@ -18,7 +18,22 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8", "mypy>=1.11"]
+test = ["pytest>=8", "mypy==2.3.1"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["python/fosu", "tests/typing"]
+strict = true
+warn_unreachable = true
+disallow_any_unimported = true
+enable_error_code = [
+  "truthy-bool",
+  "truthy-iterable",
+  "ignore-without-code",
+  "unused-awaitable",
+  "redundant-expr",
+  "possibly-undefined",
+]
 
 [project.urls]
 Repository = "https://github.com/cmyui/fast-osu-beatmap-parser"
@@ -32,7 +47,7 @@ sdist.exclude = ["build", "dist", "tests/reference/official/bin", "tests/referen
 [tool.cibuildwheel]
 build = "cp310-*"
 skip = "*-musllinux* *-win* *-manylinux_i686 *-macosx_x86_64"
-test-requires = ["pytest>=8", "mypy>=1.11"]
+test-requires = ["pytest>=8", "mypy==2.3.1"]
 test-command = "python -m pytest {project}/tests/test_python.py && FOSU_FORCE_SCALAR=1 python -m pytest {project}/tests/test_python.py && python {project}/tests/test_binary_hardening.py"
 
 [tool.cibuildwheel.linux]

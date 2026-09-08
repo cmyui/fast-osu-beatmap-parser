@@ -352,9 +352,26 @@ def test_public_typing_contract():
             sys.executable,
             "-m",
             "mypy",
-            "--strict",
+            "--config-file",
+            str(Path(__file__).resolve().parents[1] / "pyproject.toml"),
+            "--python-version",
+            f"{sys.version_info.major}.{sys.version_info.minor}",
             "--no-incremental",
             str(Path(__file__).with_name("typing") / "python_api.py"),
+        ],
+        check=True,
+    )
+
+
+def test_native_stub_contract():
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mypy.stubtest",
+            "--mypy-config-file",
+            str(Path(__file__).resolve().parents[1] / "pyproject.toml"),
+            "fosu._core",
         ],
         check=True,
     )
