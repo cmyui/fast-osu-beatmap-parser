@@ -3,6 +3,7 @@
 // Hitobject kind classification and kind-specific trailing fields.
 #include <optional>
 #include <string_view>
+#include "byte_scan.hpp"
 #include "prefix.hpp"
 
 namespace fosu::internal {
@@ -74,10 +75,10 @@ inline bool valid_edge_sets(std::string_view sets, int32_t slides) {
             if (end - p == 3) return true;
             if (p[3] == '|') { p += 4; continue; }
         }
-        const auto* separator = static_cast<const char*>(memchr(p, '|', end - p));
-        const char* next = separator ? separator : end;
+        const char* next = find_byte<'|'>(p, end);
         if (!valid_sample({p, static_cast<size_t>(next - p)})) [[unlikely]] return false;
-        if (!separator) break;
+        if (next == end)
+          break;
         p = next + 1;
     }
     return true;
@@ -104,8 +105,7 @@ inline HitObjectKind classify_hitobject_kind(uint32_t type) {
 inline std::optional<std::string_view> parse_hit_sample(
     const char* p, const char* end, bool banks_only = false) {
     if (end - p == 8 && short_sample(p)) return std::string_view{p, 8};
-    const auto* comma = static_cast<const char*>(memchr(p, ',', end - p));
-    const char* sample_end = comma ? comma : end;
+    const char* sample_end = find_byte<','>(p, end);
     const std::string_view sample{p, static_cast<size_t>(sample_end - p)};
     if (!valid_sample(sample, banks_only)) return std::nullopt;
     return sample;

@@ -29,8 +29,8 @@ fosu::Beatmap& map = *parsed.value();
 // map remains valid until parser parses another beatmap or is destroyed.
 ```
 
-Recorded warm parsing times on our **10,000-map corpus** are roughly **19 µs
-per map in C++** and **25 µs from Python**. These are means of per-map minima
+Recorded warm parsing times on our **10,000-map corpus** are roughly **22 µs
+per map in C++** and **26 µs from Python**. These are means of per-map minima
 on a pinned Zen 4 core, starting with resident input bytes; they exclude file
 I/O and process startup. See [performance](docs/performance.md) for the exact
 measurements, host, repetition counts, and reproduction commands.

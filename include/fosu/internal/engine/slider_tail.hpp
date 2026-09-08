@@ -36,7 +36,26 @@ inline SliderSoundFields parse_slider_sound_fields(
         return {{p, first}, {p + first + 1, second - first - 1},
                 {p + second + 1, sample_end - second - 1}};
     }
-#endif
+    std::string_view fields[3];
+    size_t field_count = 0;
+    const char* field_start = p;
+    while (p < end) {
+      const size_t remaining = static_cast<size_t>(end - p);
+      auto commas = equal_mask32(load32(p), k.comma);
+      if (remaining < 32)
+        commas &= (1u << remaining) - 1;
+      while (commas) {
+        const char* comma = p + trailing_zeros(commas);
+        fields[field_count++] = {field_start, static_cast<size_t>(comma - field_start)};
+        if (field_count == 3)
+          return {fields[0], fields[1], fields[2]};
+        field_start = comma + 1;
+        commas &= commas - 1;
+      }
+      p += std::min(remaining, size_t(32));
+    }
+    fields[field_count] = {field_start, static_cast<size_t>(end - field_start)};
+#else
     std::string_view fields[3];
     for (auto& field : fields) {
         const auto* comma = static_cast<const char*>(memchr(p, ',', end - p));
@@ -45,6 +64,7 @@ inline SliderSoundFields parse_slider_sound_fields(
         if (!comma) break;
         p = comma + 1;
     }
+#endif
     return {fields[0], fields[1], fields[2]};
 }
 

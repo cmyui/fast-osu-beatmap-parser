@@ -2,6 +2,7 @@
 #include <optional>
 #include "../../beatmap.hpp"
 #include "../string_lookup.hpp"
+#include "byte_scan.hpp"
 #include "prefix.hpp"
 #include "text.hpp"
 
@@ -15,12 +16,28 @@ inline std::string_view strip_quotes(std::string_view v) {
 
 inline std::optional<std::string_view> parse_event_filename(const char* rest,
                                                             const char* end) {
-  const auto* comma = static_cast<const char*>(memchr(rest, ',', end - rest));
-  if (!comma)
+#if FOSU_SIMD
+  // Timestamp and filename usually fit in one window. Reuse its comma mask
+  // for both boundaries without exposing SIMD state to the event handlers.
+  if (rest < end) {
+    const auto commas = equal_mask32(load32(rest), broadcast_byte(','));
+    const auto first = trailing_zeros(commas);
+    if (first < 32 && first < static_cast<size_t>(end - rest)) {
+      const char* filename = rest + first + 1;
+      const auto second = trailing_zeros(commas & (commas - 1));
+      const char* next = second < 32 && second < static_cast<size_t>(end - rest)
+                             ? rest + second
+                             : find_byte<','>(filename, end);
+      return strip_quotes(trim(filename, next));
+    }
+  }
+#endif
+  const auto* comma = find_byte<','>(rest, end);
+  if (comma == end)
     return std::nullopt;
   const char* filename = comma + 1;
-  const auto* next = static_cast<const char*>(memchr(filename, ',', end - filename));
-  return strip_quotes(trim(filename, next ? next : end));
+  const auto* next = find_byte<','>(filename, end);
+  return strip_quotes(trim(filename, next));
 }
 
 inline void parse_background_event(Beatmap& bm,
@@ -71,10 +88,10 @@ inline void parse_event_line(
         return;
     }
     const char* end = p + len;
-    const auto* c1 = static_cast<const char*>(memchr(p, ',', len));
-    if (!c1) {
-        ++bm.stats.storyboard_lines;
-        return;
+    const auto* c1 = find_byte<','>(p, end);
+    if (c1 == end) {
+      ++bm.stats.storyboard_lines;
+      return;
     }
     const std::string_view f0{p, static_cast<size_t>(c1 - p)};
     const char* rest = c1 + 1;
@@ -113,12 +130,8 @@ inline const char* parse_events_section(
             line_end = p + trailing_zeros(nl);
             next_line = line_end + 1;
         } else {
-            const auto* m = static_cast<const char*>(memchr(
-                p + 64, '\n',
-                file_end - p > 64 ? static_cast<size_t>(file_end - p) - 64
-                                  : 0));
-            line_end = m ? m : file_end;
-            next_line = m ? m + 1 : file_end;
+          line_end = find_byte<'\n'>(p + 64, file_end);
+          next_line = line_end + (line_end < file_end);
         }
         if (line_end[-1] == '\r') --line_end;  // line_end > line: c is not CR
         p = next_line;

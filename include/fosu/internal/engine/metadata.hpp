@@ -3,6 +3,7 @@
 #include <type_traits>
 #include "../beatmap_header.hpp"
 #include "../string_lookup.hpp"
+#include "byte_scan.hpp"
 #include "scalar_parse.hpp"
 
 namespace fosu::internal {
@@ -85,15 +86,15 @@ inline bool parse_legacy_enum(std::string_view value,
   }
   out = 0;
   do {
-    const auto* comma = static_cast<const char*>(memchr(p, ',', end - p));
-    const char* part_end = comma ? comma : end;
+    const auto* comma = find_byte<','>(p, end);
+    const char* part_end = comma;
     while (part_end > p && skip_numeric_space(part_end - 1, part_end) == part_end)
       --part_end;
     const auto* named_value = names.find({p, static_cast<size_t>(part_end - p)});
     if (!named_value)
       return false;
     out |= *named_value;
-    if (!comma)
+    if (comma == end)
       return true;
     p = skip_numeric_space(comma + 1, end);
   } while (p < end);
@@ -108,8 +109,8 @@ inline bool parse_kv_line(BeatmapHeader& bm,
                           const char* p,
                           size_t len,
                           uint32_t* malformed = nullptr) {
-  const auto* colon = static_cast<const char*>(memchr(p, ':', len));
-  if (!colon)
+  const auto* colon = find_byte<':'>(p, p + len);
+  if (colon == p + len)
     return false;
   size_t key_len = static_cast<size_t>(colon - p);
   while (key_len && (p[key_len - 1] == ' ' || p[key_len - 1] == '\t'))

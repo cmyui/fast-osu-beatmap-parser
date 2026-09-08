@@ -53,6 +53,42 @@ static void test_point_values() {
 #endif
 }
 
+static void test_point_prefix_boundaries() {
+#if FOSU_SIMD
+  const fosu::internal::HitObjectParseConstants constants;
+  // Exhausted masks must reject or retain only the complete first point.
+  for (const std::string prefix : {"|", "|1:", "|1:2|", "|1:2|3:"}) {
+    const auto input = fosu::make_padded(prefix + std::string(64, '1'));
+    const auto points =
+        fosu::internal::try_parse_slider_point_prefix_fast<fosu::SliderPoint>(
+            input.data.get(), constants);
+    CHECK_EQ(points.has_value(), prefix.starts_with("|1:2|"));
+    if (points) {
+      CHECK(!points->has_second);
+      CHECK_EQ(points->next - input.data.get(), 4);
+    }
+  }
+  // Combining delimiter classifications must not admit other byte values.
+  for (unsigned byte = 0; byte < 256; ++byte) {
+    const auto input =
+        fosu::make_padded(std::string("|1:2|3:4") + static_cast<char>(byte));
+    const auto points =
+        fosu::internal::try_parse_slider_point_prefix_fast<fosu::SliderPoint>(
+            input.data.get(), constants);
+    CHECK(points.has_value());
+    if (!points)
+      continue;
+    const bool has_second = byte == '|' || byte == ',';
+    CHECK_EQ(points->has_second, has_second);
+    CHECK_EQ(points->next - input.data.get(), has_second ? 8 : 4);
+    if (has_second) {
+      CHECK_EQ(points->second.x, 3);
+      CHECK_EQ(points->second.y, 4);
+    }
+  }
+#endif
+}
+
 static void test_slider_fields() {
     const fosu::internal::HitObjectParseConstants constants;
     // Missing length differs from an explicitly empty field.
@@ -91,6 +127,31 @@ static void test_slider_fields() {
         CHECK_EQ(tail->sounds.edge_sets, "0:0");
         CHECK_EQ(tail->sounds.hit_sample, "1:2");
     }
+}
+
+static void test_slider_sound_boundaries() {
+  const fosu::internal::HitObjectParseConstants constants;
+  for (size_t length : {0u, 1u, 30u, 31u, 32u, 33u, 63u, 64u, 65u, 95u}) {
+    for (size_t long_field = 0; long_field < 3; ++long_field) {
+      std::string fields[] = {"0", "0:0", "0:0:0:0:sample.wav"};
+      fields[long_field] = std::string(length, 'x');
+      for (size_t count = 1; count <= 4; ++count) {
+        std::string text;
+        for (size_t i = 0; i < count; ++i) {
+          if (i)
+            text += ',';
+          text += i < 3 ? fields[i] : "ignored";
+        }
+        // The following comma is readable, but outside the field span.
+        const auto input = fosu::make_padded(text + ",outside\n");
+        const auto sounds = fosu::internal::parse_slider_sound_fields(
+            input.data.get(), input.data.get() + text.size(), constants);
+        CHECK_EQ(sounds.edge_sounds, fields[0]);
+        CHECK_EQ(sounds.edge_sets, count >= 2 ? fields[1] : "");
+        CHECK_EQ(sounds.hit_sample, count >= 3 ? fields[2] : "");
+      }
+    }
+  }
 }
 
 static void test_hitobject_details() {
@@ -140,7 +201,9 @@ static void test_hitobject_details() {
 
 int main() {
     test_point_values<fosu::SliderPoint>();
+    test_point_prefix_boundaries();
     test_slider_fields();
+    test_slider_sound_boundaries();
     test_hitobject_details();
     return test_result();
 }

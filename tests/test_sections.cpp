@@ -390,7 +390,143 @@ static void test_exact_keys_and_event_aliases() {
   CHECK_EQ(map.stats.storyboard_lines, 1u);
 }
 
+static void test_long_event_lines() {
+  for (size_t length : {63u, 64u, 65u, 95u, 96u, 97u, 200u}) {
+    for (const auto ending : {"", "\n", "\r\n"}) {
+      const std::string filename(length - 6, 'x');
+      const auto map = parse_str("[Events]\n0,0,\"" + filename + "\"" + ending);
+      CHECK_EQ(map.background, filename);
+    }
+    const auto map = parse_str("[Events]\n " + std::string(length, 'x') +
+                               "\n[Metadata]\nTitle:after events\n");
+    CHECK_EQ(map.stats.storyboard_lines, 1u);
+    CHECK_EQ(map.title, "after events");
+  }
+}
+
+static void test_timing_integer_widths() {
+  for (int value : {9, 99, 999, 9999, 10000, 99999999, INT32_MAX}) {
+    const auto field = std::to_string(value);
+    const std::string input = "[TimingPoints]\n0,-100," + field + "," + field +
+        "," + field + "," + field + ",0," + field;
+    for (bool simd : {false, true}) {
+      fosu::Parser parser(simd ? fosu::internal::native_engine
+                               : fosu::internal::scalar_engine);
+      const auto& map = require_parse(parser.parse(input.data(), input.size()));
+      CHECK_EQ(map.timing_points.size(), 1u);
+      CHECK_EQ(map.stats.malformed_lines, 0u);
+      if (map.timing_points.size() != 1) continue;
+      const auto& point = map.timing_points[0];
+      CHECK_EQ(point.time, 0.0);
+      CHECK_EQ(point.beat_length, -100.0);
+      CHECK_EQ(point.meter, value);
+      CHECK_EQ(point.sample_set, value);
+      CHECK_EQ(point.sample_index, value);
+      CHECK_EQ(point.volume, value);
+      CHECK(!point.uninherited);
+      CHECK_EQ(point.effects, static_cast<uint32_t>(value));
+    }
+  }
+}
+
+static void test_masked_timing_fallback() {
+  // Exercise the general numeric rules, not just the fast editor shape.
+  for (const std::string line :
+       {"-1.5,500", "0,NaN,4,0,0,100,0,0", "0,500,0meter,0,0,100,1,0",
+        "0,500,4,0,0,100,1anything,0,ignored", " 1 , 500 , 4 ,0,0,100,1,0",
+        "0,500,4,0,0,100,1,", "0,500,,0,0,100,1,0", "0,500,4,0,0,100,1,bad",
+        "0,NaN,4,0,0,100,1,0", "bad,500", "0,500,"}) {
+    for (size_t length : {line.size(), size_t(63), size_t(64)}) {
+      const std::string text = line + std::string(length - line.size(), ' ');
+      const auto input = fosu::make_padded(text + ",outside\n");
+      const char* p = input.data.get();
+      uint64_t commas = 0;
+      for (size_t i = 0; i < text.size(); ++i)
+        if (p[i] == ',')
+          commas |= 1ull << i;
+      fosu::TimingPoint scalar{}, masked{};
+      const bool expected =
+          fosu::internal::parse_timing_fields(p, p + text.size(), scalar);
+      const bool actual =
+          fosu::internal::parse_timing_fields<true>(p, p + text.size(), masked, commas);
+      CHECK_EQ(actual, expected);
+      if (actual) {
+        CHECK_EQ(masked.time, scalar.time);
+        CHECK(masked.beat_length == scalar.beat_length ||
+              (std::isnan(masked.beat_length) && std::isnan(scalar.beat_length)));
+        CHECK_EQ(masked.meter, scalar.meter);
+        CHECK_EQ(masked.sample_set, scalar.sample_set);
+        CHECK_EQ(masked.sample_index, scalar.sample_index);
+        CHECK_EQ(masked.volume, scalar.volume);
+        CHECK_EQ(masked.uninherited, scalar.uninherited);
+        CHECK_EQ(masked.effects, scalar.effects);
+      }
+    }
+  }
+}
+
+template <char Delimiter>
+static void test_byte_scan_boundaries() {
+  // Include non-vector-aligned inputs and a matching byte just outside end.
+  for (size_t alignment = 0; alignment < 32; ++alignment) {
+    for (size_t length = 0; length <= 97; ++length) {
+      for (size_t position : {size_t(0), length / 2, length ? length - 1 : 0, length}) {
+        std::string text(alignment + length + 1, 'x');
+        text[alignment + length] = Delimiter;
+        if (position < length)
+          text[alignment + position] = Delimiter;
+        const auto input = fosu::make_padded(text);
+        const char* p = input.data.get() + alignment;
+        CHECK_EQ(fosu::internal::find_byte<Delimiter>(p, p + length), p + position);
+        CHECK_EQ((fosu::internal::find_byte<Delimiter, false>(p, p + length)),
+                 p + position);
+      }
+    }
+  }
+}
+
+static void test_event_filename_boundaries() {
+  for (size_t timestamp_length : {0u, 30u, 31u, 32u, 64u}) {
+    for (size_t filename_length : {0u, 1u, 30u, 31u, 32u, 63u, 64u, 96u}) {
+      const std::string filename(filename_length, 'x');
+      const std::string event =
+          "Video," + std::string(timestamp_length, '0') + ",\"" + filename + "\"";
+      for (const auto suffix : {"", ",0,0", "\nVideo,0"}) {
+        const auto map = parse_str("[Events]\n" + event + suffix);
+        CHECK_EQ(map.video, filename);
+      }
+    }
+  }
+}
+
+static void test_section_skip_boundaries() {
+  for (size_t padding : {0u, 30u, 31u, 32u, 63u, 64u, 95u}) {
+    for (bool simd : {false, true}) {
+      fosu::Parser parser(simd ? fosu::internal::native_engine
+                               : fosu::internal::scalar_engine);
+      const std::string text = "[Unknown]\nvalue:" + std::string(padding, 'x') +
+                               "[Metadata]\nTitle:ignored\n[Metadata]\nTitle:retained";
+      auto& map = require_parse(
+          parser.parse(text.data(), text.size(), {.sections = fosu::kSectionMetadata}));
+      CHECK_EQ(map.title, "retained");
+      const std::string missing = "[Unknown]\nvalue:[Metadata]";
+      auto& empty = require_parse(parser.parse(missing.data(), missing.size(),
+                                               {.sections = fosu::kSectionMetadata}));
+      CHECK(empty.title.empty());
+    }
+  }
+}
+
 int main() {
+  test_byte_scan_boundaries<','>();
+  test_byte_scan_boundaries<':'>();
+  test_byte_scan_boundaries<'\n'>();
+  test_byte_scan_boundaries<'\0'>();
+  test_event_filename_boundaries();
+  test_section_skip_boundaries();
+  test_long_event_lines();
+  test_masked_timing_fallback();
+  test_timing_integer_widths();
   test_exact_keys_and_event_aliases();
   test_all_sections();
   test_old_format();

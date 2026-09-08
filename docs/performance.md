@@ -51,21 +51,25 @@ input bytes divided by the sum of per-file minima, using decimal megabytes.
 
 ## Current measurement snapshot
 
+Measured source: [`948e154`](https://github.com/cmyui/fast-osu-beatmap-parser/commit/948e15416a8cbaaf559ac8714b7cda3b75cf1698).
+All runs below were serialized after builds and correctness checks completed.
+
 ### Linux / Zen 4
 
 On the target above, 2026-09-07, with resident input and one pinned core:
 
 | Boundary | Mean per-map minimum |
 |---|---:|
-| C++ fresh result, resident bytes | 19.64–20.35 µs |
-| C++ reused result | 18.58–19.25 µs |
-| C ABI fresh handle, input copy included | 20.95–21.77 µs |
-| C ABI reused handle | 19.94–20.61 µs |
-| Complete one-shot process | 163.12 µs |
+| C++ fresh result, resident bytes | 21.61–21.86 µs |
+| C++ reused result | 21.41–21.61 µs |
+| C ABI fresh handle, input copy included | 23.96–24.26 µs |
+| C ABI reused handle | 23.75–24.00 µs |
+| Complete one-shot process | 279.51 µs |
 
 Library ranges are two full-corpus comparisons with reversed starting order,
 seven repetitions per map for both C++ and the C ABI. The one-shot measurement
-uses three repetitions per map. The AVX2 kernels use GCC
+uses six samples per map (the same executable in both rotating driver slots).
+The AVX2 kernels use GCC
 `-O3 -march=x86-64-v3 -mtune=znver4`, with baseline code selecting the C ABI
 backend once per loaded library. Libraries and their benchmarks use the
 [compiled-target hardening policy](build.md#hardening), including strong stack
@@ -78,18 +82,18 @@ and seven repetitions per map in both starting orders:
 
 | Python boundary | Mean per-map minimum |
 |---|---:|
-| Warm `parse(bytes)` and result release | 23.15–24.70 µs |
-| Warm `parse_file(path)` and result release | 28.95–30.75 µs |
+| Warm `parse(bytes)` and result release | 26.22–26.28 µs |
+| Warm `parse_file(path)` and result release | 32.34–32.55 µs |
 
 Python first-use measurements select 100 evenly spaced maps and launch a fresh
 CPython process three times per map/variant, with identical dependencies and
 precompiled bytecode. The first `parse_file`/result-release interval averages
-127.07–132.18 µs of per-file minima across both starting orders; import
-averages 4.74–4.83 ms and the complete Python process 15.36–15.63 ms. These are
+175.20–177.16 µs of per-file minima across two runs; import
+averages 4.82–4.86 ms and the complete Python process 15.49–15.54 ms. These are
 separate timed boundaries, with separate minima; they should not be added together.
 
-First C ABI use in a fresh C process averages 191.21–197.90 µs across 1,000
-evenly spaced maps, three repetitions each in both starting orders. This includes
+First C ABI use in a fresh C process averages 335.13–340.37 µs across 1,000
+evenly spaced maps, three repetitions each in two runs. This includes
 `dlopen`, CPU selection, file I/O, parsing, view acquisition, destruction and
 `dlclose`, excluding the
 C process's startup. CPU detection is paid once per library load, not once per map.
@@ -105,15 +109,15 @@ per variant in each run:
 
 | Boundary | Minimum | Median of all repetitions |
 |---|---:|---:|
-| C++ fresh result, resident bytes | 140–144 µs | 150–151 µs |
-| C ABI fresh handle, input copy included | 143–148 µs | 157–158 µs |
-| Python warm `parse(bytes)` and release | 139–141 µs | 155–157 µs |
-| Python warm `parse_file(path)` and release | 150–154 µs | 168–169 µs |
+| C++ fresh result, resident bytes | 139.6–140.1 µs | 145.9–147.6 µs |
+| C ABI fresh handle, input copy included | 150.8–151.3 µs | 158.1–159.7 µs |
+| Python warm `parse(bytes)` and release | 153.3–156.0 µs | 163.0–171.0 µs |
+| Python warm `parse_file(path)` and release | 166.2–169.5 µs | 178.4–188.4 µs |
 
-Python uses CPython 3.14.6 and CFFI 2.1.1. Two separate 51-repetition rotating
-comparisons with fresh interpreters and precompiled bytecode measured the first
-`parse_file` and result release at a median 332–341 µs; import took 1.63–1.67 ms
-and the whole process 23.35–24.79 ms. These intervals have separate statistics
+Python uses CPython 3.14.6 and CFFI 2.1.1. Two separate 51-repetition runs
+with fresh interpreters and precompiled bytecode measured the first
+`parse_file` and result release at a median 514–563 µs; import took 1.63–1.77 ms
+and the whole process 24.51–24.88 ms. These intervals have separate statistics
 and should not be added together. They do not include cold storage reads or establish
 worst-case latency.
 

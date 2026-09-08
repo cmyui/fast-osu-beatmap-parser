@@ -274,73 +274,6 @@ static void test_fuzz_equivalence() {
 }
 #endif
 
-#if FOSU_SIMD
-// Shape-cache equivalence: any line whose (comma, nondigit, len) key
-// matches a cached shape must (a) be accepted by the reference parser and
-// (b) convert bit-identically through tp_shape_convert.
-void test_fuzz_tp_shape_cache() {
-    printf("timing shape-cache fuzz\n");
-    using namespace fosu::internal;
-    const char* seeds[] = {
-        "277,342.466666666667,4,2,1,60,1,0",
-        "1234,-100,4,2,1,60,0,1",
-        "56676,-83.3333333333333,4,2,1,45,0,1",
-        "120,300,4,0,0,100,1,0",
-        "1885,352.941176470588,4,1,0,70,1,0",
-        "141476,-66.6666666666667,4,3,2,5,0,8",
-    };
-    uint64_t rng = 0x5EED5EEDULL;
-    auto rnd = [&rng] {
-        rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
-        return rng;
-    };
-    TpShapeCache cache{};
-    char buf[64 + 80] = {};
-    const char muts[] = "0123456789,.-x";
-    int checked = 0;
-    for (int it = 0; it < 300000; ++it) {
-        const char* seed = seeds[rnd() % 6];
-        size_t len = strlen(seed);
-        memset(buf, 0, sizeof buf);
-        memcpy(buf, seed, len);
-        for (int m = int(rnd() % 4); m-- > 0;)
-            buf[rnd() % len] = muts[rnd() % 14];
-        if (rnd() % 8 == 0) cache = TpShapeCache{};  // section reset
-        if (len > 64 || len < 15) continue;
-        const auto a =
-            fosu::internal::load32(buf);
-        const auto b =
-            fosu::internal::load32(buf + 32);
-        const uint64_t line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
-        const uint64_t commas =
-            (comma_mask32(a) | uint64_t(comma_mask32(b)) << 32) & line_mask;
-        const uint64_t nondig =
-            (nondigit_mask32(a) | uint64_t(nondigit_mask32(b)) << 32) &
-            line_mask;
-        fosu::TimingPoint ref{};
-        TpGeom geom;
-        const bool ref_ok = fast_parse_timing_point_masked(
-            commas, nondig, buf, len, ref, &geom);
-        const TpShapeRow& row = cache.rows[TpShapeCache::slot(commas)];
-        if (tp_shape_match(row, commas, nondig, len, buf)) {
-            CHECK(ref_ok);  // cached shape implies structural validity
-            fosu::TimingPoint got{};
-            tp_shape_convert(row, buf, got);
-            CHECK(memcmp(&got, &ref, sizeof(fosu::TimingPoint)) == 0);
-            if (g_failures) {
-                printf("  failing line: %s\n", buf);
-                return;
-            }
-            ++checked;
-        } else if (ref_ok) {
-            tp_shape_insert(cache, commas, nondig, len, geom);
-        }
-    }
-    printf("  shape-cache fuzz: %d hits verified\n", checked);
-    CHECK(checked > 30000);
-}
-#endif
-
 int main() {
     test_fuzz_parse_double();
     test_fuzz_parse_coord();
@@ -349,7 +282,6 @@ int main() {
     test_prefix_shapes();
     test_fuzz_equivalence();
     test_fuzz_timing_point();
-    test_fuzz_tp_shape_cache();
     puts("SIMD path: enabled");
 #else
     puts("SIMD path: not built");
