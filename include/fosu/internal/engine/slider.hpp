@@ -104,15 +104,14 @@ consteval std::array<PointShuf, 16> make_point_shuf() {
 }
 inline constexpr auto kPointShuf = make_point_shuf();
 
-// `src` starts at a '|'; xl/yl are the digit counts (masked into range, so a
-// speculative call on an invalid shape reads a valid table entry).
+// `src` starts at a '|'; callers validate that both digit counts are 1..4.
 #if FOSU_SIMD_X86
 template <typename Point>
 inline Point decode_slider_point(__m128i src, uint32_t xl, uint32_t yl,
                                  const HitObjectParseConstants& k) {
     static_assert(sizeof(Point) == 8 && offsetof(Point, x) == 0 && offsetof(Point, y) == 4);
     const __m128i shuf = _mm_load_si128(reinterpret_cast<const __m128i*>(
-        kPointShuf[((xl - 1) & 3) * 4 + ((yl - 1) & 3)].b));
+        kPointShuf[(xl - 1) * 4 + (yl - 1)].b));
     const __m128i placed =
         _mm_shuffle_epi8(_mm_sub_epi8(src, _mm256_castsi256_si128(k.zero)), shuf);
     const auto coordinates = _mm_madd_epi16(_mm_maddubs_epi16(placed, k.pair_weights), k.word_weights);
@@ -125,7 +124,7 @@ inline Point decode_slider_point(uint8x16_t src, uint32_t xl, uint32_t yl,
                                  const HitObjectParseConstants& k) {
     static_assert(sizeof(Point) == 8 && offsetof(Point, x) == 0 && offsetof(Point, y) == 4);
     const auto* shuf = reinterpret_cast<const uint8_t*>(
-        kPointShuf[((xl - 1) & 3) * 4 + ((yl - 1) & 3)].b);
+        kPointShuf[(xl - 1) * 4 + (yl - 1)].b);
     const auto coordinates = decimal_groups(vqtbl1q_u8(vsubq_u8(src, k.zero), vld1q_u8(shuf)));
     return std::bit_cast<Point>(vgetq_lane_u64(vreinterpretq_u64_u32(coordinates), 0));
 }
@@ -140,10 +139,10 @@ struct ParsedSliderPointPrefix {
 };
 
 // Up to two editor-shaped points ("|x:y", 1..4 digits each) from one 32-byte
-// window, with no data-dependent loop exit: both are converted speculatively
-// and the second is kept only when it is present and well-formed. Most
-// sliders have one or two points, so this replaces a mispredicted loop exit
-// per slider. Returns coordinates and the next input position, or nullopt
+// window. Decode only validated points; if the second is absent or needs
+// general parsing, return the first and leave the cursor at its end. Most
+// sliders have one or two points, avoiding the general point loop entirely.
+// Returns coordinates and the next input position, or nullopt
 // if the first point needs the general parser. No destination is modified.
 template <typename Point>
 inline std::optional<ParsedSliderPointPrefix<Point>>
@@ -167,41 +166,47 @@ try_parse_slider_point_prefix_fast(
     // waiting for the preceding coordinate length. Missing boundaries are 32;
     // use 64-bit mask tests below so that sentinel remains a defined shift.
     uint32_t boundaries = nd & ~1u;
-    const uint32_t colon1 = trailing_zeros(boundaries);
+    const uint32_t first_colon = trailing_zeros(boundaries);
     boundaries &= boundaries - 1;
-    const uint32_t end1 = trailing_zeros(boundaries);
+    const uint32_t first_end = trailing_zeros(boundaries);
     boundaries &= boundaries - 1;
-    const uint32_t colon2 = trailing_zeros(boundaries);
+    const uint32_t second_colon = trailing_zeros(boundaries);
     boundaries &= boundaries - 1;
-    const uint32_t end2 = trailing_zeros(boundaries);
-    const uint32_t xl1 = colon1 - 1;
-    const uint32_t yl1 = end1 - colon1 - 1;
-    const uint32_t c1 = xl1 & 7;
-    const uint32_t d1 = yl1 & 7;
-    const bool ok1 = (pipe & 1) & (((xl1 - 1) | (yl1 - 1)) <= 3) &
-                     ((static_cast<uint64_t>(colon) >> colon1) & 1) &
-                     ((static_cast<uint64_t>(sep) >> end1) & 1);
-    const uint32_t xl2 = colon2 - end1 - 1;
-    const uint32_t c2 = xl2 & 7;
-    const uint32_t yl2 = end2 - colon2 - 1;
-    const uint32_t d2 = yl2 & 7;
-    const bool ok2 = ((static_cast<uint64_t>(pipe) >> end1) & 1) &
-                     (((xl2 - 1) | (yl2 - 1)) <= 3) &
-                     ((static_cast<uint64_t>(colon) >> colon2) & 1) &
-                     ((static_cast<uint64_t>(sep) >> end2) & 1);
-    if (!ok1) return std::nullopt;
+    const uint32_t second_end = trailing_zeros(boundaries);
+    const uint32_t first_x_digits = first_colon - 1;
+    const uint32_t first_y_digits = first_end - first_colon - 1;
+    const bool first_valid =
+        (pipe & 1) & (((first_x_digits - 1) | (first_y_digits - 1)) <= 3) &
+        ((static_cast<uint64_t>(colon) >> first_colon) & 1) &
+        ((static_cast<uint64_t>(sep) >> first_end) & 1);
+    const uint32_t second_x_digits = second_colon - first_end - 1;
+    const uint32_t second_y_digits = second_end - second_colon - 1;
+    const bool second_valid =
+        ((static_cast<uint64_t>(pipe) >> first_end) & 1) &
+        (((second_x_digits - 1) | (second_y_digits - 1)) <= 3) &
+        ((static_cast<uint64_t>(colon) >> second_colon) & 1) &
+        ((static_cast<uint64_t>(sep) >> second_end) & 1);
+    if (!first_valid) return std::nullopt;
 #if FOSU_SIMD_X86
     const auto first = decode_slider_point<Point>(
-        _mm256_castsi256_si128(v), c1, d1, k);
-    const auto second = decode_slider_point<Point>(
-        _mm_loadu_si128(reinterpret_cast<const __m128i*>(p + end1)), c2, d2, k);
+        _mm256_castsi256_si128(v), first_x_digits, first_y_digits, k);
 #else
-    const auto first = decode_slider_point<Point>(v.val[0], c1, d1, k);
+    const auto first = decode_slider_point<Point>(
+        v.val[0], first_x_digits, first_y_digits, k);
+#endif
+    if (!second_valid)
+        return ParsedSliderPointPrefix<Point>{first, {}, p + first_end, false};
+#if FOSU_SIMD_X86
     const auto second = decode_slider_point<Point>(
-        vld1q_u8(reinterpret_cast<const uint8_t*>(p + end1)), c2, d2, k);
+        _mm_loadu_si128(reinterpret_cast<const __m128i*>(p + first_end)),
+        second_x_digits, second_y_digits, k);
+#else
+    const auto second = decode_slider_point<Point>(
+        vld1q_u8(reinterpret_cast<const uint8_t*>(p + first_end)),
+        second_x_digits, second_y_digits, k);
 #endif
     return ParsedSliderPointPrefix<Point>{
-        first, second, p + (ok2 ? end2 : end1), ok2};
+        first, second, p + second_end, true};
 }
 #endif
 

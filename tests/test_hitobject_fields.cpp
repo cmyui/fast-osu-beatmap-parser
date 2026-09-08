@@ -89,6 +89,33 @@ static void test_point_prefix_boundaries() {
 #endif
 }
 
+static void test_point_prefix_digit_widths() {
+#if FOSU_SIMD
+    const fosu::internal::HitObjectParseConstants constants;
+    // Exercise every shuffle-table index for both points, independently.
+    for (int first_x : {1, 12, 123, 1234})
+    for (int first_y : {5, 56, 567, 5678})
+    for (int second_x : {9, 98, 987, 9876})
+    for (int second_y : {4, 43, 432, 4321}) {
+        const std::string text =
+            "|" + std::to_string(first_x) + ":" + std::to_string(first_y) +
+            "|" + std::to_string(second_x) + ":" + std::to_string(second_y);
+        const auto input = fosu::make_padded(text + ",1");
+        const auto points =
+            fosu::internal::try_parse_slider_point_prefix_fast<fosu::SliderPoint>(
+                input.data.get(), constants);
+        CHECK(points.has_value());
+        if (!points) continue;
+        CHECK(points->has_second);
+        CHECK_EQ(points->first.x, first_x);
+        CHECK_EQ(points->first.y, first_y);
+        CHECK_EQ(points->second.x, second_x);
+        CHECK_EQ(points->second.y, second_y);
+        CHECK_EQ(points->next - input.data.get(), text.size());
+    }
+#endif
+}
+
 static void test_slider_fields() {
     const fosu::internal::HitObjectParseConstants constants;
     // Missing length differs from an explicitly empty field.
@@ -202,6 +229,7 @@ static void test_hitobject_details() {
 int main() {
     test_point_values<fosu::SliderPoint>();
     test_point_prefix_boundaries();
+    test_point_prefix_digit_widths();
     test_slider_fields();
     test_slider_sound_boundaries();
     test_hitobject_details();
