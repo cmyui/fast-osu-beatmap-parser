@@ -74,8 +74,40 @@ endif()
 add_library(fosu_headers INTERFACE)
 add_library(fosu::headers ALIAS fosu_headers)
 set_target_properties(fosu_headers PROPERTIES EXPORT_NAME headers)
-target_include_directories(fosu_headers INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_include_directories(fosu_headers INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_compile_features(fosu_headers INTERFACE cxx_std_20)
+target_sources(fosu_headers INTERFACE FILE_SET HEADERS BASE_DIRS src FILES
+  src/fosu/arena.h
+  src/fosu/beatmap.h
+  src/fosu/beatmap_header.h
+  src/fosu/bindings/c_api.h
+  src/fosu/io.h
+  src/fosu/os.h
+  src/fosu/parse_options.h
+  src/fosu/parser.h
+  src/fosu/result.h
+  src/fosu/engine/byte_scan.h
+  src/fosu/engine/digit_groups.h
+  src/fosu/engine/document_sections.h
+  src/fosu/engine/events.h
+  src/fosu/engine/fast_float.h
+  src/fosu/engine/hitobject_details.h
+  src/fosu/engine/hitobjects.h
+  src/fosu/engine/metadata.h
+  src/fosu/engine/parse_document.h
+  src/fosu/engine/parsing_engine.h
+  src/fosu/engine/prefix.h
+  src/fosu/engine/scalar_parse.h
+  src/fosu/engine/section_names.h
+  src/fosu/engine/simd.h
+  src/fosu/engine/slider.h
+  src/fosu/engine/slider_tail.h
+  src/fosu/engine/string_lookup.h
+  src/fosu/engine/swar.h
+  src/fosu/engine/text.h
+  src/fosu/engine/timing.h
+  src/fosu/engine/timing_section.h
+)
 
 function(fosu_profile target)
   target_compile_definitions(${target} PRIVATE $<$<CONFIG:Debug>:_GLIBCXX_DEBUG>)
@@ -132,7 +164,7 @@ endfunction()
 # The core owns Parser lifetime and storage. ISA libraries execute the shared parser.
 function(fosu_dispatch target product)
   fosu_configure(${target} scalar "${product}")
-  target_sources(${target} PRIVATE src/engine_loader.cpp)
+  target_sources(${target} PRIVATE src/fosu/engine/loader.cc)
   target_link_libraries(${target} PRIVATE ${CMAKE_DL_LIBS})
   target_compile_definitions(${target} PRIVATE
     FOSU_DEFAULT_BACKEND="${FOSU_ISA}"
@@ -151,7 +183,7 @@ function(fosu_dispatch target product)
   if(variant)
     set(engine fosu_${product}_${variant})
     if(NOT TARGET ${engine})
-      add_library(${engine} SHARED src/engine.cpp)
+      add_library(${engine} SHARED src/fosu/engine/entry.cc)
       fosu_configure(${engine} "${variant}" "${product}")
       fosu_runtime(${engine})
       set_target_properties(${engine} PROPERTIES
@@ -170,14 +202,15 @@ function(fosu_dispatch target product)
 endfunction()
 
 if(NOT SKBUILD)
-  add_library(fosu SHARED src/c_api.cpp)
+  add_library(fosu SHARED src/fosu/bindings/c_api.cc)
   add_library(fosu::fosu ALIAS fosu)
   fosu_dispatch(fosu native)
   fosu_runtime(fosu)
   set_target_properties(fosu PROPERTIES CXX_VISIBILITY_PRESET hidden)
-  target_include_directories(fosu PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-  install(TARGETS fosu fosu_headers EXPORT fosuTargets)
-  install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  target_include_directories(fosu PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+  install(TARGETS fosu fosu_headers EXPORT fosuTargets
+    FILE_SET HEADERS DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  install(FILES src/fosu/engine/fast_float.md DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fosu/engine)
   install(EXPORT fosuTargets NAMESPACE fosu:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fosu)
   include(CMakePackageConfigHelpers)
   configure_package_config_file(cmake/fosuConfig.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/fosuConfig.cmake INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fosu)

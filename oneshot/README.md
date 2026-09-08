@@ -33,7 +33,7 @@ and descriptors when it exits.
 The freestanding runtime implements the small POSIX surface used by Parser
 and the arena OS layer using direct syscalls. It does not duplicate format
 rules, section loops or beatmap storage. The
-[vendored fast_float header](../include/fosu/internal/fast_float.md) supplies
+[vendored fast_float header](../src/fosu/engine/fast_float.md) supplies
 the bounded, locale-independent numeric fallback.
 
 ## Optional host configuration
@@ -68,7 +68,7 @@ consumers locate the trailer from the end and read its object count before
 walking the variable-length records. Searching for `TRLR` inside data is not a
 valid way to find a record boundary.
 
-The field order is specified by the shared serializer, [canonical_dump.hpp](../tests/support/canonical_dump.hpp); the independent
+The field order is specified by the shared serializer, [canonical_dump.h](../tests/support/canonical_dump.h); the independent
 [Python decoder](../oneshot/decode.py) demonstrates reconstruction of
 metadata, arrays and the complete point pool. A stream consumer should accept
 output only after the process exits successfully: an error may follow a

@@ -7,7 +7,7 @@ from pathlib import Path
 from cffi import FFI
 
 ROOT = Path(__file__).resolve().parents[1]
-header = (ROOT / "include/fosu/c_api.h").read_text()
+header = (ROOT / "src/fosu/bindings/c_api.h").read_text()
 header = re.sub(r"#ifdef __cplusplus\n.*?#endif", "", header, flags=re.DOTALL)
 header = "\n".join(
     line
@@ -21,7 +21,7 @@ header = header.replace("FOSU_API ", "")
 def builder() -> FFI:
     ffi = FFI()
     ffi.cdef(header)
-    ffi.set_source("fosu._core", "#include <fosu/c_api.h>\n")
+    ffi.set_source("fosu._core", "#include <fosu/bindings/c_api.h>\n")
     return ffi
 
 

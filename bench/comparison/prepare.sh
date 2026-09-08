@@ -23,7 +23,7 @@ curl --fail --location --silent --show-error \
     -o "$build/include/nlohmann/json.hpp"
 echo "aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63  $build/include/nlohmann/json.hpp" | sha256sum --check
 common=(-std=c++20 -O3 -fno-plt -fstack-protector-strong -D_FORTIFY_SOURCE=3
-        -I"$build/include" -I"$repo/include" "$bench/native_worker.cpp")
+        -I"$build/include" -I"$repo/src" "$bench/native_worker.cc")
 g++ "${common[@]}" -march=x86-64-v3 -mtune=znver4 -o "$build/native-avx2"
 g++ "${common[@]}" -march=x86-64 -DFOSU_DISABLE_SIMD -o "$build/native-scalar"
 python3 "$bench/configure.py" "$build"

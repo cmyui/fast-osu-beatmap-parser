@@ -1,7 +1,7 @@
 // First shared-library use in a fresh C process, including dlopen, input I/O,
 // parse, view acquisition, free and dlclose. Excludes process startup itself.
 // Output: input bytes and elapsed nanoseconds.
-#include <fosu/c_api.h>
+#include <fosu/bindings/c_api.h>
 #include <dlfcn.h>
 #include <stdint.h>
 #include <stdio.h>

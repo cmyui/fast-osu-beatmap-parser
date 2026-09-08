@@ -1,13 +1,27 @@
 # Building and checking fosu
 
-The header-only C++ interface needs no build step: add `include` to your include
+The header-only C++ interface needs no build step: add `src` to your include
 path and compile as C++20. CMake 3.26+ builds the C ABI, development tools, and
 Python extensions. Python installations invoke CMake through scikit-build-core;
 CFFI generates the wrapper source and does not compile it independently.
 
-Public headers live directly under `include/fosu/`. The `internal/` directory
-contains their numeric conversion, section parsing, SIMD, and storage
-implementation; the public headers include these automatically.
+Sources live under `src/fosu/`, grouped by responsibility. C++ headers use `.h`
+and compiled C++ files use `.cc`:
+
+```text
+src/fosu/
+    parser.h, beatmap.h, parse_options.h, result.h
+    arena.h, os.h, io.h, beatmap_header.h
+    engine/       # Parsing algorithms, SIMD helpers, and runtime loading
+    bindings/     # C API declarations and implementation
+```
+
+C++ callers include `<fosu/parser.h>`; C callers include
+`<fosu/bindings/c_api.h>`. Engine and storage helpers are implementation details,
+included automatically by the header-only interface. CMake explicitly lists
+the headers needed by consumers and installs them under `include/fosu/`;
+compiled-only loader headers and `.cc` files are not installed. Installed
+consumers use the same include names as source-tree consumers.
 
 ```sh
 cmake -S . -B build/native -G Ninja
@@ -146,11 +160,11 @@ The production target is Zen 4. For x86-64-v3 CI runners configure with
 ## Test responsibilities
 
 - `test_build.py`: installed header-only and compiled CMake targets.
-- `test_numeric.cpp`: bounded conversion, prefix and timing-point equivalence.
-- `test_sections.cpp`: metadata, object kinds, omitted sections and selection.
-- `test_storage.cpp`: growth, lifetime, reuse and both record layouts.
-- `test_hardening.cpp` and `fuzz_parser.cpp`: malformed input and scalar/SIMD parity.
-- `test_dispatch.cpp`: CPU/OS feature requirements, concurrent first use, forced
+- `test_numeric.cc`: bounded conversion, prefix and timing-point equivalence.
+- `test_sections.cc`: metadata, object kinds, omitted sections and selection.
+- `test_storage.cc`: growth, lifetime, reuse and both record layouts.
+- `test_hardening.cc` and `fuzz_parser.cc`: malformed input and scalar/SIMD parity.
+- `test_dispatch.cc`: CPU/OS feature requirements, concurrent first use, forced
   selection and unsupported requests; CI also exercises a CPU without AVX via QEMU.
 - C ABI tests: field values, concurrency, failures, recycling and unload.
 - `test_binary_hardening.py`: Linux C ABI and installed-wheel ELF protections

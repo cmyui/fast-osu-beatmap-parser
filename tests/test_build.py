@@ -16,17 +16,17 @@ with tempfile.TemporaryDirectory(prefix="fosu-consumer-") as temp:
     (root / "CMakeLists.txt").write_text("""cmake_minimum_required(VERSION 3.26)
 project(consumer LANGUAGES C CXX)
 find_package(fosu CONFIG REQUIRED)
-add_executable(headers main.cpp)
+add_executable(headers main.cc)
 target_link_libraries(headers PRIVATE fosu::headers)
 target_compile_options(headers PRIVATE -fno-exceptions)
 add_executable(c_api main.c)
 target_link_libraries(c_api PRIVATE fosu::fosu)
 """)
-    (root / "main.cpp").write_text("""#include <fosu/parser.hpp>
+    (root / "main.cc").write_text("""#include <fosu/parser.h>
 int main() { fosu::Parser parser; auto result = parser.parse(nullptr, 0);
 return !result || !result.value()->hit_objects.empty(); }
 """)
-    (root / "main.c").write_text("""#include <fosu/c_api.h>
+    (root / "main.c").write_text("""#include <fosu/bindings/c_api.h>
 #include <stdio.h>
 int main(void) {
     fosu_handle* h = fosu_new(); if (!h) return 1;
