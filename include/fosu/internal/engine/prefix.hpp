@@ -341,7 +341,8 @@ inline std::optional<HitObjectPrefix> decode_hitobject_prefix(
     const auto times = decimal_groups(vqtbl2q_u8(digits, vld1q_u8(shuf.bytes + 16)));
     vst1q_u32(reinterpret_cast<uint32_t*>(&prefix), fields);
     if (shape.time_span <= 9) [[likely]] {
-        // Up to eight digits fit in uint32; combine and widen in SIMD registers.
+        // Up to eight digits fit in uint32; combine the two four-digit groups
+        // before converting to double.
         const uint32_t weights[2] = {10000, 1};
         const auto terms = vmul_u32(vget_high_u32(times), vld1_u32(weights));
         const auto sum = vpadd_u32(terms, terms);
