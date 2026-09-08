@@ -21,6 +21,7 @@ jobs:
       - run: python3 tests/test_build.py build/native
       - name: Exercise benchmark and corpus tools
         run: |
+          python3 -m unittest discover -s bench/comparison -p 'test_*.py'
           build/native/generate_corpus build/smoke-corpus
           build/native/library_compare build/smoke-corpus 2 build/native/library_native.so build/native/library_c_api.so > build/library.csv
           python3 bench/summarize.py build/library.csv

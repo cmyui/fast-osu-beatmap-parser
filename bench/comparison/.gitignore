@@ -1,0 +1,4 @@
+__pycache__/
+rust/target/
+dotnet/bin/
+dotnet/obj/

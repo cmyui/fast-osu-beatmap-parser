@@ -29,11 +29,35 @@ fosu::Beatmap& map = *parsed.value();
 // map remains valid until parser parses another beatmap or is destroyed.
 ```
 
-Recorded warm parsing times on our **10,000-map corpus** are roughly **21 µs
-per map in C++** and **25 µs from Python**. These are means of per-map minima
-on a pinned Zen 4 core, starting with resident input bytes; they exclude file
-I/O and process startup. See [performance](docs/performance.md) for the exact
-measurements, host, repetition counts, and reproduction commands.
+## Performance
+
+FOSU's AVX2 Python interface averages **41 µs per map** from resident bytes on our
+Hetzner Zen 4 VM. We compared public parser APIs on the fixed **10,000-map
+corpus**, using the same **9,758 mutually accepted maps** for every row below.
+Lower is better.
+
+| Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
+|---|---:|---:|
+| FOSU Python AVX2 | 41.0 | 45.0 |
+| FOSU Python scalar | 79.1 | 88.0 |
+| rosu-pp-py 4.0.2 | 299.4 | 312.0 |
+| pyttanko 2.1.0 | 2,501.5 | 2,501.2 |
+| OsuPyParser 1.0.7 | — | 5,070.8 |
+| slider 0.8.4 | 14,091.0 | 14,119.7 |
+
+Two complete batch passes on one pinned CPU, CPython 3.12; imports and startup
+excluded. File inputs are in the OS page cache. FOSU decodes native records
+with lazy Python wrappers; competitors differ in output and may also build
+slider geometry or derived statistics. No PP/difficulty calculation is requested.
+These are practical API costs, not identical-work or full-materialization claims.
+
+See the [full comparison](docs/comparison.md) for C++ scalar/AVX2, Rust, C# and
+JavaScript results, Python object traversal, per-pass variation, failure counts,
+and the [reproducible harness](bench/comparison/README.md). The older
+[FOSU-only hot-loop benchmarks](docs/performance.md) use per-map minima and are
+not mixed into this comparison.
+
+## Interfaces
 
 | Interface | Result | Use |
 |---|---|---|

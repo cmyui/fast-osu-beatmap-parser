@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "dependencies": {
+    "osu-parser": "0.3.3",
+    "osu-parsers": "4.1.7",
+    "osu-classes": "3.1.0"
+  }
+}
