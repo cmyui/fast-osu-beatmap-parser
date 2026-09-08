@@ -18,11 +18,11 @@ performance comparisons must also pass full-result regression checks.
 | `python_first_compare.py` | Separately: import, first `parse_file`/release, whole Python process | Input page-cache misses |
 | `oneshot_process` | Spawn, read original map, parse, write complete result, exit and reap | Input page-cache misses; reference verification |
 
-The Python warm driver can also isolate raw CFFI bytes/file calls and NumPy view
-creation. Normal Python results are lazy: parsing does not decode every string
-or create a Python object for every note. Iterating all records or copying NumPy
-arrays is additional work. The first-use driver launches a new interpreter for
-every sample; the warm driver repeatedly calls an already loaded library.
+Python parsing constructs every supported field as a detached Python value before
+returning. The warm driver can additionally sum timestamps or slider lengths;
+these accesses do not perform deferred parsing or create native-backed wrappers.
+The first-use driver launches a new interpreter for every sample; the warm
+driver repeatedly calls an already loaded library.
 
 A reused parser retains committed arena pages directly. Fresh parsers can reuse
 the bounded arena pool. Neither path caches parsed maps. One-shot stdout
@@ -49,7 +49,7 @@ uncontended lower envelope; it is not the median map, average user latency, or
 a confidence interval. Shared-VM scheduling can move results. MB/s is total
 input bytes divided by the sum of per-file minima, using decimal megabytes.
 
-## Current measurement snapshot
+## Native measurement snapshot
 
 Measured source: [`feaf08f`](https://github.com/cmyui/fast-osu-beatmap-parser/commit/feaf08f1f6f3ee3028322d80718e830e1577a308).
 All runs below were serialized after builds and correctness checks completed.
@@ -77,21 +77,6 @@ protection and fortification. The separate one-shot measurement uses its
 GCC `-O2 -march=znver4` build. No PGO is applied. Differences between runs are
 one reason to retain all-run statistics and compare variants together.
 
-Python 3.12.3, builds with the private C++ runtime, full 10k corpus
-and seven repetitions per map in both starting orders:
-
-| Python boundary | Mean per-map minimum |
-|---|---:|
-| Warm `parse(bytes)` and result release | 25.18–25.28 µs |
-| Warm `parse_file(path)` and result release | 31.01–31.46 µs |
-
-Python first-use measurements select 100 evenly spaced maps and launch a fresh
-CPython process three times per map/variant, with identical dependencies and
-precompiled bytecode. The first `parse_file`/result-release interval averages
-164.32–170.59 µs of per-file minima across two runs; import
-averages 4.76–4.86 ms and the complete Python process 15.06–15.46 ms. These are
-separate timed boundaries, with separate minima; they should not be added together.
-
 First C ABI use in a fresh C process averages 334.28–337.96 µs across 1,000
 evenly spaced maps, three repetitions each in two runs. This includes
 `dlopen`, CPU selection, file I/O, parsing, view acquisition, destruction and
@@ -111,15 +96,39 @@ per variant in each run:
 |---|---:|---:|
 | C++ fresh result, resident bytes | 132.5–133.0 µs | 139.8–142.0 µs |
 | C ABI fresh handle, input copy included | 143.1–144.5 µs | 149.8–152.6 µs |
-| Python warm `parse(bytes)` and release | 144.3–144.4 µs | 150.4–150.9 µs |
-| Python warm `parse_file(path)` and release | 158.0–158.5 µs | 166.6–168.3 µs |
 
-Python uses CPython 3.14.6 and CFFI 2.1.1. Two separate 51-repetition runs
-with fresh interpreters and precompiled bytecode measured the first
-`parse_file` and result release at a median 383–392 µs; import took 1.87–1.99 ms
-and the whole process 24.45–24.82 ms. These intervals have separate statistics
-and should not be added together. They do not include cold storage reads or establish
-worst-case latency.
+## Eager Python measurements
+
+On the same Zen 4 host, CPython 3.12.3 with the bundled C++ runtime,
+the eager binding on `aedfc51` was measured with the
+[comparison batch driver](../bench/comparison/README.md). This uses the fixed
+9,758-map common cohort and **means of two complete passes**, not the per-map
+minimum statistic in the native tables:
+
+| Boundary | AVX2 mean | Scalar mean |
+|---|---:|---:|
+| Resident bytes, complete Python result and release | 635.2 µs/map | 687.9 µs/map |
+| Warm file, complete Python result and release | 647.7 µs/map | 705.7 µs/map |
+
+Normal GC is enabled. Imports, input preload and warmup are outside the timed
+loop. All supported Python values are constructed before returning. These
+numbers do not measure native parsing alone; Python graph construction dominates.
+The [batch evidence](../bench/comparison/results/hetzner-2026-09-08.eager-python-batch.json)
+retains both pass times and the corpus fingerprint. First-use measurements must
+also include the dataclass/model import costs; do not substitute native-view
+Python timings for this API.
+
+On Apple M3 Max / macOS 26 / CPython 3.14.0, the same eager implementation
+was also measured over all 10,000 maps, with three repetitions per map and
+bytes/file calls rotated within each repetition:
+
+| NEON Python boundary | Mean per-map minimum | Mean of all calls |
+|---|---:|---:|
+| Resident bytes and complete result release | 326.4 µs | 353.0 µs |
+| Warm file and complete result release | 344.8 µs | 375.1 µs |
+
+These are per-map timings, not the Linux batch statistic, and cover the full
+corpus rather than the single-map native Apple Silicon example above.
 
 ## Build and verify
 
@@ -179,8 +188,8 @@ taskset -c 3 python bench/python_first_compare.py "$corpus" \
   /path/to/baseline /path/to/candidate --limit 500 --reps 3 > build/python-first.csv
 python3 bench/summarize.py build/python-first.csv
 
-# Optional breakdown of the installed package's Python/CFFI/NumPy boundary.
-python bench/python_compare.py "$corpus" --workloads bytes file raw-bytes raw-file numpy \
+# Complete eager results, with optional timestamp and slider-length traversal.
+python bench/python_compare.py "$corpus" --workloads bytes file iterate slider-lengths \
   --reps 7 > build/python-boundary.csv
 ```
 

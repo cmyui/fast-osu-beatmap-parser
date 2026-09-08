@@ -9,8 +9,10 @@ the consumer. Input order and raw sample strings are retained.
 ## Numeric and malformed-input behavior
 
 - Object start times, spinner/hold end times and break endpoints are double
-  milliseconds; fractional values are preserved. Circle and slider `end_time`
+  milliseconds; fractional values are preserved. Native circle and slider `end_time`
   remain zero: a slider's end depends on timing points and difficulty settings.
+  Python retains this value as `raw_end_time`; its `end_time` is the start time
+  for a circle and `None` for a slider.
 - Coordinate acceptance follows the official decoder's float32 conversion and
   ±131,072 bound; accepted coordinates truncate toward zero. Timestamps,
   timing-point beat lengths and double metadata use its ±2,147,483,647 bound.
@@ -41,7 +43,8 @@ the consumer. Input order and raw sample strings are retained.
   inherited-NaN case explicitly.
 - Invalid hitobjects and timing points are skipped and counted in
   `stats.malformed_lines`. A rejected slider can retain unreferenced points in
-  the pool; use each slider's explicit point range. Invalid known numeric
+  the native pool; use each slider's explicit point range. Python exposes only
+  the points of accepted sliders. Invalid known numeric
   metadata retains its previous/default value and increments the same counter.
 - Section and metadata names must match completely. Unknown fields/sections
   are ignored. An empty input produces an empty/default result; successful
@@ -50,16 +53,18 @@ the consumer. Input order and raw sample strings are retained.
 
 All entry points accept at most **64 MiB** of source bytes. Python rejects
 larger inputs with `ValueError`; the C ABI returns `FOSU_INVALID_ARGUMENT`.
-C++ `Parser::parse`, `Parser::parse_file` and `make_padded` throw
-`std::length_error`; `read_into` returns failure with `errno=EFBIG`. The
+C++ `Parser::parse` and `Parser::parse_file` return `ErrorCode::InputTooLarge`;
+`make_padded` throws `std::length_error`, and `read_into` returns failure with
+`errno=EFBIG`. The
 standalone executable exits with status 6.
 Output arrays and temporary allocations can exceed the source size. This is
 not a strict memory or CPU quota, particularly for consumer geometry code.
 
 The C++ parser copies pointer inputs into its working arena and appends the 128
 readable zero bytes required by its fast paths. Callers therefore need only
-provide the exact logical byte range. Hosted allocation failures become `std::bad_alloc`,
-`FOSU_OUT_OF_MEMORY`, or Python `MemoryError` as appropriate.
+provide the exact logical byte range. Parser allocation failures become
+`ErrorCode::AllocationFailure`, `FOSU_OUT_OF_MEMORY`, or Python `MemoryError`
+at the respective API boundary.
 
 The test suite checks malformed bytes with ASan, UBSan and differential fuzzing.
 These are evidence about tested behavior, not a sandbox or a claim that all

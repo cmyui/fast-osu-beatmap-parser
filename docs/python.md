@@ -1,195 +1,186 @@
-# Python
+# Python API
 
-`fosu` parses an original `.osu` file into an owned, read-only Python object:
+fosu reads a complete `.osu` beatmap into ordinary, mutable Python dataclasses
+and lists. Parsing and conversion run in compiled code. Every number, string,
+record and list are ready when the call returns; no native
+allocation is retained by the result.
+
+## Install
+
+Install a wheel from the repository's **Python wheels** workflow, or build from
+a source checkout:
+
+```sh
+python -m pip install path/to/fosu-0.2.0-cp310-abi3-PLATFORM.whl
+# From a checkout with a C++20 compiler:
+python -m pip install .
+```
+
+Wheels support CPython 3.10 and later on Linux x86-64 and macOS arm64. Linux
+wheels target glibc 2.28 or later; macOS wheels target macOS 11 or later.
+The wheel selects AVX2, NEON or scalar automatically. Source builds use the
+same dispatch policy. Python 3.10
+and 3.11 use typing-extensions for buffer annotations.
+
+## Parse and use
 
 ```python
 import fosu
 
 beatmap = fosu.parse_file("map.osu")
 print(beatmap.title, beatmap.artist, beatmap.ar)
-print(beatmap.hit_objects[0].time)
-```
 
-The package builds the C++ parser into its extension module. No separate
-`libfosu` installation, manual CFFI compilation or handle management is needed.
-
-## Install
-
-Download the wheel for your platform from the **Python wheels** GitHub Actions
-artifact, extract the artifact ZIP, then install the wheel:
-
-```sh
-python -m pip install ./fosu-0.2.0-*.whl
-```
-
-Wheels target standard CPython 3.10+ on Linux x86-64 (glibc 2.28+) and macOS
-Apple Silicon (11+). They use Python's stable ABI. Windows and free-threaded
-Python builds are not supported. The package is not published to PyPI by this
-repository's workflow.
-
-A source checkout is also installable with `python -m pip install .`; this
-requires a C++20 compiler. Build a source archive and wheel with
-`python -m pip install build` followed by `python -m build`. The source archive
-also includes the C/C++ build, examples and test/benchmark sources. Linux builds use
-GCC; macOS builds use Apple Clang. Build dependencies are installed by pip.
-Linux source builds use the system C++ runtime. To bundle it as the release
-wheels do, install your compiler's static runtime archives and run
-`FOSU_BUNDLE_RUNTIME=1 python -m pip install .`. On distributions that split
-the archives into a separate package, install that package first. Native extension
-builds always recompile so header edits and runtime-selection changes cannot
-reuse stale object files.
-
-NumPy is optional: `python -m pip install numpy`. Importing `fosu` does not
-import NumPy.
-
-## Input and section selection
-
-```python
-beatmap = fosu.parse(osu_bytes)  # bytes or a contiguous buffer
-beatmap = fosu.parse_file(path) # str, bytes or pathlib.Path
-
-listing = fosu.parse_file(
-    "map.osu",
-    sections=fosu.Sections.METADATA | fosu.Sections.DIFFICULTY,
-)
-```
-
-`parse` copies the bytes once into native padded storage; the caller's input
-can be released immediately. `parse_file` reads directly into that storage.
-Each result owns a native parser containing the input copy and record arrays.
-Its arena reserves virtual address space and makes it writable in fixed-size
-chunks; released arenas can be reused by a later parse. Both return independent
-results, and CFFI releases the GIL during native calls.
-`parse` also accepts `bytearray`, `memoryview`, `mmap` and other C-contiguous
-buffers. Noncontiguous buffers raise `BufferError`. Do not mutate a writable
-input concurrently while parsing it.
-Unrequested sections retain defaults, with empty collections; `Sections.ALL`
-is the default. Available flags are `GENERAL`, `EDITOR`, `METADATA`,
-`DIFFICULTY`, `EVENTS`, `TIMING_POINTS`, `COLOURS`, and `HIT_OBJECTS`.
-
-Inputs are limited to 64 MiB. Malformed numeric records are skipped and counted
-in `beatmap.stats.malformed_lines`; successful parsing does not establish
-playability. See the [input and compatibility contract](compatibility.md),
-including inherited NaN timing points and the distinction between raw records
-and gameplay objects.
-
-Wrong Python argument types raise `TypeError`; invalid section bits, embedded
-NULs in paths and oversized input raise `ValueError`. I/O errors raise the
-corresponding `OSError` subclass, such as `FileNotFoundError`,
-`PermissionError` or `IsADirectoryError`. An unexpected early EOF raises
-`OSError` with `errno.EIO`. Allocation failures raise `MemoryError`.
-
-## Fields and records
-
-The Python names follow the C++ fields. `title`, `artist`, `creator`, `version`,
-`audio_filename`, etc. are Python strings; `ar`, `cs`, `od`, `hp` and other
-numeric fields are ordinary Python numbers. IDE completion and type hints are
-included. UTF-8 strings use `surrogateescape` so unexpected bytes can round-trip
-with `.encode("utf-8", "surrogateescape")`. Metadata strings are decoded once
-on first access.
-
-```python
 for note in beatmap.hit_objects:
-    print(note.x, note.y, note.time, note.hit_sample)
-    if note.slider is not None:
-        slider = note.slider
-        print(slider.curve_type, slider.length, slider.slides)
-        for point in slider.points:
-            print(point.x, point.y)
+    if isinstance(note, fosu.Slider):
+        print(note.start_time, note.span_count, note.length)
+        print(note.control_points[0])  # slider head included
+
+note = beatmap.hit_objects[0]
+note.x = 128
+assert beatmap.hit_objects[0] is note
+beatmap.tags.append("reviewed")
 ```
 
-`time` and `end_time` are double milliseconds, preserving fractions. A circle
-or slider has `end_time == 0`; slider duration requires gameplay calculation. `is_circle`, `is_slider`,
-`is_spinner`, `is_hold` and `is_new_combo` are boolean properties. `slider` is
-a `Slider` or `None`; `slider_index` retains the raw array index or
-`fosu.NO_SLIDER` (`0xFFFFFFFF`). Slider `points` exclude the head position,
-matching the native parser. `edge_sounds`, `edge_sets` and `hit_sample` remain
-raw strings rather than being split into additional objects.
-
-`hit_objects`, `sliders`, `slider_points`, `timing_points`, `breaks` and
-`combo_colours` are read-only sequences. They support `len`, iteration, negative
-indices and lazy slicing, including reversed slices. Indexing outside the
-sequence raises `IndexError`. Each accessed record has named attributes;
-colours are integers in `0xRRGGBB` form. `beatmap.stats` exposes all four native
-parser counters. `beatmap.source_size` is the original byte count.
-Record equality identifies the same record within the same parsed result, so
-sequence membership, `index` and `count` work. Separately parsed maps do not
-compare equal merely because their values match.
-
-## Automatic ownership
-
-Results and their public fields are read-only. Parsing does not eagerly create
-one Python object per note; a record wrapper is created when that note is
-accessed. Each record, sequence and exported array retains the native storage:
+`parse_file(path)` accepts strings, bytes and `os.PathLike` paths. It reads,
+parses and converts the entire map, and raises `OSError` on file errors.
+`parse(data)` accepts objects supporting the buffer protocol, including bytes,
+bytearray, memoryview and arrays. Non-bytes inputs are copied into an immutable
+snapshot before the native parser releases the GIL; non-contiguous buffers are
+copied in logical C order. Strings must be encoded explicitly.
 
 ```python
-note = fosu.parse_file("map.osu").hit_objects[0]
-print(note.time)  # safe even though the temporary Beatmap is gone
+beatmap = fosu.parse(uploaded_bytes)
 ```
 
-There is no `free`, `close` or reparse operation. Storage is released when its
-last dependent object is collected. Keeping even one note or array slice keeps
-the whole map's native storage alive. Copy the values you need if you want to
-release a large map while keeping a small result.
-Native-backed objects are not picklable or deep-copyable. Extract ordinary
-Python values or copy arrays when an independent representation is needed.
+Inputs are limited to **64 MiB**; oversized input raises `ValueError` and
+allocation failure raises `MemoryError`. Native parsing releases the GIL;
+constructing Python objects holds it. Separate calls return independent results
+and may be made from multiple threads. No parsed beatmaps are cached.
 
-## Optional NumPy access
+Both functions parse every supported section. Absent sections have the native
+parser's defaults, including empty lists for absent record sections. The C++
+and C APIs offer section selection for applications needing that boundary.
+Malformed records are skipped and counted according to the
+[parser contract](compatibility.md); success does not certify playability.
+
+## Beatmap fields
+
+`Beatmap` is a dataclass with explicit type annotations. Its main fields are:
+
+| Group | Attributes |
+|---|---|
+| Source | `format_version` |
+| General | `audio_filename`, `audio_lead_in`, `preview_time`, `countdown`, `sample_set`, `stack_leniency`, `mode`, `letterbox_in_breaks`, `widescreen_storyboard`, `epilepsy_warning`, `special_style`, `use_skin_sprites`, `samples_match_playback_rate`, `countdown_offset`, `overlay_position`, `skin_preference` |
+| Editor | `bookmarks`, `raw_bookmarks`, `distance_spacing`, `beat_divisor`, `grid_size`, `timeline_zoom` |
+| Metadata | `title`, `title_unicode`, `artist`, `artist_unicode`, `creator`, `version`, `source`, `tags`, `raw_tags`, `beatmap_id`, `beatmap_set_id` |
+| Difficulty | `hp`, `cs`, `od`, `ar`, `slider_multiplier`, `slider_tick_rate` |
+| Events | `background`, `video`, `breaks` |
+| Collections | `hit_objects`, `timing_points`, `combo_colours` |
+| Statistics | `stats` |
+
+`mode` is `GameMode.OSU`, `TAIKO`, `CATCH` or `MANIA`. Difficulty values describe
+the parsed file; gameplay normalization and mods are not applied. Missing
+ApproachRate follows the native decoder's OverallDifficulty default.
+
+`tags` is a list of whitespace-separated strings, retaining duplicates and order.
+`bookmarks` contains valid signed 32-bit timestamps in file order. Following
+osu!'s official legacy decoder, invalid bookmark tokens are skipped rather than
+rejecting the field or map. `raw_tags` and `raw_bookmarks` retain the parser's
+text values. The `-1` sentinel for IDs and preview time becomes `None`; zero and
+other negative values remain values.
+
+Strings decode as UTF-8 with `surrogateescape`, so undecodable input bytes can be
+recovered with `value.encode("utf-8", "surrogateescape")`. Raw fields retain the
+parser's text values, not the complete source file.
+
+## Hitobjects and sliders
+
+`hit_objects` is a `list[HitObject]` containing `Circle`, `Slider`, `Spinner` and
+`HoldNote` instances in file order. Common stored attributes are:
+
+- `start_time`, `end_time`: milliseconds. A circle ends at its start time;
+  spinner/hold endpoints are parsed from the file. A slider's endpoint is `None`
+  because it requires gameplay timing calculation.
+- `x`, `y`: coordinates in osu! pixels.
+- `hit_sound`: a `HitSound` flag value. `NORMAL`, `WHISTLE`, `FINISH` and `CLAP`
+  name the source bits; zero means default, and unknown bits are preserved.
+- `is_new_combo`, `combo_skip`: combo flags decoded at construction.
+- `raw_type`, `raw_end_time`, `raw_hit_sample`: native decoded fields. Empty
+  sample text is valid and describes the parser's default sample representation.
+
+Kinds also expose `is_circle`, `is_slider`, `is_spinner` and `is_hold`. Conflicting
+source kind bits follow the decoder's precedence: circle, slider, spinner, hold.
+
+A `Slider` additionally stores `span_count`, `curve_type`, `length`,
+`raw_edge_sounds`, `raw_edge_sets`, and `control_points: list[Point]`. The control
+points include the head followed by the path's remaining points in file order.
+Native pool offsets and indices are not part of the Python model.
+`span_count=2` means forward and back.
+No curve evaluation, slider duration, stacking, ruleset conversion or mod
+adjustment is performed.
+
+`Point` stores `x` and `y`. `TimingPoint` stores `time`, `beat_length`, `meter`,
+`sample_set`, `sample_index`, `volume`, `uninherited` and `effects`. Inherited NaN
+beat lengths are preserved. `Break` stores `start` and `end`. `combo_colours` is
+a list of packed `0xRRGGBB` integers.
+
+`ParseStats` contains `fast_path_lines`, `slow_path_lines`, `malformed_lines` and
+`storyboard_lines`, describing the original parse. Storyboard bodies are counted
+and skipped. Invalid bookmark tokens do not count as rejected records.
+
+## Mutation, copying and export
+
+All result values are detached. Repeated list indexing returns the same object,
+and mutations persist in that object. Mutating a result does not change another
+parse result, the original input, or the file on disk. Stored duplicate values
+are independent: changing `raw_type` does not recompute its decoded flags,
+and moving a slider's `x`/`y` does not move its stored head point.
+Editing a result is not gameplay preparation or `.osu` serialization.
+
+Use standard Python tools:
 
 ```python
-objects = beatmap.hit_objects.to_numpy()
-times = objects["time"]
-positions = objects[["x", "y"]]
+from copy import deepcopy
+from dataclasses import asdict, replace
+
+independent = deepcopy(beatmap)
+renamed = replace(beatmap, title="New title")  # shallow copy: lists are shared
+plain_dict = asdict(beatmap)                  # recursively copies dataclasses
 ```
 
-`numpy.asarray(beatmap.hit_objects)` is equivalent. These are zero-copy,
-read-only arrays; slices, field views, memoryviews and `numpy.asarray` continue
-to retain the storage after the original beatmap is deleted. Use `.copy()` for
-an independent, writable array. Converting a whole sequence to Python objects
-or copying arrays naturally adds work beyond parsing.
-
-The structured dtype retains native field offsets and record sizes: hitobjects
-are 48 bytes, sliders 40, points 8, timing points 40. Timestamp columns are
-float64. String fields in arrays
-are nested `{offset, length}` records. Normal Python record attributes return
-decoded strings; bulk callers can resolve the offsets against `beatmap.text`,
-a read-only memoryview of the original `.osu` bytes. NumPy's `slider_index` column
-contains the raw index/sentinel. Timing `uninherited` is a byte in arrays and a
-boolean on Python records. `curve_type` is a one-byte NumPy string and a Python
-`str` on records. Reserved fields are not exposed.
+Results support pickle. A reference to one record does not keep the whole native
+beatmap alive: the parser has already been destroyed. The native parser may keep
+a bounded spare arena for subsequent calls; no result depends on that storage.
+Lists support ordinary
+indexing, slicing, insertion and removal. If NumPy arrays are needed, construct
+them explicitly from Python values; that conversion copies data.
 
 ## CPU selection and development
 
-The wheel contains one native extension. Its C API selects AVX2 once on
-x86-64-v3 CPUs with OS XMM/YMM support, or NEON on AArch64, otherwise scalar.
-Linux AVX2 scheduling remains tuned for Zen 4. Apple Silicon uses native NEON
-fast paths.
+`fosu.backend` reports `"avx2"`, `"neon"` or `"scalar"`. Set `FOSU_BACKEND` before
+import to request `auto`, `avx2`, `neon` or `scalar`. Unsupported requests raise
+`ImportError`. `FOSU_FORCE_SCALAR=1` is a shorthand when `FOSU_BACKEND` is unset.
+Selection stays fixed for that loaded extension. Linux AVX2 remains tuned for
+Zen 4. C++ callers control header-only compilation separately.
 
-`fosu.backend` reports `"scalar"`, `"avx2"` or `"neon"`. To force a backend, set
-`FOSU_BACKEND=scalar`, `FOSU_BACKEND=avx2` or `FOSU_BACKEND=neon` before
-importing. Unsupported or unknown requests raise `ImportError`; `auto` restores
-automatic selection.
-`FOSU_FORCE_SCALAR=1` remains a shorthand when `FOSU_BACKEND` is unset.
-Selection stays fixed for that loaded extension. Each C API call forwards to
-the selected implementation; there are no per-record dispatch branches.
-Linux release wheels bundle a private C++ runtime to reduce first-import cost;
-only the Python initialization symbol is exported. macOS uses the system
-C++ runtime. Neither uses the standalone executable's custom runtime.
-Extensions use the [compiled-target hardening policy](build.md#hardening), and
-CI checks Linux protections in the installed wheel. Bundled runtime fixes
-require a rebuilt wheel.
-`FOSU_BUNDLE_RUNTIME=0` disables bundling for a custom wheel build.
-The ordinary C++ library and standalone C API use the [native build configurations](build.md).
+The extension uses CPython's 3.10 stable ABI. CMake compiles the converter and
+native parser together; no binding source or public dataclass definitions are
+generated. The Python model is in `python/fosu/_model.py`; the conversion is in
+`src/fosu/bindings/python.cc`. A small private extension stub types the compiled entry
+points; public typing comes directly from the dataclasses and functions.
+
+Linux release wheels bundle a private C++ runtime and export only the Python
+initialization symbol. macOS uses its system C++ runtime. Both use the
+[compiled-target hardening policy](build.md#hardening). Bundled-runtime updates
+require rebuilding the wheel; `FOSU_BUNDLE_RUNTIME=0` disables bundling for custom
+builds.
 
 ```sh
 python -m pip install -e '.[test]'
 python -m pytest tests/test_python.py
 FOSU_FORCE_SCALAR=1 python -m pytest tests/test_python.py
-python python/generate_stubs.py  # after changing public C fields
 ```
 
-The C declarations are read from `src/fosu/bindings/c_api.h` during wheel builds.
-The generated Python property stubs are checked in and verified against the
-compiled declarations. Native APIs are private to the extension module;
-applications should use `fosu`'s public objects. See the
-[benchmark guide](performance.md) for measured call boundaries and reproduction.
+Tests run against installed wheels in CI, including static typing and Linux ELF
+protections. The [performance guide](performance.md) separates native parsing,
+full Python result construction, first use, and process startup.

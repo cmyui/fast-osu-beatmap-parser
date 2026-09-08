@@ -1,0 +1,126 @@
+{
+  "source": {
+    "base_commit": "aedfc51",
+    "binding_git_blob": "acd623a0501f151dc30ba63de45ff136ae3a6274"
+  },
+  "complete": true,
+  "started_utc": "2026-09-08T20:19:46.306776+00:00",
+  "affinity": [
+    3
+  ],
+  "warmup_maps": 64,
+  "cohort_source_sha256": "037be7db003d398940fee1b86a7798a1f53130ad1547c199131ab074d015323b",
+  "versions": {
+    "fosu-python-avx2": "eager Python API on aedfc51",
+    "fosu-python-scalar": "eager Python API on aedfc51"
+  },
+  "samples": [
+    {
+      "elapsed_ns": 6109880881,
+      "files": 9758,
+      "bytes": 392122516,
+      "corpus_sha256": "b47c7cc0cafbd92c2f577b7628467dee7db0c85d0805bbeb0e8410c621c20803",
+      "variant": "fosu-python-avx2",
+      "workload": "bytes",
+      "round": 0
+    },
+    {
+      "elapsed_ns": 6236734941,
+      "files": 9758,
+      "bytes": 392122516,
+      "corpus_sha256": "b47c7cc0cafbd92c2f577b7628467dee7db0c85d0805bbeb0e8410c621c20803",
+      "variant": "fosu-python-avx2",
+      "workload": "file",
+      "round": 0
+    },
+    {
+      "elapsed_ns": 6768650299,
+      "files": 9758,
+      "bytes": 392122516,
+      "corpus_sha256": "b47c7cc0cafbd92c2f577b7628467dee7db0c85d0805bbeb0e8410c621c20803",
+      "variant": "fosu-python-scalar",
+      "workload": "bytes",
+      "round": 0
+    },
+    {
+      "elapsed_ns": 6818649534,
+      "files": 9758,
+      "bytes": 392122516,
+      "corpus_sha256": "b47c7cc0cafbd92c2f577b7628467dee7db0c85d0805bbeb0e8410c621c20803",
+      "variant": "fosu-python-scalar",
+      "workload": "file",
+      "round": 0
+    },
+    {
+      "elapsed_ns": 6952830613,
+      "files": 9758,
+      "bytes": 392122516,
+      "corpus_sha256": "b47c7cc0cafbd92c2f577b7628467dee7db0c85d0805bbeb0e8410c621c20803",
+      "variant": "fosu-python-scalar",
+      "workload": "file",
+      "round": 1
+    },
+    {
+      "elapsed_ns": 6655431205,
+      "files": 9758,
+      "bytes": 392122516,
+      "corpus_sha256": "b47c7cc0cafbd92c2f577b7628467dee7db0c85d0805bbeb0e8410c621c20803",
+      "variant": "fosu-python-scalar",
+      "workload": "bytes",
+      "round": 1
+    },
+    {
+      "elapsed_ns": 6403534868,
+      "files": 9758,
+      "bytes": 392122516,
+      "corpus_sha256": "b47c7cc0cafbd92c2f577b7628467dee7db0c85d0805bbeb0e8410c621c20803",
+      "variant": "fosu-python-avx2",
+      "workload": "file",
+      "round": 1
+    },
+    {
+      "elapsed_ns": 6287618900,
+      "files": 9758,
+      "bytes": 392122516,
+      "corpus_sha256": "b47c7cc0cafbd92c2f577b7628467dee7db0c85d0805bbeb0e8410c621c20803",
+      "variant": "fosu-python-avx2",
+      "workload": "bytes",
+      "round": 1
+    }
+  ],
+  "rows": {
+    "fosu-python-avx2/bytes": {
+      "mean_us": 635.2479904181184,
+      "pass_mean_us": [
+        626.1406928673908,
+        644.355287968846
+      ]
+    },
+    "fosu-python-avx2/file": {
+      "mean_us": 647.6875286431646,
+      "pass_mean_us": [
+        639.1406990161919,
+        656.2343582701374
+      ]
+    },
+    "fosu-python-scalar/bytes": {
+      "mean_us": 687.8500463209675,
+      "pass_mean_us": [
+        693.651393625743,
+        682.0486990161919
+      ]
+    },
+    "fosu-python-scalar/file": {
+      "mean_us": 705.6507556364008,
+      "pass_mean_us": [
+        698.7753160483705,
+        712.5261952244313
+      ]
+    }
+  },
+  "finished_utc": "2026-09-08T20:20:45.418439+00:00",
+  "objects": 7863673,
+  "files": 9758,
+  "bytes": 392122516,
+  "corpus_sha256": "b47c7cc0cafbd92c2f577b7628467dee7db0c85d0805bbeb0e8410c621c20803"
+}

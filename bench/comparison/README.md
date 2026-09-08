@@ -83,7 +83,7 @@ The following describes the supplementary interleaved `run.py` experiment:
   **warm page-cache** file. This is not cold disk performance. Published
   OsuPyParser only offers this input boundary; no artificial bytes API is added.
 - `visit`: `bytes` plus summing every hitobject's start time using public Python
-  record access. This forces FOSU's record wrappers to be created. `slider`
+  record access. FOSU's records are already eager Python values. `slider`
   stacking is explicitly disabled; no PP or difficulty calculation is requested.
 - Normal garbage collection remains enabled. We retain **all** timed samples,
   including slow ones and collection that occurs during measured work. We do

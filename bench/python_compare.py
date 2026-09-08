@@ -1,7 +1,7 @@
 """Rotate fresh-result Python calls across workloads and optional wheel directories.
 
 Input bytes and imports are warm. Every call releases its result. Path workloads
-include reading the file; bytes workloads start with bytes already in Python.
+include reading the file; iterate parses then sums all hitobject start times; bytes workloads start with bytes already in Python.
 """
 
 import argparse
@@ -27,26 +27,15 @@ def load(path: Path, name: str) -> ModuleType:
     return module
 
 
-def call(package: ModuleType, kind: str, data: bytes, path: Path) -> int:
-    if kind.startswith("raw-"):
-        native = sys.modules[package.__name__ + "._native"]
-        ffi, lib = native.ffi, native.lib
-        handle = lib.fosu_new()
-        if handle == ffi.NULL:
-            raise MemoryError("fosu_new")
-        try:
-            status = (
-                lib.fosu_parse(handle, data, len(data), lib.FOSU_ALL)
-                if kind == "raw-bytes"
-                else lib.fosu_parse_file(handle, bytes(path), lib.FOSU_ALL)
-            )
-            if status != lib.FOSU_OK:
-                raise RuntimeError(status)
-            return lib.fosu_get_view(handle).hit_object_count
-        finally:
-            lib.fosu_free(handle)
+def call(package: ModuleType, kind: str, data: bytes, path: Path) -> int | float:
     bm = package.parse_file(path) if kind == "file" else package.parse(data)
-    return bm.hit_objects.to_numpy().size if kind == "numpy" else len(bm.hit_objects)
+    if kind == "slider-lengths":
+        return sum(
+            note.length for note in bm.hit_objects if isinstance(note, package.Slider)
+        )
+    if kind == "iterate":
+        return sum(note.start_time for note in bm.hit_objects)
+    return len(bm.hit_objects)
 
 
 def main() -> None:
@@ -63,7 +52,12 @@ def main() -> None:
     p.add_argument(
         "--workloads",
         nargs="+",
-        choices=["bytes", "file", "raw-bytes", "raw-file", "numpy"],
+        choices=[
+            "bytes",
+            "file",
+            "iterate",
+            "slider-lengths",
+        ],
         default=["bytes", "file"],
     )
     args = p.parse_args()
@@ -80,7 +74,7 @@ def main() -> None:
     variants = [
         (name, package, kind) for name, package in packages for kind in args.workloads
     ]
-    # Initialize Python view/dtype caches consistently across packages.
+    # Initialize parser selection and Python allocation consistently across packages.
     for _, package, kind in variants:
         call(package, kind, files[0].read_bytes(), files[0])
     gc.collect()

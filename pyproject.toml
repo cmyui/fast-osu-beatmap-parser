@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "cffi>=1.17"]
+requires = ["scikit-build-core>=0.10"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Fast native osu! beatmap parsing with owned Python results"
 readme = "docs/python.md"
 requires-python = ">=3.10"
-dependencies = ["cffi>=1.17", "typing-extensions>=4.6; python_version < '3.12'"]
+dependencies = ["typing-extensions>=4.6; python_version < '3.12'"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: Implementation :: CPython",
@@ -18,8 +18,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-numpy = ["numpy>=1.26"]
-test = ["pytest>=8", "numpy>=1.26"]
+test = ["pytest>=8", "mypy>=1.11"]
 
 [project.urls]
 Repository = "https://github.com/cmyui/fast-osu-beatmap-parser"
@@ -33,7 +32,7 @@ sdist.exclude = ["build", "dist", "tests/reference/official/bin", "tests/referen
 [tool.cibuildwheel]
 build = "cp310-*"
 skip = "*-musllinux* *-win* *-manylinux_i686 *-macosx_x86_64"
-test-requires = ["pytest>=8", "numpy>=1.26"]
+test-requires = ["pytest>=8", "mypy>=1.11"]
 test-command = "python -m pytest {project}/tests/test_python.py && FOSU_FORCE_SCALAR=1 python -m pytest {project}/tests/test_python.py && python {project}/tests/test_binary_hardening.py"
 
 [tool.cibuildwheel.linux]

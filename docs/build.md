@@ -3,7 +3,7 @@
 The header-only C++ interface needs no build step: add `src` to your include
 path and compile as C++20. CMake 3.26+ builds the C ABI, development tools, and
 Python extensions. Python installations invoke CMake through scikit-build-core;
-CFFI generates the wrapper source and does not compile it independently.
+The Python extension constructs detached Python values directly from the C++ Beatmap.
 
 Sources live under `src/fosu/`, grouped by responsibility. C++ headers use `.h`
 and compiled C++ files use `.cc`:
@@ -13,7 +13,7 @@ src/fosu/
     parser.h, beatmap.h, parse_options.h, result.h
     arena.h, os.h, io.h, beatmap_header.h
     engine/       # Parsing algorithms, SIMD helpers, and runtime loading
-    bindings/     # C API declarations and implementation
+    bindings/     # C ABI and detached Python value conversion
 ```
 
 C++ callers include `<fosu/parser.h>`; C callers include
@@ -150,7 +150,7 @@ python3 -m pip install .
 python3 -m build                 # source archive, then wheel from that archive
 ```
 
-Build isolation supplies scikit-build-core, CFFI, and a suitable CMake/Ninja when
+Build isolation supplies scikit-build-core and a suitable CMake/Ninja when
 needed. An installed C/C++ compiler and Python development headers are required
 for source builds. The wheel contains a CPython 3.10+ stable-ABI extension with
 the scalar engine, plus an adjacent AVX2 library on x86-64 or NEON library on

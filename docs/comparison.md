@@ -14,7 +14,7 @@ branches. This is a broad selection, not an exhaustive ranking of every parser.
 
 | Library | Version | Entry point and relevant work |
 |---|---|---|
-| [FOSU](https://github.com/cmyui/fast-osu-beatmap-parser) | `8a51ae8` | Python `parse` / `parse_file`; C++ `Parser`. Native records, lazy Python wrappers; no slider geometry or PP calculation. |
+| [FOSU](https://github.com/cmyui/fast-osu-beatmap-parser) | C++: `8a51ae8`; Python batch: eager binding on `aedfc51` | Python `parse` / `parse_file` return detached dataclasses and lists; C++ `Parser` returns native records. No slider geometry or PP calculation. |
 | [slider](https://github.com/llllllllll/slider) | 0.8.4 | `Beatmap.parse` / `from_path`. Eager Python objects and slider-curve construction. Public object access uses `stacking=False`; no difficulty or mods requested. |
 | [rosu-pp-py](https://github.com/MaxOhn/rosu-pp-py) | 4.0.2 | `Beatmap(bytes=...)` / `Beatmap(path=...)`. Native PP-oriented model, not a full document representation. No PP/difficulty calculation requested. |
 | [OsuPyParser](https://github.com/lenforiee/osupyparser) | 1.0.7 | `OsuFile(path).parse_file()`. Eager Python objects, file hash and derived statistics. Published API is file-only. |
@@ -107,19 +107,25 @@ Same **9,758 maps / 392,122,516 bytes / 7,863,673 hitobjects** in every batch.
 Microseconds per map, lower is better. Means include both complete passes;
 OsuPyParser has no published resident-input API.
 
+FOSU rows use a separate two-pass measurement of the eager Python API on the
+same host, interpreter and cohort. The other libraries retain the original
+measurements. Full Python value construction and release are included;
+[eager batch evidence](../bench/comparison/results/hetzner-2026-09-08.eager-python-batch.json)
+records both passes and the matching corpus fingerprint.
+
 | Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---:|---:|
-| FOSU Python AVX2 | 41.0 | 45.0 |
-| FOSU Python scalar | 79.1 | 88.0 |
+| FOSU Python AVX2 (eager) | 635.2 | 647.7 |
+| FOSU Python scalar (eager) | 687.9 | 705.7 |
 | rosu-pp-py 4.0.2 | 299.4 | 312.0 |
 | pyttanko 2.1.0 | 2,501.5 | 2,501.2 |
-| OsuPyParser 1.0.7 | — | 5,070.8 |
+| OsuPyParser 1.0.7 | Unsupported (file-only API) | 5,070.8 |
 | slider 0.8.4 | 14,091.0 | 14,119.7 |
 
 | Python interface | Resident bytes: pass 1 / 2 | Warm file: pass 1 / 2 |
 |---|---:|---:|
-| FOSU Python AVX2 | 39.0 / 43.0 | 46.5 / 43.6 |
-| FOSU Python scalar | 81.5 / 76.7 | 90.5 / 85.4 |
+| FOSU Python AVX2 (eager) | 626.1 / 644.4 | 639.1 / 656.2 |
+| FOSU Python scalar (eager) | 693.7 / 682.0 | 698.8 / 712.5 |
 | rosu-pp-py 4.0.2 | 294.0 / 304.7 | 314.3 / 309.7 |
 | pyttanko 2.1.0 | 2,510.7 / 2,492.3 | 2,510.2 / 2,492.2 |
 | OsuPyParser 1.0.7 | — | 5,080.7 / 5,060.9 |
@@ -144,7 +150,10 @@ Do not interpret the C++/Python difference as binding overhead.
 | osu-parsers (TypeScript/JS) | 2,842.5 | 3,042.4 / 2,642.5 |
 | osu-parser (JavaScript) | 54,387.8 | 54,456.2 / 54,319.4 |
 
-## Python object traversal: interleaved supplement
+## Historical Python object traversal: native-view API
+
+This supplementary sweep measured FOSU at `8a51ae8`, before the eager Python API.
+It is not a measurement of the current Python result construction cost.
 
 Parse resident bytes, then sum every hitobject's start time through the public
 Python API. Same **9,948 maps**; counts and summed times agree. These figures
@@ -198,7 +207,9 @@ representations, legacy corrections and derived data. FOSU retains raw hit
 samples and slider edge fields and skips storyboard command bodies. Richer
 libraries can do significantly more work; PP libraries can retain less.
 
-FOSU parses native records eagerly but creates Python record wrappers on access.
+The `8a51ae8` FOSU used in the supplementary sweep parsed native records eagerly
+but created Python record wrappers on access. The headline batch table instead
+measures complete, detached Python results.
 The traversal workload additionally sums every hitobject start time through
 public Python objects, making that access cost visible. `rosu-pp-py` does not
 expose an equivalent iterable hitobject API, so it is not included in traversal.

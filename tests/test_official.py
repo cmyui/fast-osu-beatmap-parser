@@ -23,6 +23,11 @@ VALUES = (
 
 
 def fixtures():
+    for value in ('', '1,2,3', '10,bad,20', '2147483647,2147483648,-2147483648,-2147483649',
+                  '1_000,1e3,+3,--4,', ' 1 , \t-2\t ,+3', '٠١,１２,1',
+                  '\u00a01\u00a0', '\u00a01,2,3\u00a0', '1,\u00a02\u00a0,3',
+                  '1\0,2\0\0,3\0 ', '\v1\f,2', '1,00000000000000000000000000000002'):
+        yield f'Editor.Bookmarks={value!r}', BASE + '[Editor]\nBookmarks:' + value + '\n'
     for section, keys in (
         ('Difficulty', 'HPDrainRate CircleSize OverallDifficulty ApproachRate SliderMultiplier SliderTickRate'),
         ('General', 'StackLeniency AudioLeadIn PreviewTime CountdownOffset Mode LetterboxInBreaks WidescreenStoryboard EpilepsyWarning SpecialStyle SamplesMatchPlaybackRate'),
@@ -100,9 +105,11 @@ def main():
             counts['files'] += 1
             counts['official_rejected_lines'] += theirs[1]
             counts['fosu_rejected_lines'] += ours[1]
-            if ours != theirs:
+            if ours != theirs or actual.bookmarks != expected.get('bookmarks', []):
                 gaps.append({'case': name, 'official': theirs, 'fosu': ours,
-                             'official_rejections': expected.get('rejected', [])})
+                             'official_rejections': expected.get('rejected', []),
+                             'official_bookmarks': expected.get('bookmarks', []),
+                             'fosu_bookmarks': actual.bookmarks})
             if counts['files'] % 1000 == 0:
                 print(f"Checked {counts['files']} files; {len(gaps)} differences", flush=True)
         if args.corpus:

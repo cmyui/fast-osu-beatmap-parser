@@ -40,6 +40,7 @@ while ((request = Console.ReadLine()) != null)
             ar = map.Difficulty.ApproachRate, cs = map.Difficulty.CircleSize,
             od = map.Difficulty.OverallDifficulty,
             objects = map.HitObjects.Count,
+            bookmarks = map.Bookmarks,
             accepted = decoder.Accepted,
             rejected = decoder.Rejected,
         }, json));
