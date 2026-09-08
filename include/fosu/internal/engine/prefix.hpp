@@ -96,32 +96,34 @@ inline std::optional<ParsedHitObjectPrefix> parse_hitobject_prefix_scalar(
 
 #if FOSU_SIMD_X86
 
-// One entry per (len_x, len_y, len_time, len_type) combination. `perm`
+// One entry per (len_x, len_y, len_time, len_type, len_hit_sound) combination. `perm`
 // feeds vpermd to move each field's dwords into the lane that needs them;
 // `shuf` then places digits at fixed offsets (0x80 lanes produce zero):
 //   bytes  0-3   x   right-aligned  -> dword 0 after madd
 //   bytes  4-7   y                  -> dword 1
 //   bytes  8-11  type               -> dword 2
-//   bytes 12-15  (zero; hitSound is parsed scalar since its length is
-//                 not part of the table index)
-//   bytes 16-31  time right-aligned -> dwords 5,6,7 = top2/mid4/low4 digits
+//   bytes 12-15  hitSound digits available in the low lane
+//   bytes 16-19  remaining hitSound digits, summed with dword 3 after madd
+//   bytes 20-31  time right-aligned -> dwords 5,6,7 = top2/mid4/low4 digits
 struct alignas(64) LaneMasks {
     int32_t perm[8];
     int8_t shuf[32];
 };
 static_assert(sizeof(LaneMasks) == 64);
 
-consteval std::array<LaneMasks, kNPrefixVariants> make_lane_masks() {
-    std::array<LaneMasks, kNPrefixVariants> out{};
+consteval std::array<LaneMasks, kNPrefixVariants * 2> make_lane_masks() {
+    std::array<LaneMasks, kNPrefixVariants * 2> out{};
     for (int lx = 1; lx <= 3; ++lx)
     for (int ly = 1; ly <= 3; ++ly)
     for (int lt = 1; lt <= 10; ++lt)
-    for (int lty = 1; lty <= 3; ++lty) {
+    for (int lty = 1; lty <= 3; ++lty)
+    for (int lhs = 1; lhs <= 2; ++lhs) {
         const int p0 = lx;
         const int p1 = p0 + 1 + ly;
         const int p2 = p1 + 1 + lt;
         const int p3 = p2 + 1 + lty;
-        const int index = (((lx - 1) * 3 + (ly - 1)) * 10 + (lt - 1)) * 3 + (lty - 1);
+        const int index =
+            ((((lx - 1) * 3 + (ly - 1)) * 10 + (lt - 1)) * 3 + (lty - 1)) * 2 + lhs - 1;
 
         int src[32];
         for (auto& s : src) s = -1;
@@ -131,16 +133,32 @@ consteval std::array<LaneMasks, kNPrefixVariants> make_lane_masks() {
         for (int i = 0; i < lt; ++i) src[32 - lt + i] = p1 + 1 + i;
 
         LaneMasks& lm = out[index];
-        // Low lane: x,y always live in source dwords 0-1; type spans at
-        // most two more. High lane: time spans at most four dwords.
-        lm.perm[0] = 0;
-        lm.perm[1] = 1;
-        lm.perm[2] = (p2 + 1) / 4;
-        lm.perm[3] = (p3 - 1) / 4;
-        const int td0 = (p1 + 1) / 4;
-        const int td1 = (p2 - 1) / 4;
-        for (int k = 0; k < 4; ++k)
-            lm.perm[4 + k] = (td0 + k <= td1) ? td0 + k : td1;
+        for (auto& word : lm.perm) word = -1;
+        int used[2]{};
+        // Each 128-bit lane can gather four source dwords before the byte shuffle.
+        auto find_or_add_word = [&](int word, int lane) {
+            for (int i = 0; i < used[lane]; ++i)
+                if (lm.perm[lane * 4 + i] == word) return i;
+            if (used[lane] == 4) return -1;
+            const int slot = used[lane]++;
+            lm.perm[lane * 4 + slot] = word;
+            return slot;
+        };
+        for (int b = 0; b < 32; ++b)
+            if (src[b] >= 0 && find_or_add_word(src[b] / 4, b / 16) < 0)
+                __builtin_abort();
+
+        // Put hitSound in the low lane where possible; use spare high-lane
+        // space otherwise. Preserve each digit's decimal weight in either lane.
+        for (int i = 0; i < lhs; ++i) {
+            const int source = p3 + 1 + i;
+            if (find_or_add_word(source / 4, 0) >= 0) {
+                src[16 - lhs + i] = source;
+            } else {
+                if (find_or_add_word(source / 4, 1) < 0) __builtin_abort();
+                src[20 - lhs + i] = source;
+            }
+        }
 
         for (int b = 0; b < 32; ++b) {
             if (src[b] < 0) {
@@ -149,17 +167,10 @@ consteval std::array<LaneMasks, kNPrefixVariants> make_lane_masks() {
             }
             const int dw = src[b] / 4;
             const int off = src[b] % 4;
-            const int lane_base = (b < 16) ? 0 : 4;
-            int slot = -1;
-            for (int j = lane_base; j < lane_base + 4; ++j) {
-                if (lm.perm[j] == dw) {
-                    slot = j;
-                    break;
-                }
-            }
-            if (slot < 0) __builtin_abort();
-            lm.shuf[b] = static_cast<int8_t>((slot - lane_base) * 4 + off);
+            const int slot = find_or_add_word(dw, b / 16);
+            lm.shuf[b] = static_cast<int8_t>(slot * 4 + off);
         }
+        for (auto& word : lm.perm) if (word < 0) word = 0;
     }
     return out;
 }
@@ -260,6 +271,9 @@ inline HitObjectPrefixShape classify_hitobject_prefix(
     // 60*p0 + 27*p1 + 2*p2 + p3 lands in the top lane; lower lanes cannot carry.
     shape.index =
         static_cast<uint32_t>((pk * 0x003C001B00020001ull) >> 48) - 158;
+#if FOSU_SIMD_X86
+    shape.index = shape.index * 2 + hl - 1;
+#endif
     shape.time_span = static_cast<uint32_t>(p2 - p1);
     shape.p3 = static_cast<uint32_t>(p3);
     shape.p4 = p4;
@@ -273,7 +287,7 @@ inline HitObjectPrefixShape classify_hitobject_prefix(
 __attribute__((always_inline))
 inline std::optional<HitObjectPrefix> decode_hitobject_prefix(
     Bytes32 ascii, ByteVector zero, const HitObjectPrefixShape& shape,
-    const char* line) {
+    [[maybe_unused]] const char* line) {
     HitObjectPrefix prefix;
     static_assert(offsetof(HitObjectPrefix, x) == 0 &&
                       offsetof(HitObjectPrefix, y) == 4 &&
@@ -291,21 +305,18 @@ inline std::optional<HitObjectPrefix> decode_hitobject_prefix(
     const __m256i placed =
         _mm256_shuffle_epi8(_mm256_permutevar8x32_epi32(digits, perm), shuf);
     const __m256i pair_weights = _mm256_setr_epi8(
-        0, 100, 10, 1, 0, 100, 10, 1, 0, 100, 10, 1, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1);
+        0, 100, 10, 1, 0, 100, 10, 1, 0, 100, 10, 1, 0, 0, 10, 1,
+        0, 0, 10, 1, 0, 0, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1);
     const __m256i word_weights = _mm256_setr_epi16(
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 100, 1, 100, 1);
     const __m256i words = _mm256_maddubs_epi16(placed, pair_weights);
     const __m256i dwords = _mm256_madd_epi16(words, word_weights);
     const __m128i lo = _mm256_castsi256_si128(dwords);
-    // hitSound: the second byte is only a digit when the field has two.
-    const uint32_t d0 = static_cast<uint8_t>(line[shape.p3 + 1] - '0');
-    const uint32_t d1 = static_cast<uint8_t>(line[shape.p3 + 2] - '0');
-    const uint32_t two = shape.p4 - shape.p3 - 2;  // 0 or 1 once validated
-    const uint32_t hs = d0 + two * (d0 * 9 + d1);
-    _mm_storeu_si128(reinterpret_cast<__m128i*>(&prefix),
-                     _mm_insert_epi32(lo, static_cast<int>(hs), 3));
     const __m128i thi = _mm256_extracti128_si256(dwords, 1);
+    // Sum hitSound contributions from the two lanes into the fourth field.
+    const __m128i fields = _mm_add_epi32(lo, _mm_slli_si128(thi, 12));
+    _mm_storeu_si128(reinterpret_cast<__m128i*>(&prefix),
+                     fields);
     if (shape.time_span <= 9) [[likely]] {
         // Up to eight time digits fit in signed int32. Combine and widen in
         // SIMD registers.
