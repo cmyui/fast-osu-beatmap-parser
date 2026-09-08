@@ -44,11 +44,13 @@ Lower is better.
 | FOSU Python scalar | 79.1 | 88.0 |
 | rosu-pp-py 4.0.2 | 299.4 | 312.0 |
 | pyttanko 2.1.0 | 2,501.5 | 2,501.2 |
-| OsuPyParser 1.0.7 | — | 5,070.8 |
+| OsuPyParser 1.0.7 | Unsupported (file-only API) | 5,070.8 |
 | slider 0.8.4 | 14,091.0 | 14,119.7 |
 
 Two complete batch passes on one pinned CPU, CPython 3.12; imports and startup
-excluded. File inputs are in the OS page cache.
+excluded. File inputs are in the OS page cache. FOSU decodes native records
+eagerly but creates Python wrappers on access; these timings do not include
+materializing every record into Python objects.
 
 ### C++ and other languages
 
@@ -68,10 +70,9 @@ comparable to the Python batch measurements above**. Lower is better.
 | osu-parsers (TypeScript/JS) | 2,842.5 |
 | osu-parser (JavaScript) | 54,387.8 |
 
-FOSU decodes native records with lazy Python wrappers; competitors differ in
-output and may also build slider geometry, apply gameplay defaults, or derive
-statistics. No PP/difficulty calculation is requested in either comparison.
-These are practical API costs, not identical-work or full-materialization claims.
+Parsers differ in output and may also build slider geometry, apply gameplay
+defaults, or derive statistics. No PP/difficulty calculation is requested in either comparison.
+These are practical API costs, not identical-work claims.
 
 See the [full comparison](docs/comparison.md) for versions, exact APIs,
 Python object traversal, per-pass variation, failure counts,
