@@ -153,24 +153,41 @@ try_parse_slider_point_prefix_fast(
     const uint32_t nd = nondigit_mask32(v, k.bias, k.thr);
     const auto colon = equal_mask32(v, k.colon);
     const auto pipe = equal_mask32(v, k.pipe);
-    const auto comma = equal_mask32(v, k.comma);
-    const uint32_t sep = pipe | comma;
-    // Lengths are masked to 7 before feeding further shifts so every shift
-    // count stays below the operand width on any byte pattern.
-    const uint32_t xl1 = trailing_zeros(nd >> 1);
+#if FOSU_SIMD_X86
+    const uint32_t sep = static_cast<uint32_t>(_mm256_movemask_epi8(
+        _mm256_or_si256(_mm256_cmpeq_epi8(v, k.pipe), _mm256_cmpeq_epi8(v, k.comma))));
+#else
+    const uint32_t sep =
+        byte_mask16(vorrq_u8(vceqq_u8(v.val[0], k.pipe), vceqq_u8(v.val[0], k.comma))) |
+        (byte_mask16(vorrq_u8(vceqq_u8(v.val[1], k.pipe), vceqq_u8(v.val[1], k.comma)))
+         << 16);
+#endif
+    // Skip the opening '|', then locate ':', separator, ':', separator.
+    // Clearing each boundary bit lets later positions be found without
+    // waiting for the preceding coordinate length. Missing boundaries are 32;
+    // use 64-bit mask tests below so that sentinel remains a defined shift.
+    uint32_t boundaries = nd & ~1u;
+    const uint32_t colon1 = trailing_zeros(boundaries);
+    boundaries &= boundaries - 1;
+    const uint32_t end1 = trailing_zeros(boundaries);
+    boundaries &= boundaries - 1;
+    const uint32_t colon2 = trailing_zeros(boundaries);
+    boundaries &= boundaries - 1;
+    const uint32_t end2 = trailing_zeros(boundaries);
+    const uint32_t xl1 = colon1 - 1;
+    const uint32_t yl1 = end1 - colon1 - 1;
     const uint32_t c1 = xl1 & 7;
-    const uint32_t yl1 = trailing_zeros(nd >> (2 + c1));
     const uint32_t d1 = yl1 & 7;
-    const uint32_t end1 = 2 + c1 + d1;  // <= 16
     const bool ok1 = (pipe & 1) & (((xl1 - 1) | (yl1 - 1)) <= 3) &
-                     ((colon >> (1 + c1)) & 1) & ((sep >> end1) & 1);
-    const uint32_t xl2 = trailing_zeros(nd >> (end1 + 1));
+                     ((static_cast<uint64_t>(colon) >> colon1) & 1) &
+                     ((static_cast<uint64_t>(sep) >> end1) & 1);
+    const uint32_t xl2 = colon2 - end1 - 1;
     const uint32_t c2 = xl2 & 7;
-    const uint32_t yl2 = trailing_zeros(nd >> (end1 + 2 + c2));
+    const uint32_t yl2 = end2 - colon2 - 1;
     const uint32_t d2 = yl2 & 7;
-    const uint32_t end2 = end1 + 2 + c2 + d2;  // <= 32
-    const bool ok2 = ((pipe >> end1) & 1) & (((xl2 - 1) | (yl2 - 1)) <= 3) &
-                     ((colon >> (end1 + 1 + c2)) & 1) &
+    const bool ok2 = ((static_cast<uint64_t>(pipe) >> end1) & 1) &
+                     (((xl2 - 1) | (yl2 - 1)) <= 3) &
+                     ((static_cast<uint64_t>(colon) >> colon2) & 1) &
                      ((static_cast<uint64_t>(sep) >> end2) & 1);
     if (!ok1) return std::nullopt;
 #if FOSU_SIMD_X86

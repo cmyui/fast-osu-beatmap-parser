@@ -53,6 +53,42 @@ static void test_point_values() {
 #endif
 }
 
+static void test_point_prefix_boundaries() {
+#if FOSU_SIMD
+  const fosu::internal::HitObjectParseConstants constants;
+  // Exhausted masks must reject or retain only the complete first point.
+  for (const std::string prefix : {"|", "|1:", "|1:2|", "|1:2|3:"}) {
+    const auto input = fosu::make_padded(prefix + std::string(64, '1'));
+    const auto points =
+        fosu::internal::try_parse_slider_point_prefix_fast<fosu::SliderPoint>(
+            input.data.get(), constants);
+    CHECK_EQ(points.has_value(), prefix.starts_with("|1:2|"));
+    if (points) {
+      CHECK(!points->has_second);
+      CHECK_EQ(points->next - input.data.get(), 4);
+    }
+  }
+  // Combining delimiter classifications must not admit other byte values.
+  for (unsigned byte = 0; byte < 256; ++byte) {
+    const auto input =
+        fosu::make_padded(std::string("|1:2|3:4") + static_cast<char>(byte));
+    const auto points =
+        fosu::internal::try_parse_slider_point_prefix_fast<fosu::SliderPoint>(
+            input.data.get(), constants);
+    CHECK(points.has_value());
+    if (!points)
+      continue;
+    const bool has_second = byte == '|' || byte == ',';
+    CHECK_EQ(points->has_second, has_second);
+    CHECK_EQ(points->next - input.data.get(), has_second ? 8 : 4);
+    if (has_second) {
+      CHECK_EQ(points->second.x, 3);
+      CHECK_EQ(points->second.y, 4);
+    }
+  }
+#endif
+}
+
 static void test_slider_fields() {
     const fosu::internal::HitObjectParseConstants constants;
     // Missing length differs from an explicitly empty field.
@@ -165,6 +201,7 @@ static void test_hitobject_details() {
 
 int main() {
     test_point_values<fosu::SliderPoint>();
+    test_point_prefix_boundaries();
     test_slider_fields();
     test_slider_sound_boundaries();
     test_hitobject_details();
