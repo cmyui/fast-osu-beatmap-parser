@@ -94,6 +94,8 @@ inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
                                            const char* p, size_t len,
                                            T& tp,
                                            TpGeom* geom = nullptr) {
+    if (std::popcount(commas) != 7) return false;
+
     // Seven comma positions -> eight fields.
     const uint64_t m1 = (commas & (commas - 1));
     const uint64_t m2 = (m1 & (m1 - 1));
@@ -109,14 +111,11 @@ inline bool fast_parse_timing_point_masked(uint64_t commas, uint64_t nondig,
     const auto c5 = static_cast<uint32_t>(trailing_zeros(m5));
     const auto c6 = static_cast<uint32_t>(trailing_zeros(m6));
 
-    if (std::popcount(commas) != 7) return false;
-    bool valid = true;
-
     // Offset: an integer with 1..8 digits — editor-emitted files never
     // produce negative or decimal offsets (those defer via the purity
     // check below). Speculative lengths are clamped into 1..8 so shifts
     // stay defined; `valid` already rules the clamped cases out.
-    valid &= (c0 - 1) <= 7;
+    bool valid = (c0 - 1) <= 7;
     tp.time = static_cast<double>(swar_parse_u64_safe(p, ((c0 - 1) & 7) + 1));
 
     // beatLength: [c0+1, c1), optional leading '-', optional fraction.
