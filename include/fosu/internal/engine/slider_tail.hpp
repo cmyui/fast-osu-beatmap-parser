@@ -111,7 +111,7 @@ inline std::optional<SliderTail> parse_slider_tail(
     double length = 0;
     if (p < end) {
 #if FOSU_SIMD
-        const auto fast_length = try_parse_slider_length_fast(p + 1, k);
+        const auto fast_length = try_parse_slider_length_fast(p + 1);
         const char* next;
         if (fast_length) {
             length = fast_length->value;

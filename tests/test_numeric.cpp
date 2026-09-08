@@ -111,8 +111,17 @@ static void test_byte_masks() {
             const auto v = load32(text);
             const uint32_t bit = uint32_t(1) << lane;
             CHECK_EQ(nondigit_mask32(v), value >= '0' && value <= '9' ? 0u : bit);
+            if (lane < 16) {
+#if FOSU_SIMD_X86
+                const auto first_half = _mm256_castsi256_si128(v);
+#else
+                const auto first_half = v.val[0];
+#endif
+                CHECK_EQ(nondigit_mask16(first_half),
+                         value >= '0' && value <= '9' ? 0u : bit);
+            }
             CHECK_EQ(comma_mask32(v), value == ',' ? bit : 0u);
-            CHECK_EQ(equal_mask32(v, broadcast_byte('\n')), value == '\n' ? bit : 0u);
+            CHECK_EQ(equal_mask32(v, broadcast_byte<'\n'>()), value == '\n' ? bit : 0u);
         }
     }
 }

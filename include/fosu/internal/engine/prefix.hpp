@@ -166,68 +166,32 @@ consteval std::array<LaneMasks, kNPrefixVariants> make_lane_masks() {
 
 inline constexpr auto kLaneMasks = make_lane_masks();
 
-// Constant vectors materialized by one instruction from a static byte. The
-// compiler cannot see the value, so it keeps or reloads the register instead
-// of rebuilding a broadcast from a general register on every line (which GCC
-// otherwise does whenever a loop body contains a call).
-inline __m256i bcast256(const char& k) {
-    __m256i v;
-    __asm__("vpbroadcastb %1, %0" : "=x"(v) : "m"(k));
-    return v;
-}
-inline constexpr char kByteNewline = '\n', kByteComma = ',', kByteColon = ':',
-                      kBytePipe = '|', kByteZero = '0', kByteBias = 80,
-                      kByteThreshold = -119;
-
 // Vector constants for one [HitObjects] section, built once and passed by
 // reference so callees use them as memory operands instead of rebuilding
 // them per call.
 struct HitObjectParseConstants {
-    __m256i nl, comma, colon, pipe, bias, thr, zero;
+    __m256i nl, comma, colon, pipe, zero;
     __m128i pair_weights, word_weights;  // slider point digit weights
     HitObjectParseConstants()
-        : nl(bcast256(kByteNewline)), comma(bcast256(kByteComma)),
-          colon(bcast256(kByteColon)), pipe(bcast256(kBytePipe)),
-          bias(bcast256(kByteBias)), thr(bcast256(kByteThreshold)),
-          zero(bcast256(kByteZero)),
+        : nl(broadcast_byte<'\n'>()), comma(broadcast_byte<','>()),
+          colon(broadcast_byte<':'>()), pipe(broadcast_byte<'|'>()),
+          zero(broadcast_byte<'0'>()),
           pair_weights(_mm_setr_epi8(10, 1, 10, 1, 10, 1, 10, 1, 0, 0, 0, 0, 0, 0, 0, 0)),
           word_weights(_mm_setr_epi16(100, 1, 100, 1, 0, 0, 0, 0)) {}
 };
-
-// Non-digit classification against caller-provided constants (see
-// nondigit_mask32 for the bias trick).
-inline uint32_t nondigit_mask32(__m256i ascii, __m256i bias, __m256i threshold) {
-    return static_cast<uint32_t>(_mm256_movemask_epi8(
-        _mm256_cmpgt_epi8(_mm256_add_epi8(ascii, bias), threshold)));
-}
 
 inline uint32_t comma_mask32(__m256i ascii) {
     return static_cast<uint32_t>(_mm256_movemask_epi8(
         _mm256_cmpeq_epi8(ascii, _mm256_set1_epi8(','))));
 }
 
-// No unsigned byte compare in AVX2: bias so '0'..'9' map to [-128, -119],
-// making every non-digit byte compare greater.
-inline uint32_t nondigit_mask32(__m256i ascii) {
-    const __m256i biased = _mm256_add_epi8(ascii, _mm256_set1_epi8(80));
-    const __m256i delims = _mm256_cmpgt_epi8(biased, _mm256_set1_epi8(-119));
-    return static_cast<uint32_t>(_mm256_movemask_epi8(delims));
-}
-
 #elif FOSU_SIMD_NEON
 struct HitObjectParseConstants {
-    ByteVector nl = broadcast_byte('\n'), comma = broadcast_byte(','),
-               colon = broadcast_byte(':'), pipe = broadcast_byte('|'),
-               bias = broadcast_byte(80), thr = broadcast_byte(-119),
-               zero = broadcast_byte('0');
+    ByteVector nl = broadcast_byte<'\n'>(), comma = broadcast_byte<','>(),
+               colon = broadcast_byte<':'>(), pipe = broadcast_byte<'|'>(),
+               zero = broadcast_byte<'0'>();
 };
-inline uint32_t nondigit_mask32(Bytes32 v) {
-    return nondigit_mask16(v.val[0]) | (nondigit_mask16(v.val[1]) << 16);
-}
-inline uint32_t nondigit_mask32(Bytes32 v, ByteVector, ByteVector) {
-    return nondigit_mask32(v);
-}
-inline uint32_t comma_mask32(Bytes32 v) { return equal_mask32(v, broadcast_byte(',')); }
+inline uint32_t comma_mask32(Bytes32 v) { return equal_mask32(v, broadcast_byte<','>()); }
 
 // TBL directly addresses both 16-byte input registers. No lane permutation
 // is needed, so each prefix shape occupies 32 bytes instead of AVX2's 64.
@@ -391,7 +355,7 @@ inline std::optional<ParsedHitObjectPrefix> try_parse_hitobject_prefix_fast(
            (line[shape.p4 + 1] == '\n' || line[shape.p4 + 1] == '\0'))))
         return std::nullopt;
     const auto prefix = decode_hitobject_prefix(
-        ascii, broadcast_byte('0'), shape, line);
+        ascii, broadcast_byte<'0'>(), shape, line);
     if (!prefix) return std::nullopt;
     return ParsedHitObjectPrefix{*prefix, line + shape.p4};
 }

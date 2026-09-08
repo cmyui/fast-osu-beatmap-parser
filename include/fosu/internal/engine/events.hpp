@@ -20,7 +20,7 @@ inline std::optional<std::string_view> parse_event_filename(const char* rest,
   // Timestamp and filename usually fit in one window. Reuse its comma mask
   // for both boundaries without exposing SIMD state to the event handlers.
   if (rest < end) {
-    const auto commas = equal_mask32(load32(rest), broadcast_byte(','));
+    const auto commas = equal_mask32(load32(rest), broadcast_byte<','>());
     const auto first = trailing_zeros(commas);
     if (first < 32 && first < static_cast<size_t>(end - rest)) {
       const char* filename = rest + first + 1;
@@ -121,8 +121,8 @@ inline const char* parse_events_section(
 
         const Bytes32 a = load32(p);
         const Bytes32 b = load32(p + 32);
-        const uint64_t nl = equal_mask32(a, broadcast_byte('\n')) |
-            (uint64_t(equal_mask32(b, broadcast_byte('\n'))) << 32);
+        const uint64_t nl = equal_mask32(a, broadcast_byte<'\n'>()) |
+            (uint64_t(equal_mask32(b, broadcast_byte<'\n'>())) << 32);
         const char* line = p;
         const char* next_line;
         const char* line_end;

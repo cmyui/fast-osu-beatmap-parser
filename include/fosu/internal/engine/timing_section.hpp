@@ -21,17 +21,8 @@ inline void parse_timing_point_line(
 inline const char* parse_timing_points_section(
     Beatmap& beatmap, size_t& point_count, const char* p,
     const char* file_end) {
-#if FOSU_SIMD_X86
-    const ByteVector newline_value = bcast256(kByteNewline);
-    const ByteVector comma_value = bcast256(kByteComma);
-    const ByteVector bias = bcast256(kByteBias);
-    const ByteVector threshold = bcast256(kByteThreshold);
-#else
-    const ByteVector newline_value = broadcast_byte('\n');
-    const ByteVector comma_value = broadcast_byte(',');
-    const ByteVector bias = broadcast_byte(80);
-    const ByteVector threshold = broadcast_byte(-119);
-#endif
+    const ByteVector newline_value = broadcast_byte<'\n'>();
+    const ByteVector comma_value = broadcast_byte<','>();
     uint32_t malformed = 0;
 
     while (p < file_end) {
@@ -54,8 +45,8 @@ inline const char* parse_timing_points_section(
 
         if (length - 15 <= 64 - 15) [[likely]] {
           const uint64_t nondigits =
-              (nondigit_mask32(first, bias, threshold) |
-               static_cast<uint64_t>(nondigit_mask32(second, bias, threshold)) << 32) &
+              (nondigit_mask32(first) |
+               static_cast<uint64_t>(nondigit_mask32(second)) << 32) &
               line_mask;
           if (const auto point = try_parse_timing_point_fast_masked(
                   commas, nondigits, p, length)) {

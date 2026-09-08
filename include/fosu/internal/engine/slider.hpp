@@ -52,10 +52,9 @@ struct ParsedSliderLength {
     const char* next;
 };
 
-inline std::optional<ParsedSliderLength> try_parse_slider_length_fast(
-    const char* p, const HitObjectParseConstants& k) {
+inline std::optional<ParsedSliderLength> try_parse_slider_length_fast(const char* p) {
     const Bytes32 v = load32(p);
-    const uint64_t nd = nondigit_mask32(v, k.bias, k.thr);
+    const uint64_t nd = nondigit_mask32(v);
     const auto il = static_cast<uint32_t>(trailing_zeros(nd));  // 1..8 if valid
     if (il - 1 > 7) return std::nullopt;
     // Integer and fractional lengths alternate within a map, so the dot and
@@ -149,7 +148,7 @@ inline std::optional<ParsedSliderPointPrefix<Point>>
 try_parse_slider_point_prefix_fast(
     const char* p, const HitObjectParseConstants& k) {
     const Bytes32 v = load32(p);
-    const uint32_t nd = nondigit_mask32(v, k.bias, k.thr);
+    const uint32_t nd = nondigit_mask32(v);
     const auto colon = equal_mask32(v, k.colon);
     const auto pipe = equal_mask32(v, k.pipe);
 #if FOSU_SIMD_X86
@@ -220,9 +219,7 @@ inline std::optional<ParsedSliderPoint<Point>> parse_slider_point(
 #if FOSU_SIMD
 #if FOSU_SIMD_X86
     const __m128i v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(p));
-    const __m128i biased = _mm_add_epi8(v, _mm256_castsi256_si128(k.bias));
-    const auto nd = static_cast<uint32_t>(_mm_movemask_epi8(
-        _mm_cmpgt_epi8(biased, _mm256_castsi256_si128(k.thr))));
+    const auto nd = nondigit_mask16(v);
     const auto colon = static_cast<uint32_t>(_mm_movemask_epi8(
         _mm_cmpeq_epi8(v, _mm256_castsi256_si128(k.colon))));
 #else

@@ -10,7 +10,7 @@ template <char Delimiter, bool UseSimd = FOSU_SIMD>
 inline const char* find_byte(const char* p, const char* end) {
 #if FOSU_SIMD
   if constexpr (UseSimd) {
-    const auto delimiter = broadcast_byte(Delimiter);
+    const auto delimiter = broadcast_byte<static_cast<uint8_t>(Delimiter)>();
     while (p < end) {
       const auto mask = equal_mask32(load32(p), delimiter);
       const size_t remaining = static_cast<size_t>(end - p);
