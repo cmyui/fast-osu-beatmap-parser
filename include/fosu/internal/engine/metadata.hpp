@@ -140,6 +140,7 @@ inline bool parse_kv_line(BeatmapHeader& bm,
   char* f = reinterpret_cast<char*>(&bm) + e.off;
   switch (e.type) {
     case KT::Str:
+      // TODO: Some areas here like this seem sketchy / dynamic
       *reinterpret_cast<std::string_view*>(f) = v;
       break;
     case KT::Countdown:
