@@ -16,6 +16,8 @@ inline bool consumed_field_value(std::string_view input, const char* next) {
 }
 
 inline std::optional<int32_t> parse_field_integer(std::string_view input) {
+  if (input.empty())
+    return std::nullopt;
   int64_t value;
   if (!consumed_field_value(
           input, parse_osu_int(input.data(), input.data() + input.size(), value)))
@@ -25,6 +27,8 @@ inline std::optional<int32_t> parse_field_integer(std::string_view input) {
 
 // Decode directly to float32, as osu! does, then widen for the public storage.
 inline std::optional<double> parse_field_float(std::string_view input) {
+  if (input.empty())
+    return std::nullopt;
   float value;
   if (!consumed_field_value(
           input, parse_osu_float(input.data(), input.data() + input.size(), value)))
@@ -33,6 +37,8 @@ inline std::optional<double> parse_field_float(std::string_view input) {
 }
 
 inline std::optional<double> parse_field_double(std::string_view input) {
+  if (input.empty())
+    return std::nullopt;
   double value;
   if (!consumed_field_value(
           input, parse_double(input.data(), input.data() + input.size(), value)) ||
