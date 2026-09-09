@@ -1,65 +1,60 @@
 # Working on FOSU
 
-Optimize for useful, reviewable changes with minimal iteration overhead.
-Readability, domain correctness, and performance all matter; prefer simple,
-near-zero-cost improvements over machinery that does not earn its complexity.
+FOSU is in active, pre-release development with no production consumers.
+Interfaces may break. Optimize for useful code changes, not release-level polish.
 
-## Before editing
+## Design and scope
 
-- Define the question this iteration answers and what would make it acceptable.
-- Briefly trace affected boundaries: implementation, callers, Python bindings,
-  tests, CMake/install rules, CI, benchmarks, and documentation. Inspect only
-  relevant paths; do not turn a focused change into a whole-repo audit.
-- Check the current branch and worktree. Preserve unrelated user changes.
-- Use domain-accurate names, explicit ownership, and clear inputs and results.
-  Prefer returning parsed values over mutable output parameters where practical.
-  Do not introduce compatibility layers or speculative abstractions without a
-  concrete requirement.
+- Prefer readable, domain-accurate code, explicit ownership, and simple inputs
+  and results. Favor returning parsed values over mutable output parameters
+  where practical. Near-zero-cost abstractions should earn their complexity.
+- Change interfaces directly and update affected callers. Do not preserve aliases,
+  old formats, or speculative extension points unless explicitly requested.
+- Before editing, define the question and briefly trace the affected implementation,
+  callers, tests, and build boundaries. Do not turn focused work into a repo audit.
+- Preserve unrelated user changes. Do not add optional refinements while preparing
+  a passing change for merge; mention worthwhile follow-ups separately.
 
-## Iterate cheaply, verify progressively
+## Verification proportional to the change
 
-1. **During implementation:** build the affected target and run focused tests.
-   Avoid full builds, wheel installs, and corpus sweeps after every small edit.
-2. **Once the approach works:** run relevant regression tests and the small
-   all-mode compatibility sample. Parsing changes must preserve supported
-   behavior or explicitly account for intended differences.
-3. **Before submission:** run the checks warranted by the changed boundaries.
-   Packaging changes need installed-consumer checks; shared engine changes need
-   scalar/SIMD coverage; platform-dependent changes need the affected platforms.
-   Run broad official-parser/full-corpus validation for meaningful parsing or
-   normalization changes, after the candidate settles—not for docs-only edits.
-
-Reuse valid results when subsequent edits cannot affect what they checked.
-Re-run affected checks after a fix. State what was tested and what was not;
-never substitute a build or a small sample for broader compatibility proof.
+- During iteration, build the affected target and run focused tests.
+- For internal parsing refactors, start with focused tests and the small all-mode
+  compatibility sample. Use broader official-parser/full-corpus checks for
+  meaningful acceptance, normalization, or representation changes once settled.
+- Keep correctness tests, strict Python typing, and memory-safety checks. Arena,
+  lifetime, bounds, and SIMD-load changes warrant relevant sanitizer checks.
+- Test the relevant platform first. Reserve cross-platform and installed-package
+  checks for settled candidates whose changed boundaries warrant them, or releases.
+- Docs-only changes need a content/link review, not builds, wheel installs,
+  compatibility sweeps, or performance measurements.
+- Reuse still-valid results. Re-run affected checks after fixes and report skipped
+  checks honestly; a sample is not proof of full compatibility.
 
 ## Performance experiments
 
-- Start with one hypothesis and a cheap comparison on the relevant CPU, using
-  the small representative all-mode performance corpus. Keep edge-case coverage
-  in correctness tests rather than distorting the performance workload.
-- Reject clear losers early. Reserve reversed-order runs, confirmation samples,
-  and the second machine for promising candidates. Test promising combinations
-  after understanding their individual effects.
-- Compare the same API boundary, outputs, corpus, build settings, and host.
-  Separate native parsing from eager Python conversion. Build before timing;
-  serialize benchmarks per host and avoid competing builds or tests.
-- Treat small differences as uncertain until repeated. Spend more effort on a
-  tiny readable improvement than an equally marginal, complicated optimization.
-- Keep competitor benchmarks available and rerun them for meaningful public
-  comparisons, not every internal experiment. Never mix incompatible timings.
-- Keep experimental binaries, raw reports, and rejected prototypes under ignored
-  build directories. Failed experiments need a concise finding, not permanent
-  production code, scripts, or historical documents.
+- Screen one hypothesis cheaply on the relevant CPU with the small representative
+  all-mode performance corpus. Keep pathological cases in correctness tests.
+- Reject clear losers early. Use reversed-order runs, confirmation samples, the
+  second machine, and combinations only for promising candidates.
+- Compare identical API boundaries, outputs, corpora, build settings, and hosts.
+  Separate native parsing from eager Python conversion. Build before timing and
+  avoid competing builds, tests, or benchmarks on the measurement host.
+- Do not chase tiny uncertain wins indefinitely, especially if they add complexity.
+  Report uncertainty; cleaner code can be worth more than a marginal speedup.
+- Preserve competitor benchmarks. Rerun and publish comparisons at meaningful
+  milestones or when requested, not after every internal optimization.
+- Keep experimental binaries and raw reports in ignored build directories.
+  Rejected experiments need a concise finding, not permanent tooling or documents.
 
-## Finish without expanding scope
+## Documentation and tooling budget
 
-- Update maintained docs in one pass once the interface settles. Describe the
-  current system; put experiment history and migration notes in the PR.
-- Do not add optional refinements while preparing a passing change for merge.
-  Record worthwhile follow-ups separately.
-- Reuse existing test and benchmark entry points. If repeated orchestration
-  genuinely warrants automation, prefer one small entry point over a framework
-  or another collection of overlapping scripts.
-- Report the outcome, relevant evidence, and remaining uncertainty concisely.
-  Do not claim a performance improvement from noise or unmeasured intuition.
+- Maintain a short README, working usage examples, and important contracts and
+  limitations. Update docs only when needed to avoid misleading users or broken
+  instructions; do not synchronize implementation narratives after every refactor.
+- Do not refresh public timing tables, expand API field inventories, or create
+  architecture/history documents as routine completion work. Clearly label stale
+  measurements; do not present them as current.
+- Put experiment history and migration details in PR descriptions, not maintained
+  docs. Prefer deleting redundant prose to repeatedly updating it.
+- Reuse existing tooling. Add automation only for demonstrated recurring friction;
+  prefer one small entry point over a framework or overlapping scripts.

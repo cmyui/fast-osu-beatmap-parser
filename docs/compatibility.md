@@ -78,15 +78,14 @@ All entry points accept at most **64 MiB** of source bytes. Python rejects
 larger inputs with `ValueError`; C++ returns `ErrorCode::InputTooLarge`.
 C++ `Parser::parse` and `Parser::parse_file` return `ErrorCode::InputTooLarge`;
 `make_padded` throws `std::length_error`, and `read_into` returns failure with
-`errno=EFBIG`. The
-standalone executable exits with status 6.
+`errno=EFBIG`.
 Output arrays and temporary allocations can exceed the source size. This is
 not a strict memory or CPU quota, particularly for consumer geometry code.
 
 The C++ parser copies pointer inputs into its working arena and appends the 128
 readable zero bytes required by its fast paths. Callers therefore need only
 provide the exact logical byte range. Parser allocation failures become
-`ErrorCode::AllocationFailure`, `FOSU_OUT_OF_MEMORY`, or Python `MemoryError`
+`ErrorCode::AllocationFailure` or Python `MemoryError`
 at the respective API boundary.
 
 The test suite checks malformed bytes with ASan, UBSan and differential fuzzing.

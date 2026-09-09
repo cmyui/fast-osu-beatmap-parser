@@ -1,6 +1,10 @@
 # fosu — fast osu! beatmap parsing
 
-Parse `.osu` beatmaps into named fields and records from Python, C++, or C.
+> **Active development:** This repo is experimental and may break without notice.
+> APIs, behavior, and build interfaces are not stable. It is not production-ready;
+> contributors and coding agents should follow [AGENTS.md](AGENTS.md).
+
+Parse `.osu` beatmaps into named fields and records from Python or C++.
 fosu combines SIMD parsing with the official osu! legacy decoder's acceptance
 rules, including unusual numeric forms and malformed records.
 
@@ -30,6 +34,8 @@ fosu::Beatmap& map = *parsed.value();
 ```
 
 ## Performance
+
+These are historical measurements, not benchmarks of the current revision.
 
 ### Python APIs
 
@@ -82,9 +88,7 @@ These are practical API costs, not identical-work claims.
 
 See the [full comparison](docs/comparison.md) for versions, exact APIs,
 Python object traversal, per-pass variation, failure counts,
-and the [reproducible harness](bench/comparison/README.md). The
-[FOSU-only hot-loop benchmarks](docs/performance.md) use per-map minima and are
-not mixed into this comparison.
+and the [reproducible harness](bench/comparison/README.md). See [performance](docs/performance.md) for internal measurement commands.
 
 ## Interfaces
 
@@ -107,25 +111,6 @@ cmake --build build/native --target check -j4  # library and native checks
 
 See [builds and checks](docs/build.md) for compiler/ISA profiles, sanitizers,
 and benchmarks.
-
-## Implementation
-
-AVX2 classifies delimiters and digits together, then uses compile-time shuffle
-masks and multiply-add instructions to convert common hitobject prefixes and
-slider points. Timing points reuse validated shape geometry within a section.
-Unusual numeric forms take a bounded scalar conversion path; metadata uses
-key/type tables.
-
-Input size gives safe upper bounds for fixed arrays without a second scan. The
-parsing engine builds each record as a local value, then copies it into contiguous
-arena memory owned by the parser. Python converts the native `Beatmap` into
-detached dataclasses and lists before returning.
-One inactive parser arena is retained for cheap fresh-parser reuse.
-
-The public `Parser` prepares input, allocates arrays and owns their lifetime.
-One engine call interprets the selected sections. Compiled builds keep the
-scalar engine in the core and load only the selected AVX2 or NEON library;
-header-only builds select their engine at compile time.
 
 ## Coverage and assumptions
 

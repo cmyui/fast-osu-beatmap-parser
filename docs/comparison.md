@@ -1,5 +1,8 @@
 # Parser comparison
 
+Historical measurements; these tables do not describe the current revision.
+Refresh at benchmark milestones, retaining the methodology and scope caveats below.
+
 This comparison asks: **how long does a normal public API take to produce a
 decoded beatmap?** It covers Python, Rust, C#, JavaScript, and FOSU's native C++
 interface. It is not a claim that every library produces the same model or
