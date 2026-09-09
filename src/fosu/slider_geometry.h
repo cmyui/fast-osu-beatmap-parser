@@ -327,6 +327,10 @@ inline Result<SliderPath> calculate_slider_path(
       type = CurveType::Linear;
   }
   CurveVertices curve{vertices};
+  // The first typed control point is itself a one-vertex segment in osu!.
+  // Circular approximation can produce a slightly different first vertex.
+  if (count > 1)
+    curve.append(points[0]);
   size_t begin = 0;
   for (size_t i = 1; i <= count; ++i) {
     if (i < count && (points[i] != points[i - 1] || i == count - 1 ||
