@@ -191,14 +191,29 @@ def test_slider_event_ticks_repeats_and_versions(tmp_path, version, tick_count):
     assert events[-1].type is fosu.SliderEventType.TAIL
     assert events[-1].time == slider.end_time == 3000
     assert events[-1].position == fosu.PathPoint(0, 0)
+    legacy = [
+        event for event in events if event.type is fosu.SliderEventType.LEGACY_LAST_TICK
+    ]
+    assert len(legacy) == 1
+    assert legacy[0].time == 2964
+    assert legacy[0].path_progress == pytest.approx(0.036)
+    assert (legacy[0].position.x, legacy[0].position.y) == pytest.approx((14.4, 0))
     assert sum(e.type is fosu.SliderEventType.TICK for e in events) == tick_count
     repeats = [e for e in events if e.type is fosu.SliderEventType.REPEAT]
     assert len(repeats) == 1 and repeats[0].time == 2000
     assert repeats[0].position == fosu.PathPoint(400, 0)
-    assert [e.time for e in events] == sorted(e.time for e in events)
+    path_events = [
+        event
+        for event in events
+        if event.type is not fosu.SliderEventType.LEGACY_LAST_TICK
+    ]
+    assert [event.time for event in path_events] == sorted(
+        event.time for event in path_events
+    )
     assert pickle.loads(pickle.dumps(map)) == map
     for e in events:
-        assert e.position == fosu.slider_position_at(slider.path, e.path_progress)
+        position = fosu.slider_position_at(slider.path, e.path_progress)
+        assert (e.position.x, e.position.y) == pytest.approx((position.x, position.y))
 
 
 @pytest.mark.parametrize("curve,length", [("L|100:0", 100), ("B|0:0", 0)])
@@ -210,9 +225,27 @@ def test_slider_events_without_ticks(curve, length):
     events = fosu.parse(data, calculate_slider_events=True).hit_objects[0].events
     assert [e.type for e in events] == [
         fosu.SliderEventType.HEAD,
+        fosu.SliderEventType.LEGACY_LAST_TICK,
         fosu.SliderEventType.TAIL,
     ]
     assert all(math.isfinite(e.time) and math.isfinite(e.path_progress) for e in events)
+
+
+def test_short_slider_legacy_last_tick_clamps_to_half_duration():
+    data = (
+        b"[Difficulty]\nSliderMultiplier:1\n[TimingPoints]\n0,500\n"
+        b"[HitObjects]\n0,0,1000,2,0,L|10:0,1,10\n"
+    )
+    slider = fosu.parse(data, calculate_slider_events=True).hit_objects[0]
+    legacy = next(
+        event
+        for event in slider.events
+        if event.type is fosu.SliderEventType.LEGACY_LAST_TICK
+    )
+    assert slider.end_time == 1050
+    assert (legacy.time, legacy.path_progress, legacy.position.x) == pytest.approx(
+        (1025, 0.5, 5)
+    )
 
 
 @pytest.mark.parametrize(

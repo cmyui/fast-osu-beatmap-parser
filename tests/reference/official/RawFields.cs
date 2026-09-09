@@ -62,11 +62,16 @@ sealed class RawFields
                 record["events"] = SliderEventGenerator.Generate(decoded.StartTime,
                     ((IHasDuration)decoded).Duration / repeated.SpanCount(), velocity,
                     tickDistance, slider.Path.Distance, repeated.SpanCount())
-                    .Where(e => e.Type != SliderEventType.LegacyLastTick)
                     .Select(e => {
                         var p = slider.Path.PositionAt(e.PathProgress);
                         return new {
-                            type = e.Type switch { SliderEventType.Head => 0, SliderEventType.Tick => 1, SliderEventType.Repeat => 2, _ => 3 },
+                            type = e.Type switch {
+                                SliderEventType.Head => 0,
+                                SliderEventType.Tick => 1,
+                                SliderEventType.Repeat => 2,
+                                SliderEventType.LegacyLastTick => 3,
+                                _ => 4,
+                            },
                             time = e.Time, span_index = e.SpanIndex, span_start_time = e.SpanStartTime,
                             path_progress = e.PathProgress, position = new { x = (double)p.X, y = (double)p.Y },
                         };

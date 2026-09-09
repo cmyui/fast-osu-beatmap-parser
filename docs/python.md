@@ -88,12 +88,14 @@ Paths alone do not calculate end times. Requesting both reuses their distance.
 Native code exposes the same query and `Beatmap.slider_paths`, indexed by slider.
 
 `calculate_slider_events=True` additionally populates `slider.events` with
-chronological `HEAD`, `TICK`, `REPEAT`, and `TAIL` records. This option includes
-path and end-time calculation. Each record has time, span index/start time,
+ordered `HEAD`, `TICK`, `REPEAT`, `LEGACY_LAST_TICK`, and `TAIL` records. The
+legacy event preserves osu!'s historical judgement point up to 36 ms before the
+true tail; the real `TAIL` and slider `end_time` remain unchanged. This option
+includes path and end-time calculation. Each record has time, span index/start time,
 path progress, and a position relative to the head. Native code exposes
 `Beatmap.slider_events`, indexed by slider. Without the option, events are empty.
 These are path events using the decoded slider's timing, not a converted ruleset's
-nested hitobjects: no samples, mods, catch conversion, or legacy-last-tick judgement.
+nested hitobjects: no samples, mods, or catch conversion.
 Expansion beyond 1,048,576 events per map raises `MemoryError` rather than
 silently dropping events.
 

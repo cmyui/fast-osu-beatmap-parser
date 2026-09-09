@@ -90,7 +90,8 @@ class SliderEventType(IntEnum):
     HEAD = 0
     TICK = 1
     REPEAT = 2
-    TAIL = 3
+    LEGACY_LAST_TICK = 3
+    TAIL = 4
 
 
 @dataclass(slots=True)
