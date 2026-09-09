@@ -92,10 +92,10 @@ inline void calculate_legacy_stacks(Beatmap& map, float threshold) {
   }
 }
 
-inline bool apply_stacking(Beatmap& map, Arena* arena) {
+inline bool apply_stacking(Beatmap& map, Arena* result_arena) {
   if (map.mode != 0 || map.hit_objects.empty())
     return true;
-  auto* stacking = arena_push_array<Stacking>(arena, map.hit_objects.size());
+  auto* stacking = arena_push_array<Stacking>(result_arena, map.hit_objects.size());
   if (!stacking)
     return false;
   std::fill_n(stacking, map.hit_objects.size(), Stacking{});

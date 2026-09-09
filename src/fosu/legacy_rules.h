@@ -7,9 +7,9 @@ namespace fosu::internal {
 
 // The parsing engines do not allocate. Only an out-of-order map needs this
 // temporary merge buffer; equal timestamps retain their original input order.
-inline bool sort_hit_objects(std::span<HitObject> objects, Arena* arena) {
-  const size_t checkpoint = arena_pos(arena);
-  auto* scratch = arena_push_array<HitObject>(arena, objects.size());
+inline bool sort_hit_objects(std::span<HitObject> objects, Arena* scratch_arena) {
+  const size_t checkpoint = arena_pos(scratch_arena);
+  auto* scratch = arena_push_array<HitObject>(scratch_arena, objects.size());
   if (!scratch)
     return false;
   auto* source = objects.data();
@@ -27,16 +27,16 @@ inline bool sort_hit_objects(std::span<HitObject> objects, Arena* arena) {
   }
   if (source != objects.data())
     std::memcpy(objects.data(), source, objects.size_bytes());
-  arena_pop_to(arena, checkpoint);
+  arena_pop_to(scratch_arena, checkpoint);
   return true;
 }
 
-inline bool apply_legacy_rules(Beatmap& map, Arena* arena) {
+inline bool apply_legacy_rules(Beatmap& map, Arena* scratch_arena) {
   const bool ordered = std::is_sorted(map.hit_objects.begin(), map.hit_objects.end(),
                                       [](const HitObject& a, const HitObject& b) {
                                         return a.time < b.time;
                                       });
-  if (!ordered && !sort_hit_objects(map.hit_objects, arena))
+  if (!ordered && !sort_hit_objects(map.hit_objects, scratch_arena))
     return false;
 
   // Breaks are sparse. Find the first later object without another full walk

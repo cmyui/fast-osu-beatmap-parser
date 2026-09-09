@@ -21,12 +21,13 @@ struct SliderTiming {
 };
 
 inline bool set_slider_end_times(Beatmap& map,
-                                 Arena* arena,
+                                 Arena* scratch_arena,
                                  std::span<SliderTiming> timings = {}) {
   if (map.sliders.empty())
     return true;
-  const auto temp = temp_begin(arena);
-  auto* changes = arena_push_array<SliderTimingChange>(arena, map.timing_points.size());
+  const auto temp = temp_begin(scratch_arena);
+  auto* changes =
+      arena_push_array<SliderTimingChange>(scratch_arena, map.timing_points.size());
   if (!changes && !map.timing_points.empty())
     return false;
   size_t count = 0;
@@ -112,7 +113,7 @@ inline bool set_slider_end_times(Beatmap& map,
                         : slider_distance(object, slider,
                                           map.slider_points.subspan(slider.point_begin,
                                                                     slider.point_count),
-                                          arena);
+                                          scratch_arena);
     if (!distance) {
       temp_end(temp);
       return false;
