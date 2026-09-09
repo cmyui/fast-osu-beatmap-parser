@@ -33,8 +33,8 @@ class Reader:
 
 
 def decode(data: bytes) -> dict[str, Any]:
-    if len(data) < 36 or data[:8] != b"FOSUDMP7":
-        raise ValueError("not a FOSUDMP7 stream")
+    if len(data) < 36 or data[:8] != b"FOSUDMP8":
+        raise ValueError("not a FOSUDMP8 stream")
     trailer_size = struct.unpack("<Q", data[-8:])[0]
     start = len(data) - 8 - trailer_size
     if start < 8:
@@ -103,10 +103,7 @@ def decode(data: bytes) -> dict[str, Any]:
         hit_object: dict[str, Any] = {}
         reader.fields(hit_object, "i", "x y")
         reader.fields(hit_object, "I", "type hitsound")
-        reader.fields(hit_object, "d", "time")
-        calculated = reader.value("B")
-        end_time = reader.value("d")
-        hit_object["end_time"] = end_time if calculated else "NOT_CALCULATED"
+        reader.fields(hit_object, "d", "time end_time")
         reader.fields(hit_object, "I", "slider")
         reader.fields(hit_object, "B", "new_combo combo_skip")
         sample_size = reader.value("I")

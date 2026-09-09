@@ -89,7 +89,7 @@ inline bool parse_hitobject_details(Beatmap& beatmap,
       const auto details = parse_circle_details(p, end);
       if (!details)
         return false;
-      object.end_time = kNotCalculated;
+      object.end_time = 0;
       object.hit_sample = details->hit_sample;
       return true;
     }
@@ -155,17 +155,15 @@ inline HitObject normalize_hitobject(HitObject object,
         classify_hitobject_kind(beatmap.hit_objects[preceding_count - 1].type) ==
             HitObjectKind::Spinner;
     object.combo_skip = explicit_combo ? (object.type >> 4) & 7 : 0;
-    object.end_time = object.is_circle() ? EndTime{object.time} : EndTime{kNotCalculated};
+    object.end_time = object.is_circle() ? object.time : 0;
   } else if (object.is_spinner()) {
     object.new_combo = explicit_combo;
     object.x = 256;
     object.y = 192;
-    object.end_time =
-        std::max(object.time, *std::get_if<double>(&object.end_time) + offset);
+    object.end_time = std::max(object.time, object.end_time + offset);
   } else {
     // Legacy holds clamp against the offset start before offsetting the end.
-    object.end_time =
-        std::max(object.time, *std::get_if<double>(&object.end_time)) + offset;
+    object.end_time = std::max(object.time, object.end_time) + offset;
   }
   return object;
 }

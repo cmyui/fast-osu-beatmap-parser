@@ -2,14 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum, IntEnum, IntFlag
-from typing import ClassVar, Final, Literal, TypeAlias
-
-
-class CalculationState(Enum):
-    NOT_CALCULATED = "NOT_CALCULATED"
-
-
-NOT_CALCULATED: Final = CalculationState.NOT_CALCULATED
+from typing import ClassVar, TypeAlias
 
 
 class GameMode(IntEnum):
@@ -70,7 +63,7 @@ class Circle(_HitObject):
 
 @dataclass(slots=True, kw_only=True)
 class Slider(_HitObject):
-    end_time: float | Literal[CalculationState.NOT_CALCULATED]
+    end_time: float
     slides: int
     curve_type: CurveType
     length: float

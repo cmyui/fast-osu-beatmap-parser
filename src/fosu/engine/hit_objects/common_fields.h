@@ -60,7 +60,7 @@ inline void initialize_hitobject(HitObject& object, const HitObjectPrefix& prefi
   object.time = prefix.time;
   object.type = prefix.type;
   object.hitsound = prefix.hit_sound;
-  object.end_time = kNotCalculated;
+  object.end_time = 0;
   object.slider = HitObject::kNoSlider;
 }
 

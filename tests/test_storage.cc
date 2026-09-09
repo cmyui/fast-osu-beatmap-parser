@@ -332,19 +332,16 @@ int main() {
     const std::string input = "[HitObjects]\n0,0,1000,2,0,L|100:0,1,140\n";
     const auto& skipped =
         require_parse(parser.parse(input, {.calculate_slider_end_times = false}));
-    CHECK(std::get<fosu::CalculationState>(skipped.hit_objects[0].end_time) ==
-          fosu::kNotCalculated);
+    CHECK_EQ(skipped.hit_objects[0].end_time, 0);
     auto* destination = fosu::arena_alloc();
     CHECK(destination);
     auto copy = skipped.copy(*destination);
     CHECK(copy);
-    CHECK(std::holds_alternative<fosu::CalculationState>(
-        require_parse(parser.parse(input)).hit_objects[0].end_time));
+    CHECK_EQ(require_parse(parser.parse(input)).hit_objects[0].end_time, 0);
     const auto& calculated =
         require_parse(parser.parse(input, {.calculate_slider_end_times = true}));
-    CHECK(std::holds_alternative<double>(calculated.hit_objects[0].end_time));
-    CHECK(std::get<fosu::CalculationState>(copy.value().hit_objects[0].end_time) ==
-          fosu::kNotCalculated);
+    CHECK(calculated.hit_objects[0].end_time > calculated.hit_objects[0].time);
+    CHECK_EQ(copy.value().hit_objects[0].end_time, 0);
     fosu::arena_release(destination);
   }
   test_parser_prepares_engine_input_and_output();

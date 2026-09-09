@@ -4,17 +4,12 @@
 #include <cstring>
 #include <span>
 #include <string_view>
-#include <variant>
 
 #include <fosu/arena.h>
 #include <fosu/beatmap_header.h>
 #include <fosu/result.h>
 
 namespace fosu {
-
-enum class CalculationState : uint8_t { NotCalculated };
-inline constexpr auto kNotCalculated = CalculationState::NotCalculated;
-using EndTime = std::variant<double, CalculationState>;
 
 // Field order of the first 16 bytes is load-bearing: the AVX2 hitobject
 // fast path stores its result vector directly over {x, y, type, hitsound}.
@@ -24,8 +19,8 @@ struct HitObject {
   uint32_t type;
   uint32_t hitsound;
   double time;
-  EndTime end_time;  // milliseconds, or kNotCalculated for an opted-out slider
-  uint32_t slider;   // index into Beatmap::sliders, or kNoSlider
+  double end_time;  // milliseconds; 0 for sliders unless calculation is requested
+  uint32_t slider;  // index into Beatmap::sliders, or kNoSlider
   bool new_combo;
   uint8_t combo_skip;
   std::string_view hit_sample;

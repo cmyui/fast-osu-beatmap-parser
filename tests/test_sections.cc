@@ -130,7 +130,7 @@ static void test_all_sections() {
 
     const auto& sp = bm.hit_objects[3];
     CHECK(sp.is_spinner());
-    CHECK_EQ(std::get<double>(sp.end_time), 15354);
+    CHECK_EQ(sp.end_time, 15354);
 
     const auto& sl2 = bm.hit_objects[4];
     CHECK(sl2.is_slider());
@@ -204,7 +204,7 @@ static void test_mania_hold() {
   CHECK_EQ(bm.hit_objects.size(), 1u);
   const auto& h = bm.hit_objects[0];
   CHECK(h.is_hold());
-  CHECK_EQ(std::get<double>(h.end_time), 16999);
+  CHECK_EQ(h.end_time, 16999);
   CHECK(h.hit_sample == "0:0:0:0:");
 }
 
@@ -329,7 +329,7 @@ static void test_hitobject_selection_skips_preceding_sections() {
     CHECK_EQ(bm.hit_objects[0].time, 3000);
     CHECK_EQ(bm.hit_objects[0].hitsound, 2u);
     CHECK(bm.hit_objects[1].is_spinner());
-    CHECK_EQ(std::get<double>(bm.hit_objects[1].end_time), 5000);
+    CHECK_EQ(bm.hit_objects[1].end_time, 5000);
   }
 }
 
@@ -696,11 +696,11 @@ static void test_legacy_rules() {
     CHECK_EQ(map.breaks[0].end, 174);
     const auto objects = map.hit_objects;
     CHECK_EQ(objects[0].time, 24);
-    CHECK_EQ(std::get<double>(objects[0].end_time), 24);
+    CHECK_EQ(objects[0].end_time, 24);
     CHECK_EQ(objects[0].x, 256);
     CHECK_EQ(objects[0].y, 192);
     CHECK_EQ(objects[1].time, 44);
-    CHECK_EQ(std::get<double>(objects[1].end_time), 68);
+    CHECK_EQ(objects[1].end_time, 68);
     CHECK(objects[2].new_combo);  // Slider follows spinner in source order.
     CHECK_EQ(map.sliders[objects[2].slider].slides, 1);
     CHECK_EQ(objects[3].x, 70);  // Equal timestamps preserve input order.

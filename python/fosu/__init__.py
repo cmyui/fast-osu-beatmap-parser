@@ -14,8 +14,6 @@ else:
 from . import _core
 from ._core import backend as backend
 from ._model import (
-    NOT_CALCULATED,
-    CalculationState,
     Beatmap,
     Break,
     Circle,
@@ -33,8 +31,6 @@ from ._model import (
 )
 
 __all__ = [
-    "NOT_CALCULATED",
-    "CalculationState",
     "Beatmap",
     "Break",
     "Circle",

@@ -129,8 +129,7 @@ int main() {
     assert(m.timing_points.size() == 2 && std::isnan(m.timing_points[1].beat_length));
     assert(!m.timing_points[1].uninherited);
     assert(m.hit_objects.size() == 3 && m.hit_objects[0].x == 256);
-    assert(m.hit_objects[0].time == 1000.5 &&
-           std::get<double>(m.hit_objects[1].end_time) == 3000.75);
+    assert(m.hit_objects[0].time == 1000.5 && m.hit_objects[1].end_time == 3000.75);
     assert(m.sliders[0].length == 250 && m.slider_points[0].x == 1);
     assert(m.breaks.size() == 1 && m.breaks[0].start == 1.25 && m.breaks[0].end == 9.75);
   }

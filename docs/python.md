@@ -58,10 +58,11 @@ Shared fields use C++ names. Important Python-specific behavior:
 
 - `hit_objects` contains `Circle`, `Slider`, `Spinner`, or `HoldNote`, in
   stable timestamp order. Narrow the union with `isinstance`.
-- Times are milliseconds. Slider endpoints contain `fosu.NOT_CALCULATED` by
+- Times are milliseconds. Slider endpoints are `0` by
   default. Pass `calculate_slider_end_times=True` to `parse` or `parse_file` to
   calculate them using curve distance, timing and repeats.
-  Check with `is`; accessing the field never computes or caches anything.
+  Do not use slider endpoints unless calculation was requested.
+  Accessing the field never computes or caches anything.
   Other object types still have numeric endpoints. Omitted sections use their default settings.
   Hit samples and slider edge fields remain text.
 - Slider `control_points` includes the head position, unlike the native point

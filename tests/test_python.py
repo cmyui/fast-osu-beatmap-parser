@@ -12,7 +12,7 @@ from copy import deepcopy
 from dataclasses import asdict, fields, is_dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Literal, get_type_hints
+from typing import get_type_hints
 
 import fosu
 import pytest
@@ -113,14 +113,14 @@ def test_slider_end_time_opt_out(tmp_path):
     path.write_bytes(data)
     skipped = fosu.parse(data, calculate_slider_end_times=False)
     assert skipped == fosu.parse_file(path, calculate_slider_end_times=False)
-    assert [h.end_time for h in skipped.hit_objects] == [1000, fosu.NOT_CALCULATED, 4000, 6000]
+    assert [h.end_time for h in skipped.hit_objects] == [1000, 0, 4000, 6000]
     assert fosu.parse(data) == skipped
     assert fosu.parse_file(path) == skipped
-    assert isinstance(fosu.parse(data, calculate_slider_end_times=True).hit_objects[1].end_time, float)
-    assert isinstance(fosu.parse_file(path, calculate_slider_end_times=True).hit_objects[1].end_time, float)
+    assert fosu.parse(data, calculate_slider_end_times=True).hit_objects[1].end_time > 2000
+    assert fosu.parse_file(path, calculate_slider_end_times=True).hit_objects[1].end_time > 2000
     for copied in (skipped, deepcopy(skipped), pickle.loads(pickle.dumps(skipped))):
-        assert copied.hit_objects[1].end_time is fosu.NOT_CALCULATED
-    assert asdict(skipped)["hit_objects"][1]["end_time"] is fosu.NOT_CALCULATED
+        assert copied.hit_objects[1].end_time == 0
+    assert asdict(skipped)["hit_objects"][1]["end_time"] == 0
 
 
 def test_fractional_times_and_malformed_numeric_fields():
@@ -141,7 +141,7 @@ def test_fractional_times_and_malformed_numeric_fields():
     assert math.isnan(bm.timing_points[1].beat_length)
     assert not bm.timing_points[1].uninherited
     assert [h.time for h in bm.hit_objects] == [1000.5, 2000.25, 4000.5, 6000]
-    assert [h.end_time for h in bm.hit_objects] == [1000.5, 3000.75, 5000.75, fosu.NOT_CALCULATED]
+    assert [h.end_time for h in bm.hit_objects] == [1000.5, 3000.75, 5000.75, 0]
     assert bm.hit_objects[0].x == 256
     assert bm.hit_objects[3].length == 250
     assert [(p.x, p.y) for p in bm.hit_objects[3].control_points[1:]] == [(1, 2)]
@@ -493,7 +493,7 @@ def test_all_fields_are_detached_python_values():
 def test_runtime_annotations():
     assert get_type_hints(fosu.parse)["return"] is fosu.Beatmap
     assert get_type_hints(fosu.parse_file)["return"] is fosu.Beatmap
-    assert get_type_hints(fosu.Slider)["end_time"] == float | Literal[fosu.CalculationState.NOT_CALCULATED]
+    assert get_type_hints(fosu.Slider)["end_time"] == float
 
 
 def test_public_typing_contract():
