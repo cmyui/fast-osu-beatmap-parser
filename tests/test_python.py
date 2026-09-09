@@ -92,16 +92,16 @@ def test_slider_end_time_uses_effective_distance(curve, length, distance):
         "[TimingPoints]\n0,500\n0,-50,4,0,0,100,0,0\n"
         f"[HitObjects]\n0,0,1000,2,0,{curve},2{tail}\n"
     ).encode()
-    slider = fosu.parse(data).hit_objects[0]
+    slider = fosu.parse(data, calculate_slider_end_times=True).hit_objects[0]
     assert isinstance(slider, fosu.Slider)
     assert slider.end_time == 1000 + 2 * distance / (200 / 500)
 
 
 def test_slider_end_time_without_timing_sections():
     data = b"[Difficulty]\nSliderMultiplier:1\n[TimingPoints]\n0,500\n[HitObjects]\n0,0,0,2,0,L|100:0,1,140\n"
-    assert fosu.parse(data).hit_objects[0].end_time == 700
+    assert fosu.parse(data, calculate_slider_end_times=True).hit_objects[0].end_time == 700
     # Selected sections alone determine the result; omitted settings use defaults.
-    assert fosu.parse(data, sections=fosu.Sections.HIT_OBJECTS).hit_objects[0].end_time == pytest.approx(1000)
+    assert fosu.parse(data, sections=fosu.Sections.HIT_OBJECTS, calculate_slider_end_times=True).hit_objects[0].end_time == pytest.approx(1000)
 
 
 def test_slider_end_time_opt_out(tmp_path):
@@ -114,8 +114,10 @@ def test_slider_end_time_opt_out(tmp_path):
     skipped = fosu.parse(data, calculate_slider_end_times=False)
     assert skipped == fosu.parse_file(path, calculate_slider_end_times=False)
     assert [h.end_time for h in skipped.hit_objects] == [1000, fosu.NOT_CALCULATED, 4000, 6000]
-    assert isinstance(fosu.parse(data).hit_objects[1].end_time, float)
-    assert isinstance(fosu.parse_file(path).hit_objects[1].end_time, float)
+    assert fosu.parse(data) == skipped
+    assert fosu.parse_file(path) == skipped
+    assert isinstance(fosu.parse(data, calculate_slider_end_times=True).hit_objects[1].end_time, float)
+    assert isinstance(fosu.parse_file(path, calculate_slider_end_times=True).hit_objects[1].end_time, float)
     for copied in (skipped, deepcopy(skipped), pickle.loads(pickle.dumps(skipped))):
         assert copied.hit_objects[1].end_time is fosu.NOT_CALCULATED
     assert asdict(skipped)["hit_objects"][1]["end_time"] is fosu.NOT_CALCULATED
@@ -139,7 +141,7 @@ def test_fractional_times_and_malformed_numeric_fields():
     assert math.isnan(bm.timing_points[1].beat_length)
     assert not bm.timing_points[1].uninherited
     assert [h.time for h in bm.hit_objects] == [1000.5, 2000.25, 4000.5, 6000]
-    assert [h.end_time for h in bm.hit_objects] == [1000.5, 3000.75, 5000.75, 6000]
+    assert [h.end_time for h in bm.hit_objects] == [1000.5, 3000.75, 5000.75, fosu.NOT_CALCULATED]
     assert bm.hit_objects[0].x == 256
     assert bm.hit_objects[3].length == 250
     assert [(p.x, p.y) for p in bm.hit_objects[3].control_points[1:]] == [(1, 2)]
@@ -163,8 +165,8 @@ def test_complete_map(tmp_path):
     ).encode()
     path = tmp_path / "日本語.osu"
     path.write_bytes(data)
-    b = fosu.parse(data)
-    assert b == fosu.parse_file(path) == fosu.parse_file(os.fsencode(path))
+    b = fosu.parse(data, calculate_slider_end_times=True)
+    assert b == fosu.parse_file(path, calculate_slider_end_times=True) == fosu.parse_file(os.fsencode(path), calculate_slider_end_times=True)
     assert (b.title, b.artist, b.version, b.ar, b.cs) == (
         "日本語",
         "artist",

@@ -338,7 +338,10 @@ int main() {
     CHECK(destination);
     auto copy = skipped.copy(*destination);
     CHECK(copy);
-    const auto& calculated = require_parse(parser.parse(input));
+    CHECK(std::holds_alternative<fosu::CalculationState>(
+        require_parse(parser.parse(input)).hit_objects[0].end_time));
+    const auto& calculated =
+        require_parse(parser.parse(input, {.calculate_slider_end_times = true}));
     CHECK(std::holds_alternative<double>(calculated.hit_objects[0].end_time));
     CHECK(std::get<fosu::CalculationState>(copy.value().hit_objects[0].end_time) ==
           fosu::kNotCalculated);

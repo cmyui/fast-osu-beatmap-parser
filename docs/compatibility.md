@@ -11,9 +11,9 @@ retained separately from effective combo flags.
 
 - Object start times, spinner/hold end times and break endpoints are double
   milliseconds; fractional values are preserved. Circle `end_time` equals its
-  start. Slider `end_time` is calculated eagerly by default in both interfaces,
-  including repeats and degenerate-path handling. Disabling
-  `calculate_slider_end_times` produces an explicit not-calculated state instead.
+  start. Slider `end_time` has an explicit not-calculated state by default in
+  both interfaces. Enabling `calculate_slider_end_times` calculates it eagerly,
+  including repeats and degenerate-path handling.
   Spinner, hold and break endpoints follow the
   official clamps; spinners are centred at (256, 192). Pre-v5 timestamps use
   the official +24 ms adjustment, including its distinct hold-end ordering.

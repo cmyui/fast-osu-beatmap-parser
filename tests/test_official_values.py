@@ -76,7 +76,7 @@ def main():
                 gaps.append({"file": str(path), "reference_error": expected.get("error"),
                              "projection_errors": expected.get("projection_errors")})
                 continue
-            beatmap = fosu.parse_file(path)
+            beatmap = fosu.parse_file(path, calculate_slider_end_times=True)
             by_mode[int(beatmap.mode)] += 1
             actual = value(beatmap)
             for obj, record in zip(beatmap.hit_objects, actual["hit_objects"]):

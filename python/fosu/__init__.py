@@ -74,7 +74,7 @@ def parse(
     data: Buffer,
     *,
     sections: Sections = Sections.ALL,
-    calculate_slider_end_times: bool = True,
+    calculate_slider_end_times: bool = False,
 ) -> Beatmap:
     """Parse selected sections into detached values, copying mutable buffers."""
     if not isinstance(data, bytes):
@@ -89,7 +89,7 @@ def parse_file(
     path: str | bytes | PathLike[str] | PathLike[bytes],
     *,
     sections: Sections = Sections.ALL,
-    calculate_slider_end_times: bool = True,
+    calculate_slider_end_times: bool = False,
 ) -> Beatmap:
     """Read selected sections; raise OSError on file errors."""
     return _core.parse_file(path, sections, calculate_slider_end_times)

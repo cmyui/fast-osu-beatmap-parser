@@ -29,8 +29,8 @@ int main(int argc, char** argv) {
       std::cerr << "input read failed at file " << files << '\n';
       return 1;
     }
-    auto scalar = scalar_parser.parse(input);
-    auto simd = simd_parser.parse(input);
+    auto scalar = scalar_parser.parse(input, {.calculate_slider_end_times = true});
+    auto simd = simd_parser.parse(input, {.calculate_slider_end_times = true});
     if (!scalar || !simd) {
       std::cerr << "parse failed at file " << files << '\n';
       return 1;
