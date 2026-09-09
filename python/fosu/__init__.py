@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from enum import IntFlag
 from os import PathLike
 
 if sys.version_info >= (3, 12):
@@ -41,6 +42,7 @@ __all__ = [
     "ParseStats",
     "Point",
     "SampleSet",
+    "Sections",
     "Slider",
     "Spinner",
     "TimingPoint",
@@ -50,16 +52,34 @@ __all__ = [
 ]
 
 
-def parse(data: Buffer) -> Beatmap:
-    """Parse a complete beatmap into detached values, copying mutable buffers."""
+class Sections(IntFlag):
+    """Sections to parse; combine members with ``|``."""
+
+    GENERAL = 1 << 1
+    EDITOR = 1 << 2
+    METADATA = 1 << 3
+    DIFFICULTY = 1 << 4
+    EVENTS = 1 << 5
+    TIMING_POINTS = 1 << 6
+    COLOURS = 1 << 7
+    HIT_OBJECTS = 1 << 8
+    ALL = 0x1FE
+
+
+def parse(data: Buffer, *, sections: Sections = Sections.ALL) -> Beatmap:
+    """Parse selected sections into detached values, copying mutable buffers."""
     if not isinstance(data, bytes):
         with memoryview(data) as view:
             if view.nbytes > 64 * 1024 * 1024:
                 raise ValueError("beatmap input exceeds the supported size")
             data = view.tobytes()
-    return _core.parse(data)
+    return _core.parse(data, sections)
 
 
-def parse_file(path: str | bytes | PathLike[str] | PathLike[bytes]) -> Beatmap:
-    """Read a complete beatmap; raise OSError on file errors."""
-    return _core.parse_file(path)
+def parse_file(
+    path: str | bytes | PathLike[str] | PathLike[bytes],
+    *,
+    sections: Sections = Sections.ALL,
+) -> Beatmap:
+    """Read selected sections; raise OSError on file errors."""
+    return _core.parse_file(path, sections)

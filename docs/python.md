@@ -57,9 +57,23 @@ allocation failure raises `MemoryError`. Native parsing releases the GIL;
 constructing Python objects holds it. Separate calls return independent results
 and may be made from multiple threads. No parsed beatmaps are cached.
 
-Both functions parse every supported section. Absent sections have the native
-parser's defaults, including empty lists for absent record sections. The C++
-and C APIs offer section selection for applications needing that boundary.
+Both functions default to every supported section. Select a subset with the
+keyword-only `sections` argument:
+
+```python
+listing = fosu.parse_file(
+    "map.osu",
+    sections=fosu.Sections.METADATA | fosu.Sections.DIFFICULTY,
+)
+```
+
+`Sections` includes `GENERAL`, `EDITOR`, `METADATA`, `DIFFICULTY`,
+`EVENTS`, `TIMING_POINTS`, `COLOURS`, `HIT_OBJECTS`, and `ALL`.
+Absent or skipped sections retain native defaults and empty record lists;
+`Sections(0)` selects none. Unsupported bits raise `ValueError`.
+Include `GENERAL` when mode-dependent difficulty rules matter (for example,
+mania's CircleSize range), and `EVENTS` for hitobject combo rules based on breaks.
+Only selected sections contribute malformed-line counts.
 Malformed records are skipped and counted according to the
 [parser contract](compatibility.md); success does not certify playability.
 
@@ -181,7 +195,7 @@ them explicitly from Python values; that conversion copies data.
 
 `fosu.backend` reports `"avx2"`, `"neon"` or `"scalar"`. Set `FOSU_BACKEND` before
 import to request `auto`, `avx2`, `neon` or `scalar`. Unsupported requests raise
-`ImportError`. `FOSU_FORCE_SCALAR=1` is a shorthand when `FOSU_BACKEND` is unset.
+`ImportError`.
 Selection stays fixed for that loaded extension. Linux AVX2 remains tuned for
 Zen 4. C++ callers control header-only compilation separately.
 
@@ -208,7 +222,7 @@ builds.
 python -m pip install -e '.[test]'
 python -m mypy --config-file pyproject.toml
 python -m pytest tests/test_python.py
-FOSU_FORCE_SCALAR=1 python -m pytest tests/test_python.py
+FOSU_BACKEND=scalar python -m pytest tests/test_python.py
 ```
 
 Pre-commit and CI check the shipped package and consumer examples with the same

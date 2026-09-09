@@ -49,5 +49,5 @@ jobs:
           path: wheelhouse
       - run: python -m pip install wheelhouse/*.whl pytest mypy==2.3.1
       - run: python -m pytest tests/test_python.py
-      - run: FOSU_FORCE_SCALAR=1 python -m pytest tests/test_python.py
+      - run: FOSU_BACKEND=scalar python -m pytest tests/test_python.py
       - run: python tests/test_binary_hardening.py

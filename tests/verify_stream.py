@@ -6,8 +6,7 @@ import subprocess
 import sys
 import struct
 import json
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "oneshot"))
-from decode import decode
+from support.decode import decode
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("reference", type=pathlib.Path)

@@ -91,12 +91,10 @@ not mixed into this comparison.
 | Interface | Result | Use |
 |---|---|---|
 | [C++ library](docs/library.md) | Parser-owned `Beatmap` view | Direct parsing in a C++ application |
-| [C API](docs/c-api.md) | Handle-owned parser and result view | C and other FFI callers |
 | [Python package](docs/python.md) | Detached `Beatmap` dataclass and lists | Ordinary mutable Python values |
-| [One-shot executable](oneshot/README.md) | Complete binary stream on stdout | Process-lifetime benchmark on Linux/Zen 4 |
 
-All native representations are checked on the same fixed corpus of **10,000
-ranked/approved maps, 402,593,897 bytes**. Comparisons cover strings, raw float
+Native representations are checked against a fixed all-mode compatibility
+corpus. Comparisons cover strings, raw float
 bits, every pool entry/index and parser counters. Prior releases are regression
 baselines; intentional correctness fixes are accounted for separately. See
 [compatibility](docs/compatibility.md) for the parsing contract and independent
@@ -108,7 +106,7 @@ cmake --build build/native --target check -j4  # library and native checks
 ```
 
 See [builds and checks](docs/build.md) for compiler/ISA profiles, sanitizers,
-benchmarks and the optional Linux one-shot executable.
+and benchmarks.
 
 ## Implementation
 
@@ -120,12 +118,12 @@ key/type tables.
 
 Input size gives safe upper bounds for fixed arrays without a second scan. The
 parsing engine builds each record as a local value, then copies it into contiguous
-arena memory owned by the parser. C++, C and Python share the same `Beatmap`
-model; the C boundary converts its result once to the versioned ABI records.
+arena memory owned by the parser. Python converts the native `Beatmap` into
+detached dataclasses and lists before returning.
 One inactive parser arena is retained for cheap fresh-parser reuse.
 
 The public `Parser` prepares input, allocates arrays and owns their lifetime.
-One engine call interprets the complete document. C/Python builds keep the
+One engine call interprets the selected sections. Compiled builds keep the
 scalar engine in the core and load only the selected AVX2 or NEON library;
 header-only builds select their engine at compile time.
 
@@ -144,8 +142,8 @@ reads; `Parser` copies inputs into owned storage with **128 readable zero bytes
 after the logical end**. See the
 [full input contract](docs/compatibility.md) before integrating a consumer.
 The compiled library and Python package select AVX2 on supported x86-64 CPUs
-or NEON on AArch64, with scalar fallback. Header-only C++ uses the caller’s compile flags;
-the one-shot binary targets Zen 4. Measurements are
+or NEON on AArch64, with scalar fallback. Header-only C++ uses the caller’s compile flags.
+Measurements are
 bounded to the documented corpus and host; see [performance](docs/performance.md).
 
 The project concept and original SIMD hitobject prototype are by

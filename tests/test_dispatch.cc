@@ -1,5 +1,6 @@
-#include <fosu/bindings/c_api.h>
 #include <fosu/engine/runtime/cpu_features.h>
+#include <fosu/parser.h>
+#include <fosu/runtime.h>
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
@@ -29,35 +30,44 @@ int main(int argc, char** argv) {
   assert(argc == 2);
   const char* requested = argv[1];
   setenv("FOSU_BACKEND", requested, 1);
-  const bool available = !strcmp(requested, "auto") || fosu_backend_available(requested);
-  assert(!fosu_backend_available(nullptr) && !fosu_backend_available("unknown"));
-  // Race the first selection and allocation; all handles must retain one ABI.
+  bool avx2 = false, neon = false;
+#ifdef FOSU_TEST_avx2
+  avx2 = host_supports_avx2();
+#endif
+#ifdef FOSU_TEST_neon
+  neon = host_supports_neon();
+#endif
+  const bool available = !strcmp(requested, "auto") || !strcmp(requested, "scalar") ||
+                         (!strcmp(requested, "avx2") && avx2) ||
+                         (!strcmp(requested, "neon") && neon);
+  // Race the first selection and allocation; all callers must retain one engine.
   std::vector<std::thread> threads;
   for (int i = 0; i < 8; ++i)
     threads.emplace_back([&] {
-      auto* h = fosu_new();
-      if (!available) {
-        assert(!h && !fosu_backend_name());
-        assert(fosu_parse(nullptr, nullptr, 0, FOSU_ALL) == FOSU_INVALID_ARGUMENT);
-        fosu_free(nullptr);
+      const auto* engine = fosu::runtime_engine();
+      assert(bool(engine) == available);
+      if (!engine) {
         return;
       }
-      assert(h);
-      const char* expected = !strcmp(requested, "auto")
-                                 ? (fosu_backend_available("avx2")   ? "avx2"
-                                    : fosu_backend_available("neon") ? "neon"
-                                                                     : "scalar")
-                                 : requested;
-      assert(!strcmp(fosu_backend_name(), expected));
+      if (!strcmp(requested, "auto"))
+        assert(engine->kind == (avx2   ? fosu::EngineKind::Avx2
+                                : neon ? fosu::EngineKind::Neon
+                                       : fosu::EngineKind::Scalar));
+      if (!strcmp(requested, "scalar"))
+        assert(engine->kind == fosu::EngineKind::Scalar);
+      if (!strcmp(requested, "avx2"))
+        assert(engine->kind == fosu::EngineKind::Avx2);
+      if (!strcmp(requested, "neon"))
+        assert(engine->kind == fosu::EngineKind::Neon);
+      fosu::Parser parser(*engine);
       constexpr char input[] = "[Metadata]\nTitle:dispatch\n[HitObjects]\n1,2,3,1,0\n";
-      assert(fosu_parse(h, input, sizeof(input) - 1, FOSU_ALL) == FOSU_OK);
-      const auto* v = fosu_get_view(h);
-      assert(v && v->hit_object_count == 1 && v->hit_objects[0].x == 1);
-      fosu_free(h);
+      auto result = parser.parse(input, sizeof(input) - 1);
+      assert(result && result.value()->hit_objects.size() == 1);
+      assert(result.value()->hit_objects[0].x == 1);
     });
   for (auto& t : threads)
     t.join();
-  const char* before = fosu_backend_name();
+  const auto* before = fosu::runtime_engine();
   setenv("FOSU_BACKEND", "unknown", 1);
-  assert(before == fosu_backend_name());
+  assert(before == fosu::runtime_engine());
 }

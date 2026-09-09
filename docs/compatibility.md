@@ -75,7 +75,7 @@ rules using only the selected data; omitted events cannot contribute breaks,
 and omitted General metadata leaves the mode at its default.
 
 All entry points accept at most **64 MiB** of source bytes. Python rejects
-larger inputs with `ValueError`; the C ABI returns `FOSU_INVALID_ARGUMENT`.
+larger inputs with `ValueError`; C++ returns `ErrorCode::InputTooLarge`.
 C++ `Parser::parse` and `Parser::parse_file` return `ErrorCode::InputTooLarge`;
 `make_padded` throws `std::length_error`, and `read_into` returns failure with
 `errno=EFBIG`. The
@@ -127,7 +127,7 @@ with .NET 8 and an interpreter with fosu installed:
 ```sh
 sh tests/reference/official/build.sh
 python tests/test_official.py
-FOSU_FORCE_SCALAR=1 python tests/test_official.py
+FOSU_BACKEND=scalar python tests/test_official.py
 python tests/test_official.py --corpus /path/to/maps --report /private/report.json
 ```
 

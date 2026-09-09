@@ -1,6 +1,6 @@
 #pragma once
-// Canonical binary dump of a parsed Beatmap: the "output" a one-shot
-// parse process must produce byte-for-byte. Little-endian fixed-width
+// Private canonical Beatmap representation for correctness comparisons.
+// Little-endian fixed-width
 // fields, strings by value (u32 length + bytes), doubles as raw bit
 // patterns, so equality means bit-identical parsing, plus the parser's
 // own path counters and the pool points no slider references (left

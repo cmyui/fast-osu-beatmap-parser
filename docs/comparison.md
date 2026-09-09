@@ -96,7 +96,7 @@ does not receive pre-parsed input or skip required native input copies.
 
 The original `8a51ae8` native-view Python calls shared a process per library/backend. Their
 order materially affects CPU-cache warmth: FOSU AVX2 resident-input means were
-84.3 and 40.3 µs in the two passes. We retain those raw measurements but **do not
+84.3 and 40.3 µs in the two passes. We **do not
 use their pooled means for the Python headline**. Non-Python workers have one
 workload each. The traversal supplement also exposes both pass means rather
 than pretending it is an isolated workload.
@@ -109,9 +109,7 @@ OsuPyParser has no published resident-input API.
 
 FOSU and rosu-pp-py rows use a two-pass measurement on the same host, interpreter
 and cohort. Other libraries retain the original measurements. Full Python
-value construction and release are included for FOSU;
-[batch evidence](../bench/comparison/results/hetzner-2026-09-08.cached-slots-python-batch.json)
-records both passes and the matching corpus fingerprint. These FOSU Python
+value construction and release are included for FOSU; these FOSU Python
 batches use source `2d010a1`; native and traversal rows below retain `d31cddf`.
 
 | Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
@@ -143,8 +141,6 @@ FOSU rows are a separate **FOSU-only** refresh with the same timer boundary,
 cohort and two-pass mean; third-party rows retain the original multi-runtime
 sweep. A smaller worker mix can change CPU-cache interference. These are not
 a simultaneous rerun of all libraries or a controlled cross-revision speedup.
-The [refresh evidence](../bench/comparison/results/hetzner-2026-09-08.fosu-refresh.json)
-retains every pass and the original cohort-report hash.
 
 | Library / interface | Mean µs/map | Pass 1 / pass 2 |
 |---|---:|---:|
@@ -231,34 +227,12 @@ Choose a parser for its output and compatibility contract first. These results
 support FOSU for fast structural parsing, not replacing another library's PP,
 gameplay or geometry functionality without implementing those missing pieces.
 
-## Reproduction and evidence
+## Reproduction
 
-Published evidence:
+See [the harness](../bench/comparison/README.md) for pinned dependencies, public
+calls, build commands, timing boundaries and report inclusion rules. Generated
+reports belong under `build/`; historical result archives are available in Git
+history. The corpus itself is not bundled.
 
-- [Current FOSU and rosu-pp-py batches](../bench/comparison/results/hetzner-2026-09-08.cached-slots-python-batch.json)
-- [Python construction experiments and full-corpus comparisons](../bench/results/2026-09-08-python-conversion.json)
-- [Current FOSU-only refresh](../bench/comparison/results/hetzner-2026-09-08.fosu-refresh.json)
-- [All 160,000 refresh records](../bench/comparison/results/hetzner-2026-09-08.fosu-refresh.samples.csv.gz)
-- [Refresh corpus manifest](../bench/comparison/results/hetzner-2026-09-08.fosu-refresh.corpus.csv.gz)
-
-Original multi-library measurements (including the obsolete FOSU native-view API):
-
-- [Python batch timings](../bench/comparison/results/hetzner-2026-09-08.python-batch.json)
-- [Full interleaved summary and coverage](../bench/comparison/results/hetzner-2026-09-08.json)
-- [All 480,000 interleaved records (CSV.gz)](../bench/comparison/results/hetzner-2026-09-08.samples.csv.gz)
-- [10,000-file corpus manifest (CSV.gz)](../bench/comparison/results/hetzner-2026-09-08.corpus.csv.gz)
-
-See [the harness](../bench/comparison/README.md) for pinned dependencies, exact
-public calls, build commands, timing boundaries and report inclusion rules.
-The checked-in summary records the corpus fingerprint, source/package versions,
-all-sample and per-pass means, full-corpus failures, count/checksum mismatches,
-and the raw-results SHA-256. A compressed CSV preserves all measured timings,
-counts and failure types, including excluded maps, without publishing local
-paths or exception messages. The corpus itself is not bundled.
-A compressed corpus manifest lists the public beatmap file IDs, sizes and
-SHA-256 hashes; it contains neither beatmap contents nor private source keys.
-
-The [FOSU-only performance measurements](performance.md) use means of
-per-map minima from immediately repeated hot parses. They answer a different
-question and must not be divided into these competitors' all-sample means to
-claim a speedup.
+The [FOSU-only measurements](performance.md) use means of per-map minima. Do
+not divide them into competitors' all-call means to claim a speedup.

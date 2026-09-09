@@ -61,10 +61,8 @@ const ParsingEngine* load_engine_library(const char* name) {
 
 const ParsingEngine* select_engine_from_environment() {
   const char* request = std::getenv("FOSU_BACKEND");
-  if (!request) {
-    const char* scalar = std::getenv("FOSU_FORCE_SCALAR");
-    request = scalar && std::strcmp(scalar, "1") == 0 ? "scalar" : FOSU_DEFAULT_BACKEND;
-  }
+  if (!request)
+    request = FOSU_DEFAULT_BACKEND;
   if (std::strcmp(request, "auto") == 0) {
     for (EngineKind kind : {EngineKind::Avx2, EngineKind::Neon}) {
       if (engine_available(kind))

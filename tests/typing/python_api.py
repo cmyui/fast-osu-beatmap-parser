@@ -7,6 +7,8 @@ import fosu
 from typing_extensions import assert_never, assert_type
 
 b = fosu.parse(b"")
+assert_type(fosu.parse(b"", sections=fosu.Sections.METADATA | fosu.Sections.DIFFICULTY), fosu.Beatmap)
+assert_type(fosu.parse_file("map.osu", sections=fosu.Sections.HIT_OBJECTS), fosu.Beatmap)
 assert_type(fosu.backend, Literal["avx2", "neon", "scalar"])
 assert_type(b, fosu.Beatmap)
 assert_type(b.tag_list, list[str])
