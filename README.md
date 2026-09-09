@@ -35,7 +35,7 @@ fosu::Beatmap& map = *parsed.value();
 
 ## Performance
 
-These are historical measurements, not benchmarks of the current revision.
+These are historical measurements, not necessarily benchmarks of the current revision.
 
 ### Python APIs
 
