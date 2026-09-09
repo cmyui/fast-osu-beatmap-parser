@@ -11,6 +11,7 @@
 #include <fosu/engine/parsing_engine.h>
 #include <fosu/io.h>
 #include <fosu/legacy_rules.h>
+#include <fosu/slider_events.h>
 #include <fosu/slider_timing.h>
 
 namespace fosu {
@@ -255,11 +256,16 @@ class Parser {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
-    if (opts.calculate_slider_paths && !internal::set_slider_paths(beatmap_, arena_)) {
+    if ((opts.calculate_slider_paths || opts.calculate_slider_events) &&
+        !internal::set_slider_paths(beatmap_, arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
-    if (opts.calculate_slider_end_times &&
+    if (opts.calculate_slider_events && !internal::set_slider_events(beatmap_, arena_)) {
+      reset_working_result();
+      return Error{ErrorCode::AllocationFailure};
+    }
+    if (opts.calculate_slider_end_times && !opts.calculate_slider_events &&
         !internal::set_slider_end_times(beatmap_, arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};

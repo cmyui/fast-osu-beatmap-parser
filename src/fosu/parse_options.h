@@ -18,5 +18,6 @@ struct ParseOptions {
   uint32_t sections = kAllSections;
   bool calculate_slider_end_times = false;
   bool calculate_slider_paths = false;
+  bool calculate_slider_events = false;
 };
 }  // namespace fosu

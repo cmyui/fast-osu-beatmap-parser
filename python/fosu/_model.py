@@ -72,6 +72,23 @@ class _HitObject:
     is_hold: ClassVar[bool] = False
 
 
+class SliderEventType(IntEnum):
+    HEAD = 0
+    TICK = 1
+    REPEAT = 2
+    TAIL = 3
+
+
+@dataclass(slots=True)
+class SliderEvent:
+    type: SliderEventType
+    time: float
+    span_index: int
+    span_start_time: float
+    path_progress: float
+    position: PathPoint
+
+
 @dataclass(slots=True, kw_only=True)
 class Circle(_HitObject):
     end_time: float
@@ -88,6 +105,7 @@ class Slider(_HitObject):
     edge_sets: str
     control_points: list[Point]
     path: SliderPath | None
+    events: list[SliderEvent]
     is_slider: ClassVar[bool] = True
 
 

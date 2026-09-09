@@ -25,6 +25,13 @@ for note in b.hit_objects:
         assert_type(note.end_time, float)
         assert_type(note.curve_type, fosu.CurveType)
         assert_type(note.control_points, list[fosu.Point])
+        assert_type(note.path, fosu.SliderPath | None)
+        assert_type(note.events, list[fosu.SliderEvent])
+        if note.path is not None:
+            assert_type(fosu.slider_position_at(note.path, 0.5), fosu.PathPoint)
+        for event in note.events:
+            assert_type(event.type, fosu.SliderEventType)
+            assert_type(event.position, fosu.PathPoint)
         note.control_points.append(fosu.Point(1, 2))
     elif isinstance(note, fosu.Circle):
         assert_type(note.end_time, float)
