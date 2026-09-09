@@ -13,7 +13,9 @@ from statistics import mean, median
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("csv", type=Path)
-parser.add_argument("--corpus-manifest", type=Path, help="Also summarize each native game mode")
+parser.add_argument(
+    "--corpus-manifest", type=Path, help="Also summarize each native game mode"
+)
 args = parser.parse_args()
 modes = {}
 if args.corpus_manifest:
@@ -31,7 +33,9 @@ with args.csv.open(newline="") as stream:
         )
         groups[(row["variant"], kind, None)][row["file"]].append(row)
         if modes:
-            groups[(row["variant"], kind, modes[Path(row["file"]).name])][row["file"]].append(row)
+            groups[(row["variant"], kind, modes[Path(row["file"]).name])][
+                row["file"]
+            ].append(row)
 if not groups:
     parser.error("no measurements")
 summaries = []

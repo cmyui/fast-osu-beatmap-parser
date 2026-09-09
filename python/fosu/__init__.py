@@ -93,7 +93,14 @@ def parse(
             if view.nbytes > 64 * 1024 * 1024:
                 raise ValueError("beatmap input exceeds the supported size")
             data = view.tobytes()
-    return _core.parse(data, sections, calculate_slider_end_times, calculate_slider_paths, calculate_slider_events, apply_stacking)
+    return _core.parse(
+        data,
+        sections,
+        calculate_slider_end_times,
+        calculate_slider_paths,
+        calculate_slider_events,
+        apply_stacking,
+    )
 
 
 def parse_file(
@@ -106,7 +113,14 @@ def parse_file(
     apply_stacking: bool = False,
 ) -> Beatmap:
     """Read selected sections; raise OSError on file errors."""
-    return _core.parse_file(path, sections, calculate_slider_end_times, calculate_slider_paths, calculate_slider_events, apply_stacking)
+    return _core.parse_file(
+        path,
+        sections,
+        calculate_slider_end_times,
+        calculate_slider_paths,
+        calculate_slider_events,
+        apply_stacking,
+    )
 
 
 def slider_position_at(path: SliderPath, progress: float) -> PathPoint:

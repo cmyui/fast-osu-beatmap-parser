@@ -1,4 +1,5 @@
 """Rotate persistent parser workers on one CPU; preserve every result as JSONL."""
+
 import argparse
 import csv
 import gzip
@@ -18,14 +19,27 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument("corpus", type=Path)
 p.add_argument("config", type=Path)
 p.add_argument("output", type=Path)
-p.add_argument("--corpus-manifest", type=Path, help="Verified per-file modes and SHA256s")
+p.add_argument(
+    "--corpus-manifest", type=Path, help="Verified per-file modes and SHA256s"
+)
 p.add_argument("--reps", type=int, default=1)
 p.add_argument("--rounds", type=int, default=2)
 p.add_argument("--limit", type=int, default=0)
 p.add_argument("--warmup", type=int, default=64)
-p.add_argument("--timeout", type=float, default=10, help="Per-request seconds; timeouts are failures, not samples")
+p.add_argument(
+    "--timeout",
+    type=float,
+    default=10,
+    help="Per-request seconds; timeouts are failures, not samples",
+)
 args = p.parse_args()
-assert args.reps > 0 and args.rounds > 0 and args.warmup >= 0 and args.limit >= 0 and args.timeout > 0
+assert (
+    args.reps > 0
+    and args.rounds > 0
+    and args.warmup >= 0
+    and args.limit >= 0
+    and args.timeout > 0
+)
 files = sorted(args.corpus.resolve().glob("*.osu"))
 assert files
 if args.limit:
@@ -50,25 +64,35 @@ for path in files:
     digest.update(path.name.encode() + b"\0" + checksum.digest())
     if args.corpus_manifest:
         entry = entries[path.name]
-        assert entry["sha256"] == checksum.hexdigest() and int(entry["bytes"]) == len(content)
+        assert entry["sha256"] == checksum.hexdigest() and int(entry["bytes"]) == len(
+            content
+        )
         modes[path.name] = int(entry["mode"])
         assert modes[path.name] in range(4)
-    manifest.append((path.name, len(content), checksum.hexdigest()) +
-                    ((modes[path.name],) if modes else ()))
+    manifest.append(
+        (path.name, len(content), checksum.hexdigest())
+        + ((modes[path.name],) if modes else ())
+    )
 args.output.parent.mkdir(parents=True, exist_ok=True)
 manifest_path = args.output.with_suffix(".corpus.csv.gz")
 metadata = {
     "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    "platform": platform.platform(), "python": platform.python_version(),
+    "platform": platform.platform(),
+    "python": platform.python_version(),
     "affinity": sorted(os.sched_getaffinity(0)),
-    "files": len(files), "bytes": sum(f.stat().st_size for f in files),
-    "corpus_sha256": digest.hexdigest(), "config": config,
-    "reps": args.reps, "rounds": args.rounds, "warmup_maps": args.warmup,
+    "files": len(files),
+    "bytes": sum(f.stat().st_size for f in files),
+    "corpus_sha256": digest.hexdigest(),
+    "config": config,
+    "reps": args.reps,
+    "rounds": args.rounds,
+    "warmup_maps": args.warmup,
     "request_timeout_seconds": args.timeout,
     "complete": False,
     "file_modes": modes,
 }
 meta_path = args.output.with_suffix(".meta.json")
+
 
 class Worker:
     def __init__(self, entry):
@@ -78,19 +102,28 @@ class Worker:
     def start(self):
         entry = self.entry
         self.process = subprocess.Popen(
-            entry["command"], env={**os.environ, **entry.get("env", {})},
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1,
+            entry["command"],
+            env={**os.environ, **entry.get("env", {})},
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+            bufsize=1,
         )
 
     def request(self, path, workload, reps):
         process = self.process
-        process.stdin.write(json.dumps({"path": str(path), "workload": workload, "reps": reps}) + "\n")
+        process.stdin.write(
+            json.dumps({"path": str(path), "workload": workload, "reps": reps}) + "\n"
+        )
         process.stdin.flush()
         if not select.select([process.stdout], [], [], args.timeout)[0]:
             self.process.kill()
             self.process.wait()
             self.start()
-            return {"error": "TimeoutError", "detail": f"{args.timeout}-second request budget exceeded; worker restarted"}
+            return {
+                "error": "TimeoutError",
+                "detail": f"{args.timeout}-second request budget exceeded; worker restarted",
+            }
         line = process.stdout.readline()
         if not line:
             code = process.wait()
@@ -113,15 +146,22 @@ class Worker:
             self.process.terminate()
             self.process.wait(timeout=5)
 
+
 workers = []
 with args.output.open("x") as out:
     try:
-        with gzip.GzipFile(filename=str(manifest_path), mode="wb", mtime=0) as compressed:
+        with gzip.GzipFile(
+            filename=str(manifest_path), mode="wb", mtime=0
+        ) as compressed:
             with io.TextIOWrapper(compressed, newline="") as destination:
                 writer = csv.writer(destination)
-                writer.writerow(("file", "bytes", "sha256") + (("mode",) if modes else ()))
+                writer.writerow(
+                    ("file", "bytes", "sha256") + (("mode",) if modes else ())
+                )
                 writer.writerows(manifest)
-        metadata["corpus_manifest_sha256"] = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+        metadata["corpus_manifest_sha256"] = hashlib.sha256(
+            manifest_path.read_bytes()
+        ).hexdigest()
         for entry in config["variants"]:
             workers.append(Worker(entry))
         # Warm every decoder before recording, including JIT compilation.
@@ -137,15 +177,23 @@ with args.output.open("x") as out:
                 for worker, kind in order[shift:] + order[:shift]:
                     result = worker.request(path, kind, args.reps)
                     record = {
-                        "round": round_id, "file": path.name, "bytes": path.stat().st_size,
-                        "variant": worker.entry["name"], "workload": kind, **result,
+                        "round": round_id,
+                        "file": path.name,
+                        "bytes": path.stat().st_size,
+                        "variant": worker.entry["name"],
+                        "workload": kind,
+                        **result,
                     }
                     if modes:
                         record["mode"] = modes[path.name]
                     out.write(json.dumps(record, allow_nan=False) + "\n")
                 if (i + 1) % 100 == 0:
                     out.flush()
-                    print(f"round {round_id + 1}: {i + 1}/{len(files)}", file=sys.stderr, flush=True)
+                    print(
+                        f"round {round_id + 1}: {i + 1}/{len(files)}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
         metadata["complete"] = True
     finally:
         metadata["finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
