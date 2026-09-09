@@ -648,7 +648,7 @@ def test_all_fields_are_detached_python_values():
 def test_runtime_annotations():
     assert get_type_hints(fosu.parse)["return"] is fosu.Beatmap
     assert get_type_hints(fosu.parse_file)["return"] is fosu.Beatmap
-    assert get_type_hints(fosu.Slider)["end_time"] == float
+    assert get_type_hints(fosu.Slider)["end_time"] is float
 
 
 def test_public_typing_contract():

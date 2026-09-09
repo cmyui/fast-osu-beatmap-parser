@@ -7,7 +7,6 @@ import argparse
 from enum import Enum
 import struct
 import subprocess
-import sys
 from pathlib import Path
 
 import fosu
