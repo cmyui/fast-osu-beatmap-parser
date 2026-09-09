@@ -18,6 +18,10 @@ constexpr uint32_t string_hash(std::string_view key) {
   return hash;
 }
 
+consteval uint32_t operator""_hash(const char* text, size_t size) {
+  return string_hash({text, size});
+}
+
 template <typename Value>
 struct StringEntry {
   std::string_view key;

@@ -79,15 +79,6 @@ inline void parse_break_event(Beatmap& bm,
   bm.breaks[break_count++] = {start, std::max(start, stop + time_offset)};
 }
 
-using EventHandler = void (*)(Beatmap&, size_t&, const char*, const char*, int);
-inline constexpr auto kEventHandlers = make_string_lookup<EventHandler>({
-    {"0", parse_background_event},
-    {"1", parse_video_event},
-    {"Video", parse_video_event},
-    {"2", parse_break_event},
-    {"Break", parse_break_event},
-});
-
 inline void parse_event_line(Beatmap& bm,
                              size_t& break_count,
                              const char* p,
@@ -106,10 +97,29 @@ inline void parse_event_line(Beatmap& bm,
   }
   const std::string_view f0{p, static_cast<size_t>(c1 - p)};
   const char* rest = c1 + 1;
-  if (const auto* handler = kEventHandlers.find(f0))
-    (*handler)(bm, break_count, rest, end, time_offset);
-  else
-    ++bm.stats.storyboard_lines;
+  switch (string_hash(f0)) {
+    case "0"_hash:
+      if (f0 == "0") {
+        parse_background_event(bm, break_count, rest, end, time_offset);
+        return;
+      }
+      break;
+    case "1"_hash:
+    case "Video"_hash:
+      if (f0 == "1" || f0 == "Video") {
+        parse_video_event(bm, break_count, rest, end, time_offset);
+        return;
+      }
+      break;
+    case "2"_hash:
+    case "Break"_hash:
+      if (f0 == "2" || f0 == "Break") {
+        parse_break_event(bm, break_count, rest, end, time_offset);
+        return;
+      }
+      break;
+  }
+  ++bm.stats.storyboard_lines;
 }
 
 #if FOSU_SIMD

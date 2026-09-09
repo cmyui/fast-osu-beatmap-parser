@@ -17,18 +17,23 @@ Interfaces may break. Optimize for useful code changes, not release-level polish
 
 ## Verification proportional to the change
 
-- During iteration, build the affected target and run focused tests.
-- For internal parsing refactors, start with focused tests and the small all-mode
-  compatibility sample. Use broader official-parser/full-corpus checks for
-  meaningful acceptance, normalization, or representation changes once settled.
-- Keep correctness tests, strict Python typing, and memory-safety checks. Arena,
-  lifetime, bounds, and SIMD-load changes warrant relevant sanitizer checks.
-- Test the relevant platform first. Reserve cross-platform and installed-package
-  checks for settled candidates whose changed boundaries warrant them, or releases.
+- Use CI for routine PR validation. Check the current workflows and do not
+  duplicate their checks locally just to prepare, open, or update a PR.
+  CI covers formatting, strict typing, native/Python tests, platform/build and
+  installed-package checks, sanitizers/fuzzing, and official-parser fixtures.
+- Still add or update tests for changed behavior; let CI execute them. Normal
+  commit hooks can run, but do not manually rerun their checks for reassurance.
+- Run a local build or focused test only when needed to debug, answer an
+  experiment's question, cover something CI does not exercise, or fulfill an
+  explicit user request. Do not expand that run into the full validation matrix.
+- Performance measurements and private-corpus comparisons are not replaced by
+  CI's smoke corpus. Use the small representative profiles for experiments;
+  reserve full-corpus checks for meaningful compatibility changes that need them.
 - Docs-only changes need a content/link review, not builds, wheel installs,
   compatibility sweeps, or performance measurements.
-- Reuse still-valid results. Re-run affected checks after fixes and report skipped
-  checks honestly; a sample is not proof of full compatibility.
+- Reuse still-valid results. Distinguish local evidence, pending CI, and passing
+  CI in reports; do not claim checks passed merely because CI will run them.
+  A sample is not proof of full compatibility.
 
 ## Performance experiments
 

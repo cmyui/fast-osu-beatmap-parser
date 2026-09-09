@@ -56,8 +56,6 @@ inline std::optional<KeyValue> split_key_value(std::string_view line) {
                   trim_field({colon + 1, static_cast<size_t>(end - colon - 1)})};
 }
 
-using FieldParser = bool (*)(BeatmapHeader&, std::string_view);
-
 template <auto Member, auto ParseValue>
 inline bool assign_field_value(BeatmapHeader& header, std::string_view input) {
   const auto value = ParseValue(input);
@@ -73,23 +71,14 @@ inline bool assign_field_text(BeatmapHeader& header, std::string_view input) {
   return true;
 }
 
-template <size_t N>
-inline void parse_key_value(Beatmap& beatmap,
-                            const StringLookup<FieldParser, N>& fields,
-                            const KeyValue& field) {
-  if (const auto* parse = fields.find(field.key))
-    if (!(*parse)(beatmap, field.value))
-      ++beatmap.stats.malformed_lines;
-}
-
-template <size_t N>
+template <auto ParseField>
 inline const char* parse_key_value_section(Beatmap& beatmap,
-                                           const StringLookup<FieldParser, N>& fields,
                                            const char* p,
                                            const char* end) {
   return for_each_section_line(p, end, [&](std::string_view line) {
     if (const auto field = split_key_value(line))
-      parse_key_value(beatmap, fields, *field);
+      if (!ParseField(beatmap, *field))
+        ++beatmap.stats.malformed_lines;
   });
 }
 

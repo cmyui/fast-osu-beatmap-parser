@@ -79,38 +79,90 @@ inline bool parse_preview_time(BeatmapHeader& header, std::string_view input) {
   return true;
 }
 
-inline constexpr auto kGeneralFields = make_string_lookup<FieldParser>({
-    {"AudioFilename", assign_field_text<&BeatmapHeader::audio_filename>},
-    {"AudioLeadIn",
-     assign_field_value<&BeatmapHeader::audio_lead_in, parse_field_integer>},
-    {"PreviewTime", parse_preview_time},
-    {"CountdownOffset",
-     assign_field_value<&BeatmapHeader::countdown_offset, parse_field_integer>},
-    {"Countdown", assign_field_value<&BeatmapHeader::countdown, parse_countdown>},
-    {"SampleSet", assign_field_value<&BeatmapHeader::sample_set, parse_field_sample_set>},
-    {"SamplesMatchPlaybackRate",
-     assign_field_value<&BeatmapHeader::samples_match_playback_rate,
-                        parse_field_boolean>},
-    {"StackLeniency",
-     assign_field_value<&BeatmapHeader::stack_leniency, parse_field_float>},
-    {"Mode", assign_field_value<&BeatmapHeader::mode, parse_mode>},
-    {"LetterboxInBreaks",
-     assign_field_value<&BeatmapHeader::letterbox_in_breaks, parse_field_boolean>},
-    {"WidescreenStoryboard",
-     assign_field_value<&BeatmapHeader::widescreen_storyboard, parse_field_boolean>},
-    {"EpilepsyWarning",
-     assign_field_value<&BeatmapHeader::epilepsy_warning, parse_field_boolean>},
-    {"SpecialStyle",
-     assign_field_value<&BeatmapHeader::special_style, parse_field_boolean>},
-    {"UseSkinSprites", parse_skin_sprites},
-    {"OverlayPosition", assign_field_text<&BeatmapHeader::overlay_position>},
-    {"SkinPreference", assign_field_text<&BeatmapHeader::skin_preference>},
-});
+inline bool parse_general_field(BeatmapHeader& header, const KeyValue& field) {
+  switch (string_hash(field.key)) {
+    case "AudioFilename"_hash:
+      if (field.key == "AudioFilename")
+        return assign_field_text<&BeatmapHeader::audio_filename>(header, field.value);
+      break;
+    case "AudioLeadIn"_hash:
+      if (field.key == "AudioLeadIn")
+        return assign_field_value<&BeatmapHeader::audio_lead_in, parse_field_integer>(
+            header, field.value);
+      break;
+    case "PreviewTime"_hash:
+      if (field.key == "PreviewTime")
+        return parse_preview_time(header, field.value);
+      break;
+    case "CountdownOffset"_hash:
+      if (field.key == "CountdownOffset")
+        return assign_field_value<&BeatmapHeader::countdown_offset, parse_field_integer>(
+            header, field.value);
+      break;
+    case "Countdown"_hash:
+      if (field.key == "Countdown")
+        return assign_field_value<&BeatmapHeader::countdown, parse_countdown>(
+            header, field.value);
+      break;
+    case "SampleSet"_hash:
+      if (field.key == "SampleSet")
+        return assign_field_value<&BeatmapHeader::sample_set, parse_field_sample_set>(
+            header, field.value);
+      break;
+    case "SamplesMatchPlaybackRate"_hash:
+      if (field.key == "SamplesMatchPlaybackRate")
+        return assign_field_value<&BeatmapHeader::samples_match_playback_rate,
+                                  parse_field_boolean>(header, field.value);
+      break;
+    case "StackLeniency"_hash:
+      if (field.key == "StackLeniency")
+        return assign_field_value<&BeatmapHeader::stack_leniency, parse_field_float>(
+            header, field.value);
+      break;
+    case "Mode"_hash:
+      if (field.key == "Mode")
+        return assign_field_value<&BeatmapHeader::mode, parse_mode>(header, field.value);
+      break;
+    case "LetterboxInBreaks"_hash:
+      if (field.key == "LetterboxInBreaks")
+        return assign_field_value<&BeatmapHeader::letterbox_in_breaks,
+                                  parse_field_boolean>(header, field.value);
+      break;
+    case "WidescreenStoryboard"_hash:
+      if (field.key == "WidescreenStoryboard")
+        return assign_field_value<&BeatmapHeader::widescreen_storyboard,
+                                  parse_field_boolean>(header, field.value);
+      break;
+    case "EpilepsyWarning"_hash:
+      if (field.key == "EpilepsyWarning")
+        return assign_field_value<&BeatmapHeader::epilepsy_warning, parse_field_boolean>(
+            header, field.value);
+      break;
+    case "SpecialStyle"_hash:
+      if (field.key == "SpecialStyle")
+        return assign_field_value<&BeatmapHeader::special_style, parse_field_boolean>(
+            header, field.value);
+      break;
+    case "UseSkinSprites"_hash:
+      if (field.key == "UseSkinSprites")
+        return parse_skin_sprites(header, field.value);
+      break;
+    case "OverlayPosition"_hash:
+      if (field.key == "OverlayPosition")
+        return assign_field_text<&BeatmapHeader::overlay_position>(header, field.value);
+      break;
+    case "SkinPreference"_hash:
+      if (field.key == "SkinPreference")
+        return assign_field_text<&BeatmapHeader::skin_preference>(header, field.value);
+      break;
+  }
+  return true;
+}
 
 inline const char* parse_general_section(Beatmap& beatmap,
                                          const char* p,
                                          const char* end) {
-  return parse_key_value_section(beatmap, kGeneralFields, p, end);
+  return parse_key_value_section<parse_general_field>(beatmap, p, end);
 }
 
 }  // namespace fosu::internal
