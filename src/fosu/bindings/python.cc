@@ -82,6 +82,11 @@ bool bookmark(const char* p, const char* end, int32_t& out) {
 
 // Per-module ownership of the model keeps this compatible with subinterpreters.
 enum Field {
+  f_events,
+  f_span_index,
+  f_span_start_time,
+  f_path_progress,
+  f_position,
   f_path,
   f_points,
   f_cumulative_lengths,
@@ -161,7 +166,12 @@ enum Field {
   f_storyboard_lines,
   field_count
 };
-const char* field_names[] = {"path",
+const char* field_names[] = {"events",
+                             "span_index",
+                             "span_start_time",
+                             "path_progress",
+                             "position",
+                             "path",
                              "points",
                              "cumulative_lengths",
                              "x",
@@ -251,17 +261,19 @@ enum PythonType {
   t_path_point,
   t_path,
   t_beatmap,
+  t_event,
+  t_event_type,
   t_sound,
   t_mode,
   t_sample,
   t_curve,
   type_count
 };
-constexpr int record_type_count = t_beatmap + 1;
+constexpr int record_type_count = t_event + 1;
 constexpr const char* type_names[] = {
-    "Point",       "Circle",   "Slider",     "Spinner",   "HoldNote",
-    "TimingPoint", "Break",    "ParseStats", "PathPoint", "SliderPath",
-    "Beatmap",     "HitSound", "GameMode",   "SampleSet", "CurveType"};
+    "Point",           "Circle",     "Slider",    "Spinner",    "HoldNote", "TimingPoint",
+    "Break",           "ParseStats", "PathPoint", "SliderPath", "Beatmap",  "SliderEvent",
+    "SliderEventType", "HitSound",   "GameMode",  "SampleSet",  "CurveType"};
 struct PythonSlot {
   PyObject* descriptor;
   descrsetfunc assign;
@@ -361,6 +373,7 @@ struct BeatmapConverter {
       return record(
           t_slider,
           {{f_slides, integer(s.slides)},
+           {f_events, slider_events(h.slider)},
            {f_path,
             map.slider_paths.empty() ? none() : slider_path(map.slider_paths[h.slider])},
            {f_length, number(s.length)},
@@ -388,6 +401,25 @@ struct BeatmapConverter {
                              {f_volume, integer(t.volume)},
                              {f_uninherited, boolean(t.uninherited)},
                              {f_effects, integer(t.effects)}});
+  }
+  PythonRef slider_events(size_t index) {
+    const auto events = map.slider_events.empty() ? std::span<fosu::SliderEvent>{}
+                                                  : map.slider_events[index];
+    return list(events.size(), [&](size_t i) {
+      const auto& e = events[i];
+      return record(
+          t_event,
+          {
+              {f_type, PythonRef(PyObject_CallFunction(state.types[t_event_type], "i",
+                                                       static_cast<int>(e.type)))},
+              {f_time, number(e.time)},
+              {f_span_index, integer(e.span_index)},
+              {f_span_start_time, number(e.span_start_time)},
+              {f_path_progress, number(e.path_progress)},
+              {f_position, record(t_path_point, {{f_x, number(e.position.x)},
+                                                 {f_y, number(e.position.y)}})},
+          });
+    });
   }
   PythonRef slider_path(const fosu::SliderPath& path) {
     return record(
@@ -515,17 +547,18 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
   long sections;
   int calculate_slider_end_times;
   int calculate_slider_paths;
-  if (!PyArg_ParseTuple(args, "Olpp", &arg, &sections, &calculate_slider_end_times,
-                        &calculate_slider_paths))
+  int calculate_slider_events;
+  if (!PyArg_ParseTuple(args, "Olppp", &arg, &sections, &calculate_slider_end_times,
+                        &calculate_slider_paths, &calculate_slider_events))
     return nullptr;
   if (sections < 0 || (static_cast<unsigned long>(sections) &
                        ~static_cast<unsigned long>(fosu::kAllSections))) {
     PyErr_SetString(PyExc_ValueError, "invalid sections");
     return nullptr;
   }
-  const fosu::ParseOptions options{static_cast<uint32_t>(sections),
-                                   calculate_slider_end_times != 0,
-                                   calculate_slider_paths != 0};
+  const fosu::ParseOptions options{
+      static_cast<uint32_t>(sections), calculate_slider_end_times != 0,
+      calculate_slider_paths != 0, calculate_slider_events != 0};
   try {
     PythonRef input = file ? PythonRef(PyOS_FSPath(arg)) : retain(arg);
     if (file && PyUnicode_Check(input))

@@ -51,6 +51,25 @@ sealed class RawFields
             {
                 record["path"] = new { points = slider.Path.CalculatedPath.Select(p => new { x = (double)p.X, y = (double)p.Y }).ToArray() };
                 record["path_distance"] = slider.Path.Distance;
+                var repeated = (IHasPathWithRepeats)decoded;
+                var velocity = (double)decoded.GetType().GetField("Velocity")!.GetValue(decoded)!;
+                var beatLength = map.ControlPointInfo.TimingPointAt(decoded.StartTime).BeatLength;
+                var speed = ((IHasSliderVelocity)decoded).SliderVelocityMultiplier;
+                var tickDistance = ((IHasGenerateTicks)decoded).GenerateTicks
+                    ? velocity * beatLength / map.Difficulty.SliderTickRate * (map.BeatmapVersion < 8 ? 1 / speed : 1)
+                    : double.PositiveInfinity;
+                record["events"] = SliderEventGenerator.Generate(decoded.StartTime,
+                    ((IHasDuration)decoded).Duration / repeated.SpanCount(), velocity,
+                    tickDistance, slider.Path.Distance, repeated.SpanCount())
+                    .Where(e => e.Type != SliderEventType.LegacyLastTick)
+                    .Select(e => {
+                        var p = slider.Path.PositionAt(e.PathProgress);
+                        return new {
+                            type = e.Type switch { SliderEventType.Head => 0, SliderEventType.Tick => 1, SliderEventType.Repeat => 2, _ => 3 },
+                            time = e.Time, span_index = e.SpanIndex, span_start_time = e.SpanStartTime,
+                            path_progress = e.PathProgress, position = new { x = (double)p.X, y = (double)p.Y },
+                        };
+                    }).ToArray();
                 record["path_samples"] = new[] { 0.0, 0.1, 0.5, 0.9, 1.0 }.Select(progress => {
                     var p = slider.Path.PositionAt(progress);
                     return new { x = (double)p.X, y = (double)p.Y };

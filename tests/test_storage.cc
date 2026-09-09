@@ -328,6 +328,25 @@ static void test_parser_prepares_engine_input_and_output() {
 int main() {
   {
     fosu::Parser parser;
+    auto input = fosu::make_padded(
+        "[Difficulty]\nSliderMultiplier:1\n[TimingPoints]\n0,500\n"
+        "[HitObjects]\n0,0,0,2,0,L|400:0,2,400\n");
+    const auto& map =
+        require_parse(parser.parse(input, {.calculate_slider_events = true}));
+    CHECK_EQ(map.slider_events[0].size(), 9u);
+    CHECK(map.slider_events[0].front().type == fosu::SliderEventType::Head);
+    CHECK(map.slider_events[0].back().type == fosu::SliderEventType::Tail);
+    CHECK_EQ(map.slider_events[0].back().time, map.hit_objects[0].end_time);
+    auto* destination = fosu::arena_alloc();
+    auto copy = map.copy(*destination);
+    CHECK(copy);
+    CHECK(copy.value().slider_events[0].data() != map.slider_events[0].data());
+    require_parse(parser.parse(fosu::make_padded("")));
+    CHECK_EQ(copy.value().slider_events[0].back().time, 4000);
+    fosu::arena_release(destination);
+  }
+  {
+    fosu::Parser parser;
     const auto input = fosu::make_padded("[HitObjects]\n10,20,1000,2,0,L|110:20,1,150\n");
     const auto& map =
         require_parse(parser.parse(input, {.calculate_slider_paths = true}));

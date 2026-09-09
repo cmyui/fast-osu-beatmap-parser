@@ -27,6 +27,8 @@ from ._model import (
     Point,
     PathPoint,
     SliderPath,
+    SliderEvent,
+    SliderEventType,
     SampleSet,
     Slider,
     Spinner,
@@ -46,6 +48,8 @@ __all__ = [
     "Point",
     "PathPoint",
     "SliderPath",
+    "SliderEvent",
+    "SliderEventType",
     "slider_position_at",
     "SampleSet",
     "Sections",
@@ -78,6 +82,7 @@ def parse(
     sections: Sections = Sections.ALL,
     calculate_slider_end_times: bool = False,
     calculate_slider_paths: bool = False,
+    calculate_slider_events: bool = False,
 ) -> Beatmap:
     """Parse selected sections into detached values, copying mutable buffers."""
     if not isinstance(data, bytes):
@@ -85,7 +90,7 @@ def parse(
             if view.nbytes > 64 * 1024 * 1024:
                 raise ValueError("beatmap input exceeds the supported size")
             data = view.tobytes()
-    return _core.parse(data, sections, calculate_slider_end_times, calculate_slider_paths)
+    return _core.parse(data, sections, calculate_slider_end_times, calculate_slider_paths, calculate_slider_events)
 
 
 def parse_file(
@@ -94,9 +99,10 @@ def parse_file(
     sections: Sections = Sections.ALL,
     calculate_slider_end_times: bool = False,
     calculate_slider_paths: bool = False,
+    calculate_slider_events: bool = False,
 ) -> Beatmap:
     """Read selected sections; raise OSError on file errors."""
-    return _core.parse_file(path, sections, calculate_slider_end_times, calculate_slider_paths)
+    return _core.parse_file(path, sections, calculate_slider_end_times, calculate_slider_paths, calculate_slider_events)
 
 
 def slider_position_at(path: SliderPath, progress: float) -> PathPoint:

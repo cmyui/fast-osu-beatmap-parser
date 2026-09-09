@@ -61,6 +61,45 @@ def test_path_query_is_detached_and_does_not_mutate():
     assert path == before
 
 
+@pytest.mark.parametrize("version,tick_count", [(7, 6), (8, 2)])
+def test_slider_event_ticks_repeats_and_versions(tmp_path, version, tick_count):
+    data = (
+        f"osu file format v{version}\n[Difficulty]\nSliderMultiplier:1\nSliderTickRate:1\n"
+        "[TimingPoints]\n0,500\n0,-50,4,0,0,100,0,0\n"
+        "[HitObjects]\n0,0,1000,2,0,L|400:0,2,400\n"
+    ).encode()
+    path = tmp_path / "events.osu"
+    path.write_bytes(data)
+    assert fosu.parse(data).hit_objects[0].events == []
+    map = fosu.parse(data, calculate_slider_events=True)
+    assert map == fosu.parse_file(path, calculate_slider_events=True)
+    slider = map.hit_objects[0]
+    events = slider.events
+    assert events[0].type is fosu.SliderEventType.HEAD
+    assert events[-1].type is fosu.SliderEventType.TAIL
+    assert events[-1].time == slider.end_time == 3000
+    assert events[-1].position == fosu.PathPoint(0, 0)
+    assert sum(e.type is fosu.SliderEventType.TICK for e in events) == tick_count
+    repeats = [e for e in events if e.type is fosu.SliderEventType.REPEAT]
+    assert len(repeats) == 1 and repeats[0].time == 2000
+    assert repeats[0].position == fosu.PathPoint(400, 0)
+    assert [e.time for e in events] == sorted(e.time for e in events)
+    assert pickle.loads(pickle.dumps(map)) == map
+    for e in events:
+        assert e.position == fosu.slider_position_at(slider.path, e.path_progress)
+
+
+@pytest.mark.parametrize("curve,length", [("L|100:0", 100), ("B|0:0", 0)])
+def test_slider_events_without_ticks(curve, length):
+    data = (
+        "[TimingPoints]\n0,500\n0,NaN,4,0,0,100,0,0\n"
+        f"[HitObjects]\n0,0,0,2,0,{curve},1,{length}\n"
+    ).encode()
+    events = fosu.parse(data, calculate_slider_events=True).hit_objects[0].events
+    assert [e.type for e in events] == [fosu.SliderEventType.HEAD, fosu.SliderEventType.TAIL]
+    assert all(math.isfinite(e.time) and math.isfinite(e.path_progress) for e in events)
+
+
 @pytest.mark.parametrize("file", [False, True])
 def test_selected_sections(tmp_path, file):
     data = (

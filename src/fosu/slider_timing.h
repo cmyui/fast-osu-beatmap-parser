@@ -13,7 +13,16 @@ struct SliderTimingChange {
   bool generate_ticks;
 };
 
-inline bool set_slider_end_times(Beatmap& map, Arena* arena) {
+struct SliderTiming {
+  double velocity;
+  double tick_distance;
+  double span_duration;
+  int spans;
+};
+
+inline bool set_slider_end_times(Beatmap& map,
+                                 Arena* arena,
+                                 std::span<SliderTiming> timings = {}) {
   if (map.sliders.empty())
     return true;
   const auto temp = temp_begin(arena);
@@ -72,6 +81,7 @@ inline bool set_slider_end_times(Beatmap& map, Arena* arena) {
     });
   }
   double beat_length = 1000, velocity = 1;
+  bool generate_ticks = true;
   // The first red point supplies BPM even to objects preceding it. Green
   // points, unlike red points, never apply before their timestamp.
   for (size_t i = 0; i < count; ++i) {
@@ -90,8 +100,10 @@ inline bool set_slider_end_times(Beatmap& map, Arena* arena) {
     while (next < count && changes[next].time <= object.time) {
       if (!std::isnan(changes[next].beat_length))
         beat_length = changes[next].beat_length;
-      if (!std::isnan(changes[next].velocity))
+      if (!std::isnan(changes[next].velocity)) {
         velocity = changes[next].velocity;
+        generate_ticks = changes[next].generate_ticks;
+      }
       ++next;
     }
     const auto& slider = map.sliders[object.slider];
@@ -111,6 +123,15 @@ inline bool set_slider_end_times(Beatmap& map, Arena* arena) {
     // encoded span count on Slider, but use the effective count for duration.
     const int spans = distance.value() <= 1e-7 ? 1 : slider.slides;
     object.end_time = object.time + spans * distance.value() / pixels_per_millisecond;
+    if (!timings.empty()) {
+      const double tick_distance =
+          generate_ticks ? pixels_per_millisecond * beat_length / map.slider_tick_rate *
+                               (map.format_version < 8 ? 1 / velocity : 1)
+                         : std::numeric_limits<double>::infinity();
+      timings[object.slider] = {
+          pixels_per_millisecond, tick_distance,
+          (spans * distance.value() / pixels_per_millisecond) / spans, spans};
+    }
   }
   temp_end(temp);
   return true;

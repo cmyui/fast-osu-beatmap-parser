@@ -87,6 +87,16 @@ are relative to the head; add the slider's x/y for playfield coordinates.
 Paths alone do not calculate end times. Requesting both reuses their distance.
 Native code exposes the same query and `Beatmap.slider_paths`, indexed by slider.
 
+`calculate_slider_events=True` additionally populates `slider.events` with
+chronological `HEAD`, `TICK`, `REPEAT`, and `TAIL` records. This option includes
+path and end-time calculation. Each record has time, span index/start time,
+path progress, and a position relative to the head. Native code exposes
+`Beatmap.slider_events`, indexed by slider. Without the option, events are empty.
+These are path events using the decoded slider's timing, not a converted ruleset's
+nested hitobjects: no samples, mods, catch conversion, or legacy-last-tick judgement.
+Expansion beyond 1,048,576 events per map raises `MemoryError` rather than
+silently dropping events.
+
 See [compatibility](compatibility.md) for supported behavior and limitations;
 there is no stacking, mod application, or ruleset conversion.
 
