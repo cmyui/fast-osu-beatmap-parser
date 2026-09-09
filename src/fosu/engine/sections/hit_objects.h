@@ -12,10 +12,6 @@
 
 namespace fosu::internal {
 
-static_assert(offsetof(HitObject, x) == 0 && offsetof(HitObject, y) == 4 &&
-                  offsetof(HitObject, type) == 8 && offsetof(HitObject, hitsound) == 12,
-              "AVX2 prefix path stores {x,y,type,hitsound} as one vector");
-
 // Slider params after "type,hitSound,":
 //   curveType|x:y|x:y...,slides,length[,edgeSounds,edgeSets][,hitSample]
 //

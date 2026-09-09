@@ -328,6 +328,27 @@ static void test_parser_prepares_engine_input_and_output() {
 int main() {
   {
     fosu::Parser parser;
+    const auto input = fosu::make_padded(
+        "osu file format v14\n[HitObjects]\n100,100,0,1,0\n100,100,10,1,0\n");
+    const auto& map = require_parse(parser.parse(input, {.apply_stacking = true}));
+    CHECK_EQ(map.stacking[0].stack_height, 1);
+    CHECK(map.hit_objects[0].x < 100);
+    CHECK_EQ(map.hit_objects[0].raw_position(map.stacking[0].stack_offset).first, 100);
+    auto* destination = fosu::arena_alloc();
+    auto copy = map.copy(*destination);
+    CHECK(copy);
+    CHECK(copy.value().stacking.data() != map.stacking.data());
+    require_parse(parser.parse(fosu::make_padded("")));
+    CHECK_EQ(copy.value().stacking[0].stack_height, 1);
+    CHECK_EQ(copy.value()
+                 .hit_objects[0]
+                 .raw_position(copy.value().stacking[0].stack_offset)
+                 .first,
+             100);
+    fosu::arena_release(destination);
+  }
+  {
+    fosu::Parser parser;
     auto input = fosu::make_padded(
         "[Difficulty]\nSliderMultiplier:1\n[TimingPoints]\n0,500\n"
         "[HitObjects]\n0,0,0,2,0,L|400:0,2,400\n");

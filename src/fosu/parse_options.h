@@ -19,5 +19,6 @@ struct ParseOptions {
   bool calculate_slider_end_times = false;
   bool calculate_slider_paths = false;
   bool calculate_slider_events = false;
+  bool apply_stacking = false;
 };
 }  // namespace fosu

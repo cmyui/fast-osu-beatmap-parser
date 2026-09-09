@@ -2,8 +2,9 @@
 
 fosu decodes legacy `.osu` files and applies the official decoder's metadata
 precision/clamps, legacy clock offsets, stable hitobject ordering and combo rules.
-Slider end times use curve distance and the active BPM/slider velocity. It does
-not compute resolved sample states, stacking, mods, or ruleset conversion.
+Optional calculations provide slider paths, end times, path events and unmodded
+osu!standard stacking. They do not resolve samples, apply mods or convert rulesets.
+Retained paths use decoder geometry, not ruleset-specific Catmull rendering optimisations.
 Sample strings and encoded type bits are
 retained separately from effective combo flags.
 
@@ -12,8 +13,8 @@ retained separately from effective combo flags.
 - Object start times, spinner/hold end times and break endpoints are double
   milliseconds; fractional values are preserved. Circle `end_time` equals its
   start. Slider `end_time` is zero by default in both interfaces and must not be
-  used unless `calculate_slider_end_times` is enabled, which calculates it eagerly,
-  including repeats and degenerate-path handling.
+  used unless end-time calculation is requested, directly or through slider events
+  or standard stacking. Calculation includes repeats and degenerate-path handling.
   Spinner, hold and break endpoints follow the
   official clamps; spinners are centred at (256, 192). Pre-v5 timestamps use
   the official +24 ms adjustment, including its distinct hold-end ordering.
@@ -144,11 +145,11 @@ line in fosu. Keep corpus reports private: they contain local paths.
 For field-level corpus comparisons, run `tests/test_official_values.py`. Its
 [reference projection and normalization inventory](../tests/reference/official/README.md)
 describe which values come directly from decoded objects and which raw fields
-are recovered from officially accepted lines. Those comparisons deliberately
-exclude the remaining geometry and timing/sample transformations; they are not
-literal equality with osu!'s complete processed model. Metadata whitespace,
-final numeric settings, object order, endpoints and combo values are compared
-directly against the official result.
+are recovered from officially accepted lines. The audit also compares retained
+paths and event descriptors, and uses the official standard processor for stacking.
+Path coordinates allow 0.001-pixel/1e-6-relative tolerance for float arithmetic;
+other fields are compared exactly. This is not equality with the complete gameplay
+model: sample resolution, mods and ruleset conversion remain outside the API.
 
 This is bounded compatibility evidence, not complete format or stable-client
 parity. The raw parser is not a replacement for the game's package loader,

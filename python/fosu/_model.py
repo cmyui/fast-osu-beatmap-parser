@@ -35,8 +35,8 @@ class HitSound(IntFlag):
 
 @dataclass(slots=True)
 class Point:
-    x: int
-    y: int
+    x: float
+    y: float
 
 
 @dataclass(slots=True)
@@ -56,20 +56,34 @@ class SliderPath:
         return self.cumulative_lengths[-1] if self.cumulative_lengths else 0.0
 
 
+@dataclass(slots=True)
+class Stacking:
+    stack_height: int
+    stack_offset: PathPoint
+
+
 @dataclass(slots=True, kw_only=True)
 class _HitObject:
     time: float
-    x: int
-    y: int
+    x: float
+    y: float
     hitsound: HitSound
     type: int
     new_combo: bool
     combo_skip: int
     hit_sample: str
+    stacking: Stacking | None
     is_circle: ClassVar[bool] = False
     is_slider: ClassVar[bool] = False
     is_spinner: ClassVar[bool] = False
     is_hold: ClassVar[bool] = False
+
+    def raw_position(self) -> tuple[float, float]:
+        """Return the current position with any applied stacking offset removed."""
+        if self.stacking is None:
+            return self.x, self.y
+        offset = self.stacking.stack_offset
+        return self.x - offset.x, self.y - offset.y
 
 
 class SliderEventType(IntEnum):

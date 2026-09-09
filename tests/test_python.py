@@ -100,6 +100,79 @@ def test_slider_events_without_ticks(curve, length):
     assert all(math.isfinite(e.time) and math.isfinite(e.path_progress) for e in events)
 
 
+@pytest.mark.parametrize("version,heights", [(5, [2, 1, 0]), (6, [2, 1, 0]), (14, [2, 1, 0])])
+def test_circle_stacking_applies_positions_and_recovers_raw_position(tmp_path, version, heights):
+    data = (f"osu file format v{version}\n[HitObjects]\n"
+            "100,100,1000,1,0\n100,100,1100,1,0\n100,100,1200,1,0\n").encode()
+    assert all(h.stacking is None for h in fosu.parse(data).hit_objects)
+    source = tmp_path / "stacks.osu"
+    source.write_bytes(data)
+    map = fosu.parse(data, apply_stacking=True)
+    assert map == fosu.parse_file(source, apply_stacking=True)
+    assert [h.stacking.stack_height for h in map.hit_objects] == heights
+    assert all(h.raw_position() == pytest.approx((100, 100)) for h in map.hit_objects)
+    assert map.hit_objects[0].x == pytest.approx(93.597376, abs=1e-5)
+    assert map.hit_objects[0].y == map.hit_objects[0].x
+    assert map.hit_objects[0].stacking.stack_offset.x == pytest.approx(-6.402624, abs=1e-5)
+    assert pickle.loads(pickle.dumps(map)) == map
+    assert deepcopy(map) == map
+    map.hit_objects[0].x = 123.5
+    assert map.hit_objects[0].raw_position() == pytest.approx((123.5 - map.hit_objects[0].stacking.stack_offset.x, 100))
+
+
+def test_stacked_slider_control_points_and_relative_geometry():
+    data = (b"osu file format v14\n[Difficulty]\nSliderMultiplier:1\n"
+            b"[TimingPoints]\n0,500\n[HitObjects]\n"
+            b"100,100,1000,2,0,L|200:100,2,100\n100,100,1100,2,0,L|200:100,1,100\n")
+    raw = fosu.parse(data, calculate_slider_events=True)
+    stacked = fosu.parse(data, calculate_slider_events=True, apply_stacking=True)
+    a, b = stacked.hit_objects
+    assert a.stacking.stack_height == 1
+    assert a.raw_position() == pytest.approx((100, 100))
+    assert a.x < 100 and a.y < 100
+    assert a.control_points[0] == fosu.Point(a.x, a.y)
+    assert a.control_points[1].x == pytest.approx(200 + a.stacking.stack_offset.x, abs=1e-5)
+    assert a.control_points[1].y == a.y
+    assert a.path == raw.hit_objects[0].path
+    assert a.events == raw.hit_objects[0].events
+    assert b.raw_position() == (b.x, b.y)
+    assert isinstance(a.x, float) and isinstance(raw.hit_objects[0].x, float)
+    assert pickle.loads(pickle.dumps(stacked)) == stacked
+
+
+def test_raw_position_without_stacking_and_after_other_normalization():
+    notes = fosu.parse(b"[HitObjects]\n10,20,100,1,0\n0,0,200,8,0,300\n").hit_objects
+    assert notes[0].raw_position() == (10.0, 20.0)
+    assert notes[1].raw_position() == (256.0, 192.0)
+    notes[0].x = -1.5
+    assert notes[0].raw_position() == (-1.5, 20.0)
+
+
+@pytest.mark.parametrize("version", [5, 6, 14])
+def test_slider_tail_negative_stacks(version):
+    data = (f"osu file format v{version}\n[Difficulty]\nSliderMultiplier:1\n"
+            "[TimingPoints]\n0,500\n[HitObjects]\n"
+            "0,0,1000,2,0,L|100:0,1,100\n100,0,1550,1,0\n100,0,1600,1,0\n").encode()
+    map = fosu.parse(data, apply_stacking=True)
+    assert [h.stacking.stack_height for h in map.hit_objects] == [0, -1, -2]
+    assert map.hit_objects[0].end_time > 0
+    assert map.hit_objects[0].events == []
+
+
+@pytest.mark.parametrize("mode", [1, 2, 3])
+def test_stacking_does_not_convert_other_modes(mode):
+    data = f"[General]\nMode:{mode}\n[HitObjects]\n100,100,0,1,0\n100,100,1,1,0\n".encode()
+    assert fosu.parse(data, apply_stacking=True) == fosu.parse(data)
+
+
+def test_modern_stacking_time_distance_and_spinner_boundaries():
+    data = (b"osu file format v14\n[Difficulty]\nApproachRate:10\n"
+            b"[HitObjects]\n100,100,0,1,0\n100,100,316,1,0\n103,100,400,1,0\n"
+            b"0,0,410,8,0,420\n103,100,500,1,0\n")
+    map = fosu.parse(data, apply_stacking=True)
+    assert [h.stacking.stack_height for h in map.hit_objects] == [0, 0, 1, 0, 0]
+
+
 @pytest.mark.parametrize("file", [False, True])
 def test_selected_sections(tmp_path, file):
     data = (

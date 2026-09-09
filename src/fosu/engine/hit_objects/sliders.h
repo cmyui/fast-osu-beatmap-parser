@@ -151,7 +151,9 @@ inline Point decode_slider_point(__m128i src,
       _mm_shuffle_epi8(_mm_sub_epi8(src, _mm256_castsi256_si128(k.zero)), shuf);
   const auto coordinates =
       _mm_madd_epi16(_mm_maddubs_epi16(placed, k.pair_weights), k.word_weights);
-  return std::bit_cast<Point>(static_cast<uint64_t>(_mm_cvtsi128_si64(coordinates)));
+  const auto positions = _mm_cvtepi32_ps(coordinates);
+  return std::bit_cast<Point>(
+      static_cast<uint64_t>(_mm_cvtsi128_si64(_mm_castps_si128(positions))));
 }
 
 #else
@@ -165,7 +167,8 @@ inline Point decode_slider_point(uint8x16_t src,
       reinterpret_cast<const uint8_t*>(kPointShuf[(xl - 1) * 4 + (yl - 1)].b);
   const auto coordinates =
       decimal_groups(vqtbl1q_u8(vsubq_u8(src, k.zero), vld1q_u8(shuf)));
-  return std::bit_cast<Point>(vgetq_lane_u64(vreinterpretq_u64_u32(coordinates), 0));
+  const auto positions = vcvtq_f32_u32(coordinates);
+  return std::bit_cast<Point>(vgetq_lane_u64(vreinterpretq_u64_f32(positions), 0));
 }
 #endif
 
@@ -283,7 +286,8 @@ inline std::optional<ParsedSliderPoint<Point>> parse_slider_point(
   const auto y = parse_slider_coordinate(x->next + 1, end);
   if (!y)
     return std::nullopt;
-  return ParsedSliderPoint<Point>{Point{x->value, y->value}, y->next};
+  return ParsedSliderPoint<Point>{
+      Point{static_cast<float>(x->value), static_cast<float>(y->value)}, y->next};
 }
 
 }  // namespace fosu::internal

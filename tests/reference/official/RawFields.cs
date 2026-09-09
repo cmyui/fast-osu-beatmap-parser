@@ -10,6 +10,7 @@ using osu.Game.Rulesets.Objects.Types;
 
 sealed class RawFields
 {
+    readonly record struct Point(double x, double y);
     // The pinned official enum is internal; use it without duplicating its values.
     static readonly Type sampleBankType = typeof(LegacyBeatmapDecoder).Assembly.GetType("osu.Game.Beatmaps.Legacy.LegacySampleBank", throwOnError: true)!;
     public Dictionary<string, object?> fields { get; } = new();
@@ -76,6 +77,25 @@ sealed class RawFields
                 }).ToArray();
             }
             hit_objects.Add(record);
+        }
+        if (map.BeatmapInfo.Ruleset.OnlineID == 0)
+        {
+            var converted = new osu.Game.Rulesets.Osu.Beatmaps.OsuBeatmapConverter(map, new osu.Game.Rulesets.Osu.OsuRuleset()).Convert();
+            foreach (var obj in converted.HitObjects)
+                obj.ApplyDefaults(converted.ControlPointInfo, converted.Difficulty);
+            new osu.Game.Rulesets.Osu.Beatmaps.OsuBeatmapProcessor(converted).PostProcess();
+            for (int i = 0; i < map.HitObjects.Count; ++i)
+            {
+                if (!objects.TryGetValue(map.HitObjects[i], out var record)) continue;
+                var obj = (osu.Game.Rulesets.Osu.Objects.OsuHitObject)converted.HitObjects[i];
+                record["stacking"] = new { stack_height = obj.StackHeight,
+                    stack_offset = new { x = (double)obj.StackOffset.X, y = (double)obj.StackOffset.Y } };
+                record["x"] = (double)obj.StackedPosition.X;
+                record["y"] = (double)obj.StackedPosition.Y;
+                if (record.TryGetValue("control_points", out var points))
+                    record["control_points"] = ((Point[])points!).Select(p =>
+                        new Point((float)p.x + obj.StackOffset.X, (float)p.y + obj.StackOffset.Y)).ToArray();
+            }
         }
     }
 
@@ -208,9 +228,9 @@ sealed class RawFields
                 result["length"] = parts.Length > 7 ? Math.Max(0, Parsing.ParseDouble(parts[7], Parsing.MAX_COORDINATE_VALUE)) : 0.0;
                 result["edge_sounds"] = At(parts, 8);
                 result["edge_sets"] = At(parts, 9);
-                result["control_points"] = new[] { new { x = Coordinate(parts[0]), y = Coordinate(parts[1]) } }.Concat(path.Skip(1).Select(point => {
+                result["control_points"] = new[] { new Point(Coordinate(parts[0]), Coordinate(parts[1])) }.Concat(path.Skip(1).Select(point => {
                     var xy = point.Split(':');
-                    return new { x = Coordinate(xy[0]), y = Coordinate(xy[1]) };
+                    return new Point(Coordinate(xy[0]), Coordinate(xy[1]));
                 })).ToArray();
                 sample = At(parts, 10);
                 break;

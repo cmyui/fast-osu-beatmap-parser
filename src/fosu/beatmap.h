@@ -4,6 +4,7 @@
 #include <cstring>
 #include <span>
 #include <string_view>
+#include <utility>
 
 #include <fosu/arena.h>
 #include <fosu/beatmap_header.h>
@@ -13,11 +14,9 @@
 
 namespace fosu {
 
-// Field order of the first 16 bytes is load-bearing: the AVX2 hitobject
-// fast path stores its result vector directly over {x, y, type, hitsound}.
 struct HitObject {
-  int32_t x;
-  int32_t y;
+  float x;
+  float y;
   uint32_t type;
   uint32_t hitsound;
   double time;
@@ -26,6 +25,9 @@ struct HitObject {
   bool new_combo;
   uint8_t combo_skip;
   std::string_view hit_sample;
+  std::pair<float, float> raw_position(PathPoint stack_offset = {}) const {
+    return {x - stack_offset.x, y - stack_offset.y};
+  }
 
   static constexpr uint32_t kNoSlider = 0xFFFFFFFF;
 
@@ -37,8 +39,8 @@ struct HitObject {
 };
 
 struct SliderPoint {
-  int32_t x;
-  int32_t y;
+  float x;
+  float y;
 };
 
 struct Slider {
@@ -74,6 +76,11 @@ struct ParseStats {
   uint32_t storyboard_lines = 0;
 };
 
+struct Stacking {
+  int32_t stack_height;
+  PathPoint stack_offset;
+};
+
 struct Beatmap : BeatmapHeader {
   std::span<Break> breaks;
   std::span<uint32_t> combo_colours;
@@ -84,6 +91,8 @@ struct Beatmap : BeatmapHeader {
   // Empty unless requested; otherwise indexed identically to sliders.
   std::span<SliderPath> slider_paths;
   std::span<std::span<SliderEvent>> slider_events;
+  // Empty unless osu!standard stacking was requested; indexed by hit object.
+  std::span<Stacking> stacking;
   ParseStats stats;
 
   Result<Beatmap> copy(Arena& destination) const noexcept {
@@ -100,9 +109,10 @@ struct Beatmap : BeatmapHeader {
     auto copied_slider_points = copy_array(destination, slider_points);
     auto copied_paths = copy_array(destination, slider_paths);
     auto copied_events = copy_array(destination, slider_events);
+    auto copied_stacking = copy_array(destination, stacking);
     if (!copied_breaks || !copied_colours || !copied_timing_points ||
         !copied_hit_objects || !copied_sliders || !copied_slider_points ||
-        !copied_paths || !copied_events) {
+        !copied_paths || !copied_events || !copied_stacking) {
       return rewind_failed_copy(destination, checkpoint);
     }
 
@@ -153,6 +163,7 @@ struct Beatmap : BeatmapHeader {
     result.slider_points = copied_slider_points.value();
     result.slider_paths = copied_paths.value();
     result.slider_events = copied_events.value();
+    result.stacking = copied_stacking.value();
     for (auto& events : result.slider_events) {
       auto copy = copy_array(destination, events);
       if (!copy)
