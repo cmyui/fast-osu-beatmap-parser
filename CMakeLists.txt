@@ -83,6 +83,7 @@ target_sources(fosu_headers INTERFACE FILE_SET HEADERS BASE_DIRS src FILES
   src/fosu/enums.h
   src/fosu/io.h
   src/fosu/legacy_rules.h
+  src/fosu/mods.h
   src/fosu/slider_geometry.h
   src/fosu/slider_path.h
   src/fosu/slider_event.h

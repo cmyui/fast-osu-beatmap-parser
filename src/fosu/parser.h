@@ -11,6 +11,7 @@
 #include <fosu/engine/parsing_engine.h>
 #include <fosu/io.h>
 #include <fosu/legacy_rules.h>
+#include <fosu/mods.h>
 #include <fosu/slider_events.h>
 #include <fosu/slider_timing.h>
 #include <fosu/stacking.h>
@@ -151,7 +152,7 @@ class Parser {
 
   Result<Beatmap*> parse(const char* data, size_t size, ParseOptions opts = {}) noexcept {
     reset_working_result();
-    if ((!data && size) || invalid_sections(opts.sections))
+    if ((!data && size) || invalid_options(opts))
       return Error{ErrorCode::InvalidInput};
     auto prepared = prepare_input(size, data);
     if (!prepared) {
@@ -172,7 +173,7 @@ class Parser {
 
   Result<Beatmap*> parse_file(const char* path, ParseOptions opts = {}) noexcept {
     reset_working_result();
-    if (!path || invalid_sections(opts.sections))
+    if (!path || invalid_options(opts))
       return Error{ErrorCode::InvalidInput};
 
     const int file = open(path, O_RDONLY);
@@ -226,6 +227,14 @@ class Parser {
     return sections & ~kValidSections;
   }
 
+  static bool invalid_options(ParseOptions opts) noexcept {
+    if (invalid_sections(opts.sections) || internal::invalid_mods(opts.mods))
+      return true;
+    return internal::has_difficulty_mod(opts.mods) &&
+           (opts.sections & (kSectionGeneral | kSectionDifficulty)) !=
+               (kSectionGeneral | kSectionDifficulty);
+  }
+
   Result<char*> prepare_input(size_t size, const char* data) noexcept {
     if (size > kMaxInputSize)
       return Error{ErrorCode::InputTooLarge};
@@ -257,6 +266,10 @@ class Parser {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
+    if (!internal::apply_mods_before_calculations(beatmap_, opts.mods)) {
+      reset_working_result();
+      return Error{ErrorCode::InvalidInput};
+    }
     const bool stacking = opts.apply_stacking && beatmap_.mode == 0;
     if ((opts.calculate_slider_paths || opts.calculate_slider_events || stacking) &&
         !internal::set_slider_paths(beatmap_, arena_)) {
@@ -276,6 +289,7 @@ class Parser {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
+    internal::apply_clock_rate(beatmap_, opts.mods);
     return &beatmap_;
   }
 

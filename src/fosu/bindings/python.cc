@@ -569,18 +569,26 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
   int calculate_slider_paths;
   int calculate_slider_events;
   int apply_stacking;
-  if (!PyArg_ParseTuple(args, "Olpppp", &arg, &sections, &calculate_slider_end_times,
+  unsigned long mods;
+  if (!PyArg_ParseTuple(args, "Olppppk", &arg, &sections, &calculate_slider_end_times,
                         &calculate_slider_paths, &calculate_slider_events,
-                        &apply_stacking))
+                        &apply_stacking, &mods))
     return nullptr;
-  if (sections < 0 || (static_cast<unsigned long>(sections) &
-                       ~static_cast<unsigned long>(fosu::kAllSections))) {
-    PyErr_SetString(PyExc_ValueError, "invalid sections");
+  if (sections < 0 ||
+      (static_cast<unsigned long>(sections) &
+       ~static_cast<unsigned long>(fosu::kAllSections)) ||
+      mods > UINT32_MAX) {
+    PyErr_SetString(PyExc_ValueError, "invalid parse options");
     return nullptr;
   }
   const fosu::ParseOptions options{
-      static_cast<uint32_t>(sections), calculate_slider_end_times != 0,
-      calculate_slider_paths != 0, calculate_slider_events != 0, apply_stacking != 0};
+      .sections = static_cast<uint32_t>(sections),
+      .calculate_slider_end_times = calculate_slider_end_times != 0,
+      .calculate_slider_paths = calculate_slider_paths != 0,
+      .calculate_slider_events = calculate_slider_events != 0,
+      .apply_stacking = apply_stacking != 0,
+      .mods = static_cast<fosu::Mods>(mods),
+  };
   try {
     PythonRef input = file ? PythonRef(PyOS_FSPath(arg)) : retain(arg);
     if (file && PyUnicode_Check(input))

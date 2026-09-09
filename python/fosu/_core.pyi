@@ -12,6 +12,7 @@ def parse(
     calculate_slider_paths: bool,
     calculate_slider_events: bool,
     apply_stacking: bool,
+    mods: int,
     /,
 ) -> Beatmap: ...
 def parse_file(
@@ -21,5 +22,6 @@ def parse_file(
     calculate_slider_paths: bool,
     calculate_slider_events: bool,
     apply_stacking: bool,
+    mods: int,
     /,
 ) -> Beatmap: ...

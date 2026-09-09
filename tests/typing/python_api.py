@@ -7,6 +7,8 @@ import fosu
 from typing_extensions import assert_never, assert_type
 
 b = fosu.parse(b"")
+assert_type(fosu.parse(b"", mods=fosu.Mods.HARD_ROCK), fosu.Beatmap)
+assert_type(fosu.Mods.HARD_ROCK | fosu.Mods.DOUBLE_TIME, fosu.Mods)
 assert_type(
     fosu.parse(b"", sections=fosu.Sections.METADATA | fosu.Sections.DIFFICULTY),
     fosu.Beatmap,

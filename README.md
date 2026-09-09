@@ -15,6 +15,11 @@ beatmap = fosu.parse_file("map.osu")
 print(beatmap.title, beatmap.ar, beatmap.hit_objects[0].time)
 ```
 
+Pass `mods=fosu.Mods.HARD_ROCK | fosu.Mods.DOUBLE_TIME` to return gameplay
+positions, difficulty settings, and timeline values with supported mods applied.
+EZ and HR currently support osu!standard and osu!taiko; osu!catch and osu!mania
+support is planned. DT, NC, and HT support every mode.
+
 Python returns fully populated, mutable dataclasses and lists. All supported
 fields are eager; returned values do not retain native memory or depend on a parser.
 Install a prebuilt wheel, or run `python -m pip install .` in a source checkout.

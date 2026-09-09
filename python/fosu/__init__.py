@@ -45,6 +45,7 @@ __all__ = [
     "HitObject",
     "HitSound",
     "HoldNote",
+    "Mods",
     "ParseStats",
     "Point",
     "PathPoint",
@@ -78,6 +79,17 @@ class Sections(IntFlag):
     ALL = 0x1FE
 
 
+class Mods(IntFlag):
+    """Supported gameplay modifications; combine members with ``|``."""
+
+    NONE = 0
+    EASY = 1 << 1
+    HARD_ROCK = 1 << 4
+    DOUBLE_TIME = 1 << 6
+    HALF_TIME = 1 << 8
+    NIGHTCORE = 1 << 9
+
+
 def parse(
     data: Buffer,
     *,
@@ -86,6 +98,7 @@ def parse(
     calculate_slider_paths: bool = False,
     calculate_slider_events: bool = False,
     apply_stacking: bool = False,
+    mods: Mods = Mods.NONE,
 ) -> Beatmap:
     """Parse selected sections into detached values, copying mutable buffers."""
     if not isinstance(data, bytes):
@@ -100,6 +113,7 @@ def parse(
         calculate_slider_paths,
         calculate_slider_events,
         apply_stacking,
+        int(mods),
     )
 
 
@@ -111,6 +125,7 @@ def parse_file(
     calculate_slider_paths: bool = False,
     calculate_slider_events: bool = False,
     apply_stacking: bool = False,
+    mods: Mods = Mods.NONE,
 ) -> Beatmap:
     """Read selected sections; raise OSError on file errors."""
     return _core.parse_file(
@@ -120,6 +135,7 @@ def parse_file(
         calculate_slider_paths,
         calculate_slider_events,
         apply_stacking,
+        int(mods),
     )
 
 
