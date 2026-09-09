@@ -3,8 +3,8 @@
 #include <optional>
 #include <string_view>
 
-#include <fosu/engine/hitobject_details.h>
-#include <fosu/engine/slider.h>
+#include <fosu/engine/hit_objects/samples.h>
+#include <fosu/engine/hit_objects/sliders.h>
 
 namespace fosu::internal {
 

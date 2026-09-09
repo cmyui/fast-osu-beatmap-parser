@@ -1,7 +1,8 @@
 // Test-only DSO: retain record/framing logic but replace scalar decimal
 // conversion with libc over a bounded copy. Compile without AVX2 and with
 // hidden visibility so inline parser definitions cannot interpose on the test.
-#include <fosu/engine/scalar_parse.h>
+#include <fosu/engine/parsing/numbers.h>
+#include <fosu/engine/timing_points/beat_length.h>
 #include <cmath>
 #include <cstdlib>
 #include <string>

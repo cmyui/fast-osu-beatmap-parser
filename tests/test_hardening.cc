@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <string>
 #include "support/canonical_dump.h"
+#include "support/scalar_engine.h"
 
 static fosu::Beatmap must_parse(fosu::Parser& parser,
                                 const fosu::FileBuffer& input,
@@ -15,7 +16,7 @@ static fosu::Beatmap must_parse(fosu::Parser& parser,
 
 static void check(const std::string& text) {
   auto input = fosu::make_padded(text);
-  fosu::Parser scalar_parser(fosu::internal::scalar_engine);
+  fosu::Parser scalar_parser(fosu_test::scalar_engine());
   fosu::Parser simd_parser;
   auto scalar = must_parse(scalar_parser, input);
   auto simd = must_parse(simd_parser, input);
@@ -113,8 +114,8 @@ int main() {
     assert(map.sliders[0].length == expected);
   }
   for (bool simd : {false, true}) {
-    fosu::Parser parser(simd ? fosu::internal::native_engine
-                             : fosu::internal::scalar_engine);
+    fosu::Parser parser(simd ? fosu::internal::compiled_engine
+                             : fosu_test::scalar_engine());
     auto input = fosu::make_padded(
         "[Metadata]\nTitle:real\nTitlX:wrong\nBeatmapID:-9223372036854775808\n"
         "[MetadataFake]\nTitle:wrong\n[Difficulty]\nApproachRate:1e309\n"

@@ -12,7 +12,15 @@ and compiled C++ files use `.cc`:
 src/fosu/
     parser.h, beatmap.h, parse_options.h, result.h
     arena.h, os.h, io.h, beatmap_header.h
-    engine/       # Parsing algorithms, SIMD helpers, and runtime loading
+    engine/
+      parsing_engine.h, parse_document.h
+      sections/       # General, Editor, Metadata, Difficulty, Events, etc.
+      hit_objects/    # Common fields, samples, object types, and sliders
+      timing_points/  # Individual timing points and beat-length rules
+      parsing/        # Key/value fields, numbers, lines, and string lookup
+      primitives/     # Vector operations, byte scanning, and packed digits
+      runtime/        # CPU detection and dynamic engine loading
+      third_party/    # Unmodified fast_float dependency and attribution
     bindings/     # C ABI and detached Python value conversion
 ```
 
@@ -22,6 +30,17 @@ included automatically by the header-only interface. CMake explicitly lists
 the headers needed by consumers and installs them under `include/fosu/`;
 compiled-only loader headers and `.cc` files are not installed. Installed
 consumers use the same include names as source-tree consumers.
+
+The `Parser` owns input preparation, storage, and result lifetimes. Its selected
+engine owns the complete document parse. Each section parser consumes its body
+and returns the next section header or EOF; optimized sections can fuse line
+scanning with record parsing. General, Editor, Metadata, and Difficulty own their
+field tables and acceptance rules, sharing key/value iteration and typed field
+assignment. Domain-specific SIMD algorithms stay beside the format rules they
+implement; `primitives/` contains reusable operations, not all optimized code.
+The shared document flow is compiled once for each ISA,
+without a scalar/SIMD mode parameter. Tests compare it with a separately compiled
+scalar engine whose implementation symbols are isolated from the SIMD build.
 
 ## Formatting and Python typing
 

@@ -1,5 +1,11 @@
 find_package(Python REQUIRED COMPONENTS Interpreter)
 find_package(Threads REQUIRED)
+# Test both real engine builds, rather than a scalar-shaped route compiled
+# with SIMD helpers. Keep their inline symbols isolated from each other.
+add_library(test_scalar_engine SHARED EXCLUDE_FROM_ALL tests/reference/scalar_engine.cc)
+fosu_configure(test_scalar_engine scalar native)
+set_target_properties(test_scalar_engine PROPERTIES
+  CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 if(BUILD_TESTING)
   set(_tests numeric sections string_lookup hitobject_fields storage hardening c_api c_api_unload)
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT FOSU_SANITIZE)
@@ -10,6 +16,7 @@ if(BUILD_TESTING)
     list(APPEND _test_targets test_${name})
     fosu_executable(test_${name} tests/test_${name}.cc)
     target_compile_options(test_${name} PRIVATE -UNDEBUG)
+    target_link_libraries(test_${name} PRIVATE test_scalar_engine)
     if(name MATCHES "^(c_api|c_api_io)$")
       target_link_libraries(test_${name} PRIVATE fosu Threads::Threads)
     endif()
@@ -55,6 +62,7 @@ if(BUILD_TESTING)
   add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -LE oneshot DEPENDS test-binaries USES_TERMINAL)
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     fosu_executable(fuzz_parser tests/fuzz_parser.cc)
+    target_link_libraries(fuzz_parser PRIVATE test_scalar_engine)
     target_compile_options(fuzz_parser PRIVATE -O1 -g -UNDEBUG -fsanitize=fuzzer,address,undefined,float-cast-overflow -fno-sanitize-recover=all)
     target_link_options(fuzz_parser PRIVATE -fsanitize=fuzzer,address,undefined,float-cast-overflow)
     set(FOSU_FUZZ_SECONDS 60 CACHE STRING "Fuzz smoke duration")
@@ -80,7 +88,7 @@ set_target_properties(numeric_oracle PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET 
 # The oracle intentionally has no ISA tuning and remains independent of the fast path.
 fosu_executable(validate_corpus tests/validate_corpus.cc)
 target_compile_options(validate_corpus PRIVATE -UNDEBUG)
-target_link_libraries(validate_corpus PRIVATE ${CMAKE_DL_LIBS})
+target_link_libraries(validate_corpus PRIVATE ${CMAKE_DL_LIBS} test_scalar_engine)
 add_custom_target(references DEPENDS reference_native reference_c_api numeric_oracle validate_corpus)
 
 foreach(name native c_api)

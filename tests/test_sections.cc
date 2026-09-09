@@ -279,8 +279,8 @@ static void test_difficulty_selection_skips_other_sections() {
       "[Colours]\nCombo1:255,0,0\n"
       "[HitObjects]\n64,96,1000,1,0\n");
   for (bool simd : {false, true}) {
-    fosu::Parser parser(simd ? fosu::internal::native_engine
-                             : fosu::internal::scalar_engine);
+    fosu::Parser parser(simd ? fosu::internal::compiled_engine
+                             : fosu_test::scalar_engine());
     const auto& bm =
         require_parse(parser.parse(input, {.sections = fosu::kSectionDifficulty}));
     CHECK_EQ(bm.hp, 3);
@@ -300,8 +300,8 @@ static void test_metadata_and_difficulty_selection() {
       "[Difficulty]\nOverallDifficulty:6\n"
       "[HitObjects]\n128,192,2000,1,0\n");
   for (bool simd : {false, true}) {
-    fosu::Parser parser(simd ? fosu::internal::native_engine
-                             : fosu::internal::scalar_engine);
+    fosu::Parser parser(simd ? fosu::internal::compiled_engine
+                             : fosu_test::scalar_engine());
     const auto& bm = require_parse(parser.parse(
         input, {.sections = fosu::kSectionMetadata | fosu::kSectionDifficulty}));
     CHECK(bm.title == "Selected metadata");
@@ -319,8 +319,8 @@ static void test_hitobject_selection_skips_preceding_sections() {
       "[TimingPoints]\n100,400\n"
       "[HitObjects]\n32,48,3000,1,2\n256,192,4000,8,0,5000\n");
   for (bool simd : {false, true}) {
-    fosu::Parser parser(simd ? fosu::internal::native_engine
-                             : fosu::internal::scalar_engine);
+    fosu::Parser parser(simd ? fosu::internal::compiled_engine
+                             : fosu_test::scalar_engine());
     const auto& bm =
         require_parse(parser.parse(input, {.sections = fosu::kSectionHitObjects}));
     CHECK(bm.title.empty() && bm.timing_points.empty());
@@ -338,8 +338,8 @@ static void test_selected_missing_section_uses_defaults() {
       "[Metadata]\nTitle:No difficulty section\n"
       "[HitObjects]\n96,64,6000,1,0\n");
   for (bool simd : {false, true}) {
-    fosu::Parser parser(simd ? fosu::internal::native_engine
-                             : fosu::internal::scalar_engine);
+    fosu::Parser parser(simd ? fosu::internal::compiled_engine
+                             : fosu_test::scalar_engine());
     const auto& bm =
         require_parse(parser.parse(input, {.sections = fosu::kSectionDifficulty}));
     CHECK_EQ(bm.hp, 5);
@@ -360,7 +360,7 @@ static void test_all_section_mask_matches_default() {
       "[HitObjects]\n320,192,7000,128,0,7500:0:0:0:0:\n");
   for (bool simd : {false, true}) {
     const auto& engine =
-        simd ? fosu::internal::native_engine : fosu::internal::scalar_engine;
+        simd ? fosu::internal::compiled_engine : fosu_test::scalar_engine();
     fosu::Parser explicit_parser(engine);
     fosu::Parser default_parser(engine);
     const auto& explicit_mask =
@@ -411,8 +411,8 @@ static void test_timing_integer_widths() {
     const std::string input =
         "[TimingPoints]\n0,-100," + field + ",2," + field + "," + field + ",0," + field;
     for (bool simd : {false, true}) {
-      fosu::Parser parser(simd ? fosu::internal::native_engine
-                               : fosu::internal::scalar_engine);
+      fosu::Parser parser(simd ? fosu::internal::compiled_engine
+                               : fosu_test::scalar_engine());
       const auto& map = require_parse(parser.parse(input.data(), input.size()));
       CHECK_EQ(map.timing_points.size(), 1u);
       CHECK_EQ(map.stats.malformed_lines, 0u);
@@ -480,8 +480,6 @@ static void test_byte_scan_boundaries() {
         const auto input = fosu::make_padded(text);
         const char* p = input.data.get() + alignment;
         CHECK_EQ(fosu::internal::find_byte<Delimiter>(p, p + length), p + position);
-        CHECK_EQ((fosu::internal::find_byte<Delimiter, false>(p, p + length)),
-                 p + position);
       }
     }
   }
@@ -504,8 +502,8 @@ static void test_event_filename_boundaries() {
 static void test_section_skip_boundaries() {
   for (size_t padding : {0u, 30u, 31u, 32u, 63u, 64u, 95u}) {
     for (bool simd : {false, true}) {
-      fosu::Parser parser(simd ? fosu::internal::native_engine
-                               : fosu::internal::scalar_engine);
+      fosu::Parser parser(simd ? fosu::internal::compiled_engine
+                               : fosu_test::scalar_engine());
       const std::string text = "[Unknown]\nvalue:" + std::string(padding, 'x') +
                                "[Metadata]\nTitle:ignored\n[Metadata]\nTitle:retained";
       auto& map = require_parse(
@@ -560,7 +558,78 @@ static void test_enum_contracts() {
   }
 }
 
+static void test_header_field_failures_preserve_values() {
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(
+        "[General]\nPreviewTime:17\nPreviewTime:2147483648\n"
+        "Mode:3\nMode:4\nSampleSet:Soft\nSampleSet:Normal,Soft\n"
+        "Countdown:Normal,HalfSpeed\nUseSkinSprites:1suffix\n"
+        "LetterboxInBreaks:1suffix\nApproachRate:9\n"
+        "[Metadata]\nTitle:  text:with:colons \t\n"
+        "BeatmapID:2147483647\nBeatmapID:2147483648\nUnknown:bad\n"
+        "[Difficulty]\nOverallDifficulty:6\nApproachRate:8.5\n"
+        "[Difficulty]\nApproachRate:bad\nOverallDifficulty:7\n",
+        simd);
+    CHECK_EQ(map.preview_time, 17);
+    CHECK_EQ(map.mode, 3);
+    CHECK_EQ(map.sample_set, fosu::SampleSet::Soft);
+    CHECK_EQ(map.countdown, 3);
+    CHECK(map.use_skin_sprites);
+    CHECK(!map.letterbox_in_breaks);
+    CHECK_EQ(map.title, " text:with:colons \t");
+    CHECK_EQ(map.beatmap_id, INT32_MAX);
+    CHECK_EQ(map.ar, 8.5);
+    CHECK_EQ(map.od, 7);
+    CHECK_EQ(map.stats.malformed_lines, 6u);
+
+    const auto missing_ar = parse_str(
+        "[Difficulty]\nApproachRate:bad\nOverallDifficulty:6\n"
+        "[General]\nApproachRate:9\n"
+        "[Difficulty]\nOverallDifficulty:7\n",
+        simd);
+    CHECK_EQ(missing_ar.ar, 7);
+    CHECK_EQ(missing_ar.stats.malformed_lines, 1u);
+  }
+}
+
+static void test_repeated_section_bodies() {
+  const std::string text =
+      "osu file format v14\n"
+      "[General]\nAudioFilename:first.mp3\n[Editor]\nGridSize:8\n"
+      "[Metadata]\nTitle:literal [Difficulty]\n[Difficulty]\nOverallDifficulty:7\n"
+      "[Events]\n2,1,2\n[TimingPoints]\n0,500\n[Colours]\nCombo1:1,2,3\n"
+      "[Future]\nTitle:ignored\n[HitObjects]\n1,2,3,1,0\n"
+      "[General]\n[Editor]\n[Metadata]\nArtist:final\n[Difficulty]\n"
+      "[Events]\n//comment\n2,3,4\n[TimingPoints]\n5,-100\n"
+      "[Colours]\nCombo2:4,5,6\n[HitObjects]\n4,5,6,1,0";
+  for (bool simd : {false, true}) {
+    for (bool crlf : {false, true}) {
+      std::string input;
+      for (char c : text) {
+        if (crlf && c == '\n')
+          input += '\r';
+        input += c;
+      }
+      const auto map = parse_str(input, simd);
+      CHECK_EQ(map.audio_filename, "first.mp3");
+      CHECK_EQ(map.grid_size, 8);
+      CHECK_EQ(map.title, "literal [Difficulty]");
+      CHECK_EQ(map.artist, "final");
+      CHECK_EQ(map.ar, 7);
+      CHECK_EQ(map.breaks.size(), 2u);
+      CHECK_EQ(map.timing_points.size(), 2u);
+      CHECK_EQ(map.combo_colours.size(), 2u);
+      CHECK_EQ(map.hit_objects.size(), 2u);
+      if (map.hit_objects.size() == 2)
+        CHECK_EQ(map.hit_objects[1].time, 6);
+      CHECK_EQ(map.stats.malformed_lines, 0u);
+    }
+  }
+}
+
 int main() {
+  test_header_field_failures_preserve_values();
+  test_repeated_section_bodies();
   test_enum_contracts();
   test_byte_scan_boundaries<','>();
   test_byte_scan_boundaries<':'>();

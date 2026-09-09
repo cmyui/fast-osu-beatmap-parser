@@ -1,5 +1,5 @@
 #include <fosu/bindings/c_api.h>
-#include <fosu/engine/cpu_features.h>
+#include <fosu/engine/runtime/cpu_features.h>
 #include <cassert>
 #include <cstdlib>
 #include <cstring>

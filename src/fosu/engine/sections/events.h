@@ -1,9 +1,9 @@
 #pragma once
 #include <fosu/beatmap.h>
-#include <fosu/engine/byte_scan.h>
-#include <fosu/engine/prefix.h>
-#include <fosu/engine/string_lookup.h>
-#include <fosu/engine/text.h>
+#include <fosu/engine/parsing/lines.h>
+#include <fosu/engine/parsing/numbers.h>
+#include <fosu/engine/parsing/string_lookup.h>
+#include <fosu/engine/primitives/byte_scan.h>
 #include <optional>
 
 namespace fosu::internal {
@@ -104,15 +104,12 @@ inline void parse_event_line(Beatmap& bm,
 }
 
 #if FOSU_SIMD
-// Fused [Events] section loop. Storyboard command lines — indented, and
-// ~12% of all lines in the popular corpus — are counted and skipped on
-// their first byte; every line finds its end with vector compares (two
-// 32-byte windows cover 64 bytes) instead of a memchr call. Returns the
-// position after the section.
-inline const char* parse_events_section(Beatmap& bm,
-                                        size_t& break_count,
-                                        const char* p,
-                                        const char* file_end) {
+inline const char* parse_events_section_simd(Beatmap& bm,
+                                             size_t& break_count,
+                                             const char* p,
+                                             const char* file_end) {
+  // Fused loop: skip indented storyboard commands on their first byte and
+  // find line endings with two 32-byte vector compares.
   uint32_t storyboard_lines = 0;
   while (p < file_end) {
     const char c = *p;
@@ -155,6 +152,26 @@ inline const char* parse_events_section(Beatmap& bm,
   bm.stats.storyboard_lines += storyboard_lines;
   return p;
 }
-#endif  // FOSU_SIMD
+#endif
+
+inline const char* parse_events_section_scalar(Beatmap& bm,
+                                               size_t& break_count,
+                                               const char* p,
+                                               const char* file_end) {
+  return for_each_section_line(p, file_end, [&](std::string_view line) {
+    parse_event_line(bm, break_count, line.data(), line.size());
+  });
+}
+
+inline const char* parse_events_section(Beatmap& bm,
+                                        size_t& break_count,
+                                        const char* p,
+                                        const char* file_end) {
+#if FOSU_SIMD
+  return parse_events_section_simd(bm, break_count, p, file_end);
+#else
+  return parse_events_section_scalar(bm, break_count, p, file_end);
+#endif
+}
 
 }  // namespace fosu::internal

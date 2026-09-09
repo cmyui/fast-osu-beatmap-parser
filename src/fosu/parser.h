@@ -135,7 +135,7 @@ ParserStorage parser_storage(Parser& parser);
 
 class Parser {
  public:
-  explicit Parser(const ParsingEngine& engine = internal::native_engine) noexcept
+  explicit Parser(const ParsingEngine& engine = internal::compiled_engine) noexcept
       : arena_(internal::acquire_parser_arena()), engine_(&engine) {}
 
   Parser(const Parser&) = delete;

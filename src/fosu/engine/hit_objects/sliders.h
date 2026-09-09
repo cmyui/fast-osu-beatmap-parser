@@ -5,10 +5,26 @@
 #include <cstddef>
 #include <optional>
 
-#include <fosu/engine/digit_groups.h>
-#include <fosu/engine/prefix.h>
+#include <fosu/engine/hit_objects/common_fields.h>
+#include <fosu/engine/primitives/digit_groups.h>
+#include <fosu/enums.h>
 
 namespace fosu::internal {
+
+inline std::optional<CurveType> parse_curve_type(char value) {
+  switch (value) {
+    case 'B':
+      return CurveType::Bezier;
+    case 'C':
+      return CurveType::Catmull;
+    case 'L':
+      return CurveType::Linear;
+    case 'P':
+      return CurveType::PerfectCurve;
+    default:
+      return std::nullopt;
+  }
+}
 
 struct ParsedSliderCoordinate {
   int32_t value;

@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include <fosu/parser.h>
+#include "scalar_engine.h"
 
 static int g_failures = 0;
 
@@ -42,7 +43,7 @@ inline int test_result() {
 [[maybe_unused]] static fosu::Beatmap parse_str(const std::string& s,
                                                 bool use_simd = true) {
   static fosu::Parser native_parser;
-  static fosu::Parser scalar_parser(fosu::internal::scalar_engine);
+  static fosu::Parser scalar_parser(fosu_test::scalar_engine());
   auto& parser = use_simd ? native_parser : scalar_parser;
   return require_parse(parser.parse(s.data(), s.size()));
 }

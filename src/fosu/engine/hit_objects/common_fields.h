@@ -27,9 +27,10 @@
 #include <cstring>
 #include <optional>
 
-#include <fosu/engine/scalar_parse.h>
+#include <fosu/engine/parsing/numbers.h>
+#include <fosu/engine/primitives/digit_groups.h>
 
-#include <fosu/engine/simd.h>
+#include <fosu/engine/primitives/vector_ops.h>
 
 namespace fosu::internal {
 
@@ -207,20 +208,12 @@ struct HitObjectParseConstants {
         word_weights(_mm_setr_epi16(100, 1, 100, 1, 0, 0, 0, 0)) {}
 };
 
-inline uint32_t comma_mask32(__m256i ascii) {
-  return static_cast<uint32_t>(
-      _mm256_movemask_epi8(_mm256_cmpeq_epi8(ascii, _mm256_set1_epi8(','))));
-}
-
 #elif FOSU_SIMD_NEON
 struct HitObjectParseConstants {
   ByteVector nl = broadcast_byte<'\n'>(), comma = broadcast_byte<','>(),
              colon = broadcast_byte<':'>(), pipe = broadcast_byte<'|'>(),
              zero = broadcast_byte<'0'>();
 };
-inline uint32_t comma_mask32(Bytes32 v) {
-  return equal_mask32(v, broadcast_byte<','>());
-}
 
 // TBL directly addresses both 16-byte input registers. No lane permutation
 // is needed, so each prefix shape occupies 32 bytes instead of AVX2's 64.

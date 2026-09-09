@@ -1,5 +1,5 @@
 #pragma once
-#include <fosu/engine/string_lookup.h>
+#include <fosu/engine/parsing/string_lookup.h>
 #include <cstdint>
 #include <string_view>
 namespace fosu::internal {

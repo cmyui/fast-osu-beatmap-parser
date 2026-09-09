@@ -87,28 +87,35 @@ target_sources(fosu_headers INTERFACE FILE_SET HEADERS BASE_DIRS src FILES
   src/fosu/parse_options.h
   src/fosu/parser.h
   src/fosu/result.h
-  src/fosu/engine/byte_scan.h
-  src/fosu/engine/digit_groups.h
-  src/fosu/engine/document_sections.h
-  src/fosu/engine/enum_parse.h
-  src/fosu/engine/events.h
-  src/fosu/engine/fast_float.h
-  src/fosu/engine/hitobject_details.h
-  src/fosu/engine/hitobjects.h
-  src/fosu/engine/metadata.h
+  src/fosu/engine/hit_objects/common_fields.h
+  src/fosu/engine/hit_objects/object_types.h
+  src/fosu/engine/hit_objects/samples.h
+  src/fosu/engine/hit_objects/slider_fields.h
+  src/fosu/engine/hit_objects/sliders.h
   src/fosu/engine/parse_document.h
+  src/fosu/engine/parsing/field_values.h
+  src/fosu/engine/parsing/key_value.h
+  src/fosu/engine/parsing/lines.h
+  src/fosu/engine/parsing/numbers.h
+  src/fosu/engine/parsing/sample_sets.h
+  src/fosu/engine/parsing/section_names.h
+  src/fosu/engine/parsing/string_lookup.h
   src/fosu/engine/parsing_engine.h
-  src/fosu/engine/prefix.h
-  src/fosu/engine/scalar_parse.h
-  src/fosu/engine/section_names.h
-  src/fosu/engine/simd.h
-  src/fosu/engine/slider.h
-  src/fosu/engine/slider_tail.h
-  src/fosu/engine/string_lookup.h
-  src/fosu/engine/swar.h
-  src/fosu/engine/text.h
-  src/fosu/engine/timing.h
-  src/fosu/engine/timing_section.h
+  src/fosu/engine/primitives/byte_scan.h
+  src/fosu/engine/primitives/digit_groups.h
+  src/fosu/engine/primitives/packed_digits.h
+  src/fosu/engine/primitives/vector_ops.h
+  src/fosu/engine/sections/colours.h
+  src/fosu/engine/sections/difficulty.h
+  src/fosu/engine/sections/editor.h
+  src/fosu/engine/sections/events.h
+  src/fosu/engine/sections/general.h
+  src/fosu/engine/sections/hit_objects.h
+  src/fosu/engine/sections/metadata.h
+  src/fosu/engine/sections/timing_points.h
+  src/fosu/engine/third_party/fast_float.h
+  src/fosu/engine/timing_points/beat_length.h
+  src/fosu/engine/timing_points/point.h
 )
 
 function(fosu_profile target)
@@ -166,7 +173,7 @@ endfunction()
 # The core owns Parser lifetime and storage. ISA libraries execute the shared parser.
 function(fosu_dispatch target product)
   fosu_configure(${target} scalar "${product}")
-  target_sources(${target} PRIVATE src/fosu/engine/loader.cc)
+  target_sources(${target} PRIVATE src/fosu/engine/runtime/loader.cc)
   target_link_libraries(${target} PRIVATE ${CMAKE_DL_LIBS})
   target_compile_definitions(${target} PRIVATE
     FOSU_DEFAULT_BACKEND="${FOSU_ISA}"
@@ -185,7 +192,7 @@ function(fosu_dispatch target product)
   if(variant)
     set(engine fosu_${product}_${variant})
     if(NOT TARGET ${engine})
-      add_library(${engine} SHARED src/fosu/engine/entry.cc)
+      add_library(${engine} SHARED src/fosu/engine/runtime/entry.cc)
       fosu_configure(${engine} "${variant}" "${product}")
       fosu_runtime(${engine})
       set_target_properties(${engine} PROPERTIES
@@ -212,7 +219,7 @@ if(NOT SKBUILD)
   target_include_directories(fosu PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
   install(TARGETS fosu fosu_headers EXPORT fosuTargets
     FILE_SET HEADERS DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-  install(FILES src/fosu/engine/fast_float.md DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fosu/engine)
+  install(FILES src/fosu/engine/third_party/fast_float.md DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fosu/engine/third_party)
   install(EXPORT fosuTargets NAMESPACE fosu:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fosu)
   include(CMakePackageConfigHelpers)
   configure_package_config_file(cmake/fosuConfig.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/fosuConfig.cmake INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fosu)

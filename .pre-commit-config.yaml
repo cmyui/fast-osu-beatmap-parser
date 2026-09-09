@@ -4,7 +4,7 @@ repos:
     hooks:
       - id: clang-format
         types_or: [c, c++]
-        exclude: ^src/fosu/engine/fast_float\.h$
+        exclude: ^src/fosu/engine/third_party/fast_float\.h$
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v2.3.1
     hooks:

@@ -3,13 +3,17 @@
 #include <cstring>
 
 #include <fosu/beatmap.h>
-#include <fosu/engine/byte_scan.h>
-#include <fosu/engine/enum_parse.h>
-#include <fosu/engine/hitobject_details.h>
-#include <fosu/engine/prefix.h>
-#include <fosu/engine/slider_tail.h>
+#include <fosu/engine/hit_objects/common_fields.h>
+#include <fosu/engine/hit_objects/object_types.h>
+#include <fosu/engine/hit_objects/slider_fields.h>
+#include <fosu/engine/parsing/lines.h>
+#include <fosu/engine/primitives/byte_scan.h>
 
 namespace fosu::internal {
+
+static_assert(offsetof(HitObject, x) == 0 && offsetof(HitObject, y) == 4 &&
+                  offsetof(HitObject, type) == 8 && offsetof(HitObject, hitsound) == 12,
+              "AVX2 prefix path stores {x,y,type,hitsound} as one vector");
 
 // Slider params after "type,hitSound,":
 //   curveType|x:y|x:y...,slides,length[,edgeSounds,edgeSets][,hitSample]
@@ -133,7 +137,7 @@ __attribute__((noinline)) inline bool parse_hitobject_line_scalar(
                                  line_end, constants);
 }
 
-inline const char* parse_hitobject_lines_scalar(
+inline const char* parse_hitobjects_section_scalar(
     Beatmap& beatmap,
     size_t& hit_object_count,
     size_t& slider_count,
@@ -172,13 +176,14 @@ inline const char* parse_hitobject_lines_scalar(
 #if FOSU_SIMD
 // SIMD section loop. One 32-byte load per line yields the newline, comma and
 // non-digit masks. Lines outside the common editor shape take the scalar path.
-inline const char* parse_hitobject_lines(Beatmap& beatmap,
-                                         size_t& hit_object_count,
-                                         size_t& slider_count,
-                                         size_t& point_count,
-                                         const char* p,
-                                         const char* file_end,
-                                         const HitObjectParseConstants& constants) {
+inline const char* parse_hitobjects_section_simd(
+    Beatmap& beatmap,
+    size_t& hit_object_count,
+    size_t& slider_count,
+    size_t& point_count,
+    const char* p,
+    const char* file_end,
+    const HitObjectParseConstants& constants) {
   const ByteVector newline_value = constants.nl;
   const ByteVector comma_value = constants.comma;
   const ByteVector zero = constants.zero;
@@ -263,7 +268,6 @@ inline const char* parse_hitobject_lines(Beatmap& beatmap,
 }
 #endif
 
-template <bool UseSimd>
 inline const char* parse_hitobjects_section(Beatmap& beatmap,
                                             size_t& hit_object_count,
                                             size_t& slider_count,
@@ -272,12 +276,12 @@ inline const char* parse_hitobjects_section(Beatmap& beatmap,
                                             const char* file_end) {
   const HitObjectParseConstants constants;
 #if FOSU_SIMD
-  if constexpr (UseSimd)
-    return parse_hitobject_lines(beatmap, hit_object_count, slider_count, point_count, p,
-                                 file_end, constants);
+  return parse_hitobjects_section_simd(beatmap, hit_object_count, slider_count,
+                                       point_count, p, file_end, constants);
+#else
+  return parse_hitobjects_section_scalar(beatmap, hit_object_count, slider_count,
+                                         point_count, p, file_end, constants);
 #endif
-  return parse_hitobject_lines_scalar(beatmap, hit_object_count, slider_count,
-                                      point_count, p, file_end, constants);
 }
 
 }  // namespace fosu::internal

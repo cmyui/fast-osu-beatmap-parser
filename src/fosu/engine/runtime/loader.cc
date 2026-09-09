@@ -1,7 +1,7 @@
-#include <fosu/engine/cpu_features.h>
-#include <fosu/engine/loader.h>
 #include <fosu/engine/parse_document.h>
-#include <fosu/engine/string_lookup.h>
+#include <fosu/engine/parsing/string_lookup.h>
+#include <fosu/engine/runtime/cpu_features.h>
+#include <fosu/engine/runtime/loader.h>
 
 #include <dlfcn.h>
 #include <limits.h>
@@ -12,7 +12,11 @@
 #include <cstring>
 
 namespace fosu::internal {
+static_assert(!FOSU_SIMD, "the core embeds only the scalar engine");
 namespace {
+constexpr const ParsingEngine& embedded_scalar_engine = compiled_engine;
+static_assert(embedded_scalar_engine.kind == EngineKind::Scalar);
+
 // Trivial lifetime permits a host's late exit callback to initialize again
 // after library cleanup. No parser or arena lives in an engine library.
 constinit std::atomic<const ParsingEngine*> selected{nullptr};
@@ -38,7 +42,7 @@ bool engine_path(const char* name, char (&path)[PATH_MAX]) {
   return length > 0 && static_cast<size_t>(length) < sizeof(path);
 }
 
-const ParsingEngine* load(const char* name) {
+const ParsingEngine* load_engine_library(const char* name) {
   char path[PATH_MAX];
   if (!engine_path(name, path))
     return nullptr;
@@ -55,7 +59,7 @@ const ParsingEngine* load(const char* name) {
   return entry();
 }
 
-const ParsingEngine* choose() {
+const ParsingEngine* select_engine_from_environment() {
   const char* request = std::getenv("FOSU_BACKEND");
   if (!request) {
     const char* scalar = std::getenv("FOSU_FORCE_SCALAR");
@@ -64,17 +68,17 @@ const ParsingEngine* choose() {
   if (std::strcmp(request, "auto") == 0) {
     for (EngineKind kind : {EngineKind::Avx2, EngineKind::Neon}) {
       if (engine_available(kind))
-        if (const auto* engine = load(engine_name(kind)))
+        if (const auto* engine = load_engine_library(engine_name(kind)))
           return engine;
     }
-    return &scalar_engine;
+    return &embedded_scalar_engine;
   }
   const auto* kind = find_engine_kind(request);
   if (!kind)
     return nullptr;
   if (*kind == EngineKind::Scalar)
-    return &scalar_engine;
-  return engine_available(*kind) ? load(request) : nullptr;
+    return &embedded_scalar_engine;
+  return engine_available(*kind) ? load_engine_library(request) : nullptr;
 }
 }  // namespace
 
@@ -121,7 +125,7 @@ const ParsingEngine* selected_engine() {
     }
     engine = selected.load(std::memory_order_relaxed);
     if (!engine) {
-      engine = choose();
+      engine = select_engine_from_environment();
       if (!engine)
         engine = &unavailable;
       selected.store(engine, std::memory_order_release);
