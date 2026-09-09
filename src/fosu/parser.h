@@ -257,7 +257,7 @@ class Parser {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
-    const bool stacking = opts.calculate_stacking && beatmap_.mode == 0;
+    const bool stacking = opts.apply_stacking && beatmap_.mode == 0;
     if ((opts.calculate_slider_paths || opts.calculate_slider_events || stacking) &&
         !internal::set_slider_paths(beatmap_, arena_)) {
       reset_working_result();
@@ -272,7 +272,7 @@ class Parser {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
-    if (stacking && !internal::set_stacking(beatmap_, arena_)) {
+    if (stacking && !internal::apply_stacking(beatmap_, arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }

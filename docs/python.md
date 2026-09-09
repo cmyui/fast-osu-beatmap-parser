@@ -97,10 +97,14 @@ nested hitobjects: no samples, mods, catch conversion, or legacy-last-tick judge
 Expansion beyond 1,048,576 events per map raises `MemoryError` rather than
 silently dropping events.
 
-`calculate_stacking=True` runs unmodded osu!standard stacking after parsing,
-including the pre-v6 algorithm. Each hit object gets a `Stacking` value with
-`stack_height` and `stack_offset`; add the offset to x/y for the displayed
-position. Raw coordinates and path/event positions remain unchanged.
+`apply_stacking=True` applies unmodded osu!standard stacking after parsing,
+including the pre-v6 algorithm. Hit-object x/y and absolute slider control points
+are adjusted before returning. `obj.raw_position()` subtracts the stacking offset
+from the current x/y, or returns x/y when stacking is absent. It can have small
+floating-point rounding differences. Coordinates are floats in both interfaces,
+including when stacking is disabled. Each object also retains `stack_height` and `stack_offset`
+in its `Stacking` value for inspection; do not add the offset again.
+Relative path/event positions remain unchanged: add them to the adjusted head.
 It includes path and end-time calculation, but not events. Native results use
 `Beatmap.stacking`, indexed by hit object. Other modes are unchanged; Python
 `stacking` is `None` when not calculated. Include GENERAL, DIFFICULTY,

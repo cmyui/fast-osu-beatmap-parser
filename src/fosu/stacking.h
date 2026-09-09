@@ -92,7 +92,7 @@ inline void calculate_legacy_stacks(Beatmap& map, float threshold) {
   }
 }
 
-inline bool set_stacking(Beatmap& map, Arena* arena) {
+inline bool apply_stacking(Beatmap& map, Arena* arena) {
   if (map.mode != 0 || map.hit_objects.empty())
     return true;
   auto* stacking = arena_push_array<Stacking>(arena, map.hit_objects.size());
@@ -119,6 +119,21 @@ inline bool set_stacking(Beatmap& map, Arena* arena) {
       continue;
     const float offset = stack.stack_height * scale * -6.4f;
     stack.stack_offset = {offset, offset};
+  }
+  // Calculate every height against unstacked geometry before moving anything.
+  for (size_t i = 0; i < map.hit_objects.size(); ++i) {
+    auto& object = map.hit_objects[i];
+    const auto offset = map.stacking[i].stack_offset;
+    object.x += offset.x;
+    object.y += offset.y;
+    if (object.slider == HitObject::kNoSlider)
+      continue;
+    const auto& slider = map.sliders[object.slider];
+    for (auto& point :
+         map.slider_points.subspan(slider.point_begin, slider.point_count)) {
+      point.x += offset.x;
+      point.y += offset.y;
+    }
   }
   return true;
 }

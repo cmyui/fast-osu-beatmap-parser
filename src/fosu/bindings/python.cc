@@ -350,8 +350,8 @@ struct BeatmapConverter {
     return PythonRef(
         PyUnicode_DecodeUTF8(s.empty() ? "" : s.data(), s.size(), "surrogateescape"));
   }
-  PythonRef point(int x, int y) {
-    return record(t_point, {{f_x, integer(x)}, {f_y, integer(y)}});
+  PythonRef point(float x, float y) {
+    return record(t_point, {{f_x, number(x)}, {f_y, number(y)}});
   }
   template <class F>
   PythonRef list(size_t count, F item) {
@@ -369,8 +369,8 @@ struct BeatmapConverter {
     const Value common[] = {{f_time, retain(time)},
                             {f_stacking, stacking(h)},
                             {f_end_time, circle ? std::move(time) : number(h.end_time)},
-                            {f_x, integer(h.x)},
-                            {f_y, integer(h.y)},
+                            {f_x, number(h.x)},
+                            {f_y, number(h.y)},
                             {f_hitsound, sound(h.hitsound)},
                             {f_type, integer(h.type)},
                             {f_new_combo, boolean(h.new_combo)},
@@ -568,10 +568,10 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
   int calculate_slider_end_times;
   int calculate_slider_paths;
   int calculate_slider_events;
-  int calculate_stacking;
+  int apply_stacking;
   if (!PyArg_ParseTuple(args, "Olpppp", &arg, &sections, &calculate_slider_end_times,
                         &calculate_slider_paths, &calculate_slider_events,
-                        &calculate_stacking))
+                        &apply_stacking))
     return nullptr;
   if (sections < 0 || (static_cast<unsigned long>(sections) &
                        ~static_cast<unsigned long>(fosu::kAllSections))) {
@@ -580,7 +580,7 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
   }
   const fosu::ParseOptions options{
       static_cast<uint32_t>(sections), calculate_slider_end_times != 0,
-      calculate_slider_paths != 0, calculate_slider_events != 0, calculate_stacking != 0};
+      calculate_slider_paths != 0, calculate_slider_events != 0, apply_stacking != 0};
   try {
     PythonRef input = file ? PythonRef(PyOS_FSPath(arg)) : retain(arg);
     if (file && PyUnicode_Check(input))

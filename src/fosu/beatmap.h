@@ -4,6 +4,7 @@
 #include <cstring>
 #include <span>
 #include <string_view>
+#include <utility>
 
 #include <fosu/arena.h>
 #include <fosu/beatmap_header.h>
@@ -13,11 +14,9 @@
 
 namespace fosu {
 
-// Field order of the first 16 bytes is load-bearing: the AVX2 hitobject
-// fast path stores its result vector directly over {x, y, type, hitsound}.
 struct HitObject {
-  int32_t x;
-  int32_t y;
+  float x;
+  float y;
   uint32_t type;
   uint32_t hitsound;
   double time;
@@ -26,6 +25,9 @@ struct HitObject {
   bool new_combo;
   uint8_t combo_skip;
   std::string_view hit_sample;
+  std::pair<float, float> raw_position(PathPoint stack_offset = {}) const {
+    return {x - stack_offset.x, y - stack_offset.y};
+  }
 
   static constexpr uint32_t kNoSlider = 0xFFFFFFFF;
 
@@ -37,8 +39,8 @@ struct HitObject {
 };
 
 struct SliderPoint {
-  int32_t x;
-  int32_t y;
+  float x;
+  float y;
 };
 
 struct Slider {

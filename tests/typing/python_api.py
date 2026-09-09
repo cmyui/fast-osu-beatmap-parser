@@ -19,8 +19,11 @@ assert_type(b.hit_objects, list[fosu.HitObject])
 b.title = "Edited"
 b.tag_list.append("new")
 for note in b.hit_objects:
-    note.x = 100
     assert_type(note.time, float)
+    assert_type(note.x, float)
+    assert_type(note.y, float)
+    assert_type(note.raw_position(), tuple[float, float])
+    note.x = 100
     assert_type(note.stacking, fosu.Stacking | None)
     if note.stacking is not None:
         assert_type(note.stacking.stack_height, int)
