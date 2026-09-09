@@ -1,5 +1,9 @@
 # Benchmark corpus
 
+Use the [routine profiles](../../docs/validation.md) for everyday compatibility
+and performance checks. The full corpus described here is the source population
+and the broader validation/publication workload.
+
 The default corpus preserves the original 10,000 maps and adds roughly 2,000
 popular ranked/approved difficulties from each native non-standard mode:
 taiko (1), catch (2), and mania (3). Standard is mode 0. This is a mixed-mode

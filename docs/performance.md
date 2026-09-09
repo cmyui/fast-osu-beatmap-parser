@@ -1,5 +1,9 @@
 # Measuring performance
 
+For everyday experiments, use the fixed small profiles and escalation rules in
+[Routine validation](validation.md). The full corpus is for broad compatibility
+checkpoints and published measurements, not every optimization hypothesis.
+
 Measure the boundary the application uses. A parser call with resident bytes,
 a first Python call, and a complete process invocation include different work.
 Only compare variants at the same boundary and with the same result fields.
@@ -33,8 +37,9 @@ write syscall but not another program decoding or consuming the stream.
 
 The evaluation machine is an eight-core, shared-tenancy AMD EPYC Genoa (Zen 4)
 VM with no SMT, 32 MiB L3, Ubuntu 24.04, kernel 6.8, GCC 13.3 and glibc 2.39.
-The primary corpus contains the 10,000 most-played ranked/approved maps by
-Akatsuki playcount: 402,593,897 input bytes and 8,070,193 parsed objects. Its
+The full mixed-mode corpus contains 15,952 maps: 9,952 standard and 2,000 each
+of taiko, catch and mania; 669,536,791 input bytes and 15,486,421 parsed objects.
+The [corpus selection](../bench/corpus/README.md) uses Akatsuki popularity. Its
 manifest fixes the selection and source keys; raw files remain on the corpus
 host. Corpus conclusions do not establish performance on all maps or machines.
 
@@ -49,7 +54,7 @@ uncontended lower envelope; it is not the median map, average user latency, or
 a confidence interval. Shared-VM scheduling can move results. MB/s is total
 input bytes divided by the sum of per-file minima, using decimal megabytes.
 
-## Measurement snapshots
+## Historical measurement snapshots (10k corpus)
 
 Native and one-shot source: [`d31cddf`](https://github.com/cmyui/fast-osu-beatmap-parser/commit/d31cddf90f6c7c5d35f2c5f6a4c0ccc39e716866).
 Python source: [`2d010a1`](https://github.com/cmyui/fast-osu-beatmap-parser/commit/2d010a190deda8df71d2607c0b8c8dfdbac8df44).
