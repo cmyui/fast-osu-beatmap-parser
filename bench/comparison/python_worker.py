@@ -1,4 +1,5 @@
 """Persistent worker; JSON and IPC are outside the measured intervals."""
+
 import json
 import io
 import sys
@@ -24,23 +25,31 @@ def load_parser(name):
         import slider
 
         def parse(data, path, workload):
-            return (slider.Beatmap.from_path(path) if workload == "file"
-                    else slider.Beatmap.parse(data.decode("utf-8-sig")))
+            return (
+                slider.Beatmap.from_path(path)
+                if workload == "file"
+                else slider.Beatmap.parse(data.decode("utf-8-sig"))
+            )
 
         def count(beatmap):
             # Do not request stacking, mods, difficulty, or curve evaluation.
             return len(beatmap.hit_objects(stacking=False))
 
         def visit(beatmap):
-            return sum(obj.time.total_seconds() * 1000
-                       for obj in beatmap.hit_objects(stacking=False))
+            return sum(
+                obj.time.total_seconds() * 1000
+                for obj in beatmap.hit_objects(stacking=False)
+            )
 
     elif name == "rosu-pp-py":
         import rosu_pp_py
 
         def parse(data, path, workload):
-            return (rosu_pp_py.Beatmap(path=str(path)) if workload == "file"
-                    else rosu_pp_py.Beatmap(bytes=data))
+            return (
+                rosu_pp_py.Beatmap(path=str(path))
+                if workload == "file"
+                else rosu_pp_py.Beatmap(bytes=data)
+            )
 
         def count(beatmap):
             return beatmap.n_objects
@@ -61,8 +70,11 @@ def load_parser(name):
         decoder = pyttanko.parser()
 
         def parse(data, path, workload):
-            source = (path.open(encoding="utf-8-sig") if workload == "file"
-                      else io.StringIO(data.decode("utf-8-sig")))
+            source = (
+                path.open(encoding="utf-8-sig")
+                if workload == "file"
+                else io.StringIO(data.decode("utf-8-sig"))
+            )
             with source:
                 return decoder.map(source)
 

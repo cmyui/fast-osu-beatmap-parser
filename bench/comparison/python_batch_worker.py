@@ -1,4 +1,5 @@
 """One public Python API, one process, one timed pass over resident inputs."""
+
 import hashlib
 import json
 from pathlib import Path
@@ -13,8 +14,11 @@ def main():
     report = json.loads(Path(summary).read_text())
     table = report["tables"][table_name]
     excluded = set(table["excluded_files"])
-    inputs = [(path, path.read_bytes()) for path in sorted(Path(corpus).glob("*.osu"))
-              if path.name not in excluded]
+    inputs = [
+        (path, path.read_bytes())
+        for path in sorted(Path(corpus).glob("*.osu"))
+        if path.name not in excluded
+    ]
     assert len(inputs) == table["files"]
     fingerprint = hashlib.sha256()
     for path, data in inputs:
@@ -33,9 +37,17 @@ def main():
         counts.append(count(beatmap))
         del beatmap
     elapsed = perf_counter_ns() - start
-    print(json.dumps({"elapsed_ns": elapsed, "files": len(inputs),
-                      "bytes": sum(len(data) for _, data in inputs),
-                      "corpus_sha256": fingerprint.hexdigest(), "counts": counts}))
+    print(
+        json.dumps(
+            {
+                "elapsed_ns": elapsed,
+                "files": len(inputs),
+                "bytes": sum(len(data) for _, data in inputs),
+                "corpus_sha256": fingerprint.hexdigest(),
+                "counts": counts,
+            }
+        )
+    )
 
 
 if __name__ == "__main__":

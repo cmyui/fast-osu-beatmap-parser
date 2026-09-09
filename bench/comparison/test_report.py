@@ -1,4 +1,5 @@
 """Checks for the comparison's inclusion and aggregation rules."""
+
 import copy
 import unittest
 
@@ -7,17 +8,32 @@ from report import summarize
 
 class ReportTests(unittest.TestCase):
     def setUp(self):
-        self.metadata = {"complete": True, "rounds": 2, "reps": 1, "files": 3, "config": {
-            "reference": "fosu-python-avx2", "variants": [
-                {"name": name, "workloads": ["bytes"]}
-                for name in ("fosu-python-avx2", "slider")
-            ],
-        }}
+        self.metadata = {
+            "complete": True,
+            "rounds": 2,
+            "reps": 1,
+            "files": 3,
+            "config": {
+                "reference": "fosu-python-avx2",
+                "variants": [
+                    {"name": name, "workloads": ["bytes"]}
+                    for name in ("fosu-python-avx2", "slider")
+                ],
+            },
+        }
         self.records = [
-            {"variant": variant, "workload": "bytes", "file": file, "round": round_id,
-             "bytes": 100, "count": 2, "ns": [1000]}
+            {
+                "variant": variant,
+                "workload": "bytes",
+                "file": file,
+                "round": round_id,
+                "bytes": 100,
+                "count": 2,
+                "ns": [1000],
+            }
             for variant in ("fosu-python-avx2", "slider")
-            for file in ("a.osu", "b.osu", "c.osu") for round_id in range(2)
+            for file in ("a.osu", "b.osu", "c.osu")
+            for round_id in range(2)
         ]
 
     def test_failure_and_count_mismatch_exclude_same_files_from_both_rows(self):
@@ -34,7 +50,9 @@ class ReportTests(unittest.TestCase):
 
     def test_slow_samples_are_not_filtered(self):
         self.records[0]["ns"] = [61000]
-        row = summarize(self.records, self.metadata)["tables"]["python"]["rows"]["fosu-python-avx2/bytes"]
+        row = summarize(self.records, self.metadata)["tables"]["python"]["rows"][
+            "fosu-python-avx2/bytes"
+        ]
         self.assertEqual(row["mean_us"], 11)
         self.assertEqual(row["pass_mean_us"], [21, 1])
 
@@ -83,7 +101,9 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(report["tables"]["python"]["files"], 1)
         self.assertEqual(report["tables"]["python_all_modes"]["files"], 3)
         self.assertEqual(report["tables"]["python_mode_3"]["modes"], {"3": 1})
-        self.assertEqual(report["coverage"]["slider/bytes"]["by_mode"]["3"]["failed_files"], 1)
+        self.assertEqual(
+            report["coverage"]["slider/bytes"]["by_mode"]["3"]["failed_files"], 1
+        )
 
     def test_empty_mode_cohort_has_no_misleading_timings(self):
         self.metadata["file_modes"] = {"a.osu": 0, "b.osu": 0, "c.osu": 3}
