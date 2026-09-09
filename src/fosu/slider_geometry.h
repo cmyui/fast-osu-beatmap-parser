@@ -224,9 +224,7 @@ inline Result<double> slider_distance(const HitObject& object,
                                       Arena* arena) {
   // A non-degenerate final linear edge can always reach the declared length.
   // No approximation or scratch allocation is needed to establish its distance.
-  if (slider.length > 0 && !control_points.empty() &&
-      (slider.curve_type == CurveType::Linear ||
-       (control_points.size() == 1 && slider.curve_type != CurveType::Catmull))) {
+  if (slider.length > 0 && !control_points.empty()) {
     const auto last = control_points.back();
     const auto previous = control_points.size() > 1
                               ? control_points[control_points.size() - 2]
@@ -283,6 +281,7 @@ struct CurveVertices {
   Arena* arena;
   CurvePoint* points = nullptr;
   size_t count = 0;
+  size_t capacity = 0;
   bool first_in_segment = true;
   bool failed = false;
 
@@ -291,14 +290,18 @@ struct CurveVertices {
     first_in_segment = false;
     if (shared || failed)
       return;
-    auto* next = arena_push_array<CurvePoint>(arena, 1);
-    if (!next) {
-      failed = true;
-      return;
+    if (count == capacity) {
+      constexpr size_t chunk_size = 64;
+      auto* chunk = arena_push_array<CurvePoint>(arena, chunk_size);
+      if (!chunk) {
+        failed = true;
+        return;
+      }
+      if (!points)
+        points = chunk;
+      capacity += chunk_size;
     }
-    if (!points)
-      points = next;
-    *next = point;
+    points[count] = point;
     ++count;
   }
 };
@@ -367,14 +370,23 @@ inline Result<SliderPath> calculate_slider_path(
   return SliderPath{{output, end + 1}, {lengths, end + 1}};
 }
 
+struct PathVerticesArena {
+  Arena* value = arena_alloc({kDefaultArenaReserve, kDefaultArenaCommit, 0});
+  ~PathVerticesArena() { arena_release(value); }
+};
+
+inline Arena* path_vertices_arena() {
+  thread_local PathVerticesArena arena;
+  return arena.value;
+}
+
 inline bool set_slider_paths(Beatmap& map, Arena* arena) {
   if (map.sliders.empty())
     return true;
   auto* paths = arena_push_array<SliderPath>(arena, map.sliders.size());
   if (!paths)
     return false;
-  // Reserve address space, committing only the vertices that are actually used.
-  Arena* vertices = arena_alloc({kDefaultArenaReserve, kDefaultArenaCommit, 0});
+  Arena* vertices = path_vertices_arena();
   if (!vertices)
     return false;
   bool success = true;
@@ -391,7 +403,6 @@ inline bool set_slider_paths(Beatmap& map, Arena* arena) {
     }
     paths[object.slider] = path.value();
   }
-  arena_release(vertices);
   if (success)
     map.slider_paths = {paths, map.sliders.size()};
   return success;
