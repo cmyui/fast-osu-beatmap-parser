@@ -9,12 +9,13 @@ from python_worker import load_parser
 
 
 def main():
-    name, workload, corpus, summary = sys.argv[1:]
+    name, workload, corpus, summary, table_name = sys.argv[1:]
     report = json.loads(Path(summary).read_text())
-    excluded = set(report["tables"]["python"]["excluded_files"])
+    table = report["tables"][table_name]
+    excluded = set(table["excluded_files"])
     inputs = [(path, path.read_bytes()) for path in sorted(Path(corpus).glob("*.osu"))
               if path.name not in excluded]
-    assert len(inputs) == report["tables"]["python"]["files"]
+    assert len(inputs) == table["files"]
     fingerprint = hashlib.sha256()
     for path, data in inputs:
         fingerprint.update(path.name.encode() + b"\0" + hashlib.sha256(data).digest())

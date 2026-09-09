@@ -1,4 +1,4 @@
-"""Decode a FOSUDMP5 stream into Python values, including the complete point pool.
+"""Decode a FOSUDMP6 stream into Python values, including the complete point pool.
 
     build/release-avx2-bundled/fosu_oneshot map.osu | python3 oneshot/decode.py
 
@@ -39,8 +39,8 @@ class Reader:
 
 
 def decode(data: bytes) -> dict[str, Any]:
-    if len(data) < 36 or data[:8] != b"FOSUDMP5":
-        raise ValueError("not a FOSUDMP5 stream")
+    if len(data) < 36 or data[:8] != b"FOSUDMP6":
+        raise ValueError("not a FOSUDMP6 stream")
     trailer_size = struct.unpack("<Q", data[-8:])[0]
     start = len(data) - 8 - trailer_size
     if start < 8:
@@ -104,16 +104,17 @@ def decode(data: bytes) -> dict[str, Any]:
     reader.done()
     reader = Reader(data[8:start])
     objects: list[dict[str, Any]] = []
-    sliders: list[dict[str, Any]] = []
+    sliders: list[dict[str, Any]] = [{} for _ in range(slider_count)]
     for _ in range(object_count):
         hit_object: dict[str, Any] = {}
         reader.fields(hit_object, "i", "x y")
         reader.fields(hit_object, "I", "type hitsound")
         reader.fields(hit_object, "d", "time end_time")
         reader.fields(hit_object, "I", "slider")
+        reader.fields(hit_object, "B", "new_combo combo_skip")
         sample_size = reader.value("I")
         if hit_object["slider"] != 0xFFFFFFFF:
-            if hit_object["slider"] != len(sliders):
+            if hit_object["slider"] >= slider_count or sliders[hit_object["slider"]]:
                 raise ValueError("invalid slider index")
             slider: dict[str, Any] = {}
             reader.fields(slider, "I", "point_begin point_count")
@@ -123,11 +124,11 @@ def decode(data: bytes) -> dict[str, Any]:
             reader.fields(slider, "d", "length")
             slider["curve_type"] = bytes(reader.take(1))
             reader.fields(slider, "s", "edge_sounds edge_sets")
-            sliders.append(slider)
+            sliders[hit_object["slider"]] = slider
         hit_object["hit_sample"] = bytes(reader.take(sample_size))
         objects.append(hit_object)
     reader.done()
-    if len(sliders) != slider_count or any(p is None for p in points):
+    if any(not slider for slider in sliders) or any(p is None for p in points):
         raise ValueError("incomplete slider or point pool")
     return {
         "metadata": metadata,

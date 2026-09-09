@@ -32,13 +32,13 @@ print(beatmap.title, beatmap.artist, beatmap.ar)
 
 for note in beatmap.hit_objects:
     if isinstance(note, fosu.Slider):
-        print(note.start_time, note.span_count, note.length)
+        print(note.time, note.slides, note.length)
         print(note.control_points[0])  # slider head included
 
 note = beatmap.hit_objects[0]
 note.x = 128
 assert beatmap.hit_objects[0] is note
-beatmap.tags.append("reviewed")
+beatmap.tag_list.append("reviewed")
 ```
 
 `parse_file(path)` accepts strings, bytes and `os.PathLike` paths. It reads,
@@ -71,21 +71,21 @@ Malformed records are skipped and counted according to the
 |---|---|
 | Source | `format_version` |
 | General | `audio_filename`, `audio_lead_in`, `preview_time`, `countdown`, `sample_set`, `stack_leniency`, `mode`, `letterbox_in_breaks`, `widescreen_storyboard`, `epilepsy_warning`, `special_style`, `use_skin_sprites`, `samples_match_playback_rate`, `countdown_offset`, `overlay_position`, `skin_preference` |
-| Editor | `bookmarks`, `raw_bookmarks`, `distance_spacing`, `beat_divisor`, `grid_size`, `timeline_zoom` |
-| Metadata | `title`, `title_unicode`, `artist`, `artist_unicode`, `creator`, `version`, `source`, `tags`, `raw_tags`, `beatmap_id`, `beatmap_set_id` |
+| Editor | `bookmark_list`, `bookmarks`, `distance_spacing`, `beat_divisor`, `grid_size`, `timeline_zoom` |
+| Metadata | `title`, `title_unicode`, `artist`, `artist_unicode`, `creator`, `version`, `source`, `tag_list`, `tags`, `beatmap_id`, `beatmap_set_id` |
 | Difficulty | `hp`, `cs`, `od`, `ar`, `slider_multiplier`, `slider_tick_rate` |
 | Events | `background`, `video`, `breaks` |
 | Collections | `hit_objects`, `timing_points`, `combo_colours` |
 | Statistics | `stats` |
 
-`mode` is `GameMode.OSU`, `TAIKO`, `CATCH` or `MANIA`. Difficulty values describe
-the parsed file; gameplay normalization and mods are not applied. Missing
+`mode` is `GameMode.OSU`, `TAIKO`, `CATCH` or `MANIA`. Difficulty values use
+the official decoder's precision and clamps; mods are not applied. Missing
 ApproachRate follows the native decoder's OverallDifficulty default.
 
-`tags` is a list of whitespace-separated strings, retaining duplicates and order.
-`bookmarks` contains valid signed 32-bit timestamps in file order. Following
+`tag_list` is a list of whitespace-separated strings, retaining duplicates and order.
+`bookmark_list` contains valid signed 32-bit timestamps in file order. Following
 osu!'s official legacy decoder, invalid bookmark tokens are skipped rather than
-rejecting the field or map. `raw_tags` and `raw_bookmarks` retain the parser's
+rejecting the field or map. `tags` and `bookmarks` retain the parser's
 text values. The `-1` sentinel for IDs and preview time becomes `None`; zero and
 other negative values remain values.
 
@@ -96,28 +96,32 @@ parser's text values, not the complete source file.
 ## Hitobjects and sliders
 
 `hit_objects` is a `list[HitObject]` containing `Circle`, `Slider`, `Spinner` and
-`HoldNote` instances in file order. `HitObject` is the union of these four types,
-not a constructible base class. Use `isinstance` to narrow to a concrete type.
+`HoldNote` instances in stable timestamp order. `HitObject` is the union of these
+four types, not a constructible base class. Use `isinstance` to narrow to a concrete type.
 Common stored attributes are:
 
-- `start_time`, `end_time`: milliseconds. A circle ends at its start time;
-  spinner/hold endpoints are parsed from the file. A slider's endpoint is `None`
-  because it requires gameplay timing calculation.
+- `time`, `end_time`: milliseconds. A circle ends at its start time;
+  spinner/hold endpoints use the official decoder's clamping and legacy offsets.
+  A slider's endpoint is `None` because it requires gameplay timing calculation.
 - `x`, `y`: coordinates in osu! pixels.
-- `hit_sound`: a `HitSound` flag value. `NORMAL`, `WHISTLE`, `FINISH` and `CLAP`
+- `hitsound`: a `HitSound` flag value. `NORMAL`, `WHISTLE`, `FINISH` and `CLAP`
   name the source bits; zero means default, and unknown bits are preserved.
-- `is_new_combo`, `combo_skip`: combo flags decoded at construction.
-- `raw_type`, `raw_end_time`, `raw_hit_sample`: native decoded fields. Empty
+- `new_combo`, `combo_skip`: effective combo flags, including first-object,
+  post-spinner and post-break rules. `type` retains the original encoded bits.
+- `type`, `hit_sample`: native decoded fields. Empty
   sample text is valid and describes the parser's default sample representation.
 
 Kinds also expose `is_circle`, `is_slider`, `is_spinner` and `is_hold`. Conflicting
 source kind bits follow the decoder's precedence: circle, slider, spinner, hold.
 
-A `Slider` additionally stores `span_count`, `curve_type`, `length`,
-`raw_edge_sounds`, `raw_edge_sets`, and `control_points: list[Point]`. The control
+A `Slider` additionally stores `slides`, `curve_type`, `length`,
+`edge_sounds`, `edge_sets`, and `control_points: list[Point]`. The control
 points include the head followed by the path's remaining points in file order.
 Native pool offsets and indices are not part of the Python model.
-`span_count=2` means forward and back.
+`slides=2` means forward and back.
+Shared fields use the C/C++ names. `tag_list`, `bookmark_list`, and each slider's
+`control_points` are Python-specific conveniences; the text fields are `tags`
+and `bookmarks`.
 `curve_type` is a `CurveType` enum: `BEZIER`, `CATMULL`, `LINEAR`, or
 `PERFECT_CURVE`. Its `.value` is the file's `B`, `C`, `L`, or `P` code.
 No curve evaluation, slider duration, stacking, ruleset conversion or mod
@@ -151,7 +155,7 @@ mypy checks a concrete circle's `end_time` as `float`, but currently permits
 All result values are detached. Repeated list indexing returns the same object,
 and mutations persist in that object. Mutating a result does not change another
 parse result, the original input, or the file on disk. Stored duplicate values
-are independent: changing `raw_type` does not recompute its decoded flags,
+are independent: changing `type` does not recompute its decoded flags,
 and moving a slider's `x`/`y` does not move its stored head point.
 Editing a result is not gameplay preparation or `.osu` serialization.
 

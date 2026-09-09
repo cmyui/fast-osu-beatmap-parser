@@ -13,9 +13,14 @@ from statistics import mean, median
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("csv", type=Path)
+parser.add_argument("--corpus-manifest", type=Path, help="Also summarize each native game mode")
 args = parser.parse_args()
+modes = {}
+if args.corpus_manifest:
+    with args.corpus_manifest.open(newline="") as stream:
+        modes = {row["file"]: int(row["mode"]) for row in csv.DictReader(stream)}
 groups: collections.defaultdict[
-    tuple[str, str], collections.defaultdict[str, list[dict[str, str]]]
+    tuple[str, str, int | None], collections.defaultdict[str, list[dict[str, str]]]
 ] = collections.defaultdict(lambda: collections.defaultdict(list))
 with args.csv.open(newline="") as stream:
     for row in csv.DictReader(stream):
@@ -24,11 +29,13 @@ with args.csv.open(newline="") as stream:
         kind = row.get(
             "workload", "reuse=" + row["reuse"] if "reuse" in row else "process"
         )
-        groups[(row["variant"], kind)][row["file"]].append(row)
+        groups[(row["variant"], kind, None)][row["file"]].append(row)
+        if modes:
+            groups[(row["variant"], kind, modes[Path(row["file"]).name])][row["file"]].append(row)
 if not groups:
     parser.error("no measurements")
 summaries = []
-for (variant, kind), files in groups.items():
+for (variant, kind, mode), files in groups.items():
     best = [min(rows, key=lambda r: int(r["wall_ns"])) for rows in files.values()]
     values = sorted(int(r["wall_ns"]) / 1000 for r in best)
     all_values = [int(r["wall_ns"]) / 1000 for rows in files.values() for r in rows]
@@ -45,6 +52,8 @@ for (variant, kind), files in groups.items():
         "all_mean_us": mean(all_values),
         "all_p50_us": median(all_values),
     }
+    if mode is not None:
+        result["mode"] = mode
     if "bytes" in best[0]:
         result["MB_per_second"] = sum(int(r["bytes"]) for r in best) / sum(values)
     if "minor_faults" in best[0]:

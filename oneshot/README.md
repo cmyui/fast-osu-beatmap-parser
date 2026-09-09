@@ -59,7 +59,7 @@ input, not cold disk/S3 fetches.
 
 ## Output contract
 
-`FOSUDMP5` is a little-endian stream containing every logical `Beatmap` field,
+`FOSUDMP6` is a little-endian stream containing every logical `Beatmap` field,
 all four counters, explicit slider/pool indices and points left by failed
 slider lines. Strings are length-prefixed bytes and doubles retain raw IEEE-754
 bits, including object and break timestamps. The last eight bytes give the

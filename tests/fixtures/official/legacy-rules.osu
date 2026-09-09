@@ -1,0 +1,30 @@
+osu file format v4
+[General]
+Mode:3
+StackLeniency:0.7
+PreviewTime:100
+[Metadata]
+ Title :　 whitespace title  
+Tags:  spaced tags 
+[Editor]
+DistanceSpacing:-1
+TimelineZoom:-2
+BeatDivisor:100
+Bookmarks:1,-2,3
+[Difficulty]
+HPDrainRate:20
+CircleSize:32
+OverallDifficulty:9.3
+SliderMultiplier:8
+SliderTickRate:0.1
+[Events]
+2,150,100
+[HitObjects]
+10,20,200,1,0
+30,40,0,8,0,-10
+50,60,50,2,0,B|100:100,0,0
+70,80,100,53,0
+90,100,100,49,0
+110,120,20,128,0,10
+130,140,201,1,0
+140,150,10,2,0,L|160:170,2,30

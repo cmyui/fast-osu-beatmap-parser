@@ -29,8 +29,7 @@ def compare(actual, expected):
 
 def check(bm, ref):
     for name, expected in ref["metadata"].items():
-        public = "raw_" + name if name in ("tags", "bookmarks") else name
-        actual = getattr(bm, public)
+        actual = getattr(bm, name)
         if name == "sample_set":
             expected = fosu.SampleSet[expected.decode().upper()].value
         if name in ("beatmap_id", "beatmap_set_id", "preview_time") and actual is None:
@@ -45,17 +44,10 @@ def check(bm, ref):
             for name, value in expected.items():
                 if name == "slider":
                     continue
-                public = {
-                    "hit_objects": {
-                        "time": "start_time",
-                        "end_time": "raw_end_time",
-                        "type": "raw_type",
-                        "hitsound": "hit_sound",
-                        "hit_sample": "raw_hit_sample",
-                    },
-                }.get(group, {}).get(name, name)
-                result = getattr(actual, public)
-                compare(result, value)
+                if name == "end_time" and isinstance(actual, fosu.Slider):
+                    assert actual.end_time is None and value == 0
+                else:
+                    compare(getattr(actual, name), value)
     assert [(b.start, b.end) for b in bm.breaks] == ref["breaks"]
     assert list(bm.combo_colours) == ref["combo_colours"]
     for note, expected in zip(bm.hit_objects, ref["hit_objects"]):
@@ -70,12 +62,12 @@ def check(bm, ref):
             else fosu.HoldNote
         )
         assert type(note) is kind
-        compare(note.start_time, expected["time"])
-        compare(note.raw_type, flags)
-        compare(int(note.hit_sound), expected["hitsound"])
-        compare(note.raw_hit_sample, expected["hit_sample"])
-        assert note.is_new_combo == bool(flags & 4)
-        assert note.combo_skip == (flags >> 4) & 7
+        compare(note.time, expected["time"])
+        compare(note.type, flags)
+        compare(int(note.hitsound), expected["hitsound"])
+        compare(note.hit_sample, expected["hit_sample"])
+        assert note.new_combo == bool(expected["new_combo"])
+        assert note.combo_skip == expected["combo_skip"]
         if isinstance(note, fosu.Slider):
             assert note.end_time is None
             params = ref["sliders"][expected["slider"]]
@@ -84,11 +76,11 @@ def check(bm, ref):
                 (expected["x"], expected["y"])
             ] + ref["slider_points"][start : start + count]
             for public, raw in (
-                ("span_count", "slides"),
+                ("slides", "slides"),
                 ("length", "length"),
                 ("curve_type", "curve_type"),
-                ("raw_edge_sounds", "edge_sounds"),
-                ("raw_edge_sets", "edge_sets"),
+                ("edge_sounds", "edge_sounds"),
+                ("edge_sets", "edge_sets"),
             ):
                 compare(getattr(note, public), params[raw])
         else:
@@ -102,7 +94,7 @@ def check(bm, ref):
         value = ref["metadata"][name]
         assert getattr(bm, name) == (None if value == -1 else value)
     assert int(bm.mode) == ref["metadata"]["mode"]
-    assert bm.tags == bm.raw_tags.split()
+    assert bm.tag_list == bm.tags.split()
 
 
 def main():

@@ -1,18 +1,19 @@
 # Parsing contract and compatibility
 
-fosu decodes the raw fields of legacy `.osu` files. It does not compute the
-playable objects that a ruleset produces from those fields. In particular,
-slider duration and geometry, stacking, mods, legacy clock offsets, timing-point
-resolution, object sorting, combo processing and ruleset conversion belong to
-the consumer. Input order and raw sample strings are retained.
+fosu decodes legacy `.osu` files and applies the official decoder's metadata
+precision/clamps, legacy clock offsets, stable hitobject ordering and combo rules.
+It does not compute slider geometry/duration, resolved timing or sample states,
+stacking, mods, or ruleset conversion. Sample strings and encoded type bits are
+retained separately from effective combo flags.
 
 ## Numeric and malformed-input behavior
 
 - Object start times, spinner/hold end times and break endpoints are double
-  milliseconds; fractional values are preserved. Native circle and slider `end_time`
-  remain zero: a slider's end depends on timing points and difficulty settings.
-  Python retains this value as `raw_end_time`; its `end_time` is the start time
-  for a circle and `None` for a slider.
+  milliseconds; fractional values are preserved. Circle `end_time` equals its
+  start. Slider `end_time` is zero natively and `None` in Python because it
+  depends on geometry and timing. Spinner, hold and break endpoints follow the
+  official clamps; spinners are centred at (256, 192). Pre-v5 timestamps use
+  the official +24 ms adjustment, including its distinct hold-end ordering.
 - Coordinate acceptance follows the official decoder's float32 conversion and
   ±131,072 bound; accepted coordinates truncate toward zero. Timestamps,
   timing-point beat lengths and double metadata use its ±2,147,483,647 bound.
@@ -28,16 +29,19 @@ the consumer. Input order and raw sample strings are retained.
   Unknown values and comma-separated sample-set combinations are malformed.
   Slider curve types must be `B` (Bezier), `C` (Catmull), `L` (linear), or `P`
   (perfect curve). Unknown curve types reject the hitobject, not the whole map.
-- Difficulty values and stack leniency are stored as raw doubles, but acceptance
-  uses the official float32 domain. Float rounding matters at the upper bound;
-  these are parsing limits, not the subsequent gameplay difficulty clamps.
+- Difficulty values and stack leniency decode directly to float32, then widen
+  to double storage. Difficulty and editor settings use the official clamps;
+  mania circle size is a key count bounded to 1–18. Omitted editor distance
+  spacing is 1 and grid size is 0. Metadata keys and text values trim .NET
+  whitespace, including its Unicode whitespace characters.
 - Decimal and exponent conversion is bounded by the field's logical end and
   independent of the process locale. Large significands use a correctly rounded
   fallback rather than rounding an intermediate integer. Overflow is rejected;
   underflow rounded to signed zero is accepted. Numeric fields allow surrounding
   ASCII whitespace.
-- Slider repeat counts above 9,000 are rejected. Nonpositive repeat counts and
-  negative lengths remain raw values; gameplay preparation must normalize them.
+- Slider span counts above 9,000 are rejected. Counts below 1 become 1, and
+  negative lengths become zero. Geometry-dependent repeat corrections remain
+  outside this parser.
   An omitted slider length is represented as zero. Missing hold end times use
   the start time. Hit-sample and edge-bank fields remain raw strings, with the
   numeric portions the official decoder reads checked before retaining an object.
@@ -53,10 +57,22 @@ the consumer. Input order and raw sample strings are retained.
   the native pool; use each slider's explicit point range. Python exposes only
   the points of accepted sliders. Invalid known numeric or enum
   metadata retains its previous/default value and increments the same counter.
+- Combo colours accept indices 1–8 and three integer RGB components in 0–255.
+  Like the official legacy decoder, a fourth component is accepted but ignored.
+  Invalid colours increment `stats.malformed_lines`; valid colours with other
+  keys or combo indices are ignored.
 - Section and metadata names must match completely. Unknown fields/sections
   are ignored. An empty input produces an empty/default result; successful
   parsing is not proof of a valid or playable beatmap. Comments and blank lines
   are ignored. Storyboard bodies are counted rather than interpreted.
+
+Hitobjects are stably sorted by timestamp only when input order decreases.
+Equal-time objects keep their source order, and slider indices still identify
+their original pool entries. Sorting uses temporary arena memory. Effective
+`new_combo` and `combo_skip` follow the first-object, post-spinner and post-break
+rules while `type` retains the source bits. Section-selective parsing applies
+rules using only the selected data; omitted events cannot contribute breaks,
+and omitted General metadata leaves the mode at its default.
 
 All entry points accept at most **64 MiB** of source bytes. Python rejects
 larger inputs with `ValueError`; the C ABI returns `FOSU_INVALID_ARGUMENT`.
@@ -86,9 +102,8 @@ correctness. The official osu! decoder is the reference for legacy syntax and
 numeric behavior. FOSU deliberately rejects unknown enum values rather than
 exposing undefined choices through its typed APIs, even where the official
 decoder accepts them. These domain checks are not a ranking validator.
-Third-party parsers are not the authority for those decisions. Raw
-storage is separate from gameplay transformations such as clamping difficulty,
-resolving timing points, applying format-version offsets and sorting objects.
+Third-party parsers are not the authority for those decisions. Resolved timing
+and samples, slider geometry and ruleset processing remain separate from decoding.
 
 The reference is the unmodified open-source legacy decoder from osu! at
 [`48c4800e3ae4ee752452cdff83bd3787ccf3105f`](https://github.com/ppy/osu/tree/48c4800e3ae4ee752452cdff83bd3787ccf3105f).
@@ -122,6 +137,15 @@ they are not skipped comparisons. The
 corpus audit compares whole-map completion, rejection counts and object counts;
 it does not prove equality of every gameplay value or identify every rejected
 line in fosu. Keep corpus reports private: they contain local paths.
+
+For field-level corpus comparisons, run `tests/test_official_values.py`. Its
+[reference projection and normalization inventory](../tests/reference/official/README.md)
+describe which values come directly from decoded objects and which raw fields
+are recovered from officially accepted lines. Those comparisons deliberately
+exclude the remaining geometry and timing/sample transformations; they are not
+literal equality with osu!'s complete processed model. Metadata whitespace,
+final numeric settings, object order, endpoints and combo values are compared
+directly against the official result.
 
 This is bounded compatibility evidence, not complete format or stable-client
 parity. The raw parser is not a replacement for the game's package loader,

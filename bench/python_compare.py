@@ -34,7 +34,7 @@ def call(package: ModuleType, kind: str, data: bytes, path: Path) -> int | float
             note.length for note in bm.hit_objects if isinstance(note, package.Slider)
         )
     if kind == "iterate":
-        return sum(note.start_time for note in bm.hit_objects)
+        return sum(note.time for note in bm.hit_objects)
     return len(bm.hit_objects)
 
 

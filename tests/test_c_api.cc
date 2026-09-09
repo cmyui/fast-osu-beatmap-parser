@@ -95,6 +95,9 @@ void check_all_fields() {
   auto* handle = fosu_new();
   assert(handle && !fosu_get_view(handle));
   check(handle, input);
+  check(handle,
+        "[HitObjects]\n10,20,300,2,0,L|40:50,1,60\n"
+        "60,70,100,2,0,B|80:90|100:110,2,120\n120,130,100,1,0\n");
   fosu_free(handle);
 }
 

@@ -21,6 +21,8 @@ struct HitObject {
   double time;
   double end_time;
   uint32_t slider;  // index into Beatmap::sliders, or kNoSlider
+  bool new_combo;
+  uint8_t combo_skip;
   std::string_view hit_sample;
 
   static constexpr uint32_t kNoSlider = 0xFFFFFFFF;
@@ -29,7 +31,7 @@ struct HitObject {
   bool is_slider() const { return type & 2; }
   bool is_spinner() const { return type & 8; }
   bool is_hold() const { return type & 128; }
-  bool is_new_combo() const { return type & 4; }
+  bool is_new_combo() const { return new_combo; }
 };
 
 struct SliderPoint {

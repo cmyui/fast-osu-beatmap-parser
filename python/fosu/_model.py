@@ -41,15 +41,14 @@ class Point:
 
 @dataclass(slots=True, kw_only=True)
 class _HitObject:
-    start_time: float
+    time: float
     x: int
     y: int
-    hit_sound: HitSound
-    raw_type: int
-    raw_end_time: float
-    is_new_combo: bool
+    hitsound: HitSound
+    type: int
+    new_combo: bool
     combo_skip: int
-    raw_hit_sample: str
+    hit_sample: str
     is_circle: ClassVar[bool] = False
     is_slider: ClassVar[bool] = False
     is_spinner: ClassVar[bool] = False
@@ -65,11 +64,11 @@ class Circle(_HitObject):
 @dataclass(slots=True, kw_only=True)
 class Slider(_HitObject):
     end_time: None
-    span_count: int
+    slides: int
     curve_type: CurveType
     length: float
-    raw_edge_sounds: str
-    raw_edge_sets: str
+    edge_sounds: str
+    edge_sets: str
     control_points: list[Point]
     is_slider: ClassVar[bool] = True
 
@@ -134,7 +133,7 @@ class Beatmap:
     countdown_offset: int
     overlay_position: str
     skin_preference: str
-    bookmarks: list[int]
+    bookmark_list: list[int]
     distance_spacing: float
     beat_divisor: int
     grid_size: int
@@ -146,7 +145,7 @@ class Beatmap:
     creator: str
     version: str
     source: str
-    tags: list[str]
+    tag_list: list[str]
     beatmap_id: int | None
     beatmap_set_id: int | None
     hp: float
@@ -157,8 +156,8 @@ class Beatmap:
     slider_tick_rate: float
     background: str
     video: str
-    raw_tags: str
-    raw_bookmarks: str
+    tags: str
+    bookmarks: str
     hit_objects: list[HitObject]
     timing_points: list[TimingPoint]
     breaks: list[Break]
