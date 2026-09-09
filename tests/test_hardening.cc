@@ -114,7 +114,7 @@ int main() {
     assert(map.sliders[0].length == expected);
   }
   for (bool simd : {false, true}) {
-    fosu::Parser parser(simd ? fosu::internal::native_engine
+    fosu::Parser parser(simd ? fosu::internal::compiled_engine
                              : fosu_test::scalar_engine());
     auto input = fosu::make_padded(
         "[Metadata]\nTitle:real\nTitlX:wrong\nBeatmapID:-9223372036854775808\n"

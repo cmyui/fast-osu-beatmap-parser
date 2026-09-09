@@ -103,7 +103,7 @@ static void test_large_arena_arrays() {
   auto timing_input = fosu::make_padded(timing);
 
   for (bool simd : {false, true}) {
-    fosu::Parser parser(simd ? fosu::internal::native_engine
+    fosu::Parser parser(simd ? fosu::internal::compiled_engine
                              : fosu_test::scalar_engine());
     const auto& circles_map = require_parse(parser.parse(circle_input));
     CHECK_EQ(circles_map.hit_objects.size(), 3000u);
@@ -146,7 +146,7 @@ static void test_rejected_slider_points() {
     auto input = fosu::make_padded(std::string("[HitObjects]\n1,2,3,2,0,") + test.tail +
                                    "\n1,2,4,2,0,L|11:12,1,10\n");
     for (bool simd : {false, true}) {
-      fosu::Parser parser(simd ? fosu::internal::native_engine
+      fosu::Parser parser(simd ? fosu::internal::compiled_engine
                                : fosu_test::scalar_engine());
       const auto& beatmap = require_parse(parser.parse(input));
       CHECK_EQ(beatmap.stats.malformed_lines, 1u);

@@ -279,7 +279,7 @@ static void test_difficulty_selection_skips_other_sections() {
       "[Colours]\nCombo1:255,0,0\n"
       "[HitObjects]\n64,96,1000,1,0\n");
   for (bool simd : {false, true}) {
-    fosu::Parser parser(simd ? fosu::internal::native_engine
+    fosu::Parser parser(simd ? fosu::internal::compiled_engine
                              : fosu_test::scalar_engine());
     const auto& bm =
         require_parse(parser.parse(input, {.sections = fosu::kSectionDifficulty}));
@@ -300,7 +300,7 @@ static void test_metadata_and_difficulty_selection() {
       "[Difficulty]\nOverallDifficulty:6\n"
       "[HitObjects]\n128,192,2000,1,0\n");
   for (bool simd : {false, true}) {
-    fosu::Parser parser(simd ? fosu::internal::native_engine
+    fosu::Parser parser(simd ? fosu::internal::compiled_engine
                              : fosu_test::scalar_engine());
     const auto& bm = require_parse(parser.parse(
         input, {.sections = fosu::kSectionMetadata | fosu::kSectionDifficulty}));
@@ -319,7 +319,7 @@ static void test_hitobject_selection_skips_preceding_sections() {
       "[TimingPoints]\n100,400\n"
       "[HitObjects]\n32,48,3000,1,2\n256,192,4000,8,0,5000\n");
   for (bool simd : {false, true}) {
-    fosu::Parser parser(simd ? fosu::internal::native_engine
+    fosu::Parser parser(simd ? fosu::internal::compiled_engine
                              : fosu_test::scalar_engine());
     const auto& bm =
         require_parse(parser.parse(input, {.sections = fosu::kSectionHitObjects}));
@@ -338,7 +338,7 @@ static void test_selected_missing_section_uses_defaults() {
       "[Metadata]\nTitle:No difficulty section\n"
       "[HitObjects]\n96,64,6000,1,0\n");
   for (bool simd : {false, true}) {
-    fosu::Parser parser(simd ? fosu::internal::native_engine
+    fosu::Parser parser(simd ? fosu::internal::compiled_engine
                              : fosu_test::scalar_engine());
     const auto& bm =
         require_parse(parser.parse(input, {.sections = fosu::kSectionDifficulty}));
@@ -360,7 +360,7 @@ static void test_all_section_mask_matches_default() {
       "[HitObjects]\n320,192,7000,128,0,7500:0:0:0:0:\n");
   for (bool simd : {false, true}) {
     const auto& engine =
-        simd ? fosu::internal::native_engine : fosu_test::scalar_engine();
+        simd ? fosu::internal::compiled_engine : fosu_test::scalar_engine();
     fosu::Parser explicit_parser(engine);
     fosu::Parser default_parser(engine);
     const auto& explicit_mask =
@@ -411,7 +411,7 @@ static void test_timing_integer_widths() {
     const std::string input =
         "[TimingPoints]\n0,-100," + field + ",2," + field + "," + field + ",0," + field;
     for (bool simd : {false, true}) {
-      fosu::Parser parser(simd ? fosu::internal::native_engine
+      fosu::Parser parser(simd ? fosu::internal::compiled_engine
                                : fosu_test::scalar_engine());
       const auto& map = require_parse(parser.parse(input.data(), input.size()));
       CHECK_EQ(map.timing_points.size(), 1u);
@@ -502,7 +502,7 @@ static void test_event_filename_boundaries() {
 static void test_section_skip_boundaries() {
   for (size_t padding : {0u, 30u, 31u, 32u, 63u, 64u, 95u}) {
     for (bool simd : {false, true}) {
-      fosu::Parser parser(simd ? fosu::internal::native_engine
+      fosu::Parser parser(simd ? fosu::internal::compiled_engine
                                : fosu_test::scalar_engine());
       const std::string text = "[Unknown]\nvalue:" + std::string(padding, 'x') +
                                "[Metadata]\nTitle:ignored\n[Metadata]\nTitle:retained";

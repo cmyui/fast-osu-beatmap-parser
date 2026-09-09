@@ -104,7 +104,8 @@ inline void parse_document(std::span<const char> input,
   beatmap.slider_points = beatmap.slider_points.first(slider_point_count);
 }
 
-inline constexpr ParsingEngine native_engine{
+// The ISA this code was compiled for, not a runtime choice based on the host CPU.
+inline constexpr ParsingEngine compiled_engine{
 #if FOSU_SIMD_X86
     EngineKind::Avx2,
 #elif FOSU_SIMD_NEON
