@@ -108,3 +108,5 @@ jobs:
       - run: sh tests/reference/official/build.sh
       - run: python tests/test_official.py
       - run: FOSU_FORCE_SCALAR=1 python tests/test_official.py
+      - run: python tests/test_official_values.py --corpus tests/fixtures/official --report /tmp/official-values.json
+      - run: FOSU_FORCE_SCALAR=1 python tests/test_official_values.py --corpus tests/fixtures/official --report /tmp/official-values-scalar.json

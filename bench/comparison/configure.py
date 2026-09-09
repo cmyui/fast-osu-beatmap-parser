@@ -32,6 +32,7 @@ for name, version in (("osu-parser", "0.3.3"), ("osu-parsers", "4.1.7")):
 for backend in ("avx2", "scalar"):
     add(f"fosu-cpp-{backend}", source, [build / f"native-{backend}"])
 add("pyttanko", "2.1.0", [*python, "pyttanko"], ("bytes", "file", "visit"))
+variants[-1]["modes"] = [0]  # objects() raises NotImplementedError for other modes.
 (build / "variants.json").write_text(json.dumps({
     "reference": "fosu-python-avx2", "variants": variants,
 }, indent=2) + "\n")

@@ -18,6 +18,7 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument("corpus", type=Path)
 p.add_argument("config", type=Path)
 p.add_argument("output", type=Path)
+p.add_argument("--corpus-manifest", type=Path, help="Verified per-file modes and SHA256s")
 p.add_argument("--reps", type=int, default=1)
 p.add_argument("--rounds", type=int, default=2)
 p.add_argument("--limit", type=int, default=0)
@@ -39,11 +40,21 @@ for variant in config["variants"]:
     assert set(workloads) <= {"bytes", "file", "visit"}
 digest = hashlib.sha256()
 manifest = []
+modes = {}
+if args.corpus_manifest:
+    with args.corpus_manifest.open() as source:
+        entries = {row["file"]: row for row in csv.DictReader(source)}
 for path in files:
     content = path.read_bytes()
     checksum = hashlib.sha256(content)
     digest.update(path.name.encode() + b"\0" + checksum.digest())
-    manifest.append((path.name, len(content), checksum.hexdigest()))
+    if args.corpus_manifest:
+        entry = entries[path.name]
+        assert entry["sha256"] == checksum.hexdigest() and int(entry["bytes"]) == len(content)
+        modes[path.name] = int(entry["mode"])
+        assert modes[path.name] in range(4)
+    manifest.append((path.name, len(content), checksum.hexdigest()) +
+                    ((modes[path.name],) if modes else ()))
 args.output.parent.mkdir(parents=True, exist_ok=True)
 manifest_path = args.output.with_suffix(".corpus.csv.gz")
 metadata = {
@@ -55,6 +66,7 @@ metadata = {
     "reps": args.reps, "rounds": args.rounds, "warmup_maps": args.warmup,
     "request_timeout_seconds": args.timeout,
     "complete": False,
+    "file_modes": modes,
 }
 meta_path = args.output.with_suffix(".meta.json")
 
@@ -107,7 +119,7 @@ with args.output.open("x") as out:
         with gzip.GzipFile(filename=str(manifest_path), mode="wb", mtime=0) as compressed:
             with io.TextIOWrapper(compressed, newline="") as destination:
                 writer = csv.writer(destination)
-                writer.writerow(("file", "bytes", "sha256"))
+                writer.writerow(("file", "bytes", "sha256") + (("mode",) if modes else ()))
                 writer.writerows(manifest)
         metadata["corpus_manifest_sha256"] = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
         for entry in config["variants"]:
@@ -128,6 +140,8 @@ with args.output.open("x") as out:
                         "round": round_id, "file": path.name, "bytes": path.stat().st_size,
                         "variant": worker.entry["name"], "workload": kind, **result,
                     }
+                    if modes:
+                        record["mode"] = modes[path.name]
                     out.write(json.dumps(record, allow_nan=False) + "\n")
                 if (i + 1) % 100 == 0:
                     out.flush()

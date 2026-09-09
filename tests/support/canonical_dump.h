@@ -7,16 +7,17 @@
 // behind by slider lines that failed after their point loop), so nothing
 // the library's Beatmap holds is outside the comparison. Pool offsets
 // are explicit, including each orphan's position. Slider points follow
-// their record inline, so the format can be streamed while parsing.
+// their record inline, so the finished beatmap can be serialized in one pass.
 //
-//   "FOSUDMP5"
-//   hit objects, in file order, each:
+//   "FOSUDMP6"
+//   hit objects, in stable timestamp order, each:
 //     i32 x, y; u32 type, hitsound; f64 time, end_time; u32 slider
-//     (kNoSlider or the running slider index); u32 hit_sample length;
+//     (kNoSlider or the original slider-pool index); u8 new_combo, combo_skip;
+//     u32 hit_sample length;
 //     if a slider was parsed (slider != kNoSlider): u32 point_begin, point_count;
 //     {i32 x, y} x point_count; i32 slides; f64 length; u8 curve_type;
 //     str edge_sounds, edge_sets;
-//     then the hit_sample bytes (everything is in parse order)
+//     then the hit_sample bytes (slider records may appear out of pool order)
 //   trailer:
 //     "TRLR" u32 n_hitobjects, n_sliders, n_points (pool size)
 //     i32 format_version
@@ -76,7 +77,7 @@ inline std::string_view resolve(const Map& bm, String s) {
 
 template <typename Map, typename Output>
 inline void dump_to(const Map& bm, Output& o) {
-  o.raw("FOSUDMP5", 8);
+  o.raw("FOSUDMP6", 8);
   for (const auto& h : bm.hit_objects) {
     const auto sample = resolve(bm, h.hit_sample);
     o.i32(h.x);
@@ -86,6 +87,8 @@ inline void dump_to(const Map& bm, Output& o) {
     o.f64(h.time);
     o.f64(h.end_time);
     o.u32(h.slider);
+    o.u8(h.new_combo);
+    o.u8(h.combo_skip);
     o.u32(static_cast<uint32_t>(sample.size()));
     if (h.slider != fosu::HitObject::kNoSlider) {
       const auto& s = bm.sliders[h.slider];

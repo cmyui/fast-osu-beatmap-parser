@@ -109,9 +109,17 @@ bool publish(Handle& handle, const fosu::Beatmap& map) {
   for (size_t i = 0; i < map.hit_objects.size(); ++i) {
     const auto& source = map.hit_objects[i];
     hit_objects[i] = {
-        source.x,        source.y,    source.type,
-        source.hitsound, source.time, source.end_time,
-        source.slider,   0,           string_ref(storage, source.hit_sample),
+        source.x,
+        source.y,
+        source.type,
+        source.hitsound,
+        source.time,
+        source.end_time,
+        source.slider,
+        source.new_combo,
+        source.combo_skip,
+        0,
+        string_ref(storage, source.hit_sample),
     };
   }
   view.hit_objects = hit_objects;

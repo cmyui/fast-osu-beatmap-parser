@@ -49,7 +49,7 @@ static void test_reparse_clears_omitted_sections() {
   CHECK_EQ(beatmap.beatmap_id, -1);
   CHECK(beatmap.audio_filename.empty() && beatmap.background.empty());
   CHECK(beatmap.sample_set == fosu::SampleSet::Normal);
-  CHECK_EQ(beatmap.grid_size, 4);
+  CHECK_EQ(beatmap.grid_size, 0);
   CHECK_EQ(beatmap.od, 5);
   CHECK_EQ(beatmap.ar, 5);
   CHECK(beatmap.breaks.empty() && beatmap.combo_colours.empty());
@@ -74,7 +74,7 @@ static void test_empty_reparse_resets_defaults() {
   CHECK_EQ(beatmap.stats.malformed_lines, 0u);
   CHECK_EQ(beatmap.stats.fast_path_lines, 0u);
   CHECK_EQ(beatmap.stats.slow_path_lines, 0u);
-  CHECK(std::abs(beatmap.stack_leniency - 0.7) < 1e-12);
+  CHECK_EQ(beatmap.stack_leniency, double(0.7f));
   CHECK(beatmap.sample_set == fosu::SampleSet::Normal);
   fosu::Parser expected;
   CHECK_EQ(canonical(beatmap), canonical(require_parse(expected.parse(empty))));

@@ -35,6 +35,9 @@ def summarize(records, metadata, cohorts=None):
             raise ValueError("Input size changed")
         sizes[file] = record["bytes"]
     files = set(sizes)
+    modes = metadata.get("file_modes", {})
+    if modes and (set(modes) != files or any(mode not in range(4) for mode in modes.values())):
+        raise ValueError("Mode manifest does not cover the measured corpus")
     if len(files) != metadata["files"] or len(results) != len(files) * len(expected):
         raise ValueError("Missing benchmark results")
     if any(len(records) != rounds for records in results.values()):
@@ -67,6 +70,15 @@ def summarize(records, metadata, cohorts=None):
             "failed_files": errors,
             "errors_by_type": dict(Counter(error for kinds in errors.values() for error in kinds)),
         }
+        if modes:
+            coverage[f"{name}/{kind}"]["by_mode"] = {
+                str(mode): {
+                    "files": sum(m == mode for m in modes.values()),
+                    "matching_files": sum(modes[f] == mode for f in accepted),
+                    "failed_files": sum(modes[f] == mode for f in errors),
+                    "mismatching_files": sum(modes[f] == mode for f in mismatches),
+                } for mode in sorted(set(modes.values()))
+            }
 
     python = {"fosu-python-avx2", "fosu-python-scalar", "slider", "rosu-pp-py", "osupyparser", "pyttanko"}
     groups = {
@@ -75,11 +87,23 @@ def summarize(records, metadata, cohorts=None):
         "other_languages": sorted((n, k) for n, k in expected
                                   if k == "bytes" and (n not in python or n == reference)),
     }
+    scopes = {group: files for group in groups}
+    if modes:
+        for group, members in list(groups.items()):
+            # Never let a standard-only decoder silently select the all-mode cohort.
+            all_modes = f"{group}_all_modes"
+            groups[all_modes] = [m for m in members if set(variants[m[0]].get("modes", range(4))) == set(range(4))]
+            scopes[all_modes] = files
+            for mode in sorted(set(modes.values())):
+                name = f"{group}_mode_{mode}"
+                groups[name] = [m for m in members if mode in variants[m[0]].get("modes", range(4))]
+                scopes[name] = {f for f in files if modes[f] == mode}
     tables = {}
     for group, members in groups.items():
         if not members:
             continue
-        cohort = set.intersection(*(matching[m] for m in members))
+        scope = scopes[group]
+        cohort = scope & set.intersection(*(matching[m] for m in members))
         if cohorts is not None:
             previous = cohorts[group]
             fixed = files - set(previous["excluded_files"])
@@ -88,11 +112,11 @@ def summarize(records, metadata, cohorts=None):
                     or not fixed <= cohort):
                 raise ValueError(f"Cannot reproduce the fixed {group} cohort")
             cohort = fixed
-        if not cohort:
-            raise ValueError(f"No common successful maps in {group}")
         byte_count = sum(sizes[file] for file in cohort)
         rows = {}
         for name, kind in members:
+            if not cohort:
+                continue
             passes = [[t for file in sorted(cohort) for t in results[name, kind, file][i]["ns"]]
                       for i in range(rounds)]
             samples = [t for times in passes for t in times]
@@ -109,6 +133,8 @@ def summarize(records, metadata, cohorts=None):
             "files": len(cohort), "bytes": byte_count,
             "excluded_files": sorted(files - cohort), "rows": rows,
         }
+        if modes:
+            tables[group]["modes"] = dict(sorted(Counter(str(modes[f]) for f in cohort).items()))
     return {"coverage": coverage, "tables": tables}
 
 
@@ -135,7 +161,7 @@ def main():
         report["run"]["cohort_source_sha256"] = hashlib.sha256(args.cohorts.read_bytes()).hexdigest()
     report["run"]["raw_results_sha256"] = hashlib.sha256(args.results.read_bytes()).hexdigest()
     samples_path = args.output.with_suffix(".samples.csv.gz")
-    fields = ("round", "file", "bytes", "variant", "workload", "count", "checksum", "error", "ns")
+    fields = ("round", "file", "bytes", "mode", "variant", "workload", "count", "checksum", "error", "ns")
     with gzip.GzipFile(filename=str(samples_path), mode="wb", mtime=0) as compressed:
         with io.TextIOWrapper(compressed, newline="") as destination, args.results.open() as source:
             writer = csv.DictWriter(destination, fieldnames=fields, extrasaction="ignore")

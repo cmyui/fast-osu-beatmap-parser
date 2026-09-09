@@ -83,7 +83,7 @@ static void test_all_sections() {
     CHECK_EQ(bm.beatmap_id, 1193177);
     CHECK_EQ(bm.beatmap_set_id, 562454);
     CHECK(std::abs(bm.hp - 5.5) < 1e-9);
-    CHECK(std::abs(bm.ar - 9.3) < 1e-9);
+    CHECK_EQ(bm.ar, double(9.3f));
     CHECK(std::abs(bm.slider_multiplier - 1.8) < 1e-9);
     CHECK(bm.background == "bg.jpg");
     CHECK(bm.video == "intro.mp4");
@@ -220,9 +220,9 @@ static void test_aspire_edge_cases() {
       "0,0,4294967290,1,0\n"                          // time > INT32_MAX
       "100,100,5000,2,0,B|-64:-32|700:512,1,600\n");  // negative ctrl points
   CHECK_EQ(bm.hit_objects.size(), 6u);
-  CHECK_EQ(bm.hit_objects[0].x, -48);
-  CHECK_EQ(bm.hit_objects[1].y, -24);
-  CHECK_EQ(bm.hit_objects[2].time, -1000);
+  CHECK_EQ(bm.hit_objects[0].time, -1000);
+  CHECK_EQ(bm.hit_objects[1].x, -48);
+  CHECK_EQ(bm.hit_objects[2].y, -24);
   CHECK_EQ(bm.hit_objects[3].x, 5120);
   CHECK_EQ(bm.hit_objects[4].x, 256);  // truncated
   CHECK_EQ(bm.hit_objects[4].y, 112);
@@ -258,7 +258,7 @@ static void test_omitted_sections_use_defaults() {
     CHECK(bm.audio_filename.empty());
     CHECK(bm.sample_set == fosu::SampleSet::Normal);
     CHECK_EQ(bm.preview_time, -1);
-    CHECK_EQ(bm.grid_size, 4);
+    CHECK_EQ(bm.grid_size, 0);
     CHECK_EQ(bm.hp, 5);
     CHECK_EQ(bm.cs, 5);
     CHECK_EQ(bm.od, 5);
@@ -381,7 +381,7 @@ static void test_exact_keys_and_event_aliases() {
       "2,10,20\nBreak,30,40\nVideoExtra,0,\"ignored.mp4\"\n");
   CHECK_EQ(map.countdown, 3);
   CHECK_EQ(map.sample_set, fosu::SampleSet::Soft);
-  CHECK_EQ(map.title, "final: title ");
+  CHECK_EQ(map.title, "final: title");
   CHECK_EQ(map.title_unicode, "unicode");
   CHECK_EQ(map.background, "background.jpg");
   CHECK_EQ(map.video, "new.mp4");
@@ -576,7 +576,7 @@ static void test_header_field_failures_preserve_values() {
     CHECK_EQ(map.countdown, 3);
     CHECK(map.use_skin_sprites);
     CHECK(!map.letterbox_in_breaks);
-    CHECK_EQ(map.title, " text:with:colons \t");
+    CHECK_EQ(map.title, "text:with:colons");
     CHECK_EQ(map.beatmap_id, INT32_MAX);
     CHECK_EQ(map.ar, 8.5);
     CHECK_EQ(map.od, 7);
@@ -627,7 +627,90 @@ static void test_repeated_section_bodies() {
   }
 }
 
+static void test_combo_colour_domain() {
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(
+        "[Colours]\nCombo1:1,2,3\nCombo0:4,5,6\nCombo9:7,8,9\n"
+        "Combo:10,11,12\nCombo1suffix:13,14,15\nCombo-1:16,17,18\n"
+        "Combo+8:19,20,21\nCombo01:22,23,24\nSliderBorder:25,26,27\n",
+        simd);
+    CHECK_EQ(map.combo_colours.size(), 3u);
+    CHECK_EQ(map.combo_colours[0], 0x010203u);
+    CHECK_EQ(map.combo_colours[1], 0x131415u);
+    CHECK_EQ(map.combo_colours[2], 0x161718u);
+    CHECK_EQ(map.stats.malformed_lines, 0u);
+
+    const auto malformed = parse_str(
+        "[Colours]\nCombo1:256,0,0\nCombo2:-1,0,0\nCombo3:1,2,3junk\n"
+        "Combo4:1,2\nCombo5:1,2,3,4,5\nSliderBorder:no colour\n"
+        "Combo6:1, 2 ,3,ignored alpha\nCombo7:4,5,6 // comment\n",
+        simd);
+    CHECK_EQ(malformed.combo_colours.size(), 2u);
+    CHECK_EQ(malformed.combo_colours[0], 0x010203u);
+    CHECK_EQ(malformed.combo_colours[1], 0x040506u);
+    CHECK_EQ(malformed.stats.malformed_lines, 6u);
+  }
+}
+
+static void test_legacy_rules() {
+  static_assert(sizeof(fosu::HitObject) == 56);
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(
+        "osu file format v4\n[General]\nMode:3\nPreviewTime:100\n"
+        "[Metadata]\n Title :\xE3\x80\x80trimmed\xC2\xA0\n"
+        "[Difficulty]\nHPDrainRate:20\nCircleSize:32\nOverallDifficulty:9.3\n"
+        "SliderMultiplier:8\nSliderTickRate:0.1\n"
+        "[Editor]\nDistanceSpacing:-1\nTimelineZoom:-2\nBeatDivisor:100\n"
+        "[TimingPoints]\n0,500\n[Events]\n2,150,100\n"
+        "[HitObjects]\n10,20,200,1,0\n30,40,0,8,0,-10\n"
+        "50,60,50,2,0,B|100:100,0,0\n70,80,100,53,0\n"
+        "90,100,100,49,0\n110,120,20,128,0,10\n130,140,201,1,0\n",
+        simd);
+    CHECK_EQ(map.title, "trimmed");
+    CHECK_EQ(map.hp, 10);
+    CHECK_EQ(map.cs, 18);
+    CHECK_EQ(map.ar, double(9.3f));
+    CHECK_EQ(map.slider_multiplier, 3.6);
+    CHECK_EQ(map.slider_tick_rate, 0.5);
+    CHECK_EQ(map.distance_spacing, 0);
+    CHECK_EQ(map.timeline_zoom, 0);
+    CHECK_EQ(map.beat_divisor, 64);
+    CHECK_EQ(map.preview_time, 124);
+    CHECK_EQ(map.timing_points[0].time, 24);
+    CHECK_EQ(map.breaks[0].start, 174);
+    CHECK_EQ(map.breaks[0].end, 174);
+    const auto objects = map.hit_objects;
+    CHECK_EQ(objects[0].time, 24);
+    CHECK_EQ(objects[0].end_time, 24);
+    CHECK_EQ(objects[0].x, 256);
+    CHECK_EQ(objects[0].y, 192);
+    CHECK_EQ(objects[1].time, 44);
+    CHECK_EQ(objects[1].end_time, 68);
+    CHECK(objects[2].new_combo);  // Slider follows spinner in source order.
+    CHECK_EQ(map.sliders[objects[2].slider].slides, 1);
+    CHECK_EQ(objects[3].x, 70);  // Equal timestamps preserve input order.
+    CHECK_EQ(objects[4].x, 90);
+    CHECK_EQ(objects[3].combo_skip, 3);
+    CHECK_EQ(objects[4].combo_skip, 0);
+    CHECK(!objects[4].new_combo);
+    CHECK(objects[5].new_combo);  // First source object and first after break.
+    CHECK(!objects[6].new_combo);
+
+    const auto breaks = parse_str(
+        "osu file format v14\n[Events]\n2,0,200\n2,0,100\n2,0,350\n"
+        "[HitObjects]\n0,0,100,1,0\n0,0,200,1,0\n0,0,300,1,0\n"
+        "0,0,400,1,0\n",
+        simd);
+    CHECK(breaks.hit_objects[0].new_combo);
+    CHECK(!breaks.hit_objects[1].new_combo);  // Break ends are exclusive.
+    CHECK(breaks.hit_objects[2].new_combo);   // Earlier breaks cannot move backward.
+    CHECK(breaks.hit_objects[3].new_combo);
+  }
+}
+
 int main() {
+  test_legacy_rules();
+  test_combo_colour_domain();
   test_header_field_failures_preserve_values();
   test_repeated_section_bodies();
   test_enum_contracts();

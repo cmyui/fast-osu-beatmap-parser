@@ -8,7 +8,7 @@ rules, including unusual numeric forms and malformed records.
 import fosu
 
 beatmap = fosu.parse_file("map.osu")
-print(beatmap.title, beatmap.ar, beatmap.hit_objects[0].start_time)
+print(beatmap.title, beatmap.ar, beatmap.hit_objects[0].time)
 ```
 
 Python returns fully populated, mutable dataclasses and lists. All supported

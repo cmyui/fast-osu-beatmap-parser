@@ -35,8 +35,8 @@ def test_fractional_times_and_malformed_numeric_fields():
     assert len(bm.timing_points) == 2
     assert math.isnan(bm.timing_points[1].beat_length)
     assert not bm.timing_points[1].uninherited
-    assert [h.start_time for h in bm.hit_objects] == [1000.5, 2000.25, 4000.5, 6000]
-    assert [h.raw_end_time for h in bm.hit_objects] == [0, 3000.75, 5000.75, 0]
+    assert [h.time for h in bm.hit_objects] == [1000.5, 2000.25, 4000.5, 6000]
+    assert [h.end_time for h in bm.hit_objects] == [1000.5, 3000.75, 5000.75, None]
     assert bm.hit_objects[0].x == 256
     assert bm.hit_objects[3].length == 250
     assert [(p.x, p.y) for p in bm.hit_objects[3].control_points[1:]] == [(1, 2)]
@@ -70,20 +70,19 @@ def test_complete_map(tmp_path):
         4,
     )
     assert b.mode is fosu.GameMode.MANIA and b.letterbox_in_breaks is True
-    assert b.bookmarks == [100, -200, 300]
+    assert b.bookmark_list == [100, -200, 300]
     assert isinstance(b.hit_objects, list) and len(b.hit_objects) == 4
     circle, slider, spinner, hold = b.hit_objects
     assert isinstance(circle, fosu.Circle) and circle.is_circle
-    assert circle.end_time == circle.start_time == 1000
-    assert circle.raw_end_time == 0
+    assert circle.end_time == circle.time == 1000
     assert isinstance(slider, fosu.Slider) and slider.end_time is None
-    assert (slider.span_count, slider.curve_type, slider.length) == (
+    assert (slider.slides, slider.curve_type, slider.length) == (
         2,
         fosu.CurveType.BEZIER,
         240,
     )
     assert (
-        slider.hit_sound
+        slider.hitsound
         == fosu.HitSound.WHISTLE | fosu.HitSound.FINISH | fosu.HitSound.CLAP
     )
     assert [(p.x, p.y) for p in slider.control_points] == [
@@ -91,7 +90,7 @@ def test_complete_map(tmp_path):
         (-129088, 1726),
         (123, 456),
     ]
-    assert slider.raw_edge_sounds == "2|0"
+    assert slider.edge_sounds == "2|0"
     assert spinner.is_spinner and spinner.end_time == 4000
     assert hold.is_hold and hold.end_time == 6000
     assert b.timing_points[0].uninherited is True
@@ -104,7 +103,7 @@ def test_complete_map(tmp_path):
 def test_empty_input_defaults():
     b = fosu.parse(b"")
     assert b.title == "" and b.sample_set is fosu.SampleSet.NORMAL
-    assert b.hit_objects == b.timing_points == b.breaks == b.bookmarks == []
+    assert b.hit_objects == b.timing_points == b.breaks == b.bookmark_list == []
     assert b.mode is fosu.GameMode.OSU
     assert b.beatmap_id is None and b.preview_time is None
 
@@ -117,7 +116,7 @@ def test_omitted_general_uses_defaults():
 
 def test_omitted_metadata_uses_defaults():
     b = fosu.parse(b"[General]\nAudioLeadIn:450\n")
-    assert b.audio_lead_in == 450 and b.title == "" and b.tags == []
+    assert b.audio_lead_in == 450 and b.title == "" and b.tag_list == []
 
 
 def test_omitted_hitobjects_is_empty_list():
@@ -141,18 +140,18 @@ def test_tags_and_raw_text_are_eager():
     b = fosu.parse(
         b"[Metadata]\nTags:alpha  beta alpha\n[Editor]\nBookmarks:12, -30,40\n"
     )
-    assert b.tags == ["alpha", "beta", "alpha"]
-    assert b.raw_tags == "alpha  beta alpha" and b.raw_bookmarks == "12, -30,40"
-    b.tags.append("new")
-    assert b.tags[-1] == "new"
+    assert b.tag_list == ["alpha", "beta", "alpha"]
+    assert b.tags == "alpha  beta alpha" and b.bookmarks == "12, -30,40"
+    b.tag_list.append("new")
+    assert b.tag_list[-1] == "new"
 
 
 def test_invalid_bookmarks_follow_official_decoder():
     b = fosu.parse(
         b"[Editor]\nBookmarks:10,bad,20,2147483648,-2147483648,1_000,,+30,4e1\n"
     )
-    assert b.bookmarks == [10, 20, -2147483648, 30]
-    assert "bad" in b.raw_bookmarks and b.stats.malformed_lines == 0
+    assert b.bookmark_list == [10, 20, -2147483648, 30]
+    assert "bad" in b.bookmarks and b.stats.malformed_lines == 0
 
 
 def test_utf8_and_embedded_nul_roundtrip():
@@ -161,14 +160,14 @@ def test_utf8_and_embedded_nul_roundtrip():
     assert b.title.encode("utf-8", "surrogateescape") == b"hello\xff\x00world"
 
 
-def test_native_nan_and_signed_zero_bits_survive():
+def test_inherited_nan_survives_and_time_uses_official_offset_arithmetic():
     import struct
 
     b = fosu.parse(
         b"[TimingPoints]\n0,500\n10,NaN,4,1,0,100,0,0\n[HitObjects]\n1,2,-0,1,0\n"
     )
     assert math.isnan(b.timing_points[1].beat_length)
-    assert struct.pack("<d", b.hit_objects[0].start_time) == struct.pack("<d", -0.0)
+    assert struct.pack("<d", b.hit_objects[0].time) == struct.pack("<d", 0.0)
 
 
 def test_kind_precedence_and_combo_flags():
@@ -177,7 +176,23 @@ def test_kind_precedence_and_combo_flags():
     )
     a, s, c = b.hit_objects
     assert isinstance(a, fosu.Circle) and isinstance(s, fosu.Slider)
-    assert c.is_new_combo is True and c.combo_skip == 3 and c.raw_type == 53
+    assert c.new_combo is True and c.combo_skip == 3 and c.type == 53
+
+
+def test_stable_time_order_preserves_slider_data():
+    b = fosu.parse(
+        b"[HitObjects]\n10,20,300,2,0,L|40:50,1,60\n"
+        b"60,70,100,2,0,B|80:90|100:110,2,120\n"
+        b"120,130,100,1,0\n"
+    )
+    first, circle, last = b.hit_objects
+    assert isinstance(first, fosu.Slider) and isinstance(last, fosu.Slider)
+    assert isinstance(circle, fosu.Circle)
+    assert [h.time for h in b.hit_objects] == [100, 100, 300]
+    assert first.length == 120 and first.slides == 2
+    assert first.control_points == [fosu.Point(60, 70), fosu.Point(80, 90), fosu.Point(100, 110)]
+    assert last.length == 60 and last.slides == 1
+    assert last.control_points == [fosu.Point(10, 20), fosu.Point(40, 50)]
 
 
 def test_detached_values_remain_valid_after_reuse():
@@ -192,7 +207,7 @@ def test_detached_values_remain_valid_after_reuse():
         fosu.parse(b"[HitObjects]\n4,5,6,1,0\n")
     del b
     gc.collect()
-    assert (note.x, note.y, note.start_time) == (99, 48, 600)
+    assert (note.x, note.y, note.time) == (99, 48, 600)
 
 
 def test_points_are_independent_between_results():
@@ -211,10 +226,10 @@ def test_repeated_timestamp_fields_remain_independently_assignable():
     )
     circle, spinner, hold = b.hit_objects
     circle.end_time = 10
-    assert circle.start_time == 1000.5
-    for note, end in ((spinner, 3000.5), (hold, 5000.5)):
+    assert circle.time == 1000.5
+    for note, start in ((spinner, 2000.5), (hold, 4000.5)):
         note.end_time = 20
-        assert note.raw_end_time == end
+        assert note.time == start
 
 
 def test_hitsound_flags_preserve_combinations_and_unknown_bits():
@@ -224,8 +239,8 @@ def test_hitsound_flags_preserve_combinations_and_unknown_bits():
     )
     b = fosu.parse(data)
     assert b.stats.malformed_lines == 0
-    assert [int(note.hit_sound) for note in b.hit_objects] == values
-    assert all(isinstance(note.hit_sound, fosu.HitSound) for note in b.hit_objects)
+    assert [int(note.hitsound) for note in b.hit_objects] == values
+    assert all(isinstance(note.hitsound, fosu.HitSound) for note in b.hit_objects)
 
 
 def test_standard_python_copy_and_export():
@@ -247,7 +262,7 @@ def test_plain_lists_support_normal_mutations():
     b = fosu.parse(b"[HitObjects]\n7,8,9,1,0\n10,11,12,1,0\n")
     first = b.hit_objects.pop(0)
     b.hit_objects.insert(1, first)
-    assert [h.start_time for h in b.hit_objects] == [12, 9]
+    assert [h.time for h in b.hit_objects] == [12, 9]
     assert b.hit_objects[::-1][0] is first
 
 
@@ -305,7 +320,7 @@ def test_memory_map_and_wide_buffers_are_detached(tmp_path):
             beatmap = fosu.parse(mapped)
     path.unlink()
     assert beatmap.title == "Detached"
-    assert beatmap.hit_objects[0].start_time == 3
+    assert beatmap.hit_objects[0].time == 3
 
     padded = data + b"\n" * (-len(data) % 4)
     assert fosu.parse(memoryview(padded).cast("I")) == beatmap
@@ -331,7 +346,7 @@ def test_concurrent_calls_return_independent_objects():
     with ThreadPoolExecutor(max_workers=4) as executor:
         results = list(executor.map(fosu.parse, inputs))
     assert [b.title for b in results] == [str(i) for i in range(24)]
-    assert [b.hit_objects[0].start_time for b in results] == list(range(24))
+    assert [b.hit_objects[0].time for b in results] == list(range(24))
 
 
 def test_backend_errors_in_fresh_process():
@@ -434,9 +449,9 @@ def test_record_constructors_are_keyword_only():
 
 def test_bookmark_field_trimming_and_internal_whitespace():
     b = fosu.parse("[Editor]\nBookmarks:\u00a01,\u00a02\u00a0,3\u3000\n".encode())
-    assert b.bookmarks == [1, 3]
+    assert b.bookmark_list == [1, 3]
 
 
 def test_bookmark_trailing_nuls_follow_official_decoder():
     b = fosu.parse(b"[Editor]\nBookmarks:1\0,2\0\0,3\0 \n")
-    assert b.bookmarks == [1, 2, 3]
+    assert b.bookmark_list == [1, 2, 3]

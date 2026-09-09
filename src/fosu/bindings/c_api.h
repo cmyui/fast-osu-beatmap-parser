@@ -10,7 +10,7 @@
 #define FOSU_API
 #endif
 
-#define FOSU_ABI_VERSION 3
+#define FOSU_ABI_VERSION 4
 #define FOSU_MAX_INPUT_SIZE (64u * 1024u * 1024u)
 #define FOSU_NO_SLIDER 0xFFFFFFFFu
 
@@ -38,7 +38,9 @@ typedef struct fosu_hit_object {
   int32_t x, y;
   uint32_t type, hitsound;
   double time, end_time;
-  uint32_t slider, reserved;
+  uint32_t slider;
+  uint8_t new_combo, combo_skip;
+  uint16_t reserved;
   fosu_string_ref hit_sample;
 } fosu_hit_object;
 

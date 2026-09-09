@@ -15,17 +15,22 @@ def main():
     parser.add_argument("config", type=Path)
     parser.add_argument("summary", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--table", default="python", help="Common cohort table from the comparison report")
     args = parser.parse_args()
     if args.output.exists():
         raise FileExistsError(args.output)
     variants = json.loads(args.config.read_text())["variants"]
     python_names = {"fosu-python-avx2", "fosu-python-scalar", "slider", "rosu-pp-py",
                     "osupyparser", "pyttanko"}
+    table = json.loads(args.summary.read_text())["tables"][args.table]
     jobs = [(v, kind) for v in variants if v["name"] in python_names
-            for kind in v["workloads"] if kind != "visit"]
+            for kind in v["workloads"] if f"{v['name']}/{kind}" in table["rows"]]
+    if not jobs or not table["files"]:
+        raise ValueError("The chosen table has no common Python inputs")
     worker = Path(__file__).with_name("python_batch_worker.py")
     report = {"complete": False, "started_utc": datetime.now(timezone.utc).isoformat(),
               "affinity": sorted(os.sched_getaffinity(0)), "warmup_maps": 64,
+              "table": args.table, "modes": table.get("modes", {}),
               "cohort_source_sha256": hashlib.sha256(args.summary.read_bytes()).hexdigest(),
               "versions": {v["name"]: v["version"] for v, _ in jobs}, "samples": []}
     reference = None
@@ -34,7 +39,7 @@ def main():
             print(f"Pass {round_id + 1}: {variant['name']}/{kind}", flush=True)
             result = subprocess.run([
                 variant["command"][0], str(worker), variant["command"][-1], kind,
-                str(args.corpus), str(args.summary),
+                str(args.corpus), str(args.summary), args.table,
             ], env=os.environ | variant.get("env", {}), check=True, capture_output=True,
                 text=True, timeout=600)
             sample = json.loads(result.stdout)

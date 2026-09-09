@@ -26,19 +26,20 @@ python3 bench/comparison/report.py "$b/smoke.jsonl" "$b/smoke-summary.json"
 
 # No builds or competing benchmarks while this runs.
 taskset -c 3 "$b/venv/bin/python" bench/comparison/run.py /path/to/corpus \
-  "$b/variants.json" "$b/results.jsonl" --warmup 64 --rounds 2 --reps 1
+  "$b/variants.json" "$b/results.jsonl" --warmup 64 --rounds 2 --reps 1 \
+  --corpus-manifest /path/to/manifest.csv
 python3 bench/comparison/report.py "$b/results.jsonl" "$b/summary.json"
 
 # Python headline: one API per fresh process, two complete batch passes.
 taskset -c 3 "$b/venv/bin/python" bench/comparison/python_batch.py /path/to/corpus \
-  "$b/variants.json" "$b/summary.json" "$b/python-batch.json"
+  "$b/variants.json" "$b/summary.json" "$b/python-batch.json" --table python_all_modes
 ```
 
 The driver hashes sorted filenames and each file's SHA-256 to identify the
 corpus. To repeat the published numbers, match that fingerprint, not just its
 file count. A different local `.osu` collection is useful but is a different
-benchmark. The existing 10k corpus is described in
-[performance.md](../../docs/performance.md#method-and-target); it is not bundled.
+benchmark. The default mixed-mode corpus is described in
+[the corpus guide](../corpus/README.md); it is not bundled.
 The `.corpus.csv.gz` manifest publishes file IDs, sizes and content hashes so
 that downloaded copies can be checked against the measured inputs.
 
@@ -54,6 +55,19 @@ other variants: the reporter uses its decoded object counts as a *cohort filter*
 not as proof that another parser is wrong. Each table intersects matching,
 successful files across every included variant and both rounds.
 
+When a mode manifest is supplied, coverage includes separate standard, taiko,
+catch, and mania counts. The report adds `_all_modes` and `_mode_0` through
+`_mode_3` tables. A variant's optional `modes` list declares supported native
+modes; pyttanko is standard-only. Unsupported variants are excluded from the
+corresponding mode tables, not silently allowed to eliminate every map in that
+mode. All variants are still attempted in the raw sweep. A table with no common
+successful maps has no timings. Every nonempty table uses one shared cohort;
+different tables may have different cohorts and must not be mixed for speedups.
+
+Use `python_batch.py --table python_mode_0` for a standard-only comparison that
+includes pyttanko. `--table python_all_modes` excludes standard-only libraries
+and uses the same mixed-mode cohort for every remaining Python API.
+
 ### Refresh only FOSU
 
 Keep the same build settings and corpus, and retain only the FOSU variants in
@@ -64,9 +78,9 @@ expanding to more maps because fewer libraries are participating:
 taskset -c 3 "$b/venv/bin/python" bench/comparison/run.py /path/to/corpus \
   "$b/variants.json" "$b/refresh.jsonl" --warmup 64 --rounds 2 --reps 1
 python3 bench/comparison/report.py "$b/refresh.jsonl" "$b/refresh-summary.json" \
-  --cohorts bench/comparison/results/hetzner-2026-09-08.json
+  --cohorts /path/to/original-summary.json
 taskset -c 3 "$b/venv/bin/python" bench/comparison/python_batch.py /path/to/corpus \
-  "$b/variants.json" bench/comparison/results/hetzner-2026-09-08.json "$b/refresh-batch.json"
+  "$b/variants.json" /path/to/original-summary.json "$b/refresh-batch.json" --table python_all_modes
 ```
 
 The reporter rejects a changed corpus or any new failure/count mismatch within

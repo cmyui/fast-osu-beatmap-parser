@@ -73,6 +73,27 @@ class ReportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             summarize(self.records, self.metadata, tables)
 
+    def test_modes_do_not_disappear_behind_standard_only_parser(self):
+        self.metadata["file_modes"] = {"a.osu": 0, "b.osu": 1, "c.osu": 3}
+        self.metadata["config"]["variants"][1]["modes"] = [0]
+        for record in self.records:
+            if record["variant"] == "slider" and record["file"] != "a.osu":
+                record["error"] = "NotImplementedError"
+        report = summarize(self.records, self.metadata)
+        self.assertEqual(report["tables"]["python"]["files"], 1)
+        self.assertEqual(report["tables"]["python_all_modes"]["files"], 3)
+        self.assertEqual(report["tables"]["python_mode_3"]["modes"], {"3": 1})
+        self.assertEqual(report["coverage"]["slider/bytes"]["by_mode"]["3"]["failed_files"], 1)
+
+    def test_empty_mode_cohort_has_no_misleading_timings(self):
+        self.metadata["file_modes"] = {"a.osu": 0, "b.osu": 0, "c.osu": 3}
+        for record in self.records:
+            if record["variant"] == "slider" and record["file"] == "c.osu":
+                record["count"] = 0
+        table = summarize(self.records, self.metadata)["tables"]["python_mode_3"]
+        self.assertEqual(table["files"], 0)
+        self.assertEqual(table["rows"], {})
+
 
 if __name__ == "__main__":
     unittest.main()

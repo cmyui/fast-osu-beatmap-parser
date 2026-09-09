@@ -23,19 +23,12 @@ inline std::optional<int32_t> parse_field_integer(std::string_view input) {
   return static_cast<int32_t>(value);
 }
 
-// Preserve the encoded double precision, while validating the legacy float
-// domain used by difficulty settings and StackLeniency.
+// Decode directly to float32, as osu! does, then widen for the public storage.
 inline std::optional<double> parse_field_float(std::string_view input) {
-  double value;
+  float value;
   if (!consumed_field_value(
-          input, parse_double(input.data(), input.data() + input.size(), value)))
+          input, parse_osu_float(input.data(), input.data() + input.size(), value)))
     return std::nullopt;
-  if (value < -2147483520.0 || value > 2147483520.0) {
-    float checked;
-    if (!consumed_field_value(
-            input, parse_osu_float(input.data(), input.data() + input.size(), checked)))
-      return std::nullopt;
-  }
   return value;
 }
 

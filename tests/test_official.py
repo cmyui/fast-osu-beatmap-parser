@@ -34,6 +34,10 @@ STRICT_ENUM_CASES = {
 
 
 def fixtures():
+    for key in ('Combo1', 'Combo0', 'Combo9', 'Combo+8', 'Combo01', 'SliderBorder'):
+        for colour in ('1,2,3', '255,0,0', '256,0,0', '-1,0,0', '1,2,3junk',
+                       '1,2', '1,2,3,4,5', '1, 2 ,3,ignored alpha', '4,5,6 // comment'):
+            yield f'Colours.{key}={colour!r}', BASE + f'[Colours]\n{key}:{colour}\n'
     for value in ('', '1,2,3', '10,bad,20', '2147483647,2147483648,-2147483648,-2147483649',
                   '1_000,1e3,+3,--4,', ' 1 , \t-2\t ,+3', '٠١,１２,1',
                   '\u00a01\u00a0', '\u00a01,2,3\u00a0', '1,\u00a02\u00a0,3',
@@ -121,11 +125,11 @@ def main():
                 counts['intentional_enum_rejections'] += 1
             else:
                 acceptance_matches = ours == theirs
-            if not acceptance_matches or actual.bookmarks != expected.get('bookmarks', []):
+            if not acceptance_matches or actual.bookmark_list != expected.get('bookmarks', []):
                 gaps.append({'case': name, 'official': theirs, 'fosu': ours,
                              'official_rejections': expected.get('rejected', []),
                              'official_bookmarks': expected.get('bookmarks', []),
-                             'fosu_bookmarks': actual.bookmarks})
+                             'fosu_bookmarks': actual.bookmark_list})
             if counts['files'] % 1000 == 0:
                 print(f"Checked {counts['files']} files; {len(gaps)} differences", flush=True)
         if args.corpus:

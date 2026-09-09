@@ -15,7 +15,7 @@ struct BeatmapHeader {
   int32_t preview_time = -1;
   int32_t countdown = 1;
   SampleSet sample_set = SampleSet::Normal;
-  double stack_leniency = 0.7;
+  double stack_leniency = 0.7f;
   int32_t mode = 0;
   bool letterbox_in_breaks = false;
   bool widescreen_storyboard = false;
@@ -29,9 +29,9 @@ struct BeatmapHeader {
 
   // [Editor]
   std::string_view bookmarks;  // raw comma list
-  double distance_spacing = 0;
+  double distance_spacing = 1;
   int32_t beat_divisor = 4;
-  int32_t grid_size = 4;
+  int32_t grid_size = 0;
   double timeline_zoom = 1;
 
   // [Metadata]
