@@ -1,5 +1,5 @@
 # Hardening for compiled products and their benchmarks. Header-only consumers
-# own their build policy; the freestanding one-shot does not use this function.
+# own their build policy.
 set(_fosu_fortify 2)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   include(CheckCXXSourceCompiles)

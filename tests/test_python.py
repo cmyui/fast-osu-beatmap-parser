@@ -18,6 +18,66 @@ import fosu
 import pytest
 
 
+@pytest.mark.parametrize("file", [False, True])
+def test_selected_sections(tmp_path, file):
+    data = (
+        b"osu file format v14\n[General]\nMode:3\n"
+        b"[Editor]\nBookmarks:100,200\n"
+        b"[Metadata]\nTitle:selected\n"
+        b"[Difficulty]\nCircleSize:14\nOverallDifficulty:8\n"
+        b"[Events]\n2,100,200\n[TimingPoints]\n0,500\n"
+        b"[Colours]\nCombo1:12,34,56\n[HitObjects]\n1,2,3,1,0\n"
+    )
+    path = tmp_path / "selected.osu"
+    path.write_bytes(data)
+
+    def parse(sections):
+        if file:
+            return fosu.parse_file(path, sections=sections)
+        return fosu.parse(data, sections=sections)
+
+    full = parse(fosu.Sections.ALL)
+    assert full == (fosu.parse_file(path) if file else fosu.parse(data))
+    fields_by_section = {
+        fosu.Sections.GENERAL: ("mode",),
+        fosu.Sections.EDITOR: ("bookmark_list",),
+        fosu.Sections.METADATA: ("title",),
+        fosu.Sections.DIFFICULTY: ("od", "ar"),
+        fosu.Sections.EVENTS: ("breaks",),
+        fosu.Sections.TIMING_POINTS: ("timing_points",),
+        fosu.Sections.COLOURS: ("combo_colours",),
+        fosu.Sections.HIT_OBJECTS: ("hit_objects",),
+    }
+    defaults = fosu.parse(b"")
+    for section in fields_by_section:
+        result = parse(section)
+        for other_section, names in fields_by_section.items():
+            expected = full if other_section == section else defaults
+            for name in names:
+                assert getattr(result, name) == getattr(expected, name)
+    listing = parse(fosu.Sections.GENERAL | fosu.Sections.DIFFICULTY)
+    assert listing.cs == 14 and listing.mode == fosu.GameMode.MANIA
+    assert listing.hit_objects == []
+    empty = parse(fosu.Sections(0))
+    assert empty.title == defaults.title and empty.hit_objects == []
+    assert empty.format_version == 14
+
+
+@pytest.mark.parametrize("sections", [1, 1 << 9, 1 << 32, 1 << 100, -1])
+def test_invalid_section_masks(tmp_path, sections):
+    with pytest.raises((ValueError, OverflowError)):
+        fosu.parse(b"", sections=sections)
+    with pytest.raises((ValueError, OverflowError)):
+        fosu.parse_file(tmp_path / "missing.osu", sections=sections)
+
+
+def test_skipped_sections_do_not_count_malformed_records():
+    data = b"[Metadata]\nTitle:ok\n[HitObjects]\ninvalid\n"
+    assert fosu.parse(data).stats.malformed_lines == 1
+    selected = fosu.parse(data, sections=fosu.Sections.METADATA)
+    assert selected.title == "ok" and selected.stats.malformed_lines == 0
+
+
 def test_fractional_times_and_malformed_numeric_fields():
     import math
 

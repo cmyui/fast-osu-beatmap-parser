@@ -485,7 +485,17 @@ struct BeatmapConverter {
           })}});
   }
 };
-PyObject* parse_impl(PyObject* module, PyObject* arg, bool file) {
+PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
+  PyObject* arg;
+  long sections;
+  if (!PyArg_ParseTuple(args, "Ol", &arg, &sections))
+    return nullptr;
+  if (sections < 0 || (static_cast<unsigned long>(sections) &
+                       ~static_cast<unsigned long>(fosu::kAllSections))) {
+    PyErr_SetString(PyExc_ValueError, "invalid sections");
+    return nullptr;
+  }
+  const fosu::ParseOptions options{static_cast<uint32_t>(sections)};
   try {
     PythonRef input = file ? PythonRef(PyOS_FSPath(arg)) : retain(arg);
     if (file && PyUnicode_Check(input))
@@ -503,7 +513,8 @@ PyObject* parse_impl(PyObject* module, PyObject* arg, bool file) {
     fosu::Parser parser(*engine);
     // Both native entry points are noexcept, including allocation and I/O failures.
     PyThreadState* thread = PyEval_SaveThread();
-    auto result = file ? parser.parse_file(bytes) : parser.parse(bytes, size);
+    auto result =
+        file ? parser.parse_file(bytes, options) : parser.parse(bytes, size, options);
     PyEval_RestoreThread(thread);
     if (!result) {
       const auto error = result.error();
@@ -541,8 +552,8 @@ PyObject* parse_file(PyObject* m, PyObject* arg) {
   return parse_impl(m, arg, true);
 }
 PyMethodDef methods[] = {
-    {"parse", parse, METH_O, "Parse bytes into a detached dataclass graph."},
-    {"parse_file", parse_file, METH_O,
+    {"parse", parse, METH_VARARGS, "Parse bytes into a detached dataclass graph."},
+    {"parse_file", parse_file, METH_VARARGS,
      "Read and parse a file into a detached dataclass graph."},
     {nullptr, nullptr, 0, nullptr}};
 int traverse(PyObject* m, visitproc visit, void* arg) {

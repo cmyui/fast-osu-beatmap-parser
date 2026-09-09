@@ -16,7 +16,7 @@ namespace fosu {
 
 namespace internal {
 
-// Parser construction is common in convenience and C/Python APIs. Retain one
+// Parser construction is common in convenience and Python APIs. Retain one
 // inactive mapping without ever sharing a live arena between parser instances.
 inline std::atomic<Arena*> parser_arena_pool{};
 

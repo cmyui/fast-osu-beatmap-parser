@@ -1,7 +1,7 @@
 # Building and checking fosu
 
 The header-only C++ interface needs no build step: add `src` to your include
-path and compile as C++20. CMake 3.26+ builds the C ABI, development tools, and
+path and compile as C++20. CMake 3.26+ builds the C++ runtime, development tools, and
 Python extensions. Python installations invoke CMake through scikit-build-core;
 The Python extension constructs detached Python values directly from the C++ Beatmap.
 
@@ -21,11 +21,11 @@ src/fosu/
       primitives/     # Vector operations, byte scanning, and packed digits
       runtime/        # CPU detection and dynamic engine loading
       third_party/    # Unmodified fast_float dependency and attribution
-    bindings/     # C ABI and detached Python value conversion
+    bindings/     # Detached Python value conversion
 ```
 
-C++ callers include `<fosu/parser.h>`; C callers include
-`<fosu/bindings/c_api.h>`. Engine and storage helpers are implementation details,
+C++ callers include `<fosu/parser.h>` and optionally `<fosu/runtime.h>` for
+runtime engine selection. Engine and storage helpers are implementation details,
 included automatically by the header-only interface. CMake explicitly lists
 the headers needed by consumers and installs them under `include/fosu/`;
 compiled-only loader headers and `.cc` files are not installed. Installed
@@ -67,7 +67,7 @@ and reference utilities are outside this package-typing check.
 
 ```sh
 cmake -S . -B build/native -G Ninja
-cmake --build build/native -j4                       # C ABI shared library
+cmake --build build/native -j4                       # C++ runtime shared library
 cmake --build build/native --target check -j4        # build and run native tests
 cmake --build build/native --target bench-build references -j4
 ```
@@ -97,7 +97,7 @@ libstdc++ debug checks. Sanitizers use `-O1 -g`, ASan, UBSan and float-cast chec
 Tests keep assertions enabled. Standard `CMAKE_CXX_FLAGS`, `CMAKE_C_FLAGS`, and
 linker flag variables accept additional compiler options.
 
-Compiled C API and Python products use runtime CPU selection with `FOSU_ISA=auto`:
+Compiled C++ runtime and Python products use runtime CPU selection with `FOSU_ISA=auto`:
 x86-64 builds contain the scalar engine in the core and an adjacent AVX2 shared
 library; AArch64 builds use the same layout with NEON. Only the selected
 optimized library is loaded. Install/distribute both files together.
@@ -141,7 +141,7 @@ For Rosetta testing, configure a separate build with
 
 ## Hardening
 
-Compiled C ABI and Python products, including every parser backend, use
+Compiled C++ runtime and Python products, including every parser backend, use
 `-fstack-protector-strong`. Native library benchmarks use the same protections.
 Optimized builds enable `_FORTIFY_SOURCE=3` when the Linux compiler and libc
 support it, otherwise level 2; macOS uses level 2. Debug and sanitizer builds
@@ -153,7 +153,6 @@ These are mitigations, not a guarantee of memory safety: canaries cover selected
 stack frames, and fortification checks operations whose object bounds the
 compiler can determine. The parser's validation, bounds checks and sanitizer
 tests remain necessary. Header-only consumers choose their own hardening policy.
-The freestanding one-shot has a separate, deliberately aggressive build.
 
 ## Installed CMake consumers
 
@@ -164,7 +163,7 @@ python3 tests/test_build.py build/native
 
 Downstream projects can use `find_package(fosu CONFIG REQUIRED)` with
 `CMAKE_PREFIX_PATH` pointing at the installation. Link `fosu::headers` for the
-header-only C++ API, or `fosu::fosu` for the compiled C ABI. The header-only target
+header-only C++ API, or `fosu::fosu` for the compiled C++ runtime. The header-only target
 sets the include directory and C++20 requirement without imposing CPU flags.
 
 ## Python packages
@@ -182,38 +181,19 @@ Apple Silicon.
 `FOSU_BUNDLE_RUNTIME=1` bundles the Linux C++ runtime; cibuildwheel enables this
 by default. `CMAKE_ARGS` or pip's `-Ccmake.define.NAME=VALUE` can configure CMake.
 
-## One-shot process
-
-This separate target requires GCC and Linux x86-64. Its `-O2`,
-custom entrypoint, syscall and runtime settings stay in `oneshot/build.sh`.
-They are never applied to the library or Python extension.
-
-```sh
-cmake -S . -B build/native
-cmake --build build/native --target check-oneshot -j4
-build/native/fosu_oneshot map.osu > map.fosu
-python3 oneshot/decode.py < map.fosu
-```
-
-The production target is Zen 4. For x86-64-v3 CI runners configure with
-`-DFOSU_ONESHOT_FLAGS=-march=x86-64-v3`. `FOSU_ONESHOT_CXX` selects GCC and
-`FOSU_ONESHOT_FLAGS` appends diagnostic or ISA overrides.
-
 ## Test responsibilities
 
 - `test_build.py`: installed header-only and compiled CMake targets.
 - `test_numeric.cc`: bounded conversion, prefix and timing-point equivalence.
 - `test_sections.cc`: metadata, object kinds, omitted sections and selection.
-- `test_storage.cc`: growth, lifetime, reuse and both record layouts.
+- `test_storage.cc`: growth, lifetime, reuse and independent copies.
 - `test_hardening.cc` and `fuzz_parser.cc`: malformed input and scalar/SIMD parity.
 - `test_dispatch.cc`: CPU/OS feature requirements, concurrent first use, forced
   selection and unsupported requests; CI also exercises a CPU without AVX via QEMU.
-- C ABI tests: field values, concurrency, failures, recycling and unload.
-- `test_binary_hardening.py`: Linux C ABI and installed-wheel ELF protections
+- `test_binary_hardening.py`: Linux C++ runtime and installed-wheel ELF protections
   (RELRO, eager binding, non-executable stack, no writable executable load
   segments or text relocations, and emitted stack-canary support).
-- Python tests: installed API, ownership, errors, array views and generated types.
-- `test_oneshot*.py`: complete stream equality, I/O boundaries and limits.
+- Python tests: installed API, ownership, errors, section selection and typed values.
 - `test_official.py`: acceptance against the pinned official legacy decoder.
 
 Each parser test defines its own input beside its assertions. The canonical

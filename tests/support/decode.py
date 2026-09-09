@@ -1,10 +1,4 @@
-"""Decode a FOSUDMP6 stream into Python values, including the complete point pool.
-
-    build/release-avx2-bundled/fosu_oneshot map.osu | python3 oneshot/decode.py
-
-This example consumes trusted parser output. Strings remain bytes; decode only
-at the application boundary. For zero-copy array access use the C API instead.
-"""
+"""Decode the private canonical stream emitted by tests/reference/native.cc."""
 
 import struct
 import sys

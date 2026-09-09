@@ -49,7 +49,7 @@ sdist.exclude = ["build", "dist", "tests/reference/official/bin", "tests/referen
 build = "cp310-*"
 skip = "*-musllinux* *-win* *-manylinux_i686 *-macosx_x86_64"
 test-requires = ["pytest>=8", "mypy==2.3.1"]
-test-command = "python -m pytest {project}/tests/test_python.py && FOSU_FORCE_SCALAR=1 python -m pytest {project}/tests/test_python.py && python {project}/tests/test_binary_hardening.py"
+test-command = "python -m pytest {project}/tests/test_python.py && FOSU_BACKEND=scalar python -m pytest {project}/tests/test_python.py && python {project}/tests/test_binary_hardening.py"
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64"]

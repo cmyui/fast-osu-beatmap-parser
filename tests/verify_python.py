@@ -12,8 +12,7 @@ from pathlib import Path
 
 import fosu
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "oneshot"))
-from decode import decode
+from support.decode import decode
 
 
 def compare(actual, expected):

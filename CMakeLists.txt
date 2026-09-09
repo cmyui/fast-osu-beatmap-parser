@@ -80,13 +80,14 @@ target_sources(fosu_headers INTERFACE FILE_SET HEADERS BASE_DIRS src FILES
   src/fosu/arena.h
   src/fosu/beatmap.h
   src/fosu/beatmap_header.h
-  src/fosu/bindings/c_api.h
   src/fosu/enums.h
   src/fosu/io.h
+  src/fosu/legacy_rules.h
   src/fosu/os.h
   src/fosu/parse_options.h
   src/fosu/parser.h
   src/fosu/result.h
+  src/fosu/runtime.h
   src/fosu/engine/hit_objects/common_fields.h
   src/fosu/engine/hit_objects/object_types.h
   src/fosu/engine/hit_objects/samples.h
@@ -211,8 +212,9 @@ function(fosu_dispatch target product)
 endfunction()
 
 if(NOT SKBUILD)
-  add_library(fosu SHARED src/fosu/bindings/c_api.cc)
+  add_library(fosu SHARED src/fosu/runtime.cc)
   add_library(fosu::fosu ALIAS fosu)
+  target_link_libraries(fosu PUBLIC fosu_headers)
   fosu_dispatch(fosu native)
   fosu_runtime(fosu)
   set_target_properties(fosu PROPERTIES CXX_VISIBILITY_PRESET hidden)

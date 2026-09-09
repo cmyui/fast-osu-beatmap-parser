@@ -18,7 +18,7 @@ that FOSU builds every part of osu!'s gameplay model.
 sh tests/reference/official/build.sh
 python tests/test_official_values.py --corpus /path/to/corpus/files \
   --report /private/official-values.json
-FOSU_FORCE_SCALAR=1 python tests/test_official_values.py --corpus /path/to/corpus/files \
+FOSU_BACKEND=scalar python tests/test_official_values.py --corpus /path/to/corpus/files \
   --report /private/official-values-scalar.json
 ```
 

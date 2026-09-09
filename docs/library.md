@@ -7,8 +7,20 @@ is the baseline. Native Linux AVX2 builds also use `-fno-plt` and the
 own their build policy.
 The header-only parser uses AVX2/BMI when enabled by the compiler, or NEON on
 AArch64, with scalar fallback. Define `FOSU_DISABLE_SIMD` for scalar parser
-engine. This interface has no runtime CPU dispatch; compiled C++ callers can
-use the [C ABI](c-api.md) for automatic backend selection.
+engine. For automatic runtime CPU selection, link `fosu::fosu` and use:
+
+```cpp
+#include <fosu/parser.h>
+#include <fosu/runtime.h>
+
+const auto* engine = fosu::runtime_engine();
+if (!engine) return 1;  // explicitly requested backend unavailable
+fosu::Parser parser(*engine);
+```
+
+`runtime_engine()` selects once from `FOSU_BACKEND=auto|scalar|avx2|neon`.
+Keep the runtime library loaded while using its engine or parsers. Compile
+callers and the runtime from the same release; this is not a stable binary ABI.
 
 ## Ownership and reuse
 
@@ -82,11 +94,7 @@ integers; object and break times are double milliseconds. See the [numeric contr
 fractional values, inherited NaN timing points and skipped malformed records.
 
 On the supported 64-bit ABIs, native hitobjects occupy 56 bytes and sliders 56
-bytes, with `std::string_view` fields. The C API adds input ownership,
-versioned compact records and status-code translation at its boundary.
-
-The header-only C++ object layout is not a versioned binary ABI: rebuild callers
-when updating headers. Use the [versioned C interface](c-api.md) across an FFI.
+bytes, with `std::string_view` fields. Rebuild callers when updating headers.
 
 ## Selective parsing
 
@@ -123,8 +131,3 @@ remains optional.
 A lock-free single-slot pool retains one released parser arena without sharing
 live storage. Keeping a `Parser` is still the clearest expression of ownership
 and avoids acquiring a pooled arena.
-The hosted build uses `-O3` on the measured target.
-Profile-guided compilation of the calling application can improve it further.
-[The benchmark guide](performance.md) includes an executable GCC experiment
-with disjoint training/evaluation files. A header-only library cannot supply a
-universal profile for an application's call sites, allocator and input mix.
