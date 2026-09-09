@@ -100,6 +100,47 @@ def test_slider_events_without_ticks(curve, length):
     assert all(math.isfinite(e.time) and math.isfinite(e.path_progress) for e in events)
 
 
+@pytest.mark.parametrize("version,heights", [(5, [2, 1, 0]), (6, [2, 1, 0]), (14, [2, 1, 0])])
+def test_circle_stacking_keeps_raw_coordinates(tmp_path, version, heights):
+    data = (f"osu file format v{version}\n[HitObjects]\n"
+            "100,100,1000,1,0\n100,100,1100,1,0\n100,100,1200,1,0\n").encode()
+    assert all(h.stacking is None for h in fosu.parse(data).hit_objects)
+    source = tmp_path / "stacks.osu"
+    source.write_bytes(data)
+    map = fosu.parse(data, calculate_stacking=True)
+    assert map == fosu.parse_file(source, calculate_stacking=True)
+    assert [h.stacking.stack_height for h in map.hit_objects] == heights
+    assert all((h.x, h.y) == (100, 100) for h in map.hit_objects)
+    assert map.hit_objects[0].stacking.stack_offset.x == pytest.approx(-6.402624, abs=1e-5)
+    assert pickle.loads(pickle.dumps(map)) == map
+    assert deepcopy(map) == map
+
+
+@pytest.mark.parametrize("version", [5, 6, 14])
+def test_slider_tail_negative_stacks(version):
+    data = (f"osu file format v{version}\n[Difficulty]\nSliderMultiplier:1\n"
+            "[TimingPoints]\n0,500\n[HitObjects]\n"
+            "0,0,1000,2,0,L|100:0,1,100\n100,0,1550,1,0\n100,0,1600,1,0\n").encode()
+    map = fosu.parse(data, calculate_stacking=True)
+    assert [h.stacking.stack_height for h in map.hit_objects] == [0, -1, -2]
+    assert map.hit_objects[0].end_time > 0
+    assert map.hit_objects[0].events == []
+
+
+@pytest.mark.parametrize("mode", [1, 2, 3])
+def test_stacking_does_not_convert_other_modes(mode):
+    data = f"[General]\nMode:{mode}\n[HitObjects]\n100,100,0,1,0\n100,100,1,1,0\n".encode()
+    assert fosu.parse(data, calculate_stacking=True) == fosu.parse(data)
+
+
+def test_modern_stacking_time_distance_and_spinner_boundaries():
+    data = (b"osu file format v14\n[Difficulty]\nApproachRate:10\n"
+            b"[HitObjects]\n100,100,0,1,0\n100,100,316,1,0\n103,100,400,1,0\n"
+            b"0,0,410,8,0,420\n103,100,500,1,0\n")
+    map = fosu.parse(data, calculate_stacking=True)
+    assert [h.stacking.stack_height for h in map.hit_objects] == [0, 0, 1, 0, 0]
+
+
 @pytest.mark.parametrize("file", [False, True])
 def test_selected_sections(tmp_path, file):
     data = (

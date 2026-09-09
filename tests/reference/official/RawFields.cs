@@ -77,6 +77,20 @@ sealed class RawFields
             }
             hit_objects.Add(record);
         }
+        if (map.BeatmapInfo.Ruleset.OnlineID == 0)
+        {
+            var converted = new osu.Game.Rulesets.Osu.Beatmaps.OsuBeatmapConverter(map, new osu.Game.Rulesets.Osu.OsuRuleset()).Convert();
+            foreach (var obj in converted.HitObjects)
+                obj.ApplyDefaults(converted.ControlPointInfo, converted.Difficulty);
+            new osu.Game.Rulesets.Osu.Beatmaps.OsuBeatmapProcessor(converted).PostProcess();
+            for (int i = 0; i < map.HitObjects.Count; ++i)
+            {
+                if (!objects.TryGetValue(map.HitObjects[i], out var record)) continue;
+                var obj = (osu.Game.Rulesets.Osu.Objects.OsuHitObject)converted.HitObjects[i];
+                record["stacking"] = new { stack_height = obj.StackHeight,
+                    stack_offset = new { x = (double)obj.StackOffset.X, y = (double)obj.StackOffset.Y } };
+            }
+        }
     }
 
     static double Number(string text) => Parsing.ParseDouble(text);

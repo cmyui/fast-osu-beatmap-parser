@@ -13,6 +13,7 @@
 #include <fosu/legacy_rules.h>
 #include <fosu/slider_events.h>
 #include <fosu/slider_timing.h>
+#include <fosu/stacking.h>
 
 namespace fosu {
 
@@ -256,7 +257,8 @@ class Parser {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
-    if ((opts.calculate_slider_paths || opts.calculate_slider_events) &&
+    const bool stacking = opts.calculate_stacking && beatmap_.mode == 0;
+    if ((opts.calculate_slider_paths || opts.calculate_slider_events || stacking) &&
         !internal::set_slider_paths(beatmap_, arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
@@ -265,8 +267,12 @@ class Parser {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
-    if (opts.calculate_slider_end_times && !opts.calculate_slider_events &&
+    if ((opts.calculate_slider_end_times || stacking) && !opts.calculate_slider_events &&
         !internal::set_slider_end_times(beatmap_, arena_)) {
+      reset_working_result();
+      return Error{ErrorCode::AllocationFailure};
+    }
+    if (stacking && !internal::set_stacking(beatmap_, arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }

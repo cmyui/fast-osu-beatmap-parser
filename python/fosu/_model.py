@@ -56,6 +56,12 @@ class SliderPath:
         return self.cumulative_lengths[-1] if self.cumulative_lengths else 0.0
 
 
+@dataclass(slots=True)
+class Stacking:
+    stack_height: int
+    stack_offset: PathPoint
+
+
 @dataclass(slots=True, kw_only=True)
 class _HitObject:
     time: float
@@ -66,6 +72,7 @@ class _HitObject:
     new_combo: bool
     combo_skip: int
     hit_sample: str
+    stacking: Stacking | None
     is_circle: ClassVar[bool] = False
     is_slider: ClassVar[bool] = False
     is_spinner: ClassVar[bool] = False
