@@ -38,7 +38,7 @@ def test_standard_mods_adjust_difficulty_positions_and_gameplay_time():
     )
     assert slider.control_points == [fosu.Point(100, 284), fosu.Point(200, 234)]
     assert [event.time for event in slider.events] == pytest.approx(
-        [1000 / 1.5, 1500 / 1.5]
+        [1000 / 1.5, 1464 / 1.5, 1500 / 1.5]
     )
     assert all(
         event.span_start_time == pytest.approx(1000 / 1.5) for event in slider.events

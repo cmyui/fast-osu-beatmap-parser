@@ -63,7 +63,12 @@ sealed class RawFields
                     ((IHasDuration)decoded).Duration / repeated.SpanCount(), velocity,
                     tickDistance, slider.Path.Distance, repeated.SpanCount())
                     .Select(e => {
-                        var p = slider.Path.PositionAt(e.PathProgress);
+                        // Keep FOSU's public result finite for a degenerate zero-duration
+                        // slider; the official division produces NaN for this progress.
+                        var progress = e.Type == SliderEventType.LegacyLastTick && double.IsNaN(e.PathProgress)
+                            ? repeated.SpanCount() % 2
+                            : e.PathProgress;
+                        var p = slider.Path.PositionAt(progress);
                         return new {
                             type = e.Type switch {
                                 SliderEventType.Head => 0,
@@ -73,7 +78,7 @@ sealed class RawFields
                                 _ => 4,
                             },
                             time = e.Time, span_index = e.SpanIndex, span_start_time = e.SpanStartTime,
-                            path_progress = e.PathProgress, position = new { x = (double)p.X, y = (double)p.Y },
+                            path_progress = progress, position = new { x = (double)p.X, y = (double)p.Y },
                         };
                     }).ToArray();
                 record["path_samples"] = new[] { 0.0, 0.1, 0.5, 0.9, 1.0 }.Select(progress => {
