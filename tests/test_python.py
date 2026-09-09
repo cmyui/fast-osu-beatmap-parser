@@ -18,6 +18,113 @@ import fosu
 import pytest
 
 
+def test_standard_mods_adjust_difficulty_positions_and_gameplay_time():
+    data = (
+        b"osu file format v14\n[General]\nMode:0\n"
+        b"[Difficulty]\nHPDrainRate:4\nCircleSize:4\nOverallDifficulty:4\n"
+        b"ApproachRate:4\nSliderMultiplier:1\n"
+        b"[Events]\n2,1500,2000\n[TimingPoints]\n0,500\n"
+        b"[HitObjects]\n100,100,1000,2,0,L|200:150,1,100\n"
+    )
+    map = fosu.parse(
+        data,
+        calculate_slider_events=True,
+        mods=fosu.Mods.HARD_ROCK | fosu.Mods.DOUBLE_TIME,
+    )
+    assert (map.hp, map.cs, map.od, map.ar) == pytest.approx((5.6, 5.2, 5.6, 5.6))
+    slider = map.hit_objects[0]
+    assert (slider.x, slider.y, slider.time, slider.end_time) == pytest.approx(
+        (100, 284, 1000 / 1.5, 1500 / 1.5)
+    )
+    assert slider.control_points == [fosu.Point(100, 284), fosu.Point(200, 234)]
+    assert [event.time for event in slider.events] == pytest.approx(
+        [1000 / 1.5, 1500 / 1.5]
+    )
+    assert all(
+        event.span_start_time == pytest.approx(1000 / 1.5) for event in slider.events
+    )
+    assert map.timing_points[0].beat_length == pytest.approx(500 / 1.5)
+    assert (map.breaks[0].start, map.breaks[0].end) == pytest.approx(
+        (1500 / 1.5, 2000 / 1.5)
+    )
+
+
+@pytest.mark.parametrize(
+    "mods,rate",
+    [
+        (fosu.Mods.DOUBLE_TIME, 1.5),
+        (fosu.Mods.NIGHTCORE, 1.5),
+        (fosu.Mods.HALF_TIME, 0.75),
+    ],
+)
+def test_rate_mods_support_every_mode_and_preserve_inherited_velocity(mods, rate):
+    data = (
+        b"[General]\nMode:3\n[TimingPoints]\n300,600\n600,-50,4,0,0,100,0,0\n"
+        b"[HitObjects]\n0,0,900,128,0,1500:0:0:0:0:\n"
+    )
+    map = fosu.parse(data, mods=mods)
+    assert (map.hit_objects[0].time, map.hit_objects[0].end_time) == pytest.approx(
+        (900 / rate, 1500 / rate)
+    )
+    assert [point.time for point in map.timing_points] == pytest.approx(
+        [300 / rate, 600 / rate]
+    )
+    assert map.timing_points[0].beat_length == pytest.approx(600 / rate)
+    assert map.timing_points[1].beat_length == -50
+
+
+def test_taiko_difficulty_mods_follow_mode_specific_rules():
+    data = (
+        b"[General]\nMode:1\n[Difficulty]\nHPDrainRate:4\nCircleSize:4\n"
+        b"OverallDifficulty:4\nApproachRate:4\nSliderMultiplier:1\n"
+        b"[HitObjects]\n100,100,1000,1,0\n"
+    )
+    easy = fosu.parse(data, mods=fosu.Mods.EASY)
+    assert (
+        easy.hp,
+        easy.cs,
+        easy.od,
+        easy.ar,
+        easy.slider_multiplier,
+    ) == pytest.approx((2, 2, 2, 2, 0.8))
+    hard_rock = fosu.parse(data, mods=fosu.Mods.HARD_ROCK)
+    assert (hard_rock.hp, hard_rock.cs, hard_rock.od, hard_rock.ar) == pytest.approx(
+        (5.6, 4, 5.6, 4)
+    )
+    assert hard_rock.slider_multiplier == pytest.approx(1.4 * 4 / 3)
+    assert hard_rock.hit_objects[0].y == 100
+
+
+@pytest.mark.parametrize("mode", [2, 3])
+def test_catch_and_mania_reject_unimplemented_difficulty_mods(mode):
+    data = f"[General]\nMode:{mode}\n[Difficulty]\nCircleSize:4\n".encode()
+    with pytest.raises(ValueError, match="invalid input"):
+        fosu.parse(data, mods=fosu.Mods.EASY)
+
+
+@pytest.mark.parametrize(
+    "mods",
+    [
+        fosu.Mods.EASY | fosu.Mods.HARD_ROCK,
+        fosu.Mods.DOUBLE_TIME | fosu.Mods.HALF_TIME,
+        fosu.Mods.NIGHTCORE | fosu.Mods.HALF_TIME,
+        fosu.Mods(1 << 30),
+    ],
+)
+def test_invalid_mod_combinations_are_rejected(mods):
+    with pytest.raises(ValueError, match="invalid input"):
+        fosu.parse(b"", mods=mods)
+
+
+def test_difficulty_mods_require_general_and_difficulty_sections():
+    with pytest.raises(ValueError, match="invalid input"):
+        fosu.parse(
+            b"[HitObjects]\n0,0,0,1,0\n",
+            sections=fosu.Sections.HIT_OBJECTS,
+            mods=fosu.Mods.HARD_ROCK,
+        )
+
+
 @pytest.mark.parametrize(
     "curve,length,distance",
     [

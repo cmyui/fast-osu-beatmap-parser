@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 
+#include <fosu/mods.h>
+
 namespace fosu {
 enum : uint32_t {
   kSectionGeneral = 1u << 1,
@@ -20,5 +22,6 @@ struct ParseOptions {
   bool calculate_slider_paths = false;
   bool calculate_slider_events = false;
   bool apply_stacking = false;
+  Mods mods = Mods::None;
 };
 }  // namespace fosu

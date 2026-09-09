@@ -110,8 +110,18 @@ It includes path and end-time calculation, but not events. Native results use
 `stacking` is `None` when not calculated. Include GENERAL, DIFFICULTY,
 TIMING_POINTS and HIT_OBJECTS when selecting sections for meaningful results.
 
+`mods=` accepts combined `Mods` values. EZ and HR adjust difficulty settings for
+osu!standard and osu!taiko; HR also reflects standard hit objects and slider
+control points vertically. EZ/HR require GENERAL and DIFFICULTY in `sections`.
+They are not yet supported for osu!catch or osu!mania because those modes require
+converted fruit offsets or resolved hit windows; support is planned. DT,
+NIGHTCORE, and HT support every mode and divide gameplay timeline values by
+1.5, 1.5, and 0.75 respectively. This includes hit objects, calculated slider
+events, timing-point offsets and uninherited beat lengths, and breaks. General
+and Editor timestamp metadata remains in source-map time.
+
 See [compatibility](compatibility.md) for supported behavior and limitations;
-there is no mod application or ruleset conversion.
+there is no ruleset conversion.
 
 ## CPU selection
 
