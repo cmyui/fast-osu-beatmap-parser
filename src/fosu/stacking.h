@@ -111,7 +111,12 @@ inline bool set_stacking(Beatmap& map, Arena* arena) {
     calculate_legacy_stacks(map, threshold);
   const double cs = static_cast<float>(map.cs);
   const float scale = static_cast<float>(1.0f - 0.7f * ((cs - 5) / 5)) / 2 * 1.00041f;
-  for (auto& stack : map.stacking) {
+  for (size_t i = 0; i < map.stacking.size(); ++i) {
+    auto& stack = map.stacking[i];
+    // The standard ruleset's spinner overrides StackOffset with Vector2.Zero,
+    // even when legacy stacking assigned it a nonzero height.
+    if (map.hit_objects[i].is_spinner() || map.hit_objects[i].is_hold())
+      continue;
     const float offset = stack.stack_height * scale * -6.4f;
     stack.stack_offset = {offset, offset};
   }
