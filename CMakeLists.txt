@@ -89,18 +89,20 @@ target_sources(fosu_headers INTERFACE FILE_SET HEADERS BASE_DIRS src FILES
   src/fosu/result.h
   src/fosu/engine/byte_scan.h
   src/fosu/engine/digit_groups.h
-  src/fosu/engine/document_sections.h
+  src/fosu/engine/colours.h
   src/fosu/engine/enum_parse.h
   src/fosu/engine/events.h
   src/fosu/engine/fast_float.h
   src/fosu/engine/hitobject_details.h
   src/fosu/engine/hitobjects.h
-  src/fosu/engine/metadata.h
+  src/fosu/engine/header_fields.h
+  src/fosu/engine/header_values.h
   src/fosu/engine/parse_document.h
   src/fosu/engine/parsing_engine.h
   src/fosu/engine/prefix.h
   src/fosu/engine/scalar_parse.h
   src/fosu/engine/section_names.h
+  src/fosu/engine/section_lines.h
   src/fosu/engine/simd.h
   src/fosu/engine/slider.h
   src/fosu/engine/slider_tail.h
@@ -108,7 +110,7 @@ target_sources(fosu_headers INTERFACE FILE_SET HEADERS BASE_DIRS src FILES
   src/fosu/engine/swar.h
   src/fosu/engine/text.h
   src/fosu/engine/timing.h
-  src/fosu/engine/timing_section.h
+  src/fosu/engine/timing_points.h
 )
 
 function(fosu_profile target)

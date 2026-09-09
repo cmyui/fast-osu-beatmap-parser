@@ -133,7 +133,7 @@ __attribute__((noinline)) inline bool parse_hitobject_line_scalar(
                                  line_end, constants);
 }
 
-inline const char* parse_hitobject_lines_scalar(
+inline const char* parse_hitobjects_section_scalar(
     Beatmap& beatmap,
     size_t& hit_object_count,
     size_t& slider_count,
@@ -172,13 +172,14 @@ inline const char* parse_hitobject_lines_scalar(
 #if FOSU_SIMD
 // SIMD section loop. One 32-byte load per line yields the newline, comma and
 // non-digit masks. Lines outside the common editor shape take the scalar path.
-inline const char* parse_hitobject_lines(Beatmap& beatmap,
-                                         size_t& hit_object_count,
-                                         size_t& slider_count,
-                                         size_t& point_count,
-                                         const char* p,
-                                         const char* file_end,
-                                         const HitObjectParseConstants& constants) {
+inline const char* parse_hitobjects_section_simd(
+    Beatmap& beatmap,
+    size_t& hit_object_count,
+    size_t& slider_count,
+    size_t& point_count,
+    const char* p,
+    const char* file_end,
+    const HitObjectParseConstants& constants) {
   const ByteVector newline_value = constants.nl;
   const ByteVector comma_value = constants.comma;
   const ByteVector zero = constants.zero;
@@ -263,7 +264,6 @@ inline const char* parse_hitobject_lines(Beatmap& beatmap,
 }
 #endif
 
-template <bool UseSimd>
 inline const char* parse_hitobjects_section(Beatmap& beatmap,
                                             size_t& hit_object_count,
                                             size_t& slider_count,
@@ -272,12 +272,12 @@ inline const char* parse_hitobjects_section(Beatmap& beatmap,
                                             const char* file_end) {
   const HitObjectParseConstants constants;
 #if FOSU_SIMD
-  if constexpr (UseSimd)
-    return parse_hitobject_lines(beatmap, hit_object_count, slider_count, point_count, p,
-                                 file_end, constants);
+  return parse_hitobjects_section_simd(beatmap, hit_object_count, slider_count,
+                                       point_count, p, file_end, constants);
+#else
+  return parse_hitobjects_section_scalar(beatmap, hit_object_count, slider_count,
+                                         point_count, p, file_end, constants);
 #endif
-  return parse_hitobject_lines_scalar(beatmap, hit_object_count, slider_count,
-                                      point_count, p, file_end, constants);
 }
 
 }  // namespace fosu::internal

@@ -23,6 +23,14 @@ the headers needed by consumers and installs them under `include/fosu/`;
 compiled-only loader headers and `.cc` files are not installed. Installed
 consumers use the same include names as source-tree consumers.
 
+The `Parser` owns input preparation, storage, and result lifetimes. Its selected
+engine owns the complete document parse. Each section parser consumes its body
+and returns the next section header or EOF; optimized sections can fuse line
+scanning with record parsing. Header sections use constexpr key lookups with
+typed field handlers. The shared document flow is compiled once for each ISA,
+without a scalar/SIMD mode parameter. Tests compare it with a separately compiled
+scalar engine whose implementation symbols are isolated from the SIMD build.
+
 ## Formatting and Python typing
 
 Install `pre-commit` (CI uses version 4.6.0), then enable the Git hook for your

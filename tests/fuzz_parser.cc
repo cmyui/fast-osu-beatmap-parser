@@ -4,10 +4,11 @@
 #include <cassert>
 #include <string>
 #include "support/canonical_dump.h"
+#include "support/scalar_engine.h"
 
 static void check(std::string_view data) {
   auto input = fosu::make_padded(data);
-  fosu::Parser scalar_parser(fosu::internal::scalar_engine);
+  fosu::Parser scalar_parser(fosu_test::scalar_engine());
   fosu::Parser simd_parser;
   auto scalar = scalar_parser.parse(input);
   auto simd = simd_parser.parse(input);

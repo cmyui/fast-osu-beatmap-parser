@@ -12,6 +12,7 @@
 #include <cstring>
 
 namespace fosu::internal {
+static_assert(!FOSU_SIMD, "the core embeds only the scalar engine");
 namespace {
 // Trivial lifetime permits a host's late exit callback to initialize again
 // after library cleanup. No parser or arena lives in an engine library.
@@ -67,13 +68,13 @@ const ParsingEngine* choose() {
         if (const auto* engine = load(engine_name(kind)))
           return engine;
     }
-    return &scalar_engine;
+    return &native_engine;
   }
   const auto* kind = find_engine_kind(request);
   if (!kind)
     return nullptr;
   if (*kind == EngineKind::Scalar)
-    return &scalar_engine;
+    return &native_engine;
   return engine_available(*kind) ? load(request) : nullptr;
 }
 }  // namespace

@@ -2,28 +2,17 @@
 
 #include <fosu/beatmap.h>
 #include <fosu/engine/byte_scan.h>
+#include <fosu/engine/section_lines.h>
 #include <fosu/engine/timing.h>
 
 namespace fosu::internal {
 
-inline void parse_timing_point_line(Beatmap& beatmap,
-                                    size_t& point_count,
-                                    const char* p,
-                                    size_t length) {
-  if (const auto point = parse_timing_point(p, p + length))
-    beatmap.timing_points[point_count++] = *point;
-  else
-    ++beatmap.stats.malformed_lines;
-}
-
 #if FOSU_SIMD
-
-// Fused [TimingPoints] section loop. Each point is parsed into a local value
-// and then copied into the beatmap arena.
-inline const char* parse_timing_points_section(Beatmap& beatmap,
-                                               size_t& point_count,
-                                               const char* p,
-                                               const char* file_end) {
+// Each point is parsed into a local value and then copied into the beatmap arena.
+inline const char* parse_timing_points_section_simd(Beatmap& beatmap,
+                                                    size_t& point_count,
+                                                    const char* p,
+                                                    const char* file_end) {
   const ByteVector newline_value = broadcast_byte<'\n'>();
   const ByteVector comma_value = broadcast_byte<','>();
   uint32_t malformed = 0;
@@ -79,5 +68,28 @@ inline const char* parse_timing_points_section(Beatmap& beatmap,
   return p;
 }
 #endif
+
+inline const char* parse_timing_points_section_scalar(Beatmap& beatmap,
+                                                      size_t& point_count,
+                                                      const char* p,
+                                                      const char* file_end) {
+  return for_each_section_line(p, file_end, [&](std::string_view line) {
+    if (const auto point = parse_timing_point(line.data(), line.data() + line.size()))
+      beatmap.timing_points[point_count++] = *point;
+    else
+      ++beatmap.stats.malformed_lines;
+  });
+}
+
+inline const char* parse_timing_points_section(Beatmap& beatmap,
+                                               size_t& point_count,
+                                               const char* p,
+                                               const char* file_end) {
+#if FOSU_SIMD
+  return parse_timing_points_section_simd(beatmap, point_count, p, file_end);
+#else
+  return parse_timing_points_section_scalar(beatmap, point_count, p, file_end);
+#endif
+}
 
 }  // namespace fosu::internal

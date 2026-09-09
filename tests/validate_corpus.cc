@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <iostream>
 #include "support/canonical_dump.h"
+#include "support/scalar_engine.h"
 int main(int argc, char** argv) {
   if (argc < 2 || argc > 3)
     return 2;
@@ -18,7 +19,7 @@ int main(int argc, char** argv) {
     return 1;
   }
   size_t files = 0, bytes = 0, objects = 0, malformed = 0;
-  fosu::Parser scalar_parser(fosu::internal::scalar_engine);
+  fosu::Parser scalar_parser(fosu_test::scalar_engine());
   fosu::Parser simd_parser;
   for (const auto& entry : std::filesystem::recursive_directory_iterator(argv[1])) {
     if (entry.path().extension() != ".osu")
