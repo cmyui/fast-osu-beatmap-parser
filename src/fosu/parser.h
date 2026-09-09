@@ -30,10 +30,9 @@ struct ParserArenaPool {
 inline ParserArenaPool parser_arena_pool{};
 
 inline Arena* acquire_parser_arena(std::atomic<Arena*>& pool) {
-  Arena* arena = pool.exchange(nullptr, std::memory_order_acq_rel);
+  Arena* arena = pool.exchange(nullptr, std::memory_order_acquire);
   if (!arena)
     return arena_alloc();
-  arena_clear(arena);
   return arena;
 }
 
@@ -42,14 +41,15 @@ inline void recycle_parser_arena(std::atomic<Arena*>& pool, Arena* arena) {
     return;
   arena_clear(arena);
   Arena* empty = nullptr;
-  if (!pool.compare_exchange_strong(empty, arena, std::memory_order_acq_rel)) {
+  if (!pool.compare_exchange_strong(empty, arena, std::memory_order_release,
+                                    std::memory_order_relaxed)) {
     arena_release(arena);
   }
 }
 
 inline void clear_parser_arena_pool() {
-  arena_release(parser_arena_pool.result.exchange(nullptr, std::memory_order_acq_rel));
-  arena_release(parser_arena_pool.scratch.exchange(nullptr, std::memory_order_acq_rel));
+  arena_release(parser_arena_pool.result.exchange(nullptr, std::memory_order_acquire));
+  arena_release(parser_arena_pool.scratch.exchange(nullptr, std::memory_order_acquire));
 }
 
 #ifndef FOSU_MANAGED_ARENA_CLEANUP

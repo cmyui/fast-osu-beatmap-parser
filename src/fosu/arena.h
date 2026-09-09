@@ -32,10 +32,10 @@ inline constexpr size_t kCacheLineSize = 64;
 inline constexpr size_t kDefaultArenaReserve = size_t{64} << 20;
 inline constexpr size_t kDefaultArenaCommit = size_t{64} << 10;
 inline constexpr size_t kMaxArenaPush = size_t{1} << 46;
+inline constexpr size_t kMaxArenaAlignment = size_t{1} << 12;
 
 enum ArenaFlags : uint32_t {
-  ArenaFlagLock = 1u << 0,
-  ArenaFlagChain = 1u << 1,
+  ArenaFlagChain = 1u << 0,
 };
 
 #if defined(FOSU_ARENA_TELEMETRY)
@@ -112,10 +112,6 @@ inline bool arena_commit_to(Arena* block, size_t new_pos) {
   if (!internal::os_commit(start, amount))
     return false;
   internal::arena_poison(start, amount);
-  if (block->flags & ArenaFlagLock) {
-    if (!internal::os_lock(start, amount))
-      return false;
-  }
   block->committed = target;
   return true;
 }
@@ -162,12 +158,6 @@ inline Arena* arena_alloc(ArenaParams params) {
 #endif
   };
   arena->current = arena;
-  if (arena->flags & ArenaFlagLock) {
-    if (!internal::os_lock(arena, commit_size)) {
-      internal::os_release(arena, reserve_size);
-      return nullptr;
-    }
-  }
   return arena;
 }
 
@@ -212,11 +202,10 @@ inline void arena_reset_metrics(Arena* arena) {
 
 inline void* arena_push(Arena* arena, size_t size, size_t alignment) {
   if (!arena || size > kMaxArenaPush || alignment == 0 ||
-      (alignment & (alignment - 1)) != 0 ||
+      alignment > kMaxArenaAlignment || (alignment & (alignment - 1)) != 0 ||
       size > std::numeric_limits<size_t>::max() - alignment) {
     return nullptr;
   }
-  alignment = std::min(std::max(size_t{1}, alignment), size_t{4096});
 
   Arena* current = arena->current;
   size_t pos = align_up(current->pos, alignment);
@@ -270,8 +259,8 @@ inline void* arena_push(Arena* arena, size_t size, size_t alignment) {
 
 template <typename T>
 inline T* arena_push_array(Arena* arena, size_t count) {
-  static_assert(std::is_trivially_destructible_v<T>,
-                "arena allocations do not run element destructors");
+  static_assert(std::is_trivially_copyable_v<T>,
+                "arena arrays require trivially copyable elements");
   if (count > std::numeric_limits<size_t>::max() / sizeof(T))
     return nullptr;
   return static_cast<T*>(arena_push(arena, sizeof(T) * count, alignof(T)));

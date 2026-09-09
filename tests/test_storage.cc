@@ -249,6 +249,7 @@ static void test_arena_interface() {
   });
   CHECK(arena != nullptr);
   CHECK(reinterpret_cast<uintptr_t>(arena) % fosu::kCacheLineSize == 0);
+  CHECK(fosu::arena_push(arena, 1, fosu::kMaxArenaAlignment * 2) == nullptr);
   const size_t initial = fosu::arena_pos(arena);
   auto* first = fosu::arena_push_array<uint32_t>(arena, 16);
   CHECK(first != nullptr);

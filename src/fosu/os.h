@@ -4,7 +4,6 @@
 #include <unistd.h>
 
 #include <cstddef>
-#include <string_view>
 
 namespace fosu::internal {
 
@@ -30,16 +29,8 @@ inline bool os_commit(void* memory, size_t size) {
   return mprotect(memory, size, PROT_READ | PROT_WRITE) == 0;
 }
 
-inline bool os_lock(void* memory, size_t size) {
-  return mlock(memory, size) == 0;
-}
-
 inline void os_release(void* memory, size_t size) {
   munmap(memory, size);
-}
-
-inline void os_log(std::string_view message) {
-  (void)write(STDERR_FILENO, message.data(), message.size());
 }
 
 }  // namespace fosu::internal
