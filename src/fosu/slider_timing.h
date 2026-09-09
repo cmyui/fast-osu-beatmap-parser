@@ -25,7 +25,7 @@ inline bool set_slider_end_times(Beatmap& map,
                                  std::span<SliderTiming> timings = {}) {
   if (map.sliders.empty())
     return true;
-  const auto temp = temp_begin(scratch_arena);
+  const TempArena temp{scratch_arena};
   auto* changes =
       arena_push_array<SliderTimingChange>(scratch_arena, map.timing_points.size());
   if (!changes && !map.timing_points.empty())
@@ -114,10 +114,8 @@ inline bool set_slider_end_times(Beatmap& map,
                                           map.slider_points.subspan(slider.point_begin,
                                                                     slider.point_count),
                                           scratch_arena);
-    if (!distance) {
-      temp_end(temp);
+    if (!distance)
       return false;
-    }
     const double pixels_per_millisecond =
         100 * map.slider_multiplier * velocity / beat_length;
     // osu! suppresses repeats on effectively zero-length paths. Keep the
@@ -134,7 +132,6 @@ inline bool set_slider_end_times(Beatmap& map,
           (spans * distance.value() / pixels_per_millisecond) / spans, spans};
     }
   }
-  temp_end(temp);
   return true;
 }
 

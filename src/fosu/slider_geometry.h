@@ -233,7 +233,7 @@ inline Result<double> slider_distance(const HitObject& object,
     if (last.x != previous.x || last.y != previous.y)
       return slider.length;
   }
-  const auto temp = temp_begin(arena);
+  const TempArena temp{arena};
   auto* points = arena_push_array<CurvePoint>(arena, control_points.size() + 1);
   if (!points)
     return Error{ErrorCode::AllocationFailure};
@@ -256,17 +256,12 @@ inline Result<double> slider_distance(const HitObject& object,
     if (points[i] != points[i - 1] || i == count - 1 ||
         (type == CurveType::Catmull && i > 1))
       continue;
-    if (!curve_segment_distance({points + begin, i - begin}, type, distance, arena)) {
-      temp_end(temp);
+    if (!curve_segment_distance({points + begin, i - begin}, type, distance, arena))
       return Error{ErrorCode::AllocationFailure};
-    }
     begin = i;
   }
-  if (!curve_segment_distance({points + begin, count - begin}, type, distance, arena)) {
-    temp_end(temp);
+  if (!curve_segment_distance({points + begin, count - begin}, type, distance, arena))
     return Error{ErrorCode::AllocationFailure};
-  }
-  temp_end(temp);
   // A missing/zero declared length uses the natural path. Otherwise osu! trims
   // or extends it, except when a duplicate final vertex prevents extension.
   if (slider.length > 0 && distance.count > 1 &&
@@ -329,12 +324,10 @@ inline Result<SliderPath> calculate_slider_path(
     std::span<const SliderPoint> control_points,
     Arena* result_arena,
     Arena* scratch_arena) {
-  const auto work = temp_begin(scratch_arena);
+  const TempArena work{scratch_arena};
   auto* points = arena_push_array<CurvePoint>(scratch_arena, control_points.size() + 1);
-  if (!points) {
-    temp_end(work);
+  if (!points)
     return Error{ErrorCode::AllocationFailure};
-  }
   points[0] = {};
   for (size_t i = 0; i < control_points.size(); ++i)
     points[i + 1] = {static_cast<float>(control_points[i].x - object.x),
@@ -360,18 +353,14 @@ inline Result<SliderPath> calculate_slider_path(
     curve.first_in_segment = i - begin > 1;
     if (!approximate_curve_segment({points + begin, i - begin}, type, curve,
                                    scratch_arena) ||
-        curve.failed) {
-      temp_end(work);
+        curve.failed)
       return Error{ErrorCode::AllocationFailure};
-    }
     begin = i;
   }
   auto* output = arena_push_array<PathPoint>(result_arena, curve.count);
   auto* lengths = arena_push_array<double>(result_arena, curve.count);
-  if (!output || !lengths) {
-    temp_end(work);
+  if (!output || !lengths)
     return Error{ErrorCode::AllocationFailure};
-  }
   curve.copy_to(output);
   lengths[0] = 0;
   for (size_t i = 1; i < curve.count; ++i)
@@ -388,7 +377,6 @@ inline Result<SliderPath> calculate_slider_path(
     lengths[end] = expected;
   }
   const SliderPath result{{output, end + 1}, {lengths, end + 1}};
-  temp_end(work);
   return result;
 }
 
