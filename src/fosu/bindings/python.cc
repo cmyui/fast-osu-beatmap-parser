@@ -82,6 +82,9 @@ bool bookmark(const char* p, const char* end, int32_t& out) {
 
 // Per-module ownership of the model keeps this compatible with subinterpreters.
 enum Field {
+  f_path,
+  f_points,
+  f_cumulative_lengths,
   f_x,
   f_y,
   f_slides,
@@ -158,7 +161,10 @@ enum Field {
   f_storyboard_lines,
   field_count
 };
-const char* field_names[] = {"x",
+const char* field_names[] = {"path",
+                             "points",
+                             "cumulative_lengths",
+                             "x",
                              "y",
                              "slides",
                              "length",
@@ -242,6 +248,8 @@ enum PythonType {
   t_timing,
   t_break,
   t_stats,
+  t_path_point,
+  t_path,
   t_beatmap,
   t_sound,
   t_mode,
@@ -251,8 +259,9 @@ enum PythonType {
 };
 constexpr int record_type_count = t_beatmap + 1;
 constexpr const char* type_names[] = {
-    "Point",      "Circle",  "Slider",   "Spinner",  "HoldNote",  "TimingPoint", "Break",
-    "ParseStats", "Beatmap", "HitSound", "GameMode", "SampleSet", "CurveType"};
+    "Point",       "Circle",   "Slider",     "Spinner",   "HoldNote",
+    "TimingPoint", "Break",    "ParseStats", "PathPoint", "SliderPath",
+    "Beatmap",     "HitSound", "GameMode",   "SampleSet", "CurveType"};
 struct PythonSlot {
   PyObject* descriptor;
   descrsetfunc assign;
@@ -352,6 +361,8 @@ struct BeatmapConverter {
       return record(
           t_slider,
           {{f_slides, integer(s.slides)},
+           {f_path,
+            map.slider_paths.empty() ? none() : slider_path(map.slider_paths[h.slider])},
            {f_length, number(s.length)},
            {f_curve_type, curve(s.curve_type)},
            {f_edge_sounds, string(s.edge_sounds)},
@@ -377,6 +388,22 @@ struct BeatmapConverter {
                              {f_volume, integer(t.volume)},
                              {f_uninherited, boolean(t.uninherited)},
                              {f_effects, integer(t.effects)}});
+  }
+  PythonRef slider_path(const fosu::SliderPath& path) {
+    return record(
+        t_path,
+        {
+            {f_points, list(path.points.size(),
+                            [&](size_t i) {
+                              return record(t_path_point,
+                                            {{f_x, number(path.points[i].x)},
+                                             {f_y, number(path.points[i].y)}});
+                            })},
+            {f_cumulative_lengths, list(path.cumulative_lengths.size(),
+                                        [&](size_t i) {
+                                          return number(path.cumulative_lengths[i]);
+                                        })},
+        });
   }
   PythonRef break_period(const fosu::Break& period) {
     return record(t_break,
@@ -487,7 +514,9 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
   PyObject* arg;
   long sections;
   int calculate_slider_end_times;
-  if (!PyArg_ParseTuple(args, "Olp", &arg, &sections, &calculate_slider_end_times))
+  int calculate_slider_paths;
+  if (!PyArg_ParseTuple(args, "Olpp", &arg, &sections, &calculate_slider_end_times,
+                        &calculate_slider_paths))
     return nullptr;
   if (sections < 0 || (static_cast<unsigned long>(sections) &
                        ~static_cast<unsigned long>(fosu::kAllSections))) {
@@ -495,7 +524,8 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
     return nullptr;
   }
   const fosu::ParseOptions options{static_cast<uint32_t>(sections),
-                                   calculate_slider_end_times != 0};
+                                   calculate_slider_end_times != 0,
+                                   calculate_slider_paths != 0};
   try {
     PythonRef input = file ? PythonRef(PyOS_FSPath(arg)) : retain(arg);
     if (file && PyUnicode_Check(input))

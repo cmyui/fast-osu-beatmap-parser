@@ -36,16 +36,7 @@ namespace fosu::internal {
 #endif
 
 // osu! computes curve geometry in single precision, relative to the slider head.
-struct CurvePoint {
-  float x, y;
-  bool operator==(const CurvePoint&) const = default;
-  CurvePoint operator+(CurvePoint b) const { return {x + b.x, y + b.y}; }
-  CurvePoint operator-(CurvePoint b) const { return {x - b.x, y - b.y}; }
-  CurvePoint operator*(float scale) const { return {x * scale, y * scale}; }
-  CurvePoint operator/(float scale) const { return {x / scale, y / scale}; }
-  float squared_length() const { return x * x + y * y; }
-  float length() const { return std::sqrt(squared_length()); }
-};
+using CurvePoint = PathPoint;
 
 // Duration only needs the distance and final edge, not a retained path array.
 struct CurveDistance {
@@ -76,8 +67,9 @@ inline void subdivide_bezier(std::span<const CurvePoint> points,
   }
 }
 
+template <typename Curve>
 inline bool bezier_distance(std::span<const CurvePoint> points,
-                            CurveDistance& distance,
+                            Curve& distance,
                             Arena* arena) {
   const size_t count = points.size();
   auto* work = arena_push_array<CurvePoint>(arena, count * 4);
@@ -138,8 +130,8 @@ inline CurvePoint catmull_point(CurvePoint a,
          0.5f;
 }
 
-inline void catmull_distance(std::span<const CurvePoint> points,
-                             CurveDistance& distance) {
+template <typename Curve>
+inline void catmull_distance(std::span<const CurvePoint> points, Curve& distance) {
   for (size_t i = 0; i + 1 < points.size(); ++i) {
     const auto a = points[i ? i - 1 : i], b = points[i], c = points[i + 1];
     const auto d = i + 2 < points.size() ? points[i + 2] : c * 2 - b;
@@ -150,8 +142,8 @@ inline void catmull_distance(std::span<const CurvePoint> points,
   }
 }
 
-inline bool circular_arc_distance(std::span<const CurvePoint> points,
-                                  CurveDistance& distance) {
+template <typename Curve>
+inline bool circular_arc_distance(std::span<const CurvePoint> points, Curve& distance) {
   const auto a = points[0], b = points[1], c = points[2];
   const float divisor = 2 * (a.x * (b - c).y + b.x * (c - a).y + c.x * (a - b).y);
   const auto centre =
@@ -175,7 +167,9 @@ inline bool circular_arc_distance(std::span<const CurvePoint> points,
   const double amount =
       2 * radius <= 0.1f
           ? 2
-          : std::max(2.0, std::ceil(range / (2 * std::acos(1 - 0.1f / radius))));
+          : std::max(2.0,
+                     std::ceil(range /
+                               (2 * std::acos(static_cast<double>(1 - 0.1f / radius)))));
   if (!std::isfinite(amount) || amount >= 1000)
     return false;
   for (int i = 0; i < static_cast<int>(amount); ++i) {
@@ -187,11 +181,11 @@ inline bool circular_arc_distance(std::span<const CurvePoint> points,
   return true;
 }
 
-inline bool curve_segment_distance(std::span<const CurvePoint> points,
-                                   CurveType type,
-                                   CurveDistance& distance,
-                                   Arena* arena) {
-  CurveDistance segment{.length = distance.length};
+template <typename Curve>
+inline bool approximate_curve_segment(std::span<const CurvePoint> points,
+                                      CurveType type,
+                                      Curve& segment,
+                                      Arena* arena) {
   if (points.size() == 1 || type == CurveType::Linear ||
       (points.size() == 2 && type != CurveType::Catmull)) {
     for (auto point : points)
@@ -203,6 +197,16 @@ inline bool curve_segment_distance(std::span<const CurvePoint> points,
     if (!bezier_distance(points, segment, arena))
       return false;
   }
+  return true;
+}
+
+inline bool curve_segment_distance(std::span<const CurvePoint> points,
+                                   CurveType type,
+                                   CurveDistance& distance,
+                                   Arena* arena) {
+  CurveDistance segment{.length = distance.length};
+  if (!approximate_curve_segment(points, type, segment, arena))
+    return false;
   // Adjacent segments share their first vertex. The last edge is unchanged
   // unless the new segment consists solely of that shared vertex.
   if (segment.count > 1 || !distance.count) {
@@ -270,6 +274,127 @@ inline Result<double> slider_distance(const HitObject& object,
       !(distance.last == distance.previous && slider.length > distance.length))
     return slider.length;
   return distance.length;
+}
+
+// Only vertices are allocated in this non-chaining scratch arena, so successive
+// pushes form one contiguous array. Subdivision work lives in the parser arena.
+// The scratch arena is reused across sliders and never escapes into a Beatmap.
+struct CurveVertices {
+  Arena* arena;
+  CurvePoint* points = nullptr;
+  size_t count = 0;
+  bool first_in_segment = true;
+  bool failed = false;
+
+  void append(CurvePoint point) {
+    const bool shared = first_in_segment && count && points[count - 1] == point;
+    first_in_segment = false;
+    if (shared || failed)
+      return;
+    auto* next = arena_push_array<CurvePoint>(arena, 1);
+    if (!next) {
+      failed = true;
+      return;
+    }
+    if (!points)
+      points = next;
+    *next = point;
+    ++count;
+  }
+};
+
+inline Result<SliderPath> calculate_slider_path(
+    const HitObject& object,
+    const Slider& slider,
+    std::span<const SliderPoint> control_points,
+    Arena* arena,
+    Arena* vertices) {
+  arena_clear(vertices);
+  const auto work = temp_begin(arena);
+  auto* points = arena_push_array<CurvePoint>(arena, control_points.size() + 1);
+  if (!points)
+    return Error{ErrorCode::AllocationFailure};
+  points[0] = {};
+  for (size_t i = 0; i < control_points.size(); ++i)
+    points[i + 1] = {static_cast<float>(control_points[i].x - object.x),
+                     static_cast<float>(control_points[i].y - object.y)};
+  const size_t count = control_points.size() + 1;
+  auto type = slider.curve_type;
+  if (type == CurveType::PerfectCurve) {
+    if (count != 3)
+      type = CurveType::Bezier;
+    else if (std::abs(points[1].y * points[2].x - points[1].x * points[2].y) < 1e-3f)
+      type = CurveType::Linear;
+  }
+  CurveVertices curve{vertices};
+  // The first typed control point is itself a one-vertex segment in osu!.
+  // Circular approximation can produce a slightly different first vertex.
+  if (count > 1 && points[0] != points[1])
+    curve.append(points[0]);
+  size_t begin = 0;
+  for (size_t i = 1; i <= count; ++i) {
+    if (i < count && (points[i] != points[i - 1] || i == count - 1 ||
+                      (type == CurveType::Catmull && i > 1)))
+      continue;
+    curve.first_in_segment = i - begin > 1;
+    if (!approximate_curve_segment({points + begin, i - begin}, type, curve, arena) ||
+        curve.failed) {
+      temp_end(work);
+      return Error{ErrorCode::AllocationFailure};
+    }
+    begin = i;
+  }
+  temp_end(work);
+  auto* output = arena_push_array<PathPoint>(arena, curve.count);
+  auto* lengths = arena_push_array<double>(arena, curve.count);
+  if (!output || !lengths)
+    return Error{ErrorCode::AllocationFailure};
+  std::copy_n(curve.points, curve.count, output);
+  lengths[0] = 0;
+  for (size_t i = 1; i < curve.count; ++i)
+    lengths[i] = lengths[i - 1] + (output[i] - output[i - 1]).length();
+  size_t end = curve.count - 1;
+  const double expected = slider.length;
+  if (expected > 0 && end && expected != lengths[end] &&
+      !(expected > lengths[end] && output[end] == output[end - 1])) {
+    while (end > 1 && lengths[end - 1] >= expected)
+      --end;
+    const auto edge = output[end] - output[end - 1];
+    output[end] = output[end - 1] + (edge / edge.length()) *
+                                        static_cast<float>(expected - lengths[end - 1]);
+    lengths[end] = expected;
+  }
+  return SliderPath{{output, end + 1}, {lengths, end + 1}};
+}
+
+inline bool set_slider_paths(Beatmap& map, Arena* arena) {
+  if (map.sliders.empty())
+    return true;
+  auto* paths = arena_push_array<SliderPath>(arena, map.sliders.size());
+  if (!paths)
+    return false;
+  // Reserve address space, committing only the vertices that are actually used.
+  Arena* vertices = arena_alloc({kDefaultArenaReserve, kDefaultArenaCommit, 0});
+  if (!vertices)
+    return false;
+  bool success = true;
+  for (const auto& object : map.hit_objects) {
+    if (object.slider == HitObject::kNoSlider)
+      continue;
+    const auto& slider = map.sliders[object.slider];
+    auto path = calculate_slider_path(
+        object, slider, map.slider_points.subspan(slider.point_begin, slider.point_count),
+        arena, vertices);
+    if (!path) {
+      success = false;
+      break;
+    }
+    paths[object.slider] = path.value();
+  }
+  arena_release(vertices);
+  if (success)
+    map.slider_paths = {paths, map.sliders.size()};
+  return success;
 }
 
 #if defined(__GNUC__) && !defined(__clang__)

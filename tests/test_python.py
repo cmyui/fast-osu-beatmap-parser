@@ -18,6 +18,49 @@ import fosu
 import pytest
 
 
+@pytest.mark.parametrize("curve,length,distance", [
+    ("L|110:20", 150, 150),
+    ("L|110:20", 50, 50),
+    ("L|110:20|110:20", 150, 100),
+    ("B|10:20", 100, 0),
+    ("B|110:120|210:20", 200, 200),
+    ("P|110:120|210:20", 200, 200),
+    ("C|110:120|210:20", 200, 200),
+])
+def test_retained_slider_paths(tmp_path, curve, length, distance):
+    data = f"osu file format v14\n[HitObjects]\n10,20,1000,2,0,{curve},2,{length}\n".encode()
+    source = tmp_path / "path.osu"
+    source.write_bytes(data)
+    raw = fosu.parse(data).hit_objects[0]
+    assert raw.path is None
+    map = fosu.parse(data, calculate_slider_paths=True)
+    assert map == fosu.parse_file(source, calculate_slider_paths=True)
+    slider = map.hit_objects[0]
+    path = slider.path
+    assert path is not None and path.distance() == pytest.approx(distance)
+    assert slider.end_time == 0
+    assert len(path.points) == len(path.cumulative_lengths)
+    assert path.cumulative_lengths == sorted(path.cumulative_lengths)
+    assert fosu.slider_position_at(path, -1) == path.points[0]
+    assert fosu.slider_position_at(path, 2) == path.points[-1]
+    assert pickle.loads(pickle.dumps(map)) == map
+    assert deepcopy(map) == map
+    timed = fosu.parse(data, calculate_slider_end_times=True)
+    both = fosu.parse(data, calculate_slider_paths=True, calculate_slider_end_times=True)
+    assert timed.hit_objects[0].end_time == both.hit_objects[0].end_time
+
+
+def test_path_query_is_detached_and_does_not_mutate():
+    data = b"[HitObjects]\n10,20,0,2,0,L|110:20,1,100\n"
+    path = fosu.parse(data, calculate_slider_paths=True).hit_objects[0].path
+    before = deepcopy(path)
+    point = fosu.slider_position_at(path, 0.5)
+    assert point == fosu.PathPoint(50.0, 0.0)
+    point.x = 999
+    fosu.parse(b"")
+    assert path == before
+
+
 @pytest.mark.parametrize("file", [False, True])
 def test_selected_sections(tmp_path, file):
     data = (

@@ -326,6 +326,25 @@ static void test_parser_prepares_engine_input_and_output() {
 }
 
 int main() {
+  {
+    fosu::Parser parser;
+    const auto input = fosu::make_padded("[HitObjects]\n10,20,1000,2,0,L|110:20,1,150\n");
+    const auto& map =
+        require_parse(parser.parse(input, {.calculate_slider_paths = true}));
+    CHECK_EQ(map.hit_objects[0].end_time, 0);
+    CHECK_EQ(map.slider_paths.size(), 1u);
+    CHECK_EQ(map.slider_paths[0].distance(), 150);
+    CHECK_EQ(fosu::slider_position_at(map.slider_paths[0], 0.5).x, 75);
+    auto* arena = fosu::arena_alloc();
+    CHECK(arena);
+    auto copy = map.copy(*arena);
+    CHECK(copy);
+    CHECK(copy.value().slider_paths[0].points.data() !=
+          map.slider_paths[0].points.data());
+    require_parse(parser.parse(fosu::make_padded("")));
+    CHECK_EQ(fosu::slider_position_at(copy.value().slider_paths[0], 1).x, 150);
+    fosu::arena_release(arena);
+  }
   for (const auto* engine :
        {&fosu::internal::compiled_engine, &fosu_test::scalar_engine()}) {
     fosu::Parser parser(*engine);

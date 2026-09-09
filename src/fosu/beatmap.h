@@ -8,6 +8,7 @@
 #include <fosu/arena.h>
 #include <fosu/beatmap_header.h>
 #include <fosu/result.h>
+#include <fosu/slider_path.h>
 
 namespace fosu {
 
@@ -79,6 +80,8 @@ struct Beatmap : BeatmapHeader {
   std::span<HitObject> hit_objects;
   std::span<Slider> sliders;
   std::span<SliderPoint> slider_points;
+  // Empty unless requested; otherwise indexed identically to sliders.
+  std::span<SliderPath> slider_paths;
   ParseStats stats;
 
   Result<Beatmap> copy(Arena& destination) const noexcept {
@@ -93,8 +96,10 @@ struct Beatmap : BeatmapHeader {
     auto copied_hit_objects = copy_array(destination, hit_objects);
     auto copied_sliders = copy_array(destination, sliders);
     auto copied_slider_points = copy_array(destination, slider_points);
+    auto copied_paths = copy_array(destination, slider_paths);
     if (!copied_breaks || !copied_colours || !copied_timing_points ||
-        !copied_hit_objects || !copied_sliders || !copied_slider_points) {
+        !copied_hit_objects || !copied_sliders || !copied_slider_points ||
+        !copied_paths) {
       return rewind_failed_copy(destination, checkpoint);
     }
 
@@ -143,6 +148,14 @@ struct Beatmap : BeatmapHeader {
     result.hit_objects = mutable_hit_objects;
     result.sliders = mutable_sliders;
     result.slider_points = copied_slider_points.value();
+    result.slider_paths = copied_paths.value();
+    for (auto& path : result.slider_paths) {
+      auto points = copy_array(destination, path.points);
+      auto lengths = copy_array(destination, path.cumulative_lengths);
+      if (!points || !lengths)
+        return rewind_failed_copy(destination, checkpoint);
+      path = {points.value(), lengths.value()};
+    }
     result.audio_filename = audio_filename_copy.value();
     result.overlay_position = overlay_position_copy.value();
     result.skin_preference = skin_preference_copy.value();

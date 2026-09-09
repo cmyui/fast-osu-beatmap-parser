@@ -255,6 +255,10 @@ class Parser {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
+    if (opts.calculate_slider_paths && !internal::set_slider_paths(beatmap_, arena_)) {
+      reset_working_result();
+      return Error{ErrorCode::AllocationFailure};
+    }
     if (opts.calculate_slider_end_times &&
         !internal::set_slider_end_times(beatmap_, arena_)) {
       reset_working_result();

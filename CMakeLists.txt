@@ -84,6 +84,7 @@ target_sources(fosu_headers INTERFACE FILE_SET HEADERS BASE_DIRS src FILES
   src/fosu/io.h
   src/fosu/legacy_rules.h
   src/fosu/slider_geometry.h
+  src/fosu/slider_path.h
   src/fosu/slider_timing.h
   src/fosu/os.h
   src/fosu/parse_options.h
