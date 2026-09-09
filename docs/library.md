@@ -46,6 +46,14 @@ The default parses all sections; skipped fields retain defaults or empty arrays.
 Include General for mode-dependent difficulty rules and Events for break-dependent
 combo rules. See [the parsing contract](compatibility.md) for errors and limits.
 
+Slider end times are calculated by default. Skip the work per parse with
+`{.calculate_slider_end_times = false}` (also accepted by `parse_file`).
+`HitObject::end_time` is an `EndTime`, a `std::variant<double, CalculationState>`:
+use `std::get_if<double>(&object.end_time)` to read a calculated endpoint, or
+`std::get<CalculationState>(object.end_time)` to read `kNotCalculated`.
+Only opted-out sliders have that state; other objects have numeric endpoints.
+Reading a field never triggers calculation.
+
 ## Runtime engine selection
 
 Link the installed `fosu::fosu` CMake target:

@@ -326,6 +326,24 @@ static void test_parser_prepares_engine_input_and_output() {
 }
 
 int main() {
+  for (const auto* engine :
+       {&fosu::internal::compiled_engine, &fosu_test::scalar_engine()}) {
+    fosu::Parser parser(*engine);
+    const std::string input = "[HitObjects]\n0,0,1000,2,0,L|100:0,1,140\n";
+    const auto& skipped =
+        require_parse(parser.parse(input, {.calculate_slider_end_times = false}));
+    CHECK(std::get<fosu::CalculationState>(skipped.hit_objects[0].end_time) ==
+          fosu::kNotCalculated);
+    auto* destination = fosu::arena_alloc();
+    CHECK(destination);
+    auto copy = skipped.copy(*destination);
+    CHECK(copy);
+    const auto& calculated = require_parse(parser.parse(input));
+    CHECK(std::holds_alternative<double>(calculated.hit_objects[0].end_time));
+    CHECK(std::get<fosu::CalculationState>(copy.value().hit_objects[0].end_time) ==
+          fosu::kNotCalculated);
+    fosu::arena_release(destination);
+  }
   test_parser_prepares_engine_input_and_output();
   test_reparse_reuses_arena_memory();
   test_reparse_accepts_larger_arrays();

@@ -85,7 +85,7 @@ inline void dump_to(const Map& bm, Output& o) {
     o.u32(h.type);
     o.u32(h.hitsound);
     o.f64(h.time);
-    o.f64(h.end_time);
+    o.f64(std::get<double>(h.end_time));
     o.u32(h.slider);
     o.u8(h.new_combo);
     o.u8(h.combo_skip);

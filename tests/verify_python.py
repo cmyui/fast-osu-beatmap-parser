@@ -43,10 +43,7 @@ def check(bm, ref):
             for name, value in expected.items():
                 if name == "slider":
                     continue
-                if name == "end_time" and isinstance(actual, fosu.Slider):
-                    assert actual.end_time is None and value == 0
-                else:
-                    compare(getattr(actual, name), value)
+                compare(getattr(actual, name), value)
     assert [(b.start, b.end) for b in bm.breaks] == ref["breaks"]
     assert list(bm.combo_colours) == ref["combo_colours"]
     for note, expected in zip(bm.hit_objects, ref["hit_objects"]):
@@ -68,7 +65,6 @@ def check(bm, ref):
         assert note.new_combo == bool(expected["new_combo"])
         assert note.combo_skip == expected["combo_skip"]
         if isinstance(note, fosu.Slider):
-            assert note.end_time is None
             params = ref["sliders"][expected["slider"]]
             start, count = params["point_begin"], params["point_count"]
             assert [(p.x, p.y) for p in note.control_points] == [

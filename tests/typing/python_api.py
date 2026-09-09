@@ -22,7 +22,9 @@ for note in b.hit_objects:
     note.x = 100
     assert_type(note.time, float)
     if isinstance(note, fosu.Slider):
-        assert_type(note.end_time, None)
+        assert_type(note.end_time, float | Literal[fosu.CalculationState.NOT_CALCULATED])
+        if note.end_time is not fosu.NOT_CALCULATED:
+            assert_type(note.end_time, float)
         assert_type(note.curve_type, fosu.CurveType)
         assert_type(note.control_points, list[fosu.Point])
         note.control_points.append(fosu.Point(1, 2))

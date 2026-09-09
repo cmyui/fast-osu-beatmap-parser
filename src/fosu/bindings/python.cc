@@ -259,6 +259,7 @@ struct PythonSlot {
 };
 struct State {
   PyObject* model;
+  PyObject* not_calculated;
   PyObject* types[type_count];
   PythonSlot slots[record_type_count][field_count];
   PyObject* sounds[16];
@@ -337,11 +338,12 @@ struct BeatmapConverter {
   }
   PythonRef hit_object(const fosu::HitObject& h) {
     const bool circle = h.type & 1, slider = !circle && (h.type & 2);
+    const auto* end_time = std::get_if<double>(&h.end_time);
     PythonRef time = number(h.time);
     const Value common[] = {{f_time, retain(time)},
-                            {f_end_time, circle   ? std::move(time)
-                                         : slider ? none()
-                                                  : number(h.end_time)},
+                            {f_end_time, circle     ? std::move(time)
+                                         : end_time ? number(*end_time)
+                                                    : retain(state.not_calculated)},
                             {f_x, integer(h.x)},
                             {f_y, integer(h.y)},
                             {f_hitsound, sound(h.hitsound)},
@@ -488,14 +490,16 @@ struct BeatmapConverter {
 PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
   PyObject* arg;
   long sections;
-  if (!PyArg_ParseTuple(args, "Ol", &arg, &sections))
+  int calculate_slider_end_times;
+  if (!PyArg_ParseTuple(args, "Olp", &arg, &sections, &calculate_slider_end_times))
     return nullptr;
   if (sections < 0 || (static_cast<unsigned long>(sections) &
                        ~static_cast<unsigned long>(fosu::kAllSections))) {
     PyErr_SetString(PyExc_ValueError, "invalid sections");
     return nullptr;
   }
-  const fosu::ParseOptions options{static_cast<uint32_t>(sections)};
+  const fosu::ParseOptions options{static_cast<uint32_t>(sections),
+                                   calculate_slider_end_times != 0};
   try {
     PythonRef input = file ? PythonRef(PyOS_FSPath(arg)) : retain(arg);
     if (file && PyUnicode_Check(input))
@@ -561,6 +565,7 @@ int traverse(PyObject* m, visitproc visit, void* arg) {
   if (!s)
     return 0;
   Py_VISIT(s->model);
+  Py_VISIT(s->not_calculated);
   for (auto* type : s->types) {
     Py_VISIT(type);
   }
@@ -584,6 +589,7 @@ int clear(PyObject* m) {
   if (!s)
     return 0;
   Py_CLEAR(s->model);
+  Py_CLEAR(s->not_calculated);
   for (auto*& type : s->types) {
     Py_CLEAR(type);
   }
@@ -620,6 +626,9 @@ int exec_module(PyObject* m) {
     PythonRef name(PyUnicode_FromFormat("%U._model", package.p));
     s->model = PyImport_Import(name);
     if (!s->model)
+      return -1;
+    s->not_calculated = PyObject_GetAttrString(s->model, "NOT_CALCULATED");
+    if (!s->not_calculated)
       return -1;
     for (int i = 0; i < type_count; ++i) {
       s->types[i] = PyObject_GetAttrString(s->model, type_names[i]);

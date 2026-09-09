@@ -16,5 +16,6 @@ enum : uint32_t {
 
 struct ParseOptions {
   uint32_t sections = kAllSections;
+  bool calculate_slider_end_times = true;
 };
 }  // namespace fosu
