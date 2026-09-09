@@ -93,12 +93,11 @@ inline uint32_t nondigit_mask16(uint8x16_t v) {
 inline uint32_t nondigit_mask32(Bytes32 v) {
   return nondigit_mask16(v.val[0]) | (nondigit_mask16(v.val[1]) << 16);
 }
-// Four right-aligned groups of four decimal digits, independently converted.
-inline uint32x4_t decimal_groups(uint8x16_t digits) {
-  constexpr uint8_t pairs[16] = {10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1};
-  constexpr uint16_t words[8] = {100, 1, 100, 1, 100, 1, 100, 1};
-  return vpaddlq_u16(
-      vmulq_u16(vpaddlq_u8(vmulq_u8(digits, vld1q_u8(pairs))), vld1q_u16(words)));
+#endif
+#if FOSU_SIMD
+inline uint32_t comma_mask32(Bytes32 bytes) {
+  return equal_mask32(bytes, broadcast_byte<','>());
 }
 #endif
+
 }  // namespace fosu::internal

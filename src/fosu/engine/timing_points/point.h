@@ -1,10 +1,10 @@
 #pragma once
 
 #include <fosu/beatmap.h>
-#include <fosu/engine/byte_scan.h>
-#include <fosu/engine/digit_groups.h>
-#include <fosu/engine/enum_parse.h>
-#include <fosu/engine/prefix.h>
+#include <fosu/engine/parsing/sample_sets.h>
+#include <fosu/engine/primitives/byte_scan.h>
+#include <fosu/engine/primitives/digit_groups.h>
+#include <fosu/engine/timing_points/beat_length.h>
 #include <algorithm>
 #include <bit>
 #include <optional>

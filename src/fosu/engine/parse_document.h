@@ -1,18 +1,18 @@
 #pragma once
 
-#include <fosu/engine/colours.h>
-#include <fosu/engine/events.h>
-#include <fosu/engine/header_fields.h>
-#include <fosu/engine/hitobjects.h>
+#include <fosu/engine/parsing/section_names.h>
 #include <fosu/engine/parsing_engine.h>
-#include <fosu/engine/section_names.h>
-#include <fosu/engine/timing_points.h>
+#include <fosu/engine/sections/colours.h>
+#include <fosu/engine/sections/difficulty.h>
+#include <fosu/engine/sections/editor.h>
+#include <fosu/engine/sections/events.h>
+#include <fosu/engine/sections/general.h>
+#include <fosu/engine/sections/hit_objects.h>
+#include <fosu/engine/sections/metadata.h>
+#include <fosu/engine/sections/timing_points.h>
 
 namespace fosu::internal {
 
-static_assert(offsetof(HitObject, x) == 0 && offsetof(HitObject, y) == 4 &&
-                  offsetof(HitObject, type) == 8 && offsetof(HitObject, hitsound) == 12,
-              "AVX2 prefix path stores {x,y,type,hitsound} as one vector");
 static_assert(kSectionGeneral == 1u << static_cast<int>(Section::General) &&
                   kSectionDifficulty == 1u << static_cast<int>(Section::Difficulty) &&
                   kSectionHitObjects == 1u << static_cast<int>(Section::HitObjects),
@@ -63,13 +63,13 @@ inline void parse_document(std::span<const char> input,
 
     switch (section) {
       case Section::General:
-        p = parse_header_section(beatmap, kGeneralFields, p, end);
+        p = parse_general_section(beatmap, p, end);
         break;
       case Section::Editor:
-        p = parse_header_section(beatmap, kEditorFields, p, end);
+        p = parse_editor_section(beatmap, p, end);
         break;
       case Section::Metadata:
-        p = parse_header_section(beatmap, kMetadataFields, p, end);
+        p = parse_metadata_section(beatmap, p, end);
         break;
       case Section::Difficulty:
         p = parse_difficulty_section(beatmap, approach_rate, p, end);

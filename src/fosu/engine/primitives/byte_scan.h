@@ -1,5 +1,5 @@
 #pragma once
-#include <fosu/engine/simd.h>
+#include <fosu/engine/primitives/vector_ops.h>
 #include <cstring>
 
 namespace fosu::internal {

@@ -1,9 +1,9 @@
 #pragma once
 
 #include <fosu/beatmap.h>
-#include <fosu/engine/byte_scan.h>
-#include <fosu/engine/section_lines.h>
-#include <fosu/engine/timing.h>
+#include <fosu/engine/parsing/lines.h>
+#include <fosu/engine/primitives/byte_scan.h>
+#include <fosu/engine/timing_points/point.h>
 
 namespace fosu::internal {
 

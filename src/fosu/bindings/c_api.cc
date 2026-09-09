@@ -1,5 +1,5 @@
 #include <fosu/bindings/c_api.h>
-#include <fosu/engine/loader.h>
+#include <fosu/engine/runtime/loader.h>
 #include <fosu/parser.h>
 
 #include <cassert>

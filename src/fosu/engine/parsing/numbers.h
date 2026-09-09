@@ -3,12 +3,12 @@
 // Scalar/SWAR numeric parsing. Like the rest of the parser, these helpers
 // assume the buffer is followed by kBufferPadding readable zero bytes.
 
-#include <fosu/engine/fast_float.h>
+#include <fosu/engine/third_party/fast_float.h>
 #include <cmath>
 #include <cstdint>
 #include <limits>
 
-#include <fosu/engine/swar.h>
+#include <fosu/engine/primitives/packed_digits.h>
 
 namespace fosu::internal {
 
@@ -180,11 +180,6 @@ inline const char* skip_numeric_space(const char* p, const char* end) {
   return p;
 }
 
-inline bool ignored_line(const char* p, const char* end) {
-  p = skip_numeric_space(p, end);
-  return p == end || (end - p >= 2 && p[0] == '/' && p[1] == '/');
-}
-
 // Numeric acceptance follows osu.Game Parsing, independently of gameplay
 // clamping or our raw-field storage types. These run only outside digit-only
 // fast paths whose field widths already prove the same limits.
@@ -225,19 +220,6 @@ inline const char* parse_osu_float(const char* p,
   if (!(std::abs(out) <= limit)) [[unlikely]]
     return p;
   return skip_numeric_space(r.ptr, end);
-}
-
-// NaN has a defined gameplay meaning only for inherited timing points.
-inline const char* parse_beat_length(const char* p, const char* end, double& out) {
-  const char* first = skip_numeric_space(p, end);
-  if (first < end && (*first == '+' || *first == '-'))
-    ++first;
-  if (end - first >= 3 && (first[0] | 32) == 'n' && (first[1] | 32) == 'a' &&
-      (first[2] | 32) == 'n') {
-    out = std::numeric_limits<double>::quiet_NaN();
-    return skip_numeric_space(first + 3, end);
-  }
-  return parse_osu_double(p, end, out);
 }
 
 }  // namespace fosu::internal

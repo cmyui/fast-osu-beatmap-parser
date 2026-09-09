@@ -1,6 +1,6 @@
 // Construct detached Python values using the CPython stable ABI.
 #include <Python.h>
-#include <fosu/engine/loader.h>
+#include <fosu/engine/runtime/loader.h>
 #include <fosu/parser.h>
 #include <cerrno>
 #include <cstring>

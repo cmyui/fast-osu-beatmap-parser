@@ -3,13 +3,17 @@
 #include <cstring>
 
 #include <fosu/beatmap.h>
-#include <fosu/engine/byte_scan.h>
-#include <fosu/engine/enum_parse.h>
-#include <fosu/engine/hitobject_details.h>
-#include <fosu/engine/prefix.h>
-#include <fosu/engine/slider_tail.h>
+#include <fosu/engine/hit_objects/common_fields.h>
+#include <fosu/engine/hit_objects/object_types.h>
+#include <fosu/engine/hit_objects/slider_fields.h>
+#include <fosu/engine/parsing/lines.h>
+#include <fosu/engine/primitives/byte_scan.h>
 
 namespace fosu::internal {
+
+static_assert(offsetof(HitObject, x) == 0 && offsetof(HitObject, y) == 4 &&
+                  offsetof(HitObject, type) == 8 && offsetof(HitObject, hitsound) == 12,
+              "AVX2 prefix path stores {x,y,type,hitsound} as one vector");
 
 // Slider params after "type,hitSound,":
 //   curveType|x:y|x:y...,slides,length[,edgeSounds,edgeSets][,hitSample]

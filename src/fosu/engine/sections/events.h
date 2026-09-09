@@ -1,10 +1,9 @@
 #pragma once
 #include <fosu/beatmap.h>
-#include <fosu/engine/byte_scan.h>
-#include <fosu/engine/prefix.h>
-#include <fosu/engine/section_lines.h>
-#include <fosu/engine/string_lookup.h>
-#include <fosu/engine/text.h>
+#include <fosu/engine/parsing/lines.h>
+#include <fosu/engine/parsing/numbers.h>
+#include <fosu/engine/parsing/string_lookup.h>
+#include <fosu/engine/primitives/byte_scan.h>
 #include <optional>
 
 namespace fosu::internal {

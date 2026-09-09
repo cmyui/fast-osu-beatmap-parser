@@ -1,7 +1,7 @@
-#include <fosu/engine/cpu_features.h>
-#include <fosu/engine/loader.h>
 #include <fosu/engine/parse_document.h>
-#include <fosu/engine/string_lookup.h>
+#include <fosu/engine/parsing/string_lookup.h>
+#include <fosu/engine/runtime/cpu_features.h>
+#include <fosu/engine/runtime/loader.h>
 
 #include <dlfcn.h>
 #include <limits.h>

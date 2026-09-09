@@ -1,10 +1,23 @@
 #pragma once
 
-#include <fosu/engine/byte_scan.h>
-#include <fosu/engine/scalar_parse.h>
+#include <fosu/engine/parsing/numbers.h>
+#include <fosu/engine/primitives/byte_scan.h>
 #include <string_view>
 
 namespace fosu::internal {
+
+inline bool ignored_line(const char* p, const char* end) {
+  p = skip_numeric_space(p, end);
+  return p == end || (end - p >= 2 && p[0] == '/' && p[1] == '/');
+}
+
+inline std::string_view trim(const char* p, const char* end) {
+  while (p < end && (*p == ' ' || *p == '\t'))
+    ++p;
+  while (end > p && (end[-1] == ' ' || end[-1] == '\t'))
+    --end;
+  return {p, static_cast<size_t>(end - p)};
+}
 
 struct Line {
   std::string_view text;

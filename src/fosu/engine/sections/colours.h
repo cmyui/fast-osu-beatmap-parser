@@ -1,8 +1,7 @@
 #pragma once
 
 #include <fosu/beatmap.h>
-#include <fosu/engine/section_lines.h>
-#include <fosu/engine/text.h>
+#include <fosu/engine/parsing/lines.h>
 
 namespace fosu::internal {
 
@@ -11,9 +10,14 @@ inline const char* parse_colours_section(Beatmap& beatmap,
                                          const char* p,
                                          const char* end) {
   return for_each_section_line(p, end, [&](std::string_view line) {
-    std::string_view key, value;
-    if (!split_kv(line.data(), line.size(), key, value) || key.substr(0, 5) != "Combo")
+    const char* line_end = line.data() + line.size();
+    const char* colon = find_byte<':'>(line.data(), line_end);
+    if (colon == line_end)
       return;
+    const auto key = trim(line.data(), colon);
+    if (key.substr(0, 5) != "Combo")
+      return;
+    const auto value = trim(colon + 1, line_end);
     const char* p = value.data();
     const char* end = p + value.size();
     uint32_t rgb = 0;

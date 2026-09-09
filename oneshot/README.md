@@ -33,7 +33,7 @@ and descriptors when it exits.
 The freestanding runtime implements the small POSIX surface used by Parser
 and the arena OS layer using direct syscalls. It does not duplicate format
 rules, section loops or beatmap storage. The
-[vendored fast_float header](../src/fosu/engine/fast_float.md) supplies
+[vendored fast_float header](../src/fosu/engine/third_party/fast_float.md) supplies
 the bounded, locale-independent numeric fallback.
 
 ## Optional host configuration
