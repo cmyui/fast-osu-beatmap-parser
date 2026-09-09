@@ -252,12 +252,32 @@ static void test_arena_interface() {
   const size_t initial = fosu::arena_pos(arena);
   auto* first = fosu::arena_push_array<uint32_t>(arena, 16);
   CHECK(first != nullptr);
-  const fosu::TempArena temp = fosu::temp_begin(arena);
-  CHECK(fosu::arena_push(arena, 96u << 10, alignof(uint64_t)) != nullptr);
-  CHECK(arena->current != arena);
-  fosu::temp_end(temp);
+#if defined(FOSU_ARENA_TELEMETRY)
+  fosu::arena_reset_metrics(arena);
+  const auto initial_metrics = fosu::arena_metrics(arena);
+#endif
+  size_t checkpoint;
+  {
+    const fosu::TempArena temp{arena};
+    checkpoint = temp.position();
+    CHECK(fosu::arena_push(arena, 96u << 10, alignof(uint64_t)) != nullptr);
+    CHECK(arena->current != arena);
+#if defined(FOSU_ARENA_TELEMETRY)
+    const auto metrics = fosu::arena_metrics(arena);
+    CHECK(metrics.peak_used_bytes > initial_metrics.peak_used_bytes);
+    CHECK(metrics.peak_committed_bytes > initial_metrics.peak_committed_bytes);
+    CHECK(metrics.commit_calls >= 1);
+    CHECK_EQ(metrics.chained_blocks, 1u);
+#endif
+  }
   CHECK(arena->current == arena);
-  CHECK_EQ(fosu::arena_pos(arena), temp.pos);
+  CHECK_EQ(fosu::arena_pos(arena), checkpoint);
+#if defined(FOSU_ARENA_TELEMETRY)
+  const auto rewound_metrics = fosu::arena_metrics(arena);
+  CHECK_EQ(rewound_metrics.current_used_bytes, initial_metrics.current_used_bytes);
+  CHECK_EQ(rewound_metrics.current_committed_bytes,
+           initial_metrics.current_committed_bytes);
+#endif
   fosu::arena_clear(arena);
   CHECK_EQ(fosu::arena_pos(arena), initial);
   fosu::arena_release(arena);

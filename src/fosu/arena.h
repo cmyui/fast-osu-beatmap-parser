@@ -38,6 +38,17 @@ enum ArenaFlags : uint32_t {
   ArenaFlagChain = 1u << 1,
 };
 
+#if defined(FOSU_ARENA_TELEMETRY)
+struct ArenaMetrics {
+  size_t current_used_bytes;
+  size_t peak_used_bytes;
+  size_t current_committed_bytes;
+  size_t peak_committed_bytes;
+  size_t commit_calls;
+  size_t chained_blocks;
+};
+#endif
+
 struct Arena {
   Arena* prev;
   Arena* current;
@@ -47,11 +58,9 @@ struct Arena {
   size_t pos;
   size_t committed;
   uint32_t flags;
-};
-
-struct TempArena {
-  Arena* arena;
-  size_t pos;
+#if defined(FOSU_ARENA_TELEMETRY)
+  ArenaMetrics metrics;
+#endif
 };
 
 struct ArenaParams {
@@ -140,6 +149,17 @@ inline Arena* arena_alloc(ArenaParams params) {
       .pos = kArenaHeaderSize,
       .committed = commit_size,
       .flags = params.flags,
+#if defined(FOSU_ARENA_TELEMETRY)
+      .metrics =
+          {
+              .current_used_bytes = 0,
+              .peak_used_bytes = 0,
+              .current_committed_bytes = commit_size,
+              .peak_committed_bytes = commit_size,
+              .commit_calls = 1,
+              .chained_blocks = 0,
+          },
+#endif
   };
   arena->current = arena;
   if (arena->flags & ArenaFlagLock) {
@@ -164,6 +184,31 @@ inline size_t arena_pos(const Arena* arena) {
     return 0;
   return arena->current->base_pos + arena->current->pos;
 }
+
+#if defined(FOSU_ARENA_TELEMETRY)
+inline ArenaMetrics arena_metrics(const Arena* arena) {
+  return arena ? arena->metrics : ArenaMetrics{};
+}
+
+inline void arena_reset_metrics(Arena* arena) {
+  if (!arena)
+    return;
+  size_t used = 0;
+  size_t committed = 0;
+  for (const Arena* block = arena->current; block; block = block->prev) {
+    used += block->pos - kArenaHeaderSize;
+    committed += block->committed;
+  }
+  arena->metrics = {
+      .current_used_bytes = used,
+      .peak_used_bytes = used,
+      .current_committed_bytes = committed,
+      .peak_committed_bytes = committed,
+      .commit_calls = 0,
+      .chained_blocks = 0,
+  };
+}
+#endif
 
 inline void* arena_push(Arena* arena, size_t size, size_t alignment) {
   if (!arena || size > kMaxArenaPush || alignment == 0 ||
@@ -191,11 +236,32 @@ inline void* arena_push(Arena* arena, size_t size, size_t alignment) {
     block->base_pos = current->base_pos + current->reserve_size;
     arena->current = current = block;
     pos = align_up(current->pos, alignment);
+#if defined(FOSU_ARENA_TELEMETRY)
+    arena->metrics.current_committed_bytes += current->committed;
+    arena->metrics.peak_committed_bytes = std::max(
+        arena->metrics.peak_committed_bytes, arena->metrics.current_committed_bytes);
+    ++arena->metrics.commit_calls;
+    ++arena->metrics.chained_blocks;
+#endif
   }
 
   const size_t new_pos = pos + size;
+#if defined(FOSU_ARENA_TELEMETRY)
+  const size_t committed_before = current->committed;
+#endif
   if (!arena_commit_to(current, new_pos))
     return nullptr;
+#if defined(FOSU_ARENA_TELEMETRY)
+  if (current->committed != committed_before) {
+    arena->metrics.current_committed_bytes += current->committed - committed_before;
+    arena->metrics.peak_committed_bytes = std::max(
+        arena->metrics.peak_committed_bytes, arena->metrics.current_committed_bytes);
+    ++arena->metrics.commit_calls;
+  }
+  arena->metrics.current_used_bytes += new_pos - current->pos;
+  arena->metrics.peak_used_bytes =
+      std::max(arena->metrics.peak_used_bytes, arena->metrics.current_used_bytes);
+#endif
   void* result = reinterpret_cast<uint8_t*>(current) + pos;
   internal::arena_unpoison(result, size);
   current->pos = new_pos;
@@ -232,6 +298,10 @@ inline void arena_pop_to(Arena* arena, size_t pos) {
   while (current->prev && current->base_pos >= target) {
     Arena* prev = current->prev;
     const size_t reserve_size = current->reserve_size;
+#if defined(FOSU_ARENA_TELEMETRY)
+    arena->metrics.current_used_bytes -= current->pos - kArenaHeaderSize;
+    arena->metrics.current_committed_bytes -= current->committed;
+#endif
     internal::arena_unpoison(current, current->committed);
     current->~Arena();
     internal::os_release(current, reserve_size);
@@ -240,6 +310,9 @@ inline void arena_pop_to(Arena* arena, size_t pos) {
   arena->current = current;
   const size_t new_pos =
       std::clamp(target - current->base_pos, kArenaHeaderSize, current->pos);
+#if defined(FOSU_ARENA_TELEMETRY)
+  arena->metrics.current_used_bytes -= current->pos - new_pos;
+#endif
   internal::arena_poison(reinterpret_cast<uint8_t*>(current) + new_pos,
                          current->pos - new_pos);
   current->pos = new_pos;
@@ -249,13 +322,23 @@ inline void arena_clear(Arena* arena) {
   arena_pop_to(arena, kArenaHeaderSize);
 }
 
-inline TempArena temp_begin(Arena* arena) {
-  return {arena, arena_pos(arena)};
-}
+class TempArena {
+ public:
+  explicit TempArena(Arena* arena) noexcept : arena_(arena), pos_(arena_pos(arena)) {}
 
-inline void temp_end(TempArena temp) {
-  arena_pop_to(temp.arena, temp.pos);
-}
+  TempArena(const TempArena&) = delete;
+  TempArena& operator=(const TempArena&) = delete;
+  TempArena(TempArena&&) = delete;
+  TempArena& operator=(TempArena&&) = delete;
+
+  ~TempArena() { arena_pop_to(arena_, pos_); }
+
+  size_t position() const noexcept { return pos_; }
+
+ private:
+  Arena* arena_;
+  size_t pos_;
+};
 
 }  // namespace fosu
 
