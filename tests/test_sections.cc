@@ -655,6 +655,21 @@ static void test_combo_colour_domain() {
 static void test_legacy_rules() {
   static_assert(sizeof(fosu::HitObject) == 56);
   for (bool simd : {false, true}) {
+    const auto late_mode = parse_str(
+        "[Difficulty]\nCircleSize:18\nOverallDifficulty:20\nApproachRate:bad\n"
+        "[General]\nMode:0\n[General]\nMode:3\n",
+        simd);
+    CHECK_EQ(late_mode.cs, 18);
+    CHECK_EQ(late_mode.od, 10);
+    CHECK_EQ(late_mode.ar, 10);
+    const auto explicit_ar = parse_str(
+        "[Difficulty]\nCircleSize:18\nApproachRate:20\n"
+        "[Difficulty]\nApproachRate:bad\nOverallDifficulty:3\n"
+        "[General]\nMode:3\n[General]\nMode:0\n",
+        simd);
+    CHECK_EQ(explicit_ar.cs, 10);
+    CHECK_EQ(explicit_ar.ar, 10);
+    CHECK_EQ(explicit_ar.od, 3);
     const auto map = parse_str(
         "osu file format v4\n[General]\nMode:3\nPreviewTime:100\n"
         "[Metadata]\n Title :\xE3\x80\x80trimmed\xC2\xA0\n"

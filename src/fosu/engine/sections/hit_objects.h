@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstring>
 
 #include <fosu/beatmap.h>
@@ -62,9 +63,9 @@ __attribute__((noinline)) inline bool parse_slider(
   Slider slider{
       .point_begin = static_cast<uint32_t>(point_begin),
       .point_count = static_cast<uint32_t>(point_count - point_begin),
-      .slides = tail->slides,
+      .slides = std::max(1, tail->slides),
       .curve_type = *curve_type,
-      .length = tail->length,
+      .length = std::max(0.0, tail->length),
       .edge_sounds = tail->sounds.edge_sounds,
       .edge_sets = tail->sounds.edge_sets,
   };
@@ -137,6 +138,36 @@ __attribute__((noinline)) inline bool parse_hitobject_line_scalar(
                                  line_end, constants);
 }
 
+// Interpret a successfully decoded record before publishing it to the arena.
+// The preceding accepted object is still in source order, including across
+// repeated HitObjects sections. No separate state crosses the engine boundary.
+inline HitObject normalize_hitobject(HitObject object,
+                                     const Beatmap& beatmap,
+                                     size_t preceding_count,
+                                     int offset) {
+  const bool explicit_combo = object.type & 4;
+  object.time += offset;
+  object.new_combo = false;
+  object.combo_skip = 0;
+  if (object.is_circle() || object.is_slider()) {
+    object.new_combo =
+        !preceding_count || explicit_combo ||
+        classify_hitobject_kind(beatmap.hit_objects[preceding_count - 1].type) ==
+            HitObjectKind::Spinner;
+    object.combo_skip = explicit_combo ? (object.type >> 4) & 7 : 0;
+    object.end_time = object.is_circle() ? object.time : 0;
+  } else if (object.is_spinner()) {
+    object.new_combo = explicit_combo;
+    object.x = 256;
+    object.y = 192;
+    object.end_time = std::max(object.time, object.end_time + offset);
+  } else {
+    // Legacy holds clamp against the offset start before offsetting the end.
+    object.end_time = std::max(object.time, object.end_time) + offset;
+  }
+  return object;
+}
+
 inline const char* parse_hitobjects_section_scalar(
     Beatmap& beatmap,
     size_t& hit_object_count,
@@ -144,7 +175,8 @@ inline const char* parse_hitobjects_section_scalar(
     size_t& point_count,
     const char* p,
     const char* file_end,
-    const HitObjectParseConstants& constants) {
+    const HitObjectParseConstants& constants,
+    int time_offset) {
   while (p < file_end) {
     const char c = *p;
     if (c == '\r' || c == '\n') {
@@ -163,7 +195,9 @@ inline const char* parse_hitobjects_section_scalar(
       HitObject object{};
       if (parse_hitobject_line_scalar(beatmap, slider_count, point_count, object, p,
                                       line_end, constants)) {
-        beatmap.hit_objects[hit_object_count++] = object;
+        beatmap.hit_objects[hit_object_count] =
+            normalize_hitobject(object, beatmap, hit_object_count, time_offset);
+        ++hit_object_count;
       } else [[unlikely]] {
         ++beatmap.stats.malformed_lines;
       }
@@ -176,14 +210,14 @@ inline const char* parse_hitobjects_section_scalar(
 #if FOSU_SIMD
 // SIMD section loop. One 32-byte load per line yields the newline, comma and
 // non-digit masks. Lines outside the common editor shape take the scalar path.
-inline const char* parse_hitobjects_section_simd(
-    Beatmap& beatmap,
-    size_t& hit_object_count,
-    size_t& slider_count,
-    size_t& point_count,
-    const char* p,
-    const char* file_end,
-    const HitObjectParseConstants& constants) {
+inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
+                                                 size_t& hit_object_count,
+                                                 size_t& slider_count,
+                                                 size_t& point_count,
+                                                 const char* p,
+                                                 const char* file_end,
+                                                 const HitObjectParseConstants& constants,
+                                                 int time_offset) {
   const ByteVector newline_value = constants.nl;
   const ByteVector comma_value = constants.comma;
   const ByteVector zero = constants.zero;
@@ -237,9 +271,11 @@ inline const char* parse_hitobjects_section_simd(
                                                p, line_end, constants);
       }
 
-      if (accepted)
-        beatmap.hit_objects[hit_object_count++] = object;
-      else [[unlikely]]
+      if (accepted) {
+        beatmap.hit_objects[hit_object_count] =
+            normalize_hitobject(object, beatmap, hit_object_count, time_offset);
+        ++hit_object_count;
+      } else [[unlikely]]
         ++malformed;
     } else {
       const char c = *p;
@@ -253,7 +289,9 @@ inline const char* parse_hitobjects_section_simd(
         HitObject object{};
         if (parse_hitobject_line_scalar(beatmap, slider_count, point_count, object, p,
                                         line_end, constants)) {
-          beatmap.hit_objects[hit_object_count++] = object;
+          beatmap.hit_objects[hit_object_count] =
+              normalize_hitobject(object, beatmap, hit_object_count, time_offset);
+          ++hit_object_count;
         } else [[unlikely]] {
           ++malformed;
         }
@@ -273,14 +311,16 @@ inline const char* parse_hitobjects_section(Beatmap& beatmap,
                                             size_t& slider_count,
                                             size_t& point_count,
                                             const char* p,
-                                            const char* file_end) {
+                                            const char* file_end,
+                                            int time_offset = 0) {
   const HitObjectParseConstants constants;
 #if FOSU_SIMD
   return parse_hitobjects_section_simd(beatmap, hit_object_count, slider_count,
-                                       point_count, p, file_end, constants);
+                                       point_count, p, file_end, constants, time_offset);
 #else
   return parse_hitobjects_section_scalar(beatmap, hit_object_count, slider_count,
-                                         point_count, p, file_end, constants);
+                                         point_count, p, file_end, constants,
+                                         time_offset);
 #endif
 }
 

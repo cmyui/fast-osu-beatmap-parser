@@ -43,6 +43,7 @@ inline void parse_document(std::span<const char> input,
     return;
   const char* end = input.data() + input.size();
   const char* p = parse_preamble(beatmap, input.data(), end);
+  const int time_offset = beatmap.format_version < 5 ? 24 : 0;
   size_t break_count = 0, colour_count = 0, timing_point_count = 0;
   size_t hit_object_count = 0, slider_count = 0, slider_point_count = 0;
   std::optional<double> approach_rate;
@@ -75,17 +76,17 @@ inline void parse_document(std::span<const char> input,
         p = parse_difficulty_section(beatmap, approach_rate, p, end);
         break;
       case Section::Events:
-        p = parse_events_section(beatmap, break_count, p, end);
+        p = parse_events_section(beatmap, break_count, p, end, time_offset);
         break;
       case Section::TimingPoints:
-        p = parse_timing_points_section(beatmap, timing_point_count, p, end);
+        p = parse_timing_points_section(beatmap, timing_point_count, p, end, time_offset);
         break;
       case Section::Colours:
         p = parse_colours_section(beatmap, colour_count, p, end);
         break;
       case Section::HitObjects:
         p = parse_hitobjects_section(beatmap, hit_object_count, slider_count,
-                                     slider_point_count, p, end);
+                                     slider_point_count, p, end, time_offset);
         break;
       case Section::None:
       case Section::Unknown:
@@ -96,6 +97,9 @@ inline void parse_document(std::span<const char> input,
 
   // An omitted (or wholly invalid) AR inherits the final OD across sections.
   beatmap.ar = approach_rate.value_or(beatmap.od);
+  // General may follow Difficulty or repeat; CS depends on the final mode.
+  beatmap.cs = beatmap.mode == 3 ? std::clamp(beatmap.cs, 1.0, 18.0)
+                                 : std::clamp(beatmap.cs, 0.0, 10.0);
   beatmap.breaks = beatmap.breaks.first(break_count);
   beatmap.combo_colours = beatmap.combo_colours.first(colour_count);
   beatmap.timing_points = beatmap.timing_points.first(timing_point_count);

@@ -18,7 +18,8 @@ namespace fosu::internal {
 template <bool UseCommaMask = false>
 inline std::optional<TimingPoint> parse_timing_point(const char* p,
                                                      const char* end,
-                                                     uint64_t commas = 0) {
+                                                     uint64_t commas = 0,
+                                                     int time_offset = 0) {
   [[maybe_unused]] const char* line = p;
   double time, beat_length;
   const char* q = parse_osu_double(p, end, time);
@@ -65,7 +66,7 @@ inline std::optional<TimingPoint> parse_timing_point(const char* p,
   if (!sample_set)
     return std::nullopt;
   return TimingPoint{
-      .time = time,
+      .time = time + time_offset,
       .beat_length = beat_length,
       .meter = clamp_i32(rest[0]),
       .sample_set = *sample_set,
@@ -125,7 +126,8 @@ __attribute__((always_inline)) inline std::optional<TimingPoint>
 try_parse_timing_point_fast_masked(uint64_t commas,
                                    uint64_t nondig,
                                    const char* p,
-                                   size_t len) {
+                                   size_t len,
+                                   int time_offset = 0) {
   if (std::popcount(commas) != 7)
     return std::nullopt;
 
@@ -230,7 +232,7 @@ try_parse_timing_point_fast_masked(uint64_t commas,
   if (!sample_set)
     return std::nullopt;
   return TimingPoint{
-      .time = static_cast<double>(swar_parse_u64(p, time_end)),
+      .time = static_cast<double>(swar_parse_u64(p, time_end)) + time_offset,
       .beat_length = beat_length,
       .meter = fields[0],
       .sample_set = *sample_set,

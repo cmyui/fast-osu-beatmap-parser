@@ -70,12 +70,20 @@ inline bool parse_skin_sprites(BeatmapHeader& header, std::string_view input) {
   return true;
 }
 
+inline bool parse_preview_time(BeatmapHeader& header, std::string_view input) {
+  const auto time = parse_field_integer(input);
+  if (!time)
+    return false;
+  const int offset = header.format_version < 5 && *time != -1 ? 24 : 0;
+  header.preview_time = static_cast<int32_t>(static_cast<uint32_t>(*time) + offset);
+  return true;
+}
+
 inline constexpr auto kGeneralFields = make_string_lookup<FieldParser>({
     {"AudioFilename", assign_field_text<&BeatmapHeader::audio_filename>},
     {"AudioLeadIn",
      assign_field_value<&BeatmapHeader::audio_lead_in, parse_field_integer>},
-    {"PreviewTime",
-     assign_field_value<&BeatmapHeader::preview_time, parse_field_integer>},
+    {"PreviewTime", parse_preview_time},
     {"CountdownOffset",
      assign_field_value<&BeatmapHeader::countdown_offset, parse_field_integer>},
     {"Countdown", assign_field_value<&BeatmapHeader::countdown, parse_countdown>},
