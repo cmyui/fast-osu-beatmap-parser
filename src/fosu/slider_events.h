@@ -6,14 +6,18 @@
 
 namespace fosu::internal {
 
-inline bool set_slider_events(Beatmap& map, Arena* arena) {
+inline bool set_slider_events(Beatmap& map, Arena* result_arena, Arena* scratch_arena) {
   if (map.sliders.empty())
     return true;
-  auto* timings = arena_push_array<SliderTiming>(arena, map.sliders.size());
-  auto* ranges = arena_push_array<std::span<SliderEvent>>(arena, map.sliders.size());
+  const auto temp = temp_begin(scratch_arena);
+  auto* timings = arena_push_array<SliderTiming>(scratch_arena, map.sliders.size());
+  auto* ranges =
+      arena_push_array<std::span<SliderEvent>>(result_arena, map.sliders.size());
   if (!timings || !ranges ||
-      !set_slider_end_times(map, arena, {timings, map.sliders.size()}))
+      !set_slider_end_times(map, scratch_arena, {timings, map.sliders.size()})) {
+    temp_end(temp);
     return false;
+  }
   size_t remaining = 1u << 20;  // Bound pathological repeat/tick expansion.
   for (const auto& object : map.hit_objects) {
     if (object.slider == HitObject::kNoSlider)
@@ -31,12 +35,16 @@ inline bool set_slider_events(Beatmap& map, Arena* arena) {
            d += tick_distance)
         ++tick_count;
     const size_t count = 2 + static_cast<size_t>(timing.spans) * (tick_count + 1);
-    if (count > remaining)
+    if (count > remaining) {
+      temp_end(temp);
       return false;
+    }
     remaining -= count;
-    auto* events = arena_push_array<SliderEvent>(arena, count);
-    if (!events)
+    auto* events = arena_push_array<SliderEvent>(result_arena, count);
+    if (!events) {
+      temp_end(temp);
       return false;
+    }
     size_t next = 0;
     auto event = [&](SliderEventType type, double time, int span, double progress) {
       return SliderEvent{type,     time,
@@ -80,6 +88,7 @@ inline bool set_slider_events(Beatmap& map, Arena* arena) {
     ranges[object.slider] = {events, count};
   }
   map.slider_events = {ranges, map.sliders.size()};
+  temp_end(temp);
   return true;
 }
 

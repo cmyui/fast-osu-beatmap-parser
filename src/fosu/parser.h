@@ -21,30 +21,35 @@ namespace fosu {
 namespace internal {
 
 // Parser construction is common in convenience and Python APIs. Retain one
-// inactive mapping without ever sharing a live arena between parser instances.
-inline std::atomic<Arena*> parser_arena_pool{};
+// inactive result/scratch pair without ever sharing live arenas between parsers.
+struct ParserArenaPool {
+  std::atomic<Arena*> result{};
+  std::atomic<Arena*> scratch{};
+};
 
-inline Arena* acquire_parser_arena() {
-  Arena* arena = parser_arena_pool.exchange(nullptr, std::memory_order_acq_rel);
+inline ParserArenaPool parser_arena_pool{};
+
+inline Arena* acquire_parser_arena(std::atomic<Arena*>& pool) {
+  Arena* arena = pool.exchange(nullptr, std::memory_order_acq_rel);
   if (!arena)
     return arena_alloc();
   arena_clear(arena);
   return arena;
 }
 
-inline void recycle_parser_arena(Arena* arena) {
+inline void recycle_parser_arena(std::atomic<Arena*>& pool, Arena* arena) {
   if (!arena)
     return;
   arena_clear(arena);
   Arena* empty = nullptr;
-  if (!parser_arena_pool.compare_exchange_strong(empty, arena,
-                                                 std::memory_order_acq_rel)) {
+  if (!pool.compare_exchange_strong(empty, arena, std::memory_order_acq_rel)) {
     arena_release(arena);
   }
 }
 
 inline void clear_parser_arena_pool() {
-  arena_release(parser_arena_pool.exchange(nullptr, std::memory_order_acq_rel));
+  arena_release(parser_arena_pool.result.exchange(nullptr, std::memory_order_acq_rel));
+  arena_release(parser_arena_pool.scratch.exchange(nullptr, std::memory_order_acq_rel));
 }
 
 #ifndef FOSU_MANAGED_ARENA_CLEANUP
@@ -129,7 +134,8 @@ class Parser;
 
 namespace internal {
 struct ParserStorage {
-  Arena* arena;
+  Arena* result_arena;
+  Arena* scratch_arena;
   const char* input;
   size_t input_size;
   size_t input_storage_size;
@@ -141,14 +147,20 @@ ParserStorage parser_storage(Parser& parser);
 class Parser {
  public:
   explicit Parser(const ParsingEngine& engine = internal::compiled_engine) noexcept
-      : arena_(internal::acquire_parser_arena()), engine_(&engine) {}
+      : result_arena_(internal::acquire_parser_arena(internal::parser_arena_pool.result)),
+        scratch_arena_(
+            internal::acquire_parser_arena(internal::parser_arena_pool.scratch)),
+        engine_(&engine) {}
 
   Parser(const Parser&) = delete;
   Parser& operator=(const Parser&) = delete;
   Parser(Parser&&) = delete;
   Parser& operator=(Parser&&) = delete;
 
-  ~Parser() { internal::recycle_parser_arena(arena_); }
+  ~Parser() {
+    internal::recycle_parser_arena(internal::parser_arena_pool.result, result_arena_);
+    internal::recycle_parser_arena(internal::parser_arena_pool.scratch, scratch_arena_);
+  }
 
   Result<Beatmap*> parse(const char* data, size_t size, ParseOptions opts = {}) noexcept {
     reset_working_result();
@@ -238,11 +250,14 @@ class Parser {
   Result<char*> prepare_input(size_t size, const char* data) noexcept {
     if (size > kMaxInputSize)
       return Error{ErrorCode::InputTooLarge};
-    if (!arena_)
-      arena_ = internal::acquire_parser_arena();
-    if (!arena_)
+    if (!result_arena_)
+      result_arena_ = internal::acquire_parser_arena(internal::parser_arena_pool.result);
+    if (!scratch_arena_)
+      scratch_arena_ =
+          internal::acquire_parser_arena(internal::parser_arena_pool.scratch);
+    if (!result_arena_ || !scratch_arena_)
       return Error{ErrorCode::AllocationFailure};
-    input_ = static_cast<char*>(arena_push(arena_, size + kBufferPadding, 1));
+    input_ = static_cast<char*>(arena_push(result_arena_, size + kBufferPadding, 1));
     if (!input_)
       return Error{ErrorCode::AllocationFailure};
     if (data && size)
@@ -256,13 +271,13 @@ class Parser {
     if (input_size_ != 0) {
       const auto sizes =
           internal::maximum_beatmap_array_sizes(input_size_, opts.sections);
-      if (!internal::allocate_beatmap_arrays(arena_, beatmap_, sizes)) {
+      if (!internal::allocate_beatmap_arrays(result_arena_, beatmap_, sizes)) {
         reset_working_result();
         return Error{ErrorCode::AllocationFailure};
       }
     }
     engine_->parse_document({input_, input_size_}, beatmap_, opts);
-    if (!internal::apply_legacy_rules(beatmap_, arena_)) {
+    if (!internal::apply_legacy_rules(beatmap_, scratch_arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
@@ -272,20 +287,21 @@ class Parser {
     }
     const bool stacking = opts.apply_stacking && beatmap_.mode == 0;
     if ((opts.calculate_slider_paths || opts.calculate_slider_events || stacking) &&
-        !internal::set_slider_paths(beatmap_, arena_)) {
+        !internal::set_slider_paths(beatmap_, result_arena_, scratch_arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
-    if (opts.calculate_slider_events && !internal::set_slider_events(beatmap_, arena_)) {
+    if (opts.calculate_slider_events &&
+        !internal::set_slider_events(beatmap_, result_arena_, scratch_arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
     if ((opts.calculate_slider_end_times || stacking) && !opts.calculate_slider_events &&
-        !internal::set_slider_end_times(beatmap_, arena_)) {
+        !internal::set_slider_end_times(beatmap_, scratch_arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
-    if (stacking && !internal::apply_stacking(beatmap_, arena_)) {
+    if (stacking && !internal::apply_stacking(beatmap_, result_arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
@@ -294,13 +310,15 @@ class Parser {
   }
 
   void reset_working_result() noexcept {
-    arena_clear(arena_);
+    arena_clear(result_arena_);
+    arena_clear(scratch_arena_);
     input_ = nullptr;
     input_size_ = 0;
     beatmap_ = {};
   }
 
-  Arena* arena_;
+  Arena* result_arena_;
+  Arena* scratch_arena_;
   const ParsingEngine* engine_;
   char* input_ = nullptr;
   size_t input_size_ = 0;
@@ -310,7 +328,8 @@ class Parser {
 namespace internal {
 inline ParserStorage parser_storage(Parser& parser) {
   return {
-      .arena = parser.arena_,
+      .result_arena = parser.result_arena_,
+      .scratch_arena = parser.scratch_arena_,
       .input = parser.input_,
       .input_size = parser.input_size_,
       .input_storage_size = parser.input_size_ + kBufferPadding,

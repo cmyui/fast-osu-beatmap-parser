@@ -205,7 +205,9 @@ static void test_failed_parse_resets_and_parser_remains_reusable() {
   CHECK_EQ(failed.error().code, fosu::ErrorCode::InvalidInput);
   const auto storage = fosu::internal::parser_storage(parser);
   CHECK(storage.input == nullptr);
-  CHECK_EQ(fosu::arena_pos(storage.arena), fosu::kArenaHeaderSize);
+  CHECK(storage.result_arena != storage.scratch_arena);
+  CHECK_EQ(fosu::arena_pos(storage.result_arena), fosu::kArenaHeaderSize);
+  CHECK_EQ(fosu::arena_pos(storage.scratch_arena), fosu::kArenaHeaderSize);
 
   const auto& recovered = require_parse(parser.parse(input));
   CHECK(recovered.title == "Before failure");
@@ -260,14 +262,15 @@ static void test_arena_interface() {
   CHECK_EQ(fosu::arena_pos(arena), initial);
   fosu::arena_release(arena);
 
-  fosu::Arena* pooled = fosu::internal::acquire_parser_arena();
+  auto& pool = fosu::internal::parser_arena_pool.result;
+  fosu::Arena* pooled = fosu::internal::acquire_parser_arena(pool);
   CHECK(pooled != nullptr);
   CHECK(fosu::arena_push(pooled, 1024, alignof(uint64_t)) != nullptr);
-  fosu::internal::recycle_parser_arena(pooled);
-  fosu::Arena* reused = fosu::internal::acquire_parser_arena();
+  fosu::internal::recycle_parser_arena(pool, pooled);
+  fosu::Arena* reused = fosu::internal::acquire_parser_arena(pool);
   CHECK(reused == pooled);
   CHECK_EQ(fosu::arena_pos(reused), fosu::kArenaHeaderSize);
-  fosu::internal::recycle_parser_arena(reused);
+  fosu::internal::recycle_parser_arena(pool, reused);
 }
 
 void test_read_into_reuse() {
@@ -375,6 +378,9 @@ int main() {
     CHECK(map.slider_events[0][8].type == fosu::SliderEventType::LegacyLastTick);
     CHECK_EQ(map.slider_events[0][8].time, 3964);
     CHECK_EQ(map.slider_events[0].back().time, map.hit_objects[0].end_time);
+    const auto storage = fosu::internal::parser_storage(parser);
+    CHECK_EQ(fosu::arena_pos(storage.scratch_arena), fosu::kArenaHeaderSize);
+    CHECK(fosu::arena_pos(storage.result_arena) > fosu::kArenaHeaderSize);
     auto* destination = fosu::arena_alloc();
     auto copy = map.copy(*destination);
     CHECK(copy);

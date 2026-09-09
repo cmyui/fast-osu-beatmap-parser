@@ -23,6 +23,7 @@
 
 #include <fosu/beatmap.h>
 #include <cmath>
+#include <cstring>
 #include <numbers>
 
 namespace fosu::internal {
@@ -274,35 +275,51 @@ inline Result<double> slider_distance(const HitObject& object,
   return distance.length;
 }
 
-// Only vertices are allocated in this non-chaining scratch arena, so successive
-// pushes form one contiguous array. Subdivision work lives in the parser arena.
-// The scratch arena is reused across sliders and never escapes into a Beatmap.
+struct CurveVertexChunk {
+  static constexpr size_t capacity = 64;
+
+  CurveVertexChunk* next = nullptr;
+  size_t count = 0;
+  CurvePoint points[capacity];
+};
+
 struct CurveVertices {
   Arena* arena;
-  CurvePoint* points = nullptr;
+  CurveVertexChunk* first = nullptr;
+  CurveVertexChunk* last = nullptr;
   size_t count = 0;
-  size_t capacity = 0;
+  CurvePoint last_point{};
   bool first_in_segment = true;
   bool failed = false;
 
   void append(CurvePoint point) {
-    const bool shared = first_in_segment && count && points[count - 1] == point;
+    const bool shared = first_in_segment && count && last_point == point;
     first_in_segment = false;
     if (shared || failed)
       return;
-    if (count == capacity) {
-      constexpr size_t chunk_size = 64;
-      auto* chunk = arena_push_array<CurvePoint>(arena, chunk_size);
+    if (!last || last->count == CurveVertexChunk::capacity) {
+      auto* chunk = arena_push_array<CurveVertexChunk>(arena, 1);
       if (!chunk) {
         failed = true;
         return;
       }
-      if (!points)
-        points = chunk;
-      capacity += chunk_size;
+      ::new (chunk) CurveVertexChunk;
+      if (last)
+        last->next = chunk;
+      else
+        first = chunk;
+      last = chunk;
     }
-    points[count] = point;
+    last->points[last->count++] = point;
+    last_point = point;
     ++count;
+  }
+
+  void copy_to(CurvePoint* destination) const {
+    for (const auto* chunk = first; chunk; chunk = chunk->next) {
+      std::memcpy(destination, chunk->points, chunk->count * sizeof(CurvePoint));
+      destination += chunk->count;
+    }
   }
 };
 
@@ -310,13 +327,14 @@ inline Result<SliderPath> calculate_slider_path(
     const HitObject& object,
     const Slider& slider,
     std::span<const SliderPoint> control_points,
-    Arena* arena,
-    Arena* vertices) {
-  arena_clear(vertices);
-  const auto work = temp_begin(arena);
-  auto* points = arena_push_array<CurvePoint>(arena, control_points.size() + 1);
-  if (!points)
+    Arena* result_arena,
+    Arena* scratch_arena) {
+  const auto work = temp_begin(scratch_arena);
+  auto* points = arena_push_array<CurvePoint>(scratch_arena, control_points.size() + 1);
+  if (!points) {
+    temp_end(work);
     return Error{ErrorCode::AllocationFailure};
+  }
   points[0] = {};
   for (size_t i = 0; i < control_points.size(); ++i)
     points[i + 1] = {static_cast<float>(control_points[i].x - object.x),
@@ -329,7 +347,7 @@ inline Result<SliderPath> calculate_slider_path(
     else if (std::abs(points[1].y * points[2].x - points[1].x * points[2].y) < 1e-3f)
       type = CurveType::Linear;
   }
-  CurveVertices curve{vertices};
+  CurveVertices curve{scratch_arena};
   // The first typed control point is itself a one-vertex segment in osu!.
   // Circular approximation can produce a slightly different first vertex.
   if (count > 1 && points[0] != points[1])
@@ -340,19 +358,21 @@ inline Result<SliderPath> calculate_slider_path(
                       (type == CurveType::Catmull && i > 1)))
       continue;
     curve.first_in_segment = i - begin > 1;
-    if (!approximate_curve_segment({points + begin, i - begin}, type, curve, arena) ||
+    if (!approximate_curve_segment({points + begin, i - begin}, type, curve,
+                                   scratch_arena) ||
         curve.failed) {
       temp_end(work);
       return Error{ErrorCode::AllocationFailure};
     }
     begin = i;
   }
-  temp_end(work);
-  auto* output = arena_push_array<PathPoint>(arena, curve.count);
-  auto* lengths = arena_push_array<double>(arena, curve.count);
-  if (!output || !lengths)
+  auto* output = arena_push_array<PathPoint>(result_arena, curve.count);
+  auto* lengths = arena_push_array<double>(result_arena, curve.count);
+  if (!output || !lengths) {
+    temp_end(work);
     return Error{ErrorCode::AllocationFailure};
-  std::copy_n(curve.points, curve.count, output);
+  }
+  curve.copy_to(output);
   lengths[0] = 0;
   for (size_t i = 1; i < curve.count; ++i)
     lengths[i] = lengths[i - 1] + (output[i] - output[i - 1]).length();
@@ -367,27 +387,16 @@ inline Result<SliderPath> calculate_slider_path(
                                         static_cast<float>(expected - lengths[end - 1]);
     lengths[end] = expected;
   }
-  return SliderPath{{output, end + 1}, {lengths, end + 1}};
+  const SliderPath result{{output, end + 1}, {lengths, end + 1}};
+  temp_end(work);
+  return result;
 }
 
-struct PathVerticesArena {
-  Arena* value = arena_alloc({kDefaultArenaReserve, kDefaultArenaCommit, 0});
-  ~PathVerticesArena() { arena_release(value); }
-};
-
-inline Arena* path_vertices_arena() {
-  thread_local PathVerticesArena arena;
-  return arena.value;
-}
-
-inline bool set_slider_paths(Beatmap& map, Arena* arena) {
+inline bool set_slider_paths(Beatmap& map, Arena* result_arena, Arena* scratch_arena) {
   if (map.sliders.empty())
     return true;
-  auto* paths = arena_push_array<SliderPath>(arena, map.sliders.size());
+  auto* paths = arena_push_array<SliderPath>(result_arena, map.sliders.size());
   if (!paths)
-    return false;
-  Arena* vertices = path_vertices_arena();
-  if (!vertices)
     return false;
   bool success = true;
   for (const auto& object : map.hit_objects) {
@@ -396,7 +405,7 @@ inline bool set_slider_paths(Beatmap& map, Arena* arena) {
     const auto& slider = map.sliders[object.slider];
     auto path = calculate_slider_path(
         object, slider, map.slider_points.subspan(slider.point_begin, slider.point_count),
-        arena, vertices);
+        result_arena, scratch_arena);
     if (!path) {
       success = false;
       break;

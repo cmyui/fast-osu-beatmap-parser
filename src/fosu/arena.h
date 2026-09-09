@@ -5,8 +5,21 @@
 #include <cstdint>
 #include <limits>
 #include <new>
+#include <type_traits>
 
 #include <fosu/os.h>
+
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define FOSU_ADDRESS_SANITIZER 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+#define FOSU_ADDRESS_SANITIZER 1
+#endif
+#if defined(FOSU_ADDRESS_SANITIZER)
+#include <sanitizer/asan_interface.h>
+#endif
 
 namespace fosu {
 
@@ -16,7 +29,7 @@ inline constexpr size_t kCacheLineSize = 128;
 inline constexpr size_t kCacheLineSize = 64;
 #endif
 
-inline constexpr size_t kDefaultArenaReserve = size_t{1} << 30;
+inline constexpr size_t kDefaultArenaReserve = size_t{64} << 20;
 inline constexpr size_t kDefaultArenaCommit = size_t{64} << 10;
 inline constexpr size_t kMaxArenaPush = size_t{1} << 46;
 
@@ -57,6 +70,28 @@ constexpr size_t round_up(size_t value, size_t multiple) {
 
 inline constexpr size_t kArenaHeaderSize = align_up(sizeof(Arena), kCacheLineSize);
 
+namespace internal {
+
+inline void arena_poison(void* memory, size_t size) {
+#if defined(FOSU_ADDRESS_SANITIZER)
+  ASAN_POISON_MEMORY_REGION(memory, size);
+#else
+  (void)memory;
+  (void)size;
+#endif
+}
+
+inline void arena_unpoison(void* memory, size_t size) {
+#if defined(FOSU_ADDRESS_SANITIZER)
+  ASAN_UNPOISON_MEMORY_REGION(memory, size);
+#else
+  (void)memory;
+  (void)size;
+#endif
+}
+
+}  // namespace internal
+
 inline bool arena_commit_to(Arena* block, size_t new_pos) {
   if (new_pos <= block->committed)
     return true;
@@ -67,6 +102,7 @@ inline bool arena_commit_to(Arena* block, size_t new_pos) {
   auto* start = reinterpret_cast<uint8_t*>(block) + block->committed;
   if (!internal::os_commit(start, amount))
     return false;
+  internal::arena_poison(start, amount);
   if (block->flags & ArenaFlagLock) {
     if (!internal::os_lock(start, amount))
       return false;
@@ -93,6 +129,8 @@ inline Arena* arena_alloc(ArenaParams params) {
     return nullptr;
   }
 
+  internal::arena_poison(memory, commit_size);
+  internal::arena_unpoison(memory, kArenaHeaderSize);
   auto* arena = ::new (memory) Arena{
       .prev = nullptr,
       .current = nullptr,
@@ -159,12 +197,15 @@ inline void* arena_push(Arena* arena, size_t size, size_t alignment) {
   if (!arena_commit_to(current, new_pos))
     return nullptr;
   void* result = reinterpret_cast<uint8_t*>(current) + pos;
+  internal::arena_unpoison(result, size);
   current->pos = new_pos;
   return result;
 }
 
 template <typename T>
 inline T* arena_push_array(Arena* arena, size_t count) {
+  static_assert(std::is_trivially_destructible_v<T>,
+                "arena allocations do not run element destructors");
   if (count > std::numeric_limits<size_t>::max() / sizeof(T))
     return nullptr;
   return static_cast<T*>(arena_push(arena, sizeof(T) * count, alignof(T)));
@@ -176,6 +217,7 @@ inline void arena_release(Arena* arena) {
   for (Arena* block = arena->current; block;) {
     Arena* prev = block->prev;
     const size_t reserve_size = block->reserve_size;
+    internal::arena_unpoison(block, block->committed);
     block->~Arena();
     internal::os_release(block, reserve_size);
     block = prev;
@@ -190,12 +232,17 @@ inline void arena_pop_to(Arena* arena, size_t pos) {
   while (current->prev && current->base_pos >= target) {
     Arena* prev = current->prev;
     const size_t reserve_size = current->reserve_size;
+    internal::arena_unpoison(current, current->committed);
     current->~Arena();
     internal::os_release(current, reserve_size);
     current = prev;
   }
   arena->current = current;
-  current->pos = std::clamp(target - current->base_pos, kArenaHeaderSize, current->pos);
+  const size_t new_pos =
+      std::clamp(target - current->base_pos, kArenaHeaderSize, current->pos);
+  internal::arena_poison(reinterpret_cast<uint8_t*>(current) + new_pos,
+                         current->pos - new_pos);
+  current->pos = new_pos;
 }
 
 inline void arena_clear(Arena* arena) {
@@ -211,3 +258,5 @@ inline void temp_end(TempArena temp) {
 }
 
 }  // namespace fosu
+
+#undef FOSU_ADDRESS_SANITIZER
