@@ -63,7 +63,7 @@ class Circle(_HitObject):
 
 @dataclass(slots=True, kw_only=True)
 class Slider(_HitObject):
-    end_time: None
+    end_time: float
     slides: int
     curve_type: CurveType
     length: float

@@ -10,8 +10,8 @@ static void check(std::string_view data) {
   auto input = fosu::make_padded(data);
   fosu::Parser scalar_parser(fosu_test::scalar_engine());
   fosu::Parser simd_parser;
-  auto scalar = scalar_parser.parse(input);
-  auto simd = simd_parser.parse(input);
+  auto scalar = scalar_parser.parse(input, {.calculate_slider_end_times = true});
+  auto simd = simd_parser.parse(input, {.calculate_slider_end_times = true});
   assert(scalar && simd);
   auto a = *scalar.value();
   auto b = *simd.value();

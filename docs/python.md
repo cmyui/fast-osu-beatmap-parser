@@ -58,8 +58,13 @@ Shared fields use C++ names. Important Python-specific behavior:
 
 - `hit_objects` contains `Circle`, `Slider`, `Spinner`, or `HoldNote`, in
   stable timestamp order. Narrow the union with `isinstance`.
-- Times are milliseconds. Slider `end_time` is `None`: geometry and gameplay
-  timing are not calculated. Hit samples and slider edge fields remain text.
+- Times are milliseconds. Slider endpoints are `0` by
+  default. Pass `calculate_slider_end_times=True` to `parse` or `parse_file` to
+  calculate them using curve distance, timing and repeats.
+  Do not use slider endpoints unless calculation was requested.
+  Accessing the field never computes or caches anything.
+  Other object types still have numeric endpoints. Omitted sections use their default settings.
+  Hit samples and slider edge fields remain text.
 - Slider `control_points` includes the head position, unlike the native point
   range. `slides=2` means forward and back.
 - `tag_list` and `bookmark_list` are parsed conveniences alongside the
@@ -76,7 +81,7 @@ changing a slider's position does not move its stored head point, and changing
 Mutation does not change the input or another parse result.
 
 See [compatibility](compatibility.md) for supported behavior and limitations;
-there is no slider geometry, stacking, mod application, or ruleset conversion.
+there are no path-position queries, stacking, mod application, or ruleset conversion.
 
 ## CPU selection
 

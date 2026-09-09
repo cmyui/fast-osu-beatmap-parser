@@ -2,16 +2,19 @@
 
 fosu decodes legacy `.osu` files and applies the official decoder's metadata
 precision/clamps, legacy clock offsets, stable hitobject ordering and combo rules.
-It does not compute slider geometry/duration, resolved timing or sample states,
-stacking, mods, or ruleset conversion. Sample strings and encoded type bits are
+Slider end times use curve distance and the active BPM/slider velocity. It does
+not compute resolved sample states, stacking, mods, or ruleset conversion.
+Sample strings and encoded type bits are
 retained separately from effective combo flags.
 
 ## Numeric and malformed-input behavior
 
 - Object start times, spinner/hold end times and break endpoints are double
   milliseconds; fractional values are preserved. Circle `end_time` equals its
-  start. Slider `end_time` is zero natively and `None` in Python because it
-  depends on geometry and timing. Spinner, hold and break endpoints follow the
+  start. Slider `end_time` is zero by default in both interfaces and must not be
+  used unless `calculate_slider_end_times` is enabled, which calculates it eagerly,
+  including repeats and degenerate-path handling.
+  Spinner, hold and break endpoints follow the
   official clamps; spinners are centred at (256, 192). Pre-v5 timestamps use
   the official +24 ms adjustment, including its distinct hold-end ordering.
 - Coordinate acceptance follows the official decoder's float32 conversion and
@@ -50,8 +53,8 @@ retained separately from effective combo flags.
   regardless of line length.
 - NaN is retained **only for inherited timing-point beat lengths**. It must not
   be treated as an ordinary slider-velocity number. Other NaN/infinity values
-  are rejected. A consumer implementing slider duration/ticks must handle the
-  inherited-NaN case explicitly.
+  are rejected. Duration uses velocity 1 for inherited NaN; consumers generating
+  ticks must also respect its tick-suppression meaning.
 - Invalid hitobjects and timing points are skipped and counted in
   `stats.malformed_lines`. A rejected slider can retain unreferenced points in
   the native pool; use each slider's explicit point range. Python exposes only
@@ -101,8 +104,9 @@ correctness. The official osu! decoder is the reference for legacy syntax and
 numeric behavior. FOSU deliberately rejects unknown enum values rather than
 exposing undefined choices through its typed APIs, even where the official
 decoder accepts them. These domain checks are not a ranking validator.
-Third-party parsers are not the authority for those decisions. Resolved timing
-and samples, slider geometry and ruleset processing remain separate from decoding.
+Third-party parsers are not the authority for those decisions. Duration resolves
+timing and curve distance; resolved samples, path-position queries and ruleset
+processing remain outside decoding.
 
 The reference is the unmodified open-source legacy decoder from osu! at
 [`48c4800e3ae4ee752452cdff83bd3787ccf3105f`](https://github.com/ppy/osu/tree/48c4800e3ae4ee752452cdff83bd3787ccf3105f).

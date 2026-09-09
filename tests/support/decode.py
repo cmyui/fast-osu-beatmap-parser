@@ -33,8 +33,8 @@ class Reader:
 
 
 def decode(data: bytes) -> dict[str, Any]:
-    if len(data) < 36 or data[:8] != b"FOSUDMP6":
-        raise ValueError("not a FOSUDMP6 stream")
+    if len(data) < 36 or data[:8] != b"FOSUDMP8":
+        raise ValueError("not a FOSUDMP8 stream")
     trailer_size = struct.unpack("<Q", data[-8:])[0]
     start = len(data) - 8 - trailer_size
     if start < 8:

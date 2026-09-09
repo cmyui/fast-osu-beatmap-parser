@@ -66,20 +66,26 @@ class Sections(IntFlag):
     ALL = 0x1FE
 
 
-def parse(data: Buffer, *, sections: Sections = Sections.ALL) -> Beatmap:
+def parse(
+    data: Buffer,
+    *,
+    sections: Sections = Sections.ALL,
+    calculate_slider_end_times: bool = False,
+) -> Beatmap:
     """Parse selected sections into detached values, copying mutable buffers."""
     if not isinstance(data, bytes):
         with memoryview(data) as view:
             if view.nbytes > 64 * 1024 * 1024:
                 raise ValueError("beatmap input exceeds the supported size")
             data = view.tobytes()
-    return _core.parse(data, sections)
+    return _core.parse(data, sections, calculate_slider_end_times)
 
 
 def parse_file(
     path: str | bytes | PathLike[str] | PathLike[bytes],
     *,
     sections: Sections = Sections.ALL,
+    calculate_slider_end_times: bool = False,
 ) -> Beatmap:
     """Read selected sections; raise OSError on file errors."""
-    return _core.parse_file(path, sections)
+    return _core.parse_file(path, sections, calculate_slider_end_times)

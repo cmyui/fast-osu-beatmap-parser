@@ -46,8 +46,7 @@ sealed class RawFields
             record["time"] = decoded.StartTime;
             record["new_combo"] = combo.NewCombo;
             record["combo_skip"] = combo.ComboOffset;
-            record["end_time"] = (string)record["kind"]! == "slider" ? null
-                : decoded is IHasDuration duration ? duration.EndTime : decoded.StartTime;
+            record["end_time"] = decoded is IHasDuration duration ? duration.EndTime : decoded.StartTime;
             hit_objects.Add(record);
         }
     }

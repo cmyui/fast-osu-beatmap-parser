@@ -34,8 +34,8 @@ separately and never treated as official line rejections.
 |---|---|
 | Object order and old-format offsets | Compare the final stable timestamp order with offsets enabled. Original type bits remain associated with the corresponding official object. |
 | Object positions and timestamps | Compare the final decoded position and start time, including centred spinners and pre-v5 offsets. |
-| Spinner/hold end times | Compare the official final end time, including duration clamping and the legacy hold offset ordering. |
-| Slider repeats and length | Compare spans clamped to at least 1 and nonnegative declared length. Geometry-dependent repeat corrections, unspecified versus zero length, and calculated duration remain excluded. |
+| Object end times | Compare the official final end time, including slider geometry/timing, duration clamping and the legacy hold offset ordering. |
+| Slider repeats and length | Compare spans clamped to at least 1 and nonnegative declared length. Geometry-dependent repeat corrections remain excluded from these raw fields. |
 | Slider path | Compare raw curve choice and control points with official coordinate conversion, before duplicate-point handling, relative coordinates, or perfect-curve normalization. Python's initial object-position point is included. |
 | Samples and flags | Compare original hitsound/type bits and sample/edge strings. Effective new-combo and colour-skip values come from the finished official object. Resolved samples and generated node samples remain excluded. |
 | Timing points | Compare every accepted source row with its legacy timestamp offset, including zero/default selectors. Do not compare deduplicated control points, resolved sample banks, clamped slider/scroll velocity, or tick generation. |

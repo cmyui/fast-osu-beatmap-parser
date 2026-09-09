@@ -78,6 +78,51 @@ def test_skipped_sections_do_not_count_malformed_records():
     assert selected.title == "ok" and selected.stats.malformed_lines == 0
 
 
+@pytest.mark.parametrize("curve,length,distance", [
+    ("L|100:0", "140", 140),
+    ("L|100:0", "0", 100),
+    ("L|100:0", None, 100),
+    ("L|100:0|100:0", "200", 100),
+    ("B|0:0", "200", 0),
+])
+def test_slider_end_time_uses_effective_distance(curve, length, distance):
+    tail = "" if length is None else f",{length}"
+    data = (
+        "[Difficulty]\nSliderMultiplier:1\n"
+        "[TimingPoints]\n0,500\n0,-50,4,0,0,100,0,0\n"
+        f"[HitObjects]\n0,0,1000,2,0,{curve},2{tail}\n"
+    ).encode()
+    slider = fosu.parse(data, calculate_slider_end_times=True).hit_objects[0]
+    assert isinstance(slider, fosu.Slider)
+    assert slider.end_time == 1000 + 2 * distance / (200 / 500)
+
+
+def test_slider_end_time_without_timing_sections():
+    data = b"[Difficulty]\nSliderMultiplier:1\n[TimingPoints]\n0,500\n[HitObjects]\n0,0,0,2,0,L|100:0,1,140\n"
+    assert fosu.parse(data, calculate_slider_end_times=True).hit_objects[0].end_time == 700
+    # Selected sections alone determine the result; omitted settings use defaults.
+    assert fosu.parse(data, sections=fosu.Sections.HIT_OBJECTS, calculate_slider_end_times=True).hit_objects[0].end_time == pytest.approx(1000)
+
+
+def test_slider_end_time_opt_out(tmp_path):
+    data = (
+        b"[HitObjects]\n0,0,1000,1,0\n0,0,2000,2,0,L|100:0,1,140\n"
+        b"0,0,3000,8,0,4000\n0,0,5000,128,0,6000\n"
+    )
+    path = tmp_path / "map.osu"
+    path.write_bytes(data)
+    skipped = fosu.parse(data, calculate_slider_end_times=False)
+    assert skipped == fosu.parse_file(path, calculate_slider_end_times=False)
+    assert [h.end_time for h in skipped.hit_objects] == [1000, 0, 4000, 6000]
+    assert fosu.parse(data) == skipped
+    assert fosu.parse_file(path) == skipped
+    assert fosu.parse(data, calculate_slider_end_times=True).hit_objects[1].end_time > 2000
+    assert fosu.parse_file(path, calculate_slider_end_times=True).hit_objects[1].end_time > 2000
+    for copied in (skipped, deepcopy(skipped), pickle.loads(pickle.dumps(skipped))):
+        assert copied.hit_objects[1].end_time == 0
+    assert asdict(skipped)["hit_objects"][1]["end_time"] == 0
+
+
 def test_fractional_times_and_malformed_numeric_fields():
     import math
 
@@ -96,7 +141,7 @@ def test_fractional_times_and_malformed_numeric_fields():
     assert math.isnan(bm.timing_points[1].beat_length)
     assert not bm.timing_points[1].uninherited
     assert [h.time for h in bm.hit_objects] == [1000.5, 2000.25, 4000.5, 6000]
-    assert [h.end_time for h in bm.hit_objects] == [1000.5, 3000.75, 5000.75, None]
+    assert [h.end_time for h in bm.hit_objects] == [1000.5, 3000.75, 5000.75, 0]
     assert bm.hit_objects[0].x == 256
     assert bm.hit_objects[3].length == 250
     assert [(p.x, p.y) for p in bm.hit_objects[3].control_points[1:]] == [(1, 2)]
@@ -120,8 +165,8 @@ def test_complete_map(tmp_path):
     ).encode()
     path = tmp_path / "日本語.osu"
     path.write_bytes(data)
-    b = fosu.parse(data)
-    assert b == fosu.parse_file(path) == fosu.parse_file(os.fsencode(path))
+    b = fosu.parse(data, calculate_slider_end_times=True)
+    assert b == fosu.parse_file(path, calculate_slider_end_times=True) == fosu.parse_file(os.fsencode(path), calculate_slider_end_times=True)
     assert (b.title, b.artist, b.version, b.ar, b.cs) == (
         "日本語",
         "artist",
@@ -135,7 +180,8 @@ def test_complete_map(tmp_path):
     circle, slider, spinner, hold = b.hit_objects
     assert isinstance(circle, fosu.Circle) and circle.is_circle
     assert circle.end_time == circle.time == 1000
-    assert isinstance(slider, fosu.Slider) and slider.end_time is None
+    assert isinstance(slider, fosu.Slider)
+    assert slider.end_time == pytest.approx(2000 + 480 / (140 / b.timing_points[0].beat_length))
     assert (slider.slides, slider.curve_type, slider.length) == (
         2,
         fosu.CurveType.BEZIER,
@@ -447,7 +493,7 @@ def test_all_fields_are_detached_python_values():
 def test_runtime_annotations():
     assert get_type_hints(fosu.parse)["return"] is fosu.Beatmap
     assert get_type_hints(fosu.parse_file)["return"] is fosu.Beatmap
-    assert get_type_hints(fosu.Slider)["end_time"] is type(None)
+    assert get_type_hints(fosu.Slider)["end_time"] == float
 
 
 def test_public_typing_contract():

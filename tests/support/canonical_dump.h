@@ -9,7 +9,7 @@
 // are explicit, including each orphan's position. Slider points follow
 // their record inline, so the finished beatmap can be serialized in one pass.
 //
-//   "FOSUDMP6"
+//   "FOSUDMP8"
 //   hit objects, in stable timestamp order, each:
 //     i32 x, y; u32 type, hitsound; f64 time, end_time; u32 slider
 //     (kNoSlider or the original slider-pool index); u8 new_combo, combo_skip;
@@ -77,7 +77,7 @@ inline std::string_view resolve(const Map& bm, String s) {
 
 template <typename Map, typename Output>
 inline void dump_to(const Map& bm, Output& o) {
-  o.raw("FOSUDMP6", 8);
+  o.raw("FOSUDMP8", 8);
   for (const auto& h : bm.hit_objects) {
     const auto sample = resolve(bm, h.hit_sample);
     o.i32(h.x);

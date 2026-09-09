@@ -19,7 +19,7 @@ struct HitObject {
   uint32_t type;
   uint32_t hitsound;
   double time;
-  double end_time;
+  double end_time;  // milliseconds; 0 for sliders unless calculation is requested
   uint32_t slider;  // index into Beatmap::sliders, or kNoSlider
   bool new_combo;
   uint8_t combo_skip;
@@ -44,7 +44,7 @@ struct Slider {
   uint32_t point_count;
   int32_t slides;  // 1 = no repeats
   CurveType curve_type;
-  double length;  // pixel length
+  double length;  // declared pixel length; zero uses the natural path for duration
   std::string_view edge_sounds;
   std::string_view edge_sets;
 };

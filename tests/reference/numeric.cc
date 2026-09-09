@@ -58,7 +58,7 @@ static_assert(!FOSU_SIMD, "the independent numeric oracle must use scalar parsin
 extern "C" __attribute__((visibility("default"))) void
 fosu_numeric_oracle(const char* data, size_t size, std::string& output) {
   fosu::Parser parser;
-  auto parsed = parser.parse(data, size);
+  auto parsed = parser.parse(data, size, {.calculate_slider_end_times = true});
   if (!parsed)
     return;
   auto map = *parsed.value();

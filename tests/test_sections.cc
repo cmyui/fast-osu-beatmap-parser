@@ -653,7 +653,7 @@ static void test_combo_colour_domain() {
 }
 
 static void test_legacy_rules() {
-  static_assert(sizeof(fosu::HitObject) == 56);
+  static_assert(std::is_trivially_copyable_v<fosu::HitObject>);
   for (bool simd : {false, true}) {
     const auto late_mode = parse_str(
         "[Difficulty]\nCircleSize:18\nOverallDifficulty:20\nApproachRate:bad\n"

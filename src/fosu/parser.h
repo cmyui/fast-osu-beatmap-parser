@@ -11,6 +11,7 @@
 #include <fosu/engine/parsing_engine.h>
 #include <fosu/io.h>
 #include <fosu/legacy_rules.h>
+#include <fosu/slider_timing.h>
 
 namespace fosu {
 
@@ -251,6 +252,11 @@ class Parser {
     }
     engine_->parse_document({input_, input_size_}, beatmap_, opts);
     if (!internal::apply_legacy_rules(beatmap_, arena_)) {
+      reset_working_result();
+      return Error{ErrorCode::AllocationFailure};
+    }
+    if (opts.calculate_slider_end_times &&
+        !internal::set_slider_end_times(beatmap_, arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
