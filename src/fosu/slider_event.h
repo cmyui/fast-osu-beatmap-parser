@@ -4,7 +4,7 @@
 #include <cstdint>
 
 namespace fosu {
-enum class SliderEventType : uint8_t { Head, Tick, Repeat, Tail };
+enum class SliderEventType : uint8_t { Head, Tick, Repeat, LegacyLastTick, Tail };
 
 struct SliderEvent {
   SliderEventType type;

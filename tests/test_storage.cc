@@ -369,9 +369,11 @@ int main() {
         "[HitObjects]\n0,0,0,2,0,L|400:0,2,400\n");
     const auto& map =
         require_parse(parser.parse(input, {.calculate_slider_events = true}));
-    CHECK_EQ(map.slider_events[0].size(), 9u);
+    CHECK_EQ(map.slider_events[0].size(), 10u);
     CHECK(map.slider_events[0].front().type == fosu::SliderEventType::Head);
     CHECK(map.slider_events[0].back().type == fosu::SliderEventType::Tail);
+    CHECK(map.slider_events[0][8].type == fosu::SliderEventType::LegacyLastTick);
+    CHECK_EQ(map.slider_events[0][8].time, 3964);
     CHECK_EQ(map.slider_events[0].back().time, map.hit_objects[0].end_time);
     auto* destination = fosu::arena_alloc();
     auto copy = map.copy(*destination);

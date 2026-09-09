@@ -30,7 +30,7 @@ inline bool set_slider_events(Beatmap& map, Arena* arena) {
       for (double d = tick_distance; d <= length && d < length - minimum_from_end;
            d += tick_distance)
         ++tick_count;
-    const size_t count = 1 + static_cast<size_t>(timing.spans) * (tick_count + 1);
+    const size_t count = 2 + static_cast<size_t>(timing.spans) * (tick_count + 1);
     if (count > remaining)
       return false;
     remaining -= count;
@@ -56,11 +56,27 @@ inline bool set_slider_events(Beatmap& map, Arena* arena) {
                   span, progress);
       }
       next += tick_count;
-      const bool last = span == timing.spans - 1;
-      events[next++] = event(last ? SliderEventType::Tail : SliderEventType::Repeat,
-                             last ? object.end_time : start + timing.span_duration, span,
-                             (span + 1) % 2);
+      if (span < timing.spans - 1)
+        events[next++] = event(SliderEventType::Repeat, start + timing.span_duration,
+                               span, (span + 1) % 2);
     }
+    const int final_span = timing.spans - 1;
+    const double final_span_start = object.time + final_span * timing.span_duration;
+    const double duration = timing.spans * timing.span_duration;
+    const double legacy_time = std::max(object.time + duration / 2,
+                                        final_span_start + timing.span_duration - 36);
+    double legacy_progress;
+    if (timing.span_duration == 0) {
+      legacy_progress = timing.spans % 2;
+    } else {
+      legacy_progress = (legacy_time - final_span_start) / timing.span_duration;
+      if (timing.spans % 2 == 0)
+        legacy_progress = 1 - legacy_progress;
+    }
+    events[next++] =
+        event(SliderEventType::LegacyLastTick, legacy_time, final_span, legacy_progress);
+    events[next++] =
+        event(SliderEventType::Tail, object.end_time, final_span, timing.spans % 2);
     ranges[object.slider] = {events, count};
   }
   map.slider_events = {ranges, map.sliders.size()};
