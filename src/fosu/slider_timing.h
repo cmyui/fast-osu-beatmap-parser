@@ -95,9 +95,12 @@ inline bool set_slider_end_times(Beatmap& map, Arena* arena) {
       ++next;
     }
     const auto& slider = map.sliders[object.slider];
-    auto distance = slider_distance(
-        object, slider, map.slider_points.subspan(slider.point_begin, slider.point_count),
-        arena);
+    auto distance = !map.slider_paths.empty()
+                        ? Result<double>{map.slider_paths[object.slider].distance()}
+                        : slider_distance(object, slider,
+                                          map.slider_points.subspan(slider.point_begin,
+                                                                    slider.point_count),
+                                          arena);
     if (!distance) {
       temp_end(temp);
       return false;

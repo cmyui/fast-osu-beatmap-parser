@@ -45,6 +45,8 @@ def differences(expected, actual, path=""):
     elif expected == "NaN" and isinstance(actual, float) and math.isnan(actual):
         return
     elif isinstance(expected, float) or isinstance(actual, float):
+        if ".path" in path and math.isclose(float(expected), float(actual), rel_tol=1e-6, abs_tol=1e-3):
+            return
         if struct.pack("d", float(expected)) != struct.pack("d", float(actual)):
             yield path, expected, actual
     elif expected != actual:
@@ -76,10 +78,13 @@ def main():
                 gaps.append({"file": str(path), "reference_error": expected.get("error"),
                              "projection_errors": expected.get("projection_errors")})
                 continue
-            beatmap = fosu.parse_file(path, calculate_slider_end_times=True)
+            beatmap = fosu.parse_file(path, calculate_slider_end_times=True, calculate_slider_paths=True)
             by_mode[int(beatmap.mode)] += 1
             actual = value(beatmap)
             for obj, record in zip(beatmap.hit_objects, actual["hit_objects"]):
+                if isinstance(obj, fosu.Slider) and obj.path is not None:
+                    record["path_distance"] = obj.path.distance()
+                    record["path_samples"] = [value(fosu.slider_position_at(obj.path, p)) for p in (0, 0.1, 0.5, 0.9, 1)]
                 record["kind"] = ("circle" if obj.is_circle else "slider" if obj.is_slider
                                   else "spinner" if obj.is_spinner else "hold")
             raw = expected["values"]

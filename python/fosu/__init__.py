@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from bisect import bisect_left
 from enum import IntFlag
 from os import PathLike
 
@@ -24,6 +25,8 @@ from ._model import (
     HoldNote,
     ParseStats,
     Point,
+    PathPoint,
+    SliderPath,
     SampleSet,
     Slider,
     Spinner,
@@ -41,6 +44,9 @@ __all__ = [
     "HoldNote",
     "ParseStats",
     "Point",
+    "PathPoint",
+    "SliderPath",
+    "slider_position_at",
     "SampleSet",
     "Sections",
     "Slider",
@@ -71,6 +77,7 @@ def parse(
     *,
     sections: Sections = Sections.ALL,
     calculate_slider_end_times: bool = False,
+    calculate_slider_paths: bool = False,
 ) -> Beatmap:
     """Parse selected sections into detached values, copying mutable buffers."""
     if not isinstance(data, bytes):
@@ -78,7 +85,7 @@ def parse(
             if view.nbytes > 64 * 1024 * 1024:
                 raise ValueError("beatmap input exceeds the supported size")
             data = view.tobytes()
-    return _core.parse(data, sections, calculate_slider_end_times)
+    return _core.parse(data, sections, calculate_slider_end_times, calculate_slider_paths)
 
 
 def parse_file(
@@ -86,6 +93,26 @@ def parse_file(
     *,
     sections: Sections = Sections.ALL,
     calculate_slider_end_times: bool = False,
+    calculate_slider_paths: bool = False,
 ) -> Beatmap:
     """Read selected sections; raise OSError on file errors."""
-    return _core.parse_file(path, sections, calculate_slider_end_times)
+    return _core.parse_file(path, sections, calculate_slider_end_times, calculate_slider_paths)
+
+
+def slider_position_at(path: SliderPath, progress: float) -> PathPoint:
+    """Query a retained path at clamped [0, 1] progress, relative to its head."""
+    if not path.points:
+        return PathPoint(0.0, 0.0)
+    distance = min(max(progress, 0.0), 1.0) * path.distance()
+    i = bisect_left(path.cumulative_lengths, distance)
+    if i == 0:
+        point = path.points[0]
+        return PathPoint(point.x, point.y)
+    if i >= len(path.points):
+        point = path.points[-1]
+        return PathPoint(point.x, point.y)
+    start = path.cumulative_lengths[i - 1]
+    length = path.cumulative_lengths[i] - start
+    a, b = path.points[i - 1], path.points[i]
+    weight = (distance - start) / length if abs(length) >= 1e-7 else 0.0
+    return PathPoint(a.x + (b.x - a.x) * weight, a.y + (b.y - a.y) * weight)

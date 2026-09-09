@@ -47,6 +47,15 @@ sealed class RawFields
             record["new_combo"] = combo.NewCombo;
             record["combo_skip"] = combo.ComboOffset;
             record["end_time"] = decoded is IHasDuration duration ? duration.EndTime : decoded.StartTime;
+            if (decoded is IHasPath slider)
+            {
+                record["path"] = new { points = slider.Path.CalculatedPath.Select(p => new { x = (double)p.X, y = (double)p.Y }).ToArray() };
+                record["path_distance"] = slider.Path.Distance;
+                record["path_samples"] = new[] { 0.0, 0.1, 0.5, 0.9, 1.0 }.Select(progress => {
+                    var p = slider.Path.PositionAt(progress);
+                    return new { x = (double)p.X, y = (double)p.Y };
+                }).ToArray();
+            }
             hit_objects.Add(record);
         }
     }

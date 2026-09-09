@@ -80,8 +80,15 @@ changing a slider's position does not move its stored head point, and changing
 `type` does not recalculate combo flags. `dataclasses.replace` is a shallow copy.
 Mutation does not change the input or another parse result.
 
+Pass `calculate_slider_paths=True` to retain each slider's `path` (otherwise
+`None`). `fosu.slider_position_at(slider.path, progress)` is a pure query over
+that polyline, with progress clamped to [0, 1]. Returned `PathPoint` coordinates
+are relative to the head; add the slider's x/y for playfield coordinates.
+Paths alone do not calculate end times. Requesting both reuses their distance.
+Native code exposes the same query and `Beatmap.slider_paths`, indexed by slider.
+
 See [compatibility](compatibility.md) for supported behavior and limitations;
-there are no path-position queries, stacking, mod application, or ruleset conversion.
+there is no stacking, mod application, or ruleset conversion.
 
 ## CPU selection
 

@@ -39,6 +39,23 @@ class Point:
     y: int
 
 
+@dataclass(slots=True)
+class PathPoint:
+    x: float
+    y: float
+
+
+@dataclass(slots=True)
+class SliderPath:
+    """Retained polyline, relative to the head; distances are playfield pixels."""
+
+    points: list[PathPoint]
+    cumulative_lengths: list[float]
+
+    def distance(self) -> float:
+        return self.cumulative_lengths[-1] if self.cumulative_lengths else 0.0
+
+
 @dataclass(slots=True, kw_only=True)
 class _HitObject:
     time: float
@@ -70,6 +87,7 @@ class Slider(_HitObject):
     edge_sounds: str
     edge_sets: str
     control_points: list[Point]
+    path: SliderPath | None
     is_slider: ClassVar[bool] = True
 
 
