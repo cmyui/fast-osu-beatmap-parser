@@ -21,7 +21,7 @@ inline constexpr auto kMetadataFields = make_string_lookup<FieldParser>({
 inline const char* parse_metadata_section(Beatmap& beatmap,
                                           const char* p,
                                           const char* end) {
-  return parse_key_value_section(beatmap, kMetadataFields, p, end);
+  return parse_key_value_section<kMetadataFields>(beatmap, p, end);
 }
 
 }  // namespace fosu::internal

@@ -1,5 +1,7 @@
+#include <fosu/engine/parsing/key_value.h>
 #include <fosu/engine/parsing/string_lookup.h>
 #include <cassert>
+#include <string>
 
 using fosu::internal::make_string_lookup;
 using fosu::internal::string_hash;
@@ -17,7 +19,29 @@ static_assert(*collisions.find("liquid") == 2);
 static_assert(*collisions.find("") == 3);
 static_assert(collisions.find("Costarring") == nullptr);
 
+constexpr auto fields = make_string_lookup<fosu::internal::FieldParser>({
+    {"Title", fosu::internal::assign_field_text<&fosu::BeatmapHeader::title>},
+    {"Artist", fosu::internal::assign_field_text<&fosu::BeatmapHeader::artist>},
+});
+
 int main() {
+  fosu::Beatmap map;
+  fosu::internal::parse_key_value<fields>(map, {"Title", "accepted"});
+  assert(map.title == "accepted");
+  bool tested_collision = false;
+  for (int byte = 0; byte < 256; ++byte) {
+    std::string unknown = "bad";
+    unknown += static_cast<char>(byte);
+    if (fields.slot_for(unknown) != fields.slot_at(0))
+      continue;
+    assert(fields.find(unknown) == nullptr);
+    fosu::internal::parse_key_value<fields>(map, {unknown, "must not overwrite"});
+    assert(map.title == "accepted");
+    assert(map.stats.malformed_lines == 0);
+    tested_collision = true;
+    break;
+  }
+  assert(tested_collision);
   constexpr auto single = make_string_lookup<int>({{"costarring", 1}});
   assert(single.find("liquid") == nullptr);
   for (const auto key : {"cost", "costarring-extra", "unknown"})

@@ -106,10 +106,22 @@ inline void parse_event_line(Beatmap& bm,
   }
   const std::string_view f0{p, static_cast<size_t>(c1 - p)};
   const char* rest = c1 + 1;
-  if (const auto* handler = kEventHandlers.find(f0))
-    (*handler)(bm, break_count, rest, end, time_offset);
-  else
-    ++bm.stats.storyboard_lines;
+  switch (kEventHandlers.find_index(f0)) {
+    case 0:
+      parse_background_event(bm, break_count, rest, end, time_offset);
+      break;
+    case 1:
+    case 2:
+      parse_video_event(bm, break_count, rest, end, time_offset);
+      break;
+    case 3:
+    case 4:
+      parse_break_event(bm, break_count, rest, end, time_offset);
+      break;
+    default:
+      ++bm.stats.storyboard_lines;
+      break;
+  }
 }
 
 #if FOSU_SIMD

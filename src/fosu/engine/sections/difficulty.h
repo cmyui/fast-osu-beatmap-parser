@@ -50,7 +50,7 @@ inline const char* parse_difficulty_section(Beatmap& beatmap,
       else
         ++beatmap.stats.malformed_lines;
     } else {
-      parse_key_value(beatmap, kDifficultyFields, *field);
+      parse_key_value<kDifficultyFields>(beatmap, *field);
     }
   });
 }

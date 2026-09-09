@@ -110,7 +110,7 @@ inline constexpr auto kGeneralFields = make_string_lookup<FieldParser>({
 inline const char* parse_general_section(Beatmap& beatmap,
                                          const char* p,
                                          const char* end) {
-  return parse_key_value_section(beatmap, kGeneralFields, p, end);
+  return parse_key_value_section<kGeneralFields>(beatmap, p, end);
 }
 
 }  // namespace fosu::internal

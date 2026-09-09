@@ -8,28 +8,26 @@
 
 namespace fosu::internal {
 
-// FNV-1a: constant keys are hashed during compilation; input keys at lookup.
-constexpr uint32_t string_hash(std::string_view key) {
-  uint32_t hash = 2166136261u;
+// Seeded FNV-1a with a final mix so the low bucket bits use the entire hash.
+constexpr uint32_t string_hash(std::string_view key, uint32_t seed = 0) {
+  uint32_t hash = 2166136261u ^ seed;
   for (unsigned char byte : key) {
     hash ^= byte;
     hash *= 16777619u;
   }
-  return hash;
+  hash ^= hash >> 16;
+  hash *= 0x85ebca6bu;
+  return hash ^ (hash >> 13);
 }
 
 template <typename Value>
 struct StringEntry {
   std::string_view key;
   Value value;
-  uint32_t hash;
-
-  constexpr StringEntry(std::string_view key, Value value)
-      : key(key), value(value), hash(string_hash(key)) {}
 };
 
-// Immutable open-addressed table. Zero slots mark misses; occupied slots store
-// one-based entry indices. No allocations or runtime table construction.
+// Choose a collision-free seed for known keys at compile time. Unknown keys
+// still require full equality. Zero slots mark misses; others hold entry + 1.
 template <typename Value, size_t N>
 class StringLookup {
  public:
@@ -38,30 +36,51 @@ class StringLookup {
     for (size_t i = 0; i < N; ++i) {
       if (entries[i].key.size() > max_key_size_)
         max_key_size_ = entries[i].key.size();
-      size_t slot = entries[i].hash & kMask;
-      while (slots_[slot])
-        slot = (slot + 1) & kMask;
-      slots_[slot] = i + 1;
     }
+    for (seed_ = 0; seed_ < 4096; ++seed_) {
+      slots_.fill(0);
+      bool collision = false;
+      for (size_t i = 0; i < N; ++i) {
+        const auto slot = hash_key(entries[i].key) & kMask;
+        if (slots_[slot]) {
+          collision = true;
+          break;
+        }
+        slots_[slot] = i + 1;
+      }
+      if (!collision)
+        return;
+    }
+    throw "No perfect hash found within search budget";
   }
 
   constexpr const Value* find(std::string_view key) const {
-    if (key.size() > max_key_size_)
-      return nullptr;
-    const auto hash = string_hash(key);
-    size_t slot = hash & kMask;
-    while (slots_[slot]) {
-      const auto& entry = entries_[slots_[slot] - 1];
-      // Full equality is required even when the entire hash matches.
-      if (entry.hash == hash && entry.key == key)
-        return &entry.value;
-      slot = (slot + 1) & kMask;
-    }
-    return nullptr;
+    const auto index = find_index(key);
+    return index < N ? &entries_[index].value : nullptr;
   }
+  constexpr size_t find_index(std::string_view key) const {
+    if (key.size() > max_key_size_)
+      return N;
+    const auto index = slots_[hash_key(key) & kMask];
+    return index && entries_[index - 1].key == key ? index - 1 : N;
+  }
+  static constexpr size_t size = N;
+  constexpr size_t slot_for(std::string_view key) const {
+    return key.size() > max_key_size_ ? kCapacity + N : hash_key(key) & kMask;
+  }
+  constexpr size_t slot_at(size_t index) const {
+    // Unused switch cases lie outside every possible input slot.
+    return index < N ? hash_key(entries_[index].key) & kMask : kCapacity + index;
+  }
+  constexpr auto key_at(size_t index) const { return entries_[index].key; }
+  constexpr Value value_at(size_t index) const { return entries_[index].value; }
 
  private:
-  static constexpr size_t kCapacity = std::bit_ceil(N * 2);
+  constexpr uint32_t hash_key(std::string_view key) const {
+    return string_hash(key, seed_);
+  }
+  uint32_t seed_ = 0;
+  static constexpr size_t kCapacity = std::bit_ceil(N * 4);
   static constexpr size_t kMask = kCapacity - 1;
   std::array<StringEntry<Value>, N> entries_;
   std::array<size_t, kCapacity> slots_{};

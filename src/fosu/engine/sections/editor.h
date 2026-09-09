@@ -30,7 +30,7 @@ inline constexpr auto kEditorFields = make_string_lookup<FieldParser>({
 inline const char* parse_editor_section(Beatmap& beatmap,
                                         const char* p,
                                         const char* end) {
-  return parse_key_value_section(beatmap, kEditorFields, p, end);
+  return parse_key_value_section<kEditorFields>(beatmap, p, end);
 }
 
 }  // namespace fosu::internal

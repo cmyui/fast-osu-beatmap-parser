@@ -73,23 +73,51 @@ inline bool assign_field_text(BeatmapHeader& header, std::string_view input) {
   return true;
 }
 
-template <size_t N>
-inline void parse_key_value(Beatmap& beatmap,
-                            const StringLookup<FieldParser, N>& fields,
-                            const KeyValue& field) {
-  if (const auto* parse = fields.find(field.key))
-    if (!(*parse)(beatmap, field.value))
-      ++beatmap.stats.malformed_lines;
+template <auto& Fields>
+inline void parse_key_value(Beatmap& beatmap, const KeyValue& field) {
+  // A switch exposes constant keys and handlers to the compiler, allowing
+  // equality checks and field assignments to inline without an indirect call.
+  static_assert(Fields.size <= 16, "Extend the field dispatch cases for larger sections");
+  bool valid = true;
+#define FOSU_FIELD_CASE(index)                                \
+  case Fields.slot_at(index):                                 \
+    if constexpr (Fields.size > index) {                      \
+      if (field.key == Fields.key_at(index))                  \
+        valid = Fields.value_at(index)(beatmap, field.value); \
+    }                                                         \
+    break
+  switch (Fields.slot_for(field.key)) {
+    FOSU_FIELD_CASE(0);
+    FOSU_FIELD_CASE(1);
+    FOSU_FIELD_CASE(2);
+    FOSU_FIELD_CASE(3);
+    FOSU_FIELD_CASE(4);
+    FOSU_FIELD_CASE(5);
+    FOSU_FIELD_CASE(6);
+    FOSU_FIELD_CASE(7);
+    FOSU_FIELD_CASE(8);
+    FOSU_FIELD_CASE(9);
+    FOSU_FIELD_CASE(10);
+    FOSU_FIELD_CASE(11);
+    FOSU_FIELD_CASE(12);
+    FOSU_FIELD_CASE(13);
+    FOSU_FIELD_CASE(14);
+    FOSU_FIELD_CASE(15);
+    default:
+      break;
+  }
+#undef FOSU_FIELD_CASE
+  if (!valid)
+    ++beatmap.stats.malformed_lines;
 }
 
-template <size_t N>
+template <auto& Fields>
 inline const char* parse_key_value_section(Beatmap& beatmap,
-                                           const StringLookup<FieldParser, N>& fields,
                                            const char* p,
                                            const char* end) {
   return for_each_section_line(p, end, [&](std::string_view line) {
     if (const auto field = split_key_value(line))
-      parse_key_value(beatmap, fields, *field);
+      parse_key_value<Fields>(beatmap, *field);
   });
 }
 
