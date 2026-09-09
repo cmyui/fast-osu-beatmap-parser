@@ -19,7 +19,7 @@ namespace fosu {
 // one-pass timing point parser on garbage input (~90 bytes past a line
 // start near EOF).
 inline constexpr size_t kBufferPadding = 128;
-inline constexpr size_t kMaxInputSize = 64u * 1024u * 1024u;
+inline constexpr size_t kMaxInputSize = 128u * 1024u * 1024u;
 
 struct FileBuffer {
   std::unique_ptr<char[]> data;

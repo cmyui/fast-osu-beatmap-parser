@@ -318,6 +318,29 @@ void test_read_into_reuse() {
   unlink(path);
 }
 
+static void test_input_size_limit() {
+  char byte = 0;
+  fosu::Parser parser;
+  auto memory_result = parser.parse(&byte, fosu::kMaxInputSize + 1);
+  CHECK(!memory_result);
+  CHECK(memory_result.error().code == fosu::ErrorCode::InputTooLarge);
+
+  char path[] = "/tmp/fosu_oversized_XXXXXX";
+  const int fd = mkstemp(path);
+  CHECK(fd >= 0);
+  CHECK_EQ(ftruncate(fd, static_cast<off_t>(fosu::kMaxInputSize + 1)), 0);
+  close(fd);
+
+  auto file_result = parser.parse_file(path);
+  CHECK(!file_result);
+  CHECK(file_result.error().code == fosu::ErrorCode::InputTooLarge);
+  fosu::FileBuffer buffer;
+  errno = 0;
+  CHECK(!fosu::read_into(path, buffer));
+  CHECK_EQ(errno, EFBIG);
+  unlink(path);
+}
+
 static void test_parser_prepares_engine_input_and_output() {
   static int calls = 0;
   const fosu::ParsingEngine engine{
@@ -459,5 +482,6 @@ int main() {
   test_failed_copy_rewinds_destination();
   test_arena_interface();
   test_read_into_reuse();
+  test_input_size_limit();
   return test_result();
 }

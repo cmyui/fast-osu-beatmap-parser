@@ -26,7 +26,7 @@ for note in beatmap.hit_objects:
 memoryview, and arrays. Non-bytes buffers are copied to an immutable snapshot;
 encode text explicitly.
 
-Inputs are limited to 64 MiB. Oversized inputs raise `ValueError`, allocation
+Inputs are limited to 128 MiB. Oversized inputs raise `ValueError`, allocation
 failures raise `MemoryError`, and file failures raise `OSError`. Native parsing
 releases the GIL; Python value construction holds it. Concurrent calls return
 independent results. Malformed records are skipped and counted in
