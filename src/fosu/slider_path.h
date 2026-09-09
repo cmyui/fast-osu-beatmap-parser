@@ -6,6 +6,14 @@
 
 namespace fosu {
 
+// Keep the official implementation's separate single-precision operations.
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC optimize("fp-contract=off")
+#endif
+
 // Subpixel coordinates relative to the slider head, in osu! playfield pixels.
 struct PathPoint {
   float x, y;
@@ -47,5 +55,9 @@ inline PathPoint slider_position_at(const SliderPath& path, double progress) {
   return path.points[i - 1] + (path.points[i] - path.points[i - 1]) *
                                   static_cast<float>((distance - start) / length);
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC pop_options
+#endif
 
 }  // namespace fosu

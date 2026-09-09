@@ -167,7 +167,9 @@ inline bool circular_arc_distance(std::span<const CurvePoint> points, Curve& dis
   const double amount =
       2 * radius <= 0.1f
           ? 2
-          : std::max(2.0, std::ceil(range / (2 * std::acos(1 - 0.1f / radius))));
+          : std::max(2.0,
+                     std::ceil(range /
+                               (2 * std::acos(static_cast<double>(1 - 0.1f / radius)))));
   if (!std::isfinite(amount) || amount >= 1000)
     return false;
   for (int i = 0; i < static_cast<int>(amount); ++i) {
