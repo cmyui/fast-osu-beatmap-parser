@@ -53,6 +53,27 @@ inline const char* for_each_section_line(const char* p,
   return p;
 }
 
+// As above, but stops and reports allocation failure when a line cannot be
+// published to parser-owned scratch storage.
+template <typename ParseLine>
+inline const char* for_each_section_line_until(const char* p,
+                                               const char* end,
+                                               ParseLine parse_line) {
+  while (p < end) {
+    if (*p == '\r' || *p == '\n') {
+      ++p;
+      continue;
+    }
+    if (*p == '[')
+      break;
+    const auto line = read_line(p, end);
+    if (!ignored_line(p, p + line.text.size()) && !parse_line(line.text))
+      return nullptr;
+    p = line.next;
+  }
+  return p;
+}
+
 inline const char* skip_section(const char* p, const char* end) {
   const char* header = find_byte<'['>(p, end);
   // A bracket inside a value or comment is not a section header.

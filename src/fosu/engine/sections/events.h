@@ -1,5 +1,6 @@
 #pragma once
 #include <fosu/beatmap.h>
+#include <fosu/engine/parsing/arena_list.h>
 #include <fosu/engine/parsing/lines.h>
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/parsing/string_lookup.h>
@@ -41,26 +42,31 @@ inline std::optional<std::string_view> parse_event_filename(const char* rest,
   return strip_quotes(trim(filename, next));
 }
 
-inline void parse_background_event(Beatmap& bm,
-                                   size_t&,
+inline bool parse_background_event(Beatmap& bm,
+                                   Arena*,
+                                   ArenaList<Break>&,
                                    const char* rest,
                                    const char* end,
                                    int) {
   if (const auto filename = parse_event_filename(rest, end))
     bm.background = *filename;
+  return true;
 }
 
-inline void parse_video_event(Beatmap& bm,
-                              size_t&,
+inline bool parse_video_event(Beatmap& bm,
+                              Arena*,
+                              ArenaList<Break>&,
                               const char* rest,
                               const char* end,
                               int) {
   if (const auto filename = parse_event_filename(rest, end))
     bm.video = *filename;
+  return true;
 }
 
-inline void parse_break_event(Beatmap& bm,
-                              size_t& break_count,
+inline bool parse_break_event(Beatmap& bm,
+                              Arena* arena,
+                              ArenaList<Break>& breaks,
                               const char* rest,
                               const char* end,
                               int time_offset) {
@@ -68,18 +74,20 @@ inline void parse_break_event(Beatmap& bm,
   const char* q = parse_osu_double(rest, end, start);
   if (q == rest || q >= end || *q != ',') {
     ++bm.stats.malformed_lines;
-    return;
+    return true;
   }
   const char* r = parse_osu_double(q + 1, end, stop);
   if (r == q + 1 || r != end) {
     ++bm.stats.malformed_lines;
-    return;
+    return true;
   }
   start += time_offset;
-  bm.breaks[break_count++] = {start, std::max(start, stop + time_offset)};
+  const Break parsed{start, std::max(start, stop + time_offset)};
+  return arena_list_push(arena, breaks, parsed) != nullptr;
 }
 
-using EventHandler = void (*)(Beatmap&, size_t&, const char*, const char*, int);
+using EventHandler =
+    bool (*)(Beatmap&, Arena*, ArenaList<Break>&, const char*, const char*, int);
 inline constexpr auto kEventHandlers = make_string_lookup<EventHandler>({
     {"0", parse_background_event},
     {"1", parse_video_event},
@@ -88,33 +96,37 @@ inline constexpr auto kEventHandlers = make_string_lookup<EventHandler>({
     {"Break", parse_break_event},
 });
 
-inline void parse_event_line(Beatmap& bm,
-                             size_t& break_count,
+inline bool parse_event_line(Beatmap& bm,
+                             Arena* arena,
+                             ArenaList<Break>& breaks,
                              const char* p,
                              size_t len,
                              int time_offset) {
   // Storyboard commands are indented; count and skip them.
   if (len == 0 || *p == ' ' || *p == '_') {
     ++bm.stats.storyboard_lines;
-    return;
+    return true;
   }
   const char* end = p + len;
   const auto* c1 = find_byte<','>(p, end);
   if (c1 == end) {
     ++bm.stats.storyboard_lines;
-    return;
+    return true;
   }
   const std::string_view f0{p, static_cast<size_t>(c1 - p)};
   const char* rest = c1 + 1;
   if (const auto* handler = kEventHandlers.find(f0))
-    (*handler)(bm, break_count, rest, end, time_offset);
-  else
+    return (*handler)(bm, arena, breaks, rest, end, time_offset);
+  else {
     ++bm.stats.storyboard_lines;
+    return true;
+  }
 }
 
 #if FOSU_SIMD
 inline const char* parse_events_section_simd(Beatmap& bm,
-                                             size_t& break_count,
+                                             Arena* arena,
+                                             ArenaList<Break>& breaks,
                                              const char* p,
                                              const char* file_end,
                                              int time_offset) {
@@ -157,7 +169,8 @@ inline const char* parse_events_section_simd(Beatmap& bm,
     const auto len = static_cast<size_t>(line_end - line);
     if (len >= 2 && c == '/' && line[1] == '/')
       continue;  // comment
-    parse_event_line(bm, break_count, line, len, time_offset);
+    if (!parse_event_line(bm, arena, breaks, line, len, time_offset))
+      return nullptr;
   }
   bm.stats.storyboard_lines += storyboard_lines;
   return p;
@@ -165,24 +178,26 @@ inline const char* parse_events_section_simd(Beatmap& bm,
 #endif
 
 inline const char* parse_events_section_scalar(Beatmap& bm,
-                                               size_t& break_count,
+                                               Arena* arena,
+                                               ArenaList<Break>& breaks,
                                                const char* p,
                                                const char* file_end,
                                                int time_offset) {
-  return for_each_section_line(p, file_end, [&](std::string_view line) {
-    parse_event_line(bm, break_count, line.data(), line.size(), time_offset);
+  return for_each_section_line_until(p, file_end, [&](std::string_view line) {
+    return parse_event_line(bm, arena, breaks, line.data(), line.size(), time_offset);
   });
 }
 
 inline const char* parse_events_section(Beatmap& bm,
-                                        size_t& break_count,
+                                        Arena* arena,
+                                        ArenaList<Break>& breaks,
                                         const char* p,
                                         const char* file_end,
                                         int time_offset = 0) {
 #if FOSU_SIMD
-  return parse_events_section_simd(bm, break_count, p, file_end, time_offset);
+  return parse_events_section_simd(bm, arena, breaks, p, file_end, time_offset);
 #else
-  return parse_events_section_scalar(bm, break_count, p, file_end, time_offset);
+  return parse_events_section_scalar(bm, arena, breaks, p, file_end, time_offset);
 #endif
 }
 

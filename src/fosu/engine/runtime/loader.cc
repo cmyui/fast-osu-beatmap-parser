@@ -50,7 +50,7 @@ const ParsingEngine* load_engine_library(const char* name) {
   if (!loaded)
     return nullptr;
   const auto entry =
-      reinterpret_cast<const ParsingEngine* (*)()>(dlsym(loaded, "fosu_engine_v2"));
+      reinterpret_cast<const ParsingEngine* (*)()>(dlsym(loaded, "fosu_engine_v3"));
   if (!entry) {
     dlclose(loaded);
     return nullptr;

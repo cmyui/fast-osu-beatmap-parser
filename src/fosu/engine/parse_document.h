@@ -1,5 +1,6 @@
 #pragma once
 
+#include <fosu/engine/parsing/arena_list.h>
 #include <fosu/engine/parsing/section_names.h>
 #include <fosu/engine/parsing_engine.h>
 #include <fosu/engine/sections/colours.h>
@@ -33,19 +34,27 @@ inline const char* parse_preamble(Beatmap& beatmap, const char* p, const char* e
   });
 }
 
-// Compiled once per engine ISA. Each section consumes its body and returns
-// the next header or EOF; framing and scalar fallbacks stay inside the section.
+// Compiled once per engine ISA. Each section consumes its body and returns the
+// next header or EOF. Parsed arrays grow in scratch chunks and are flattened
+// into exact result-arena spans once the whole document has been accepted.
 // Input has kBufferPadding readable zero bytes; string views refer into it.
-inline void parse_document(std::span<const char> input,
+inline bool parse_document(std::span<const char> input,
                            Beatmap& beatmap,
+                           Arena* result_arena,
+                           Arena* scratch_arena,
                            ParseOptions options) noexcept {
   if (input.empty())
-    return;
+    return true;
+  const TempArena temporary_storage{scratch_arena};
+  ArenaList<Break> breaks;
+  ArenaList<uint32_t> colours;
+  ArenaList<TimingPoint> timing_points;
+  ArenaList<HitObject> hit_objects;
+  ArenaList<Slider> sliders;
+  ArenaList<SliderPoint> slider_points;
   const char* end = input.data() + input.size();
   const char* p = parse_preamble(beatmap, input.data(), end);
   const int time_offset = beatmap.format_version < 5 ? 24 : 0;
-  size_t break_count = 0, colour_count = 0, timing_point_count = 0;
-  size_t hit_object_count = 0, slider_count = 0, slider_point_count = 0;
   std::optional<double> approach_rate;
   uint32_t pending = options.sections & 0x1FEu;
 
@@ -76,23 +85,26 @@ inline void parse_document(std::span<const char> input,
         p = parse_difficulty_section(beatmap, approach_rate, p, end);
         break;
       case Section::Events:
-        p = parse_events_section(beatmap, break_count, p, end, time_offset);
+        p = parse_events_section(beatmap, scratch_arena, breaks, p, end, time_offset);
         break;
       case Section::TimingPoints:
-        p = parse_timing_points_section(beatmap, timing_point_count, p, end, time_offset);
+        p = parse_timing_points_section(beatmap, scratch_arena, timing_points, p, end,
+                                        time_offset);
         break;
       case Section::Colours:
-        p = parse_colours_section(beatmap, colour_count, p, end);
+        p = parse_colours_section(beatmap, scratch_arena, colours, p, end);
         break;
       case Section::HitObjects:
-        p = parse_hitobjects_section(beatmap, hit_object_count, slider_count,
-                                     slider_point_count, p, end, time_offset);
+        p = parse_hitobjects_section(beatmap, scratch_arena, hit_objects, sliders,
+                                     slider_points, p, end, time_offset);
         break;
       case Section::None:
       case Section::Unknown:
         p = skip_section(p, end);
         break;
     }
+    if (!p)
+      return false;
   }
 
   // An omitted (or wholly invalid) AR inherits the final OD across sections.
@@ -100,12 +112,23 @@ inline void parse_document(std::span<const char> input,
   // General may follow Difficulty or repeat; CS depends on the final mode.
   beatmap.cs = beatmap.mode == 3 ? std::clamp(beatmap.cs, 1.0, 18.0)
                                  : std::clamp(beatmap.cs, 0.0, 10.0);
-  beatmap.breaks = beatmap.breaks.first(break_count);
-  beatmap.combo_colours = beatmap.combo_colours.first(colour_count);
-  beatmap.timing_points = beatmap.timing_points.first(timing_point_count);
-  beatmap.hit_objects = beatmap.hit_objects.first(hit_object_count);
-  beatmap.sliders = beatmap.sliders.first(slider_count);
-  beatmap.slider_points = beatmap.slider_points.first(slider_point_count);
+  auto flat_breaks = flatten_arena_list(result_arena, breaks);
+  auto flat_colours = flatten_arena_list(result_arena, colours);
+  auto flat_timing_points = flatten_arena_list(result_arena, timing_points);
+  auto flat_hit_objects = flatten_arena_list(result_arena, hit_objects);
+  auto flat_sliders = flatten_arena_list(result_arena, sliders);
+  auto flat_slider_points = flatten_arena_list(result_arena, slider_points);
+  if (!flat_breaks || !flat_colours || !flat_timing_points || !flat_hit_objects ||
+      !flat_sliders || !flat_slider_points) {
+    return false;
+  }
+  beatmap.breaks = flat_breaks.value();
+  beatmap.combo_colours = flat_colours.value();
+  beatmap.timing_points = flat_timing_points.value();
+  beatmap.hit_objects = flat_hit_objects.value();
+  beatmap.sliders = flat_sliders.value();
+  beatmap.slider_points = flat_slider_points.value();
+  return true;
 }
 
 // The ISA this code was compiled for, not a runtime choice based on the host CPU.

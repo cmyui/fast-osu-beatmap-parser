@@ -7,58 +7,69 @@
 #include <fosu/engine/hit_objects/common_fields.h>
 #include <fosu/engine/hit_objects/object_types.h>
 #include <fosu/engine/hit_objects/slider_fields.h>
+#include <fosu/engine/parsing/arena_list.h>
 #include <fosu/engine/parsing/lines.h>
 #include <fosu/engine/primitives/byte_scan.h>
 
 namespace fosu::internal {
 
+enum class HitObjectParseResult : uint8_t {
+  Accepted,
+  Malformed,
+  AllocationFailure,
+};
+
 // Slider params after "type,hitSound,":
 //   curveType|x:y|x:y...,slides,length[,edgeSounds,edgeSets][,hitSample]
 //
-// Each point is parsed into a local value before it is copied into the
-// beatmap arena. A malformed point list is discarded. Points parsed before a
+// Each point is parsed into a local value before it is appended to scratch
+// storage. A malformed point list is discarded. Points parsed before a
 // malformed later field remain, matching the official decoder's behavior.
-__attribute__((noinline)) inline bool parse_slider(
-    Beatmap& beatmap,
-    size_t& slider_count,
-    size_t& point_count,
+__attribute__((noinline)) inline HitObjectParseResult parse_slider(
+    Arena* arena,
+    ArenaList<Slider>& sliders,
+    ArenaList<SliderPoint>& points,
     HitObject& object,
     const char* p,
     const char* end,
     const HitObjectParseConstants& constants) {
   if (p >= end) [[unlikely]]
-    return false;
+    return HitObjectParseResult::Malformed;
 
   const auto curve_type = parse_curve_type(*p++);
   if (!curve_type)
-    return false;
-  const size_t point_begin = point_count;
+    return HitObjectParseResult::Malformed;
+  const auto point_position = arena_list_position(points);
+  const size_t point_begin = points.count;
 #if FOSU_SIMD
   if (const auto initial_points =
           try_parse_slider_point_prefix_fast<SliderPoint>(p, constants)) {
-    beatmap.slider_points[point_count++] = initial_points->first;
-    if (initial_points->has_second)
-      beatmap.slider_points[point_count++] = initial_points->second;
+    if (!arena_list_push(arena, points, initial_points->first) ||
+        (initial_points->has_second &&
+         !arena_list_push(arena, points, initial_points->second))) {
+      return HitObjectParseResult::AllocationFailure;
+    }
     p = initial_points->next;
   }
 #endif
   while (p < end && *p == '|') {
     const auto point = parse_slider_point<SliderPoint>(p, end, constants);
     if (!point) [[unlikely]] {
-      point_count = point_begin;
-      return false;
+      arena_list_pop_to(points, point_position);
+      return HitObjectParseResult::Malformed;
     }
-    beatmap.slider_points[point_count++] = point->value;
+    if (!arena_list_push(arena, points, point->value))
+      return HitObjectParseResult::AllocationFailure;
     p = point->next;
   }
 
   const auto tail = parse_slider_tail(p, end, constants);
   if (!tail) [[unlikely]]
-    return false;
+    return HitObjectParseResult::Malformed;
 
   Slider slider{
       .point_begin = static_cast<uint32_t>(point_begin),
-      .point_count = static_cast<uint32_t>(point_count - point_begin),
+      .point_count = static_cast<uint32_t>(points.count - point_begin),
       .slides = std::max(1, tail->slides),
       .curve_type = *curve_type,
       .length = std::max(0.0, tail->length),
@@ -66,90 +77,90 @@ __attribute__((noinline)) inline bool parse_slider(
       .edge_sets = tail->sounds.edge_sets,
   };
   object.hit_sample = tail->sounds.hit_sample;
-  object.slider = static_cast<uint32_t>(slider_count);
-  beatmap.sliders[slider_count++] = slider;
-  return true;
+  object.slider = static_cast<uint32_t>(sliders.count);
+  if (!arena_list_push(arena, sliders, slider))
+    return HitObjectParseResult::AllocationFailure;
+  return HitObjectParseResult::Accepted;
 }
 
 // Everything after the "x,y,time,type,hitSound" prefix: slider params,
 // spinner/hold end times, or a trailing hit sample.
-inline bool parse_hitobject_details(Beatmap& beatmap,
-                                    size_t& slider_count,
-                                    size_t& point_count,
-                                    HitObject& object,
-                                    const char* p,
-                                    const char* end,
-                                    const HitObjectParseConstants& constants) {
+inline HitObjectParseResult parse_hitobject_details(
+    Arena* arena,
+    ArenaList<Slider>& sliders,
+    ArenaList<SliderPoint>& points,
+    HitObject& object,
+    const char* p,
+    const char* end,
+    const HitObjectParseConstants& constants) {
   switch (classify_hitobject_kind(object.type)) {
     case HitObjectKind::Circle: {
       const auto details = parse_circle_details(p, end);
       if (!details)
-        return false;
+        return HitObjectParseResult::Malformed;
       object.end_time = 0;
       object.hit_sample = details->hit_sample;
-      return true;
+      return HitObjectParseResult::Accepted;
     }
     case HitObjectKind::Slider:
-      return p < end && *p == ',' &&
-             parse_slider(beatmap, slider_count, point_count, object, p + 1, end,
-                          constants);
+      return p < end && *p == ','
+                 ? parse_slider(arena, sliders, points, object, p + 1, end, constants)
+                 : HitObjectParseResult::Malformed;
     case HitObjectKind::Spinner: {
       const auto details = parse_spinner_details(p, end);
       if (!details)
-        return false;
+        return HitObjectParseResult::Malformed;
       object.end_time = details->end_time;
       object.hit_sample = details->hit_sample;
-      return true;
+      return HitObjectParseResult::Accepted;
     }
     case HitObjectKind::Hold: {
       const auto details = parse_hold_details(object.time, p, end);
       if (!details)
-        return false;
+        return HitObjectParseResult::Malformed;
       object.end_time = details->end_time;
       object.hit_sample = details->hit_sample;
-      return true;
+      return HitObjectParseResult::Accepted;
     }
     case HitObjectKind::Invalid:
-      return false;
+      return HitObjectParseResult::Malformed;
   }
-  return false;
+  return HitObjectParseResult::Malformed;
 }
 
 // Lines the fast prefix does not accept: the scalar prefix parser handles
 // signed, decimal, spaced or wide fields; anything else is malformed.
-__attribute__((noinline)) inline bool parse_hitobject_line_scalar(
+__attribute__((noinline)) inline HitObjectParseResult parse_hitobject_line_scalar(
     Beatmap& beatmap,
-    size_t& slider_count,
-    size_t& point_count,
+    Arena* arena,
+    ArenaList<Slider>& sliders,
+    ArenaList<SliderPoint>& points,
     HitObject& object,
     const char* p,
     const char* line_end,
     const HitObjectParseConstants& constants) {
   const auto prefix = parse_hitobject_prefix_scalar(p, static_cast<size_t>(line_end - p));
   if (!prefix)
-    return false;
+    return HitObjectParseResult::Malformed;
   initialize_hitobject(object, prefix->value);
   ++beatmap.stats.slow_path_lines;
-  return parse_hitobject_details(beatmap, slider_count, point_count, object, prefix->next,
-                                 line_end, constants);
+  return parse_hitobject_details(arena, sliders, points, object, prefix->next, line_end,
+                                 constants);
 }
 
-// Interpret a successfully decoded record before publishing it to the arena.
+// Interpret a successfully decoded record before appending it to scratch storage.
 // The preceding accepted object is still in source order, including across
 // repeated HitObjects sections. No separate state crosses the engine boundary.
 inline HitObject normalize_hitobject(HitObject object,
-                                     const Beatmap& beatmap,
-                                     size_t preceding_count,
+                                     const HitObject* previous,
                                      int offset) {
   const bool explicit_combo = object.type & 4;
   object.time += offset;
   object.new_combo = false;
   object.combo_skip = 0;
   if (object.is_circle() || object.is_slider()) {
-    object.new_combo =
-        !preceding_count || explicit_combo ||
-        classify_hitobject_kind(beatmap.hit_objects[preceding_count - 1].type) ==
-            HitObjectKind::Spinner;
+    object.new_combo = !previous || explicit_combo ||
+                       classify_hitobject_kind(previous->type) == HitObjectKind::Spinner;
     object.combo_skip = explicit_combo ? (object.type >> 4) & 7 : 0;
     object.end_time = object.is_circle() ? object.time : 0;
   } else if (object.is_spinner()) {
@@ -166,9 +177,10 @@ inline HitObject normalize_hitobject(HitObject object,
 
 inline const char* parse_hitobjects_section_scalar(
     Beatmap& beatmap,
-    size_t& hit_object_count,
-    size_t& slider_count,
-    size_t& point_count,
+    Arena* arena,
+    ArenaList<HitObject>& hit_objects,
+    ArenaList<Slider>& sliders,
+    ArenaList<SliderPoint>& points,
     const char* p,
     const char* file_end,
     const HitObjectParseConstants& constants,
@@ -189,11 +201,14 @@ inline const char* parse_hitobjects_section_scalar(
     const char* next_line = newline ? newline + 1 : file_end;
     if (!ignored_line(p, line_end)) {
       HitObject object{};
-      if (parse_hitobject_line_scalar(beatmap, slider_count, point_count, object, p,
-                                      line_end, constants)) {
-        beatmap.hit_objects[hit_object_count] =
-            normalize_hitobject(object, beatmap, hit_object_count, time_offset);
-        ++hit_object_count;
+      const auto parsed = parse_hitobject_line_scalar(beatmap, arena, sliders, points,
+                                                      object, p, line_end, constants);
+      if (parsed == HitObjectParseResult::Accepted) {
+        object = normalize_hitobject(object, arena_list_back(hit_objects), time_offset);
+        if (!arena_list_push(arena, hit_objects, object))
+          return nullptr;
+      } else if (parsed == HitObjectParseResult::AllocationFailure) {
+        return nullptr;
       } else [[unlikely]] {
         ++beatmap.stats.malformed_lines;
       }
@@ -207,9 +222,10 @@ inline const char* parse_hitobjects_section_scalar(
 // SIMD section loop. One 32-byte load per line yields the newline, comma and
 // non-digit masks. Lines outside the common editor shape take the scalar path.
 inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
-                                                 size_t& hit_object_count,
-                                                 size_t& slider_count,
-                                                 size_t& point_count,
+                                                 Arena* arena,
+                                                 ArenaList<HitObject>& hit_objects,
+                                                 ArenaList<Slider>& sliders,
+                                                 ArenaList<SliderPoint>& points,
                                                  const char* p,
                                                  const char* file_end,
                                                  const HitObjectParseConstants& constants,
@@ -236,7 +252,7 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
     if (shape.ok && (shape.p4 == length || after_prefix == ',' || after_prefix == '\0'))
         [[likely]] {
       HitObject object{};
-      bool accepted;
+      HitObjectParseResult parsed;
       const auto prefix = decode_hitobject_prefix(ascii, zero, shape);
       if (prefix) [[likely]] {
         initialize_hitobject(object, *prefix);
@@ -245,32 +261,35 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
         if (kind == HitObjectKind::Circle) {
           if (shape.p4 == length) {
             object.hit_sample = {};
-            accepted = true;
+            parsed = HitObjectParseResult::Accepted;
           } else if (length - shape.p4 == 9 && after_prefix == ',' &&
                      short_sample(p + shape.p4 + 1)) {
             object.hit_sample = {p + shape.p4 + 1, 8};
-            accepted = true;
+            parsed = HitObjectParseResult::Accepted;
           } else {
-            accepted = parse_hitobject_details(beatmap, slider_count, point_count, object,
-                                               p + shape.p4, line_end, constants);
+            parsed = parse_hitobject_details(arena, sliders, points, object, p + shape.p4,
+                                             line_end, constants);
           }
         } else if (kind == HitObjectKind::Slider) {
-          accepted = shape.p4 < length && after_prefix == ',' &&
-                     parse_slider(beatmap, slider_count, point_count, object,
-                                  p + shape.p4 + 1, line_end, constants);
+          parsed = shape.p4 < length && after_prefix == ','
+                       ? parse_slider(arena, sliders, points, object, p + shape.p4 + 1,
+                                      line_end, constants)
+                       : HitObjectParseResult::Malformed;
         } else {
-          accepted = parse_hitobject_details(beatmap, slider_count, point_count, object,
-                                             p + shape.p4, line_end, constants);
+          parsed = parse_hitobject_details(arena, sliders, points, object, p + shape.p4,
+                                           line_end, constants);
         }
       } else {
-        accepted = parse_hitobject_line_scalar(beatmap, slider_count, point_count, object,
-                                               p, line_end, constants);
+        parsed = parse_hitobject_line_scalar(beatmap, arena, sliders, points, object, p,
+                                             line_end, constants);
       }
 
-      if (accepted) {
-        beatmap.hit_objects[hit_object_count] =
-            normalize_hitobject(object, beatmap, hit_object_count, time_offset);
-        ++hit_object_count;
+      if (parsed == HitObjectParseResult::Accepted) {
+        object = normalize_hitobject(object, arena_list_back(hit_objects), time_offset);
+        if (!arena_list_push(arena, hit_objects, object))
+          return nullptr;
+      } else if (parsed == HitObjectParseResult::AllocationFailure) {
+        return nullptr;
       } else [[unlikely]]
         ++malformed;
     } else {
@@ -283,11 +302,14 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
         break;
       if (!ignored_line(p, line_end)) {
         HitObject object{};
-        if (parse_hitobject_line_scalar(beatmap, slider_count, point_count, object, p,
-                                        line_end, constants)) {
-          beatmap.hit_objects[hit_object_count] =
-              normalize_hitobject(object, beatmap, hit_object_count, time_offset);
-          ++hit_object_count;
+        const auto parsed = parse_hitobject_line_scalar(beatmap, arena, sliders, points,
+                                                        object, p, line_end, constants);
+        if (parsed == HitObjectParseResult::Accepted) {
+          object = normalize_hitobject(object, arena_list_back(hit_objects), time_offset);
+          if (!arena_list_push(arena, hit_objects, object))
+            return nullptr;
+        } else if (parsed == HitObjectParseResult::AllocationFailure) {
+          return nullptr;
         } else [[unlikely]] {
           ++malformed;
         }
@@ -303,20 +325,20 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
 #endif
 
 inline const char* parse_hitobjects_section(Beatmap& beatmap,
-                                            size_t& hit_object_count,
-                                            size_t& slider_count,
-                                            size_t& point_count,
+                                            Arena* arena,
+                                            ArenaList<HitObject>& hit_objects,
+                                            ArenaList<Slider>& sliders,
+                                            ArenaList<SliderPoint>& points,
                                             const char* p,
                                             const char* file_end,
                                             int time_offset = 0) {
   const HitObjectParseConstants constants;
 #if FOSU_SIMD
-  return parse_hitobjects_section_simd(beatmap, hit_object_count, slider_count,
-                                       point_count, p, file_end, constants, time_offset);
+  return parse_hitobjects_section_simd(beatmap, arena, hit_objects, sliders, points, p,
+                                       file_end, constants, time_offset);
 #else
-  return parse_hitobjects_section_scalar(beatmap, hit_object_count, slider_count,
-                                         point_count, p, file_end, constants,
-                                         time_offset);
+  return parse_hitobjects_section_scalar(beatmap, arena, hit_objects, sliders, points, p,
+                                         file_end, constants, time_offset);
 #endif
 }
 

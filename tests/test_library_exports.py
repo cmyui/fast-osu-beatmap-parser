@@ -12,7 +12,7 @@ exports = subprocess.check_output(["nm", "-D", "--defined-only", a.library], tex
 names = {line.split()[-1] for line in exports.splitlines()}
 expected = {"_ZN4fosu14runtime_engineEv"}
 if a.engine:
-    expected = {"fosu_engine_v2"}
+    expected = {"fosu_engine_v3"}
 assert names == expected, names ^ expected
 if a.bundled:
     dynamic = subprocess.check_output(["readelf", "-d", a.library], text=True)

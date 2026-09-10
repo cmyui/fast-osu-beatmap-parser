@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fosu/beatmap.h>
+#include <fosu/engine/parsing/arena_list.h>
 #include <fosu/engine/parsing/field_values.h>
 #include <fosu/engine/parsing/lines.h>
 
@@ -28,10 +29,11 @@ inline std::optional<uint32_t> parse_colour(std::string_view input) {
 }
 
 inline const char* parse_colours_section(Beatmap& beatmap,
-                                         size_t& colour_count,
+                                         Arena* arena,
+                                         ArenaList<uint32_t>& colours,
                                          const char* p,
                                          const char* end) {
-  return for_each_section_line(p, end, [&](std::string_view line) {
+  return for_each_section_line_until(p, end, [&](std::string_view line) {
     if (const auto comment = line.find("//"); comment != std::string_view::npos)
       line = line.substr(0, comment);
     const char* line_end = line.data() + line.size();
@@ -40,14 +42,15 @@ inline const char* parse_colours_section(Beatmap& beatmap,
         colon == line_end ? std::nullopt : parse_colour(trim(colon + 1, line_end));
     if (!colour) {
       ++beatmap.stats.malformed_lines;
-      return;
+      return true;
     }
     const auto key = trim(line.data(), colon);
     if (key.substr(0, 5) != "Combo")
-      return;
+      return true;
     const auto index = parse_field_integer(key.substr(5));
     if (index && *index >= 1 && *index <= 8)
-      beatmap.combo_colours[colour_count++] = *colour;
+      return arena_list_push(arena, colours, *colour) != nullptr;
+    return true;
   });
 }
 

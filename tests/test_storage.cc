@@ -332,20 +332,22 @@ static void test_parser_prepares_engine_input_and_output() {
   static int calls = 0;
   const fosu::ParsingEngine engine{
       fosu::EngineKind::Scalar,
-      [](std::span<const char> input, fosu::Beatmap& beatmap,
-         fosu::ParseOptions options) noexcept {
+      [](std::span<const char> input, fosu::Beatmap& beatmap, fosu::Arena* result_arena,
+         fosu::Arena*, fosu::ParseOptions options) noexcept {
         ++calls;
         CHECK_EQ(options.sections, fosu::kSectionHitObjects);
         CHECK_EQ(std::string_view(input.data(), input.size()), "1,2,3,1,0");
         for (size_t i = 0; i < fosu::kBufferPadding; ++i)
           CHECK_EQ(input.data()[input.size() + i], '\0');
-        CHECK(!beatmap.hit_objects.empty());
+        CHECK(beatmap.hit_objects.empty());
         CHECK(beatmap.timing_points.empty());
         CHECK_EQ(beatmap.sample_set, fosu::SampleSet::Normal);
-        beatmap.hit_objects[0] = {.x = 42};
-        beatmap.hit_objects = beatmap.hit_objects.first(1);
-        beatmap.sliders = {};
-        beatmap.slider_points = {};
+        auto* object = fosu::arena_push_array<fosu::HitObject>(result_arena, 1);
+        CHECK(object);
+        *object = {};
+        object->x = 42;
+        beatmap.hit_objects = {object, 1};
+        return true;
       },
   };
   fosu::Parser parser(engine);
