@@ -65,10 +65,11 @@ inline bool allocate_beatmap_arrays(Arena* arena,
                                     size_t input_size,
                                     uint32_t selected_sections) noexcept {
   // Each capacity is a conservative bound derived from the shortest accepted
-  // spelling. The arena reserves address space for it, but physical pages are
+  // spelling. sizeof includes the string literal's trailing null byte.
+  // The arena reserves address space for the bound, but physical pages are
   // only used where the parser writes accepted records.
   if (selected_sections & kSectionEvents) {
-    const size_t capacity = input_size / 5 + 1;  // 2,0,0
+    const size_t capacity = input_size / (sizeof("2,0,0") - 1) + 1;
     Break* values = arena_push_array<Break>(arena, capacity);
     if (!values)
       return false;
@@ -76,7 +77,7 @@ inline bool allocate_beatmap_arrays(Arena* arena,
   }
 
   if (selected_sections & kSectionColours) {
-    const size_t capacity = input_size / 11 + 1;  // Combo:0,0,0
+    const size_t capacity = input_size / (sizeof("Combo1:0,0,0") - 1) + 1;
     uint32_t* values = arena_push_array<uint32_t>(arena, capacity);
     if (!values)
       return false;
@@ -84,7 +85,7 @@ inline bool allocate_beatmap_arrays(Arena* arena,
   }
 
   if (selected_sections & kSectionTimingPoints) {
-    const size_t capacity = input_size / 3 + 1;  // 0,0
+    const size_t capacity = input_size / (sizeof("0,0") - 1) + 1;
     TimingPoint* values = arena_push_array<TimingPoint>(arena, capacity);
     if (!values)
       return false;
@@ -92,19 +93,19 @@ inline bool allocate_beatmap_arrays(Arena* arena,
   }
 
   if (selected_sections & kSectionHitObjects) {
-    const size_t object_capacity = input_size / 9 + 1;  // 0,0,0,1,0
+    const size_t object_capacity = input_size / (sizeof("0,0,0,1,0") - 1) + 1;
     HitObject* objects = arena_push_array<HitObject>(arena, object_capacity);
     if (!objects)
       return false;
     beatmap.hit_objects = {objects, object_capacity};
 
-    const size_t slider_capacity = input_size / 14 + 1;  // 0,0,0,2,0,L,0
+    const size_t slider_capacity = input_size / (sizeof("0,0,0,2,0,L,0") - 1) + 1;
     Slider* sliders = arena_push_array<Slider>(arena, slider_capacity);
     if (!sliders)
       return false;
     beatmap.sliders = {sliders, slider_capacity};
 
-    const size_t point_capacity = input_size / 4 + 1;  // |0:0
+    const size_t point_capacity = input_size / (sizeof("|0:0") - 1) + 1;
     SliderPoint* points = arena_push_array<SliderPoint>(arena, point_capacity);
     if (!points)
       return false;
