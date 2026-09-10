@@ -58,6 +58,9 @@ struct BeatmapHeader {
   // [Events]
   std::string_view background;
   std::string_view video;
+  double video_offset = 0;
+  float storyboard_background_offset_x = 0;
+  float storyboard_background_offset_y = 0;
 };
 
 }  // namespace fosu

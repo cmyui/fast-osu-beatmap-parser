@@ -168,6 +168,26 @@ enum Field {
   f_slow_path_lines,
   f_malformed_lines,
   f_storyboard_lines,
+  f_depth,
+  f_easing,
+  f_start_time,
+  f_start_value,
+  f_end_value,
+  f_parameter,
+  f_repeat_count,
+  f_group_number,
+  f_trigger_name,
+  f_layer,
+  f_origin,
+  f_loop_type,
+  f_filename,
+  f_frame_count,
+  f_frame_delay,
+  f_commands,
+  f_storyboard_elements,
+  f_video_offset,
+  f_storyboard_background_offset_x,
+  f_storyboard_background_offset_y,
   field_count
 };
 const char* field_names[] = {"stacking",
@@ -255,7 +275,27 @@ const char* field_names[] = {"stacking",
                              "fast_path_lines",
                              "slow_path_lines",
                              "malformed_lines",
-                             "storyboard_lines"};
+                             "storyboard_lines",
+                             "depth",
+                             "easing",
+                             "start_time",
+                             "start_value",
+                             "end_value",
+                             "parameter",
+                             "repeat_count",
+                             "group_number",
+                             "trigger_name",
+                             "layer",
+                             "origin",
+                             "loop_type",
+                             "filename",
+                             "frame_count",
+                             "frame_delay",
+                             "commands",
+                             "storyboard_elements",
+                             "video_offset",
+                             "storyboard_background_offset_x",
+                             "storyboard_background_offset_y"};
 static_assert(sizeof(field_names) / sizeof(field_names[0]) == field_count);
 enum PythonType {
   t_point,
@@ -271,18 +311,48 @@ enum PythonType {
   t_beatmap,
   t_event,
   t_stacking,
+  t_storyboard_command,
+  t_storyboard_element,
   t_event_type,
   t_sound,
   t_mode,
   t_sample,
   t_curve,
+  t_storyboard_command_type,
+  t_storyboard_element_type,
+  t_storyboard_layer,
+  t_storyboard_origin,
+  t_storyboard_parameter,
+  t_animation_loop_type,
   type_count
 };
-constexpr int record_type_count = t_stacking + 1;
-constexpr const char* type_names[] = {
-    "Point",    "Circle",          "Slider",    "Spinner",    "HoldNote",  "TimingPoint",
-    "Break",    "ParseStats",      "PathPoint", "SliderPath", "Beatmap",   "SliderEvent",
-    "Stacking", "SliderEventType", "HitSound",  "GameMode",   "SampleSet", "CurveType"};
+constexpr int record_type_count = t_storyboard_element + 1;
+constexpr const char* type_names[] = {"Point",
+                                      "Circle",
+                                      "Slider",
+                                      "Spinner",
+                                      "HoldNote",
+                                      "TimingPoint",
+                                      "Break",
+                                      "ParseStats",
+                                      "PathPoint",
+                                      "SliderPath",
+                                      "Beatmap",
+                                      "SliderEvent",
+                                      "Stacking",
+                                      "StoryboardCommand",
+                                      "StoryboardElement",
+                                      "SliderEventType",
+                                      "HitSound",
+                                      "GameMode",
+                                      "SampleSet",
+                                      "CurveType",
+                                      "StoryboardCommandType",
+                                      "StoryboardElementType",
+                                      "StoryboardLayer",
+                                      "StoryboardOrigin",
+                                      "StoryboardParameter",
+                                      "AnimationLoopType"};
 struct PythonSlot {
   PyObject* descriptor;
   descrsetfunc assign;
@@ -320,6 +390,12 @@ struct BeatmapConverter {
     __builtin_unreachable();  // Only validated native enums reach conversion.
   }
 
+  template <typename Enum>
+  PythonRef enum_value(PythonType type, Enum value) {
+    return PythonRef(
+        PyObject_CallFunction(state.types[type], "i", static_cast<int>(value)));
+  }
+
   struct Value {
     Field field;
     PythonRef value;
@@ -354,6 +430,15 @@ struct BeatmapConverter {
   }
   PythonRef point(float x, float y) {
     return record(t_point, {{f_x, number(x)}, {f_y, number(y)}});
+  }
+  PythonRef triple(const float values[3]) {
+    PythonRef out(PyTuple_New(3));
+    for (size_t i = 0; i < 3; ++i) {
+      PythonRef value = number(values[i]);
+      if (PyTuple_SetItem(out, static_cast<Py_ssize_t>(i), value.release()) < 0)
+        throw PythonError{};
+    }
+    return out;
   }
   template <class F>
   PythonRef list(size_t count, F item) {
@@ -401,6 +486,39 @@ struct BeatmapConverter {
           common);
     }
     return record(circle ? t_circle : h.type & 8 ? t_spinner : t_hold, {}, common);
+  }
+  PythonRef storyboard_command(const fosu::StoryboardCommand& command) {
+    return record(t_storyboard_command,
+                  {{f_type, enum_value(t_storyboard_command_type, command.type)},
+                   {f_depth, integer(command.depth)},
+                   {f_easing, integer(command.easing)},
+                   {f_start_time, number(command.start_time)},
+                   {f_end_time, number(command.end_time)},
+                   {f_start_value, triple(command.start_value)},
+                   {f_end_value, triple(command.end_value)},
+                   {f_parameter, enum_value(t_storyboard_parameter, command.parameter)},
+                   {f_repeat_count, integer(command.repeat_count)},
+                   {f_group_number, integer(command.group_number)},
+                   {f_trigger_name, string(command.trigger_name)}});
+  }
+
+  PythonRef storyboard_element(const fosu::StoryboardElement& element) {
+    return record(
+        t_storyboard_element,
+        {{f_type, enum_value(t_storyboard_element_type, element.type)},
+         {f_layer, enum_value(t_storyboard_layer, element.layer)},
+         {f_origin, enum_value(t_storyboard_origin, element.origin)},
+         {f_loop_type, enum_value(t_animation_loop_type, element.loop_type)},
+         {f_filename, string(element.filename)},
+         {f_x, number(element.x)},
+         {f_y, number(element.y)},
+         {f_time, number(element.time)},
+         {f_volume, integer(element.volume)},
+         {f_frame_count, integer(element.frame_count)},
+         {f_frame_delay, number(element.frame_delay)},
+         {f_commands, list(element.command_count, [&](size_t i) {
+            return storyboard_command(map.storyboard_commands[element.command_begin + i]);
+          })}});
   }
   PythonRef timing_point(const fosu::TimingPoint& t) {
     return record(t_timing, {{f_time, number(t.time)},
@@ -543,6 +661,9 @@ struct BeatmapConverter {
          {f_slider_tick_rate, number(m.slider_tick_rate)},
          {f_background, string(m.background)},
          {f_video, string(m.video)},
+         {f_video_offset, number(m.video_offset)},
+         {f_storyboard_background_offset_x, number(m.storyboard_background_offset_x)},
+         {f_storyboard_background_offset_y, number(m.storyboard_background_offset_y)},
          {f_tag_list, PythonRef(PyUnicode_Split(tags, nullptr, -1))},
          {f_bookmark_list, bookmark_list(bookmarks)},
          {f_tags, std::move(tags)},
@@ -559,6 +680,11 @@ struct BeatmapConverter {
                          [&](size_t i) {
                            return break_period(map.breaks[i]);
                          })},
+         {f_storyboard_elements, list(map.storyboard_elements.size(),
+                                      [&](size_t i) {
+                                        return storyboard_element(
+                                            map.storyboard_elements[i]);
+                                      })},
          {f_stats, stats()},
          {f_combo_colours, list(map.combo_colours.size(), [&](size_t i) {
             return integer(map.combo_colours[i]);

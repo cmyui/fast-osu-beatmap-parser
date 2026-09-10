@@ -119,12 +119,13 @@ and benchmarks.
 
 ## Coverage and assumptions
 
-General, Editor, Metadata, Difficulty, Events (background/video/breaks),
-TimingPoints, Colours and HitObjects are represented. Circles, sliders,
-spinners and mania holds are supported. BOM/CRLF, legacy timing fields and
-missing ApproachRate defaults are handled. Hit samples and slider edge fields
-remain raw strings. Storyboard command bodies are counted and skipped;
-lazer's newer per-segment curve syntax is outside this parser's scope.
+General, Editor, Metadata, Difficulty, Events, TimingPoints, Colours and
+HitObjects are represented. Circles, sliders, spinners and mania holds are
+supported. BOM/CRLF, legacy timing fields and missing ApproachRate defaults are
+handled. Storyboard videos, sprites, animations, samples, commands and variables
+are parsed into typed records; drawing and command evaluation remain consumer work.
+Hit samples and slider edge fields remain raw strings. Lazer's newer per-segment
+curve syntax is outside this parser's scope.
 
 Malformed numeric records are skipped and counted; this is not a strict
 playability validator. Fast paths use speculative reads; `Parser` copies inputs

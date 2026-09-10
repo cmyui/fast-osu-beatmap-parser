@@ -67,16 +67,39 @@ struct BeatmapArraySizes {
   size_t hit_objects = 0;
   size_t sliders = 0;
   size_t slider_points = 0;
+  size_t storyboard_elements = 0;
+  size_t storyboard_commands = 0;
 };
+
+inline size_t first_section_body_size(std::span<const char> input, Section target) {
+  const char* p = input.data();
+  const char* end = p + input.size();
+  while (p < end) {
+    const Line header = read_line(p, end);
+    if (match_section(header.text) != target) {
+      p = header.next;
+      continue;
+    }
+    const char* body = header.next;
+    return static_cast<size_t>(skip_section(body, end) - body);
+  }
+  return 0;
+}
 
 // Derive safe upper bounds from the shortest accepted spelling of each
 // record. Virtual arena space is cheap; only pages containing accepted records
 // are touched. This avoids a sizing pass over the input.
-inline BeatmapArraySizes maximum_beatmap_array_sizes(size_t size,
+inline BeatmapArraySizes maximum_beatmap_array_sizes(std::span<const char> input,
                                                      uint32_t selected_sections) {
+  const size_t size = input.size();
   BeatmapArraySizes sizes;
   if (selected_sections & kSectionEvents)
     sizes.breaks = size / 5 + 1;  // 2,0,0
+  if (selected_sections & kSectionEvents) {
+    const size_t event_size = first_section_body_size(input, Section::Events);
+    sizes.storyboard_elements = event_size / 4 + 1;  // 5,0,0,x
+    sizes.storyboard_commands = event_size / 4 + 1;  // T,x; M may emit two
+  }
   if (selected_sections & kSectionColours)
     sizes.colours = size / 11 + 1;  // Combo:0,0,0
   if (selected_sections & kSectionTimingPoints)
@@ -110,7 +133,9 @@ inline bool allocate_beatmap_arrays(Arena* arena,
       !add.template operator()<TimingPoint>(sizes.timing_points) ||
       !add.template operator()<HitObject>(sizes.hit_objects) ||
       !add.template operator()<Slider>(sizes.sliders) ||
-      !add.template operator()<SliderPoint>(sizes.slider_points))
+      !add.template operator()<SliderPoint>(sizes.slider_points) ||
+      !add.template operator()<StoryboardElement>(sizes.storyboard_elements) ||
+      !add.template operator()<StoryboardCommand>(sizes.storyboard_commands))
     return false;
   if (!bytes)
     return true;
@@ -135,6 +160,10 @@ inline bool allocate_beatmap_arrays(Arena* arena,
   beatmap.hit_objects = take.template operator()<HitObject>(sizes.hit_objects);
   beatmap.sliders = take.template operator()<Slider>(sizes.sliders);
   beatmap.slider_points = take.template operator()<SliderPoint>(sizes.slider_points);
+  beatmap.storyboard_elements =
+      take.template operator()<StoryboardElement>(sizes.storyboard_elements);
+  beatmap.storyboard_commands =
+      take.template operator()<StoryboardCommand>(sizes.storyboard_commands);
   return true;
 }
 
@@ -279,15 +308,22 @@ class Parser {
   }
 
   Result<Beatmap*> finish_parse(ParseOptions opts) noexcept {
-    if (input_size_ != 0) {
-      const auto sizes =
-          internal::maximum_beatmap_array_sizes(input_size_, opts.sections);
+    auto expanded = internal::expand_storyboard_variables({input_, input_size_},
+                                                          opts.sections, scratch_arena_);
+    if (!expanded) {
+      const Error error = expanded.error();
+      reset_working_result();
+      return error;
+    }
+    const auto input = expanded.value();
+    if (!input.empty()) {
+      const auto sizes = internal::maximum_beatmap_array_sizes(input, opts.sections);
       if (!internal::allocate_beatmap_arrays(result_arena_, beatmap_, sizes)) {
         reset_working_result();
         return Error{ErrorCode::AllocationFailure};
       }
     }
-    engine_->parse_document({input_, input_size_}, beatmap_, opts);
+    engine_->parse_document(input, beatmap_, opts);
     if (!internal::apply_legacy_rules(beatmap_, scratch_arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};

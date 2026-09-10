@@ -548,6 +548,46 @@ def test_complete_map(tmp_path):
     assert "hit_objects=4" in repr(b) and len(repr(b)) < 150
 
 
+def test_storyboard_objects_and_variables_are_detached():
+    b = fosu.parse(
+        b"[Variables]\n$path=sb/hero.png\n"
+        b"[Events]\n"
+        b'Sprite,Foreground,Centre,"$path",320,240\n'
+        b" F,0,100,,0,1\n"
+        b" M,0,200,300,10,20,30,40\n"
+        b'Sample,500,Background,"hit.wav",70\n'
+    )
+    sprite, sample = b.storyboard_elements
+    assert sprite.type is fosu.StoryboardElementType.SPRITE
+    assert sprite.filename == "sb/hero.png"
+    assert (sprite.x, sprite.y) == (320, 240)
+    assert [command.type for command in sprite.commands] == [
+        fosu.StoryboardCommandType.FADE,
+        fosu.StoryboardCommandType.MOVE_X,
+        fosu.StoryboardCommandType.MOVE_Y,
+    ]
+    assert sprite.commands[2].start_value[0] == 20
+    assert sprite.commands[2].end_value[0] == 40
+    assert sample.type is fosu.StoryboardElementType.SAMPLE
+    assert sample.filename == "hit.wav" and sample.volume == 70
+
+    # Python values no longer borrow either parser arena or the source bytes.
+    fosu.parse(b"[Metadata]\nTitle:next\n")
+    assert sprite.filename == "sb/hero.png"
+
+
+def test_video_is_a_storyboard_element_with_commands():
+    b = fosu.parse(b'[Events]\nVideo,-5678,"Video.avi",0,0\n F,0,1500,1600,0,1\n')
+    (video,) = b.storyboard_elements
+    assert video.type is fosu.StoryboardElementType.VIDEO
+    assert video.layer is fosu.StoryboardLayer.VIDEO
+    assert video.time == b.video_offset == -5678
+    assert video.filename == b.video == "Video.avi"
+    assert [command.type for command in video.commands] == [
+        fosu.StoryboardCommandType.FADE
+    ]
+
+
 def test_empty_input_defaults():
     b = fosu.parse(b"")
     assert b.title == "" and b.sample_set is fosu.SampleSet.NORMAL

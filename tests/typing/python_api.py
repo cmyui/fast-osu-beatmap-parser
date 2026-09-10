@@ -53,5 +53,12 @@ for note in b.hit_objects:
         assert_type(note.end_time, float)
     else:
         assert_never(note)
+for element in b.storyboard_elements:
+    assert_type(element.type, fosu.StoryboardElementType)
+    assert_type(element.layer, fosu.StoryboardLayer)
+    assert_type(element.commands, list[fosu.StoryboardCommand])
+    for command in element.commands:
+        assert_type(command.type, fosu.StoryboardCommandType)
+        assert_type(command.start_value, tuple[float, float, float])
 assert_type(replace(b, title="Copy"), fosu.Beatmap)
 asdict(b)

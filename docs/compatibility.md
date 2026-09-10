@@ -152,6 +152,8 @@ model: sample resolution, mods and ruleset conversion remain outside the API.
 
 This is bounded compatibility evidence, not complete format or stable-client
 parity. The raw parser is not a replacement for the game's package loader,
-storyboard interpreter or ruleset processing. Empty raw buffers remain valid
-empty results even though the official file decoder requires a header/content.
+storyboard renderer or ruleset processing. Empty raw buffers remain valid empty
+results even though the official file decoder requires a header/content.
+Storyboard elements and their source commands are decoded, but FOSU does not
+render them or evaluate the command timeline.
 Lazer-only curve segments and versions are outside the supported scope.

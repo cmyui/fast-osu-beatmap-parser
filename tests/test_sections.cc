@@ -178,6 +178,86 @@ static void test_old_format() {
   CHECK_EQ(bm.hit_objects[0].hitsound, 4u);
 }
 
+static void test_storyboard_objects_and_variables() {
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(
+        "osu file format v14\n"
+        "[General]\nSampleVolume:73\n"
+        "[Variables]\n$asset=sb/hero.png\n$x=320\n"
+        "[Events]\n"
+        "0,0,\"background.jpg\",12,-4\n"
+        "Video,-250,\"intro.mp4\"\n"
+        " F,0,0,100,0,1 // inline comment\n"
+        "Sprite,Foreground,Centre,\"$asset\",$x,240\n"
+        " F,1,100,,0,1\n"
+        " M,2,200,300,10,20,30,40\n"
+        " L,400,3\n"
+        "  S,0,0,100,1,2\n"
+        " T,HitSoundClap,500,600,2\n"
+        "  P,0,0,,A\n"
+        "Animation,Overlay,TopLeft,\"anim.png\",1,2,4,16,LoopOnce\n"
+        "Sample,700,Fail,\"sample.wav\",64\n",
+        simd);
+
+    CHECK_EQ(map.sample_volume, 73);
+    CHECK(map.background == "background.jpg");
+    CHECK_EQ(map.storyboard_background_offset_x, 12);
+    CHECK_EQ(map.storyboard_background_offset_y, -4);
+    CHECK(map.video == "intro.mp4");
+    CHECK_EQ(map.video_offset, -250);
+    CHECK_EQ(map.storyboard_elements.size(), 4u);
+
+    const auto& video = map.storyboard_elements[0];
+    CHECK_EQ(video.type, fosu::StoryboardElementType::Video);
+    CHECK_EQ(video.layer, fosu::StoryboardLayer::Video);
+    CHECK_EQ(video.time, -250);
+    CHECK(video.filename == "intro.mp4");
+    CHECK_EQ(video.command_count, 1u);
+    CHECK_EQ(map.storyboard_commands[video.command_begin].type,
+             fosu::StoryboardCommandType::Fade);
+
+    const auto& sprite = map.storyboard_elements[1];
+    CHECK_EQ(sprite.type, fosu::StoryboardElementType::Sprite);
+    CHECK_EQ(sprite.layer, fosu::StoryboardLayer::Foreground);
+    CHECK_EQ(sprite.origin, fosu::StoryboardOrigin::Centre);
+    CHECK(sprite.filename == "sb/hero.png");
+    CHECK_EQ(sprite.x, 320);
+    CHECK_EQ(sprite.y, 240);
+    CHECK_EQ(sprite.command_count, 7u);  // M expands into independent X/Y commands.
+
+    const auto commands =
+        map.storyboard_commands.subspan(sprite.command_begin, sprite.command_count);
+    CHECK_EQ(commands[0].type, fosu::StoryboardCommandType::Fade);
+    CHECK_EQ(commands[0].end_time, 100);
+    CHECK_EQ(commands[0].start_value[0], 0);
+    CHECK_EQ(commands[0].end_value[0], 1);
+    CHECK_EQ(commands[1].type, fosu::StoryboardCommandType::MoveX);
+    CHECK_EQ(commands[1].end_value[0], 30);
+    CHECK_EQ(commands[2].type, fosu::StoryboardCommandType::MoveY);
+    CHECK_EQ(commands[2].start_value[0], 20);
+    CHECK_EQ(commands[2].end_value[0], 40);
+    CHECK_EQ(commands[3].type, fosu::StoryboardCommandType::Loop);
+    CHECK_EQ(commands[3].repeat_count, 2);
+    CHECK_EQ(commands[4].depth, 2);
+    CHECK_EQ(commands[5].type, fosu::StoryboardCommandType::Trigger);
+    CHECK(commands[5].trigger_name == "HitSoundClap");
+    CHECK_EQ(commands[5].group_number, -2);
+    CHECK_EQ(commands[6].parameter, fosu::StoryboardParameter::Additive);
+
+    const auto& animation = map.storyboard_elements[2];
+    CHECK_EQ(animation.type, fosu::StoryboardElementType::Animation);
+    CHECK_EQ(animation.loop_type, fosu::AnimationLoopType::LoopOnce);
+    CHECK_EQ(animation.frame_count, 4);
+    CHECK_EQ(animation.frame_delay, 16);
+    const auto& sample = map.storyboard_elements[3];
+    CHECK_EQ(sample.type, fosu::StoryboardElementType::Sample);
+    CHECK_EQ(sample.layer, fosu::StoryboardLayer::Fail);
+    CHECK_EQ(sample.time, 700);
+    CHECK_EQ(sample.volume, 64);
+    CHECK_EQ(map.stats.malformed_lines, 0u);
+  }
+}
+
 static void test_long_timing_offsets() {
   // Offsets past the 8-byte SWAR window (>27h marathons) must defer to
   // the generic parser, not vanish as malformed.
@@ -391,6 +471,18 @@ static void test_exact_keys_and_event_aliases() {
   CHECK_EQ(map.breaks[0].start, 10);
   CHECK_EQ(map.breaks[1].end, 40);
   CHECK_EQ(map.stats.storyboard_lines, 1u);
+
+  const auto old_background =
+      parse_str("[Events]\nVideo,0,\"mistyped-background.jpg\"\n");
+  CHECK(old_background.video.empty());
+  CHECK(old_background.background == "mistyped-background.jpg");
+  const auto sprite_background = parse_str(
+      "[Events]\nSprite,Background,Centre,\"storyboard-background.png\",320,240\n");
+  CHECK(sprite_background.background == "storyboard-background.png");
+
+  const auto truncated_storyboard = parse_str("[Events]\nSample\n L\n");
+  CHECK(truncated_storyboard.storyboard_elements.empty());
+  CHECK_EQ(truncated_storyboard.stats.malformed_lines, 2u);
 }
 
 static void test_long_event_lines() {
@@ -490,7 +582,7 @@ static void test_byte_scan_boundaries() {
 static void test_event_filename_boundaries() {
   for (size_t timestamp_length : {0u, 30u, 31u, 32u, 64u}) {
     for (size_t filename_length : {0u, 1u, 30u, 31u, 32u, 63u, 64u, 96u}) {
-      const std::string filename(filename_length, 'x');
+      const std::string filename = std::string(filename_length, 'x') + ".mp4";
       const std::string event =
           "Video," + std::string(timestamp_length, '0') + ",\"" + filename + "\"";
       for (const auto suffix : {"", ",0,0", "\nVideo,0"}) {
@@ -743,6 +835,7 @@ int main() {
   test_exact_keys_and_event_aliases();
   test_all_sections();
   test_old_format();
+  test_storyboard_objects_and_variables();
   test_mania_hold();
   test_aspire_edge_cases();
   test_malformed();

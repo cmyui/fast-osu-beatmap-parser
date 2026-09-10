@@ -11,6 +11,7 @@
 #include <fosu/result.h>
 #include <fosu/slider_event.h>
 #include <fosu/slider_path.h>
+#include <fosu/storyboard.h>
 
 namespace fosu {
 
@@ -88,6 +89,8 @@ struct Beatmap : BeatmapHeader {
   std::span<HitObject> hit_objects;
   std::span<Slider> sliders;
   std::span<SliderPoint> slider_points;
+  std::span<StoryboardElement> storyboard_elements;
+  std::span<StoryboardCommand> storyboard_commands;
   // Empty unless requested; otherwise indexed identically to sliders.
   std::span<SliderPath> slider_paths;
   std::span<std::span<SliderEvent>> slider_events;
@@ -107,12 +110,15 @@ struct Beatmap : BeatmapHeader {
     auto copied_hit_objects = copy_array(destination, hit_objects);
     auto copied_sliders = copy_array(destination, sliders);
     auto copied_slider_points = copy_array(destination, slider_points);
+    auto copied_storyboard_elements = copy_array(destination, storyboard_elements);
+    auto copied_storyboard_commands = copy_array(destination, storyboard_commands);
     auto copied_paths = copy_array(destination, slider_paths);
     auto copied_events = copy_array(destination, slider_events);
     auto copied_stacking = copy_array(destination, stacking);
     if (!copied_breaks || !copied_colours || !copied_timing_points ||
         !copied_hit_objects || !copied_sliders || !copied_slider_points ||
-        !copied_paths || !copied_events || !copied_stacking) {
+        !copied_storyboard_elements || !copied_storyboard_commands || !copied_paths ||
+        !copied_events || !copied_stacking) {
       return rewind_failed_copy(destination, checkpoint);
     }
 
@@ -161,6 +167,8 @@ struct Beatmap : BeatmapHeader {
     result.hit_objects = mutable_hit_objects;
     result.sliders = mutable_sliders;
     result.slider_points = copied_slider_points.value();
+    result.storyboard_elements = copied_storyboard_elements.value();
+    result.storyboard_commands = copied_storyboard_commands.value();
     result.slider_paths = copied_paths.value();
     result.slider_events = copied_events.value();
     result.stacking = copied_stacking.value();
@@ -191,6 +199,18 @@ struct Beatmap : BeatmapHeader {
     result.tags = tags_copy.value();
     result.background = background_copy.value();
     result.video = video_copy.value();
+    for (auto& element : result.storyboard_elements) {
+      auto filename = copy_string(destination, element.filename);
+      if (!filename)
+        return rewind_failed_copy(destination, checkpoint);
+      element.filename = filename.value();
+    }
+    for (auto& command : result.storyboard_commands) {
+      auto trigger = copy_string(destination, command.trigger_name);
+      if (!trigger)
+        return rewind_failed_copy(destination, checkpoint);
+      command.trigger_name = trigger.value();
+    }
     return result;
   }
 
