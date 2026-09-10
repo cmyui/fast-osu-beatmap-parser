@@ -67,6 +67,10 @@ Shared fields use C++ names. Important Python-specific behavior:
   Hit samples and slider edge fields remain text.
 - Slider `control_points` includes the head position, unlike the native point
   range. `slides=2` means forward and back.
+- `storyboard_elements` contains typed video, sprite, animation, and sample
+  records. Video, sprite, and animation commands retain their type, easing,
+  times, values, and loop/trigger nesting depth. Storyboard variables are
+  expanded while parsing; command evaluation and drawing are not performed.
 - `tag_list` and `bookmark_list` are parsed conveniences alongside the
   `tags` and `bookmarks` text fields.
 - IDs and preview time map the `-1` sentinel to `None`.

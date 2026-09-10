@@ -46,6 +46,7 @@ inline void parse_document(std::span<const char> input,
   const int time_offset = beatmap.format_version < 5 ? 24 : 0;
   size_t break_count = 0, colour_count = 0, timing_point_count = 0;
   size_t hit_object_count = 0, slider_count = 0, slider_point_count = 0;
+  size_t storyboard_element_count = 0, storyboard_command_count = 0;
   std::optional<double> approach_rate;
   uint32_t pending = options.sections & 0x1FEu;
 
@@ -76,7 +77,8 @@ inline void parse_document(std::span<const char> input,
         p = parse_difficulty_section(beatmap, approach_rate, p, end);
         break;
       case Section::Events:
-        p = parse_events_section(beatmap, break_count, p, end, time_offset);
+        p = parse_events_section(beatmap, break_count, storyboard_element_count,
+                                 storyboard_command_count, p, end, time_offset);
         break;
       case Section::TimingPoints:
         p = parse_timing_points_section(beatmap, timing_point_count, p, end, time_offset);
@@ -89,6 +91,7 @@ inline void parse_document(std::span<const char> input,
                                      slider_point_count, p, end, time_offset);
         break;
       case Section::None:
+      case Section::Variables:
       case Section::Unknown:
         p = skip_section(p, end);
         break;
@@ -106,6 +109,10 @@ inline void parse_document(std::span<const char> input,
   beatmap.hit_objects = beatmap.hit_objects.first(hit_object_count);
   beatmap.sliders = beatmap.sliders.first(slider_count);
   beatmap.slider_points = beatmap.slider_points.first(slider_point_count);
+  beatmap.storyboard_elements =
+      beatmap.storyboard_elements.first(storyboard_element_count);
+  beatmap.storyboard_commands =
+      beatmap.storyboard_commands.first(storyboard_command_count);
 }
 
 // The ISA this code was compiled for, not a runtime choice based on the host CPU.

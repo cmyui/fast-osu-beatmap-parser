@@ -170,7 +170,10 @@ static void test_copy_owns_all_data() {
     auto input = fosu::make_padded(
         "[General]\nAudioFilename:song.mp3\n"
         "[Metadata]\nTitle:Owned title\nArtist:Owned artist\n"
+        "[Variables]\n$asset=story.png\n"
         "[Events]\n0,0,\"background.jpg\",0,0\n2,10,20\n"
+        "Sprite,Foreground,Centre,\"$asset\",320,240\n"
+        " T,HitSoundClap,0,100\n"
         "[TimingPoints]\n0,500\n"
         "[Colours]\nCombo1:1,2,3\n"
         "[HitObjects]\n"
@@ -184,6 +187,8 @@ static void test_copy_owns_all_data() {
     CHECK(copied);
     if (copied)
       owned = copied.value();
+    CHECK(owned.storyboard_elements[0].filename == "story.png");
+    CHECK(owned.storyboard_commands[0].trigger_name == "HitSoundClap");
     owned.hit_objects[0].x = 42;
     CHECK_EQ(parsed.hit_objects[0].x, 1);
     owned.hit_objects[0].x = 1;
@@ -194,6 +199,8 @@ static void test_copy_owns_all_data() {
     require_parse(parser.parse(replacement));
   }
   CHECK_EQ(canonical(owned), expected);
+  CHECK(owned.storyboard_elements[0].filename == "story.png");
+  CHECK(owned.storyboard_commands[0].trigger_name == "HitSoundClap");
   fosu::arena_release(program_arena);
 }
 

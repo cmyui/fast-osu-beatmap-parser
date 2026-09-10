@@ -19,6 +19,60 @@ class CurveType(Enum):
     PERFECT_CURVE = "P"
 
 
+class StoryboardElementType(IntEnum):
+    VIDEO = 0
+    SPRITE = 1
+    ANIMATION = 2
+    SAMPLE = 3
+
+
+class StoryboardLayer(IntEnum):
+    BACKGROUND = 0
+    FAIL = 1
+    PASS = 2
+    FOREGROUND = 3
+    OVERLAY = 4
+    VIDEO = 5
+
+
+class StoryboardOrigin(IntEnum):
+    TOP_LEFT = 0
+    CENTRE = 1
+    CENTRE_LEFT = 2
+    TOP_RIGHT = 3
+    BOTTOM_CENTRE = 4
+    TOP_CENTRE = 5
+    CUSTOM = 6
+    CENTRE_RIGHT = 7
+    BOTTOM_LEFT = 8
+    BOTTOM_RIGHT = 9
+
+
+class AnimationLoopType(IntEnum):
+    LOOP_FOREVER = 0
+    LOOP_ONCE = 1
+
+
+class StoryboardCommandType(IntEnum):
+    FADE = 0
+    SCALE = 1
+    VECTOR_SCALE = 2
+    ROTATE = 3
+    MOVE_X = 4
+    MOVE_Y = 5
+    COLOUR = 6
+    PARAMETER = 7
+    LOOP = 8
+    TRIGGER = 9
+
+
+class StoryboardParameter(IntEnum):
+    NONE = 0
+    ADDITIVE = 1
+    FLIP_HORIZONTAL = 2
+    FLIP_VERTICAL = 3
+
+
 class SampleSet(IntEnum):
     NONE = 0
     NORMAL = 1
@@ -37,6 +91,37 @@ class HitSound(IntFlag):
 class Point:
     x: float
     y: float
+
+
+@dataclass(slots=True, kw_only=True)
+class StoryboardCommand:
+    type: StoryboardCommandType
+    depth: int
+    easing: int
+    start_time: float
+    end_time: float
+    start_value: tuple[float, float, float]
+    end_value: tuple[float, float, float]
+    parameter: StoryboardParameter
+    repeat_count: int
+    group_number: int
+    trigger_name: str
+
+
+@dataclass(slots=True, kw_only=True)
+class StoryboardElement:
+    type: StoryboardElementType
+    layer: StoryboardLayer
+    origin: StoryboardOrigin
+    loop_type: AnimationLoopType
+    filename: str
+    x: float
+    y: float
+    time: float
+    volume: int
+    frame_count: int
+    frame_delay: float
+    commands: list[StoryboardCommand]
 
 
 @dataclass(slots=True)
@@ -208,12 +293,16 @@ class Beatmap:
     slider_tick_rate: float
     background: str
     video: str
+    video_offset: float
+    storyboard_background_offset_x: float
+    storyboard_background_offset_y: float
     tags: str
     bookmarks: str
     hit_objects: list[HitObject]
     timing_points: list[TimingPoint]
     breaks: list[Break]
     combo_colours: list[int]
+    storyboard_elements: list[StoryboardElement]
     stats: ParseStats
 
     def __repr__(self) -> str:

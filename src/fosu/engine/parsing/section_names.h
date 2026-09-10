@@ -13,6 +13,7 @@ enum class Section : uint8_t {
   TimingPoints,
   Colours,
   HitObjects,
+  Variables,
   Unknown
 };
 inline constexpr auto kSectionNames = make_string_lookup<Section>({
@@ -24,6 +25,7 @@ inline constexpr auto kSectionNames = make_string_lookup<Section>({
     {"[TimingPoints]", Section::TimingPoints},
     {"[Colours]", Section::Colours},
     {"[HitObjects]", Section::HitObjects},
+    {"[Variables]", Section::Variables},
 });
 
 constexpr Section match_section(std::string_view line) {

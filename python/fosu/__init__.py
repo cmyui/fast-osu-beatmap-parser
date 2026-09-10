@@ -16,6 +16,7 @@ from . import _core
 from ._core import backend as backend
 from ._model import (
     Beatmap,
+    AnimationLoopType,
     Break,
     Circle,
     CurveType,
@@ -32,12 +33,20 @@ from ._model import (
     Stacking,
     SampleSet,
     Slider,
+    StoryboardCommand,
+    StoryboardCommandType,
+    StoryboardElement,
+    StoryboardElementType,
+    StoryboardLayer,
+    StoryboardOrigin,
+    StoryboardParameter,
     Spinner,
     TimingPoint,
 )
 
 __all__ = [
     "Beatmap",
+    "AnimationLoopType",
     "Break",
     "Circle",
     "CurveType",
@@ -57,6 +66,13 @@ __all__ = [
     "SampleSet",
     "Sections",
     "Slider",
+    "StoryboardCommand",
+    "StoryboardCommandType",
+    "StoryboardElement",
+    "StoryboardElementType",
+    "StoryboardLayer",
+    "StoryboardOrigin",
+    "StoryboardParameter",
     "Spinner",
     "TimingPoint",
     "backend",
