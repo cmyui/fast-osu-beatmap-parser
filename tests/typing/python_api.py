@@ -38,6 +38,7 @@ for note in b.hit_objects:
     if isinstance(note, fosu.Slider):
         assert_type(note.end_time, float)
         assert_type(note.curve_type, fosu.CurveType)
+        assert_type(note.curve_segments, list[fosu.CurveSegment])
         assert_type(note.control_points, list[fosu.Point])
         assert_type(note.path, fosu.SliderPath | None)
         assert_type(note.events, list[fosu.SliderEvent])

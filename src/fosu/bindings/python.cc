@@ -122,7 +122,6 @@ enum Field {
   f_audio_lead_in,
   f_preview_time,
   f_countdown,
-  f_sample_volume,
   f_stack_leniency,
   f_mode,
   f_letterbox_in_breaks,
@@ -168,6 +167,10 @@ enum Field {
   f_slow_path_lines,
   f_malformed_lines,
   f_storyboard_lines,
+  f_curve_segments,
+  f_degree,
+  f_sample_volume,
+  f_velocity_presets,
   field_count
 };
 const char* field_names[] = {"stacking",
@@ -210,7 +213,6 @@ const char* field_names[] = {"stacking",
                              "audio_lead_in",
                              "preview_time",
                              "countdown",
-                             "sample_volume",
                              "stack_leniency",
                              "mode",
                              "letterbox_in_breaks",
@@ -255,7 +257,11 @@ const char* field_names[] = {"stacking",
                              "fast_path_lines",
                              "slow_path_lines",
                              "malformed_lines",
-                             "storyboard_lines"};
+                             "storyboard_lines",
+                             "curve_segments",
+                             "degree",
+                             "sample_volume",
+                             "velocity_presets"};
 static_assert(sizeof(field_names) / sizeof(field_names[0]) == field_count);
 enum PythonType {
   t_point,
@@ -271,6 +277,7 @@ enum PythonType {
   t_beatmap,
   t_event,
   t_stacking,
+  t_curve_segment,
   t_event_type,
   t_sound,
   t_mode,
@@ -278,11 +285,12 @@ enum PythonType {
   t_curve,
   type_count
 };
-constexpr int record_type_count = t_stacking + 1;
+constexpr int record_type_count = t_curve_segment + 1;
 constexpr const char* type_names[] = {
-    "Point",    "Circle",          "Slider",    "Spinner",    "HoldNote",  "TimingPoint",
-    "Break",    "ParseStats",      "PathPoint", "SliderPath", "Beatmap",   "SliderEvent",
-    "Stacking", "SliderEventType", "HitSound",  "GameMode",   "SampleSet", "CurveType"};
+    "Point",       "Circle",      "Slider",     "Spinner",      "HoldNote",
+    "TimingPoint", "Break",       "ParseStats", "PathPoint",    "SliderPath",
+    "Beatmap",     "SliderEvent", "Stacking",   "CurveSegment", "SliderEventType",
+    "HitSound",    "GameMode",    "SampleSet",  "CurveType"};
 struct PythonSlot {
   PyObject* descriptor;
   descrsetfunc assign;
@@ -388,6 +396,7 @@ struct BeatmapConverter {
             map.slider_paths.empty() ? none() : slider_path(map.slider_paths[h.slider])},
            {f_length, number(s.length)},
            {f_curve_type, curve(s.curve_type)},
+           {f_curve_segments, curve_segments(h, s)},
            {f_edge_sounds, string(s.edge_sounds)},
            {f_edge_sets, string(s.edge_sets)},
            {f_control_points, list(s.point_count + 1,
@@ -402,6 +411,37 @@ struct BeatmapConverter {
     }
     return record(circle ? t_circle : h.type & 8 ? t_spinner : t_hold, {}, common);
   }
+  PythonRef curve_segments(const fosu::HitObject& object, const fosu::Slider& slider) {
+    if (!slider.segment_count) {
+      return list(1, [&](size_t) {
+        return record(t_curve_segment,
+                      {{f_type, curve(slider.curve_type)},
+                       {f_degree, integer(0)},
+                       {f_control_points, list(slider.point_count + 1, [&](size_t i) {
+                          if (!i)
+                            return point(object.x, object.y);
+                          const auto& value =
+                              map.slider_points[slider.point_begin + i - 1];
+                          return point(value.x, value.y);
+                        })}});
+      });
+    }
+    return list(slider.segment_count, [&](size_t i) {
+      const auto& segment = map.slider_segments[slider.segment_begin + i];
+      const bool head = i == 0;
+      return record(t_curve_segment,
+                    {{f_type, curve(segment.type)},
+                     {f_degree, integer(segment.degree)},
+                     {f_control_points, list(segment.point_count + head, [&](size_t j) {
+                        if (head && !j)
+                          return point(object.x, object.y);
+                        const auto& value =
+                            map.slider_points[segment.point_begin + j - head];
+                        return point(value.x, value.y);
+                      })}});
+    });
+  }
+
   PythonRef timing_point(const fosu::TimingPoint& t) {
     return record(t_timing, {{f_time, number(t.time)},
                              {f_beat_length, number(t.beat_length)},
@@ -522,6 +562,10 @@ struct BeatmapConverter {
          {f_countdown_offset, integer(m.countdown_offset)},
          {f_overlay_position, string(m.overlay_position)},
          {f_skin_preference, string(m.skin_preference)},
+         {f_velocity_presets, list(m.velocity_presets.size(),
+                                   [&](size_t i) {
+                                     return number(m.velocity_presets[i]);
+                                   })},
          {f_distance_spacing, number(m.distance_spacing)},
          {f_beat_divisor, integer(m.beat_divisor)},
          {f_grid_size, integer(m.grid_size)},

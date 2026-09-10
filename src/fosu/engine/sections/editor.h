@@ -27,10 +27,44 @@ inline constexpr auto kEditorFields = make_string_lookup<FieldParser>({
      assign_field_value<&BeatmapHeader::timeline_zoom, parse_editor_scale>},
 });
 
+inline bool parse_velocity_presets(Beatmap& beatmap,
+                                   size_t& count,
+                                   std::string_view input) {
+  const size_t begin = count;
+  const char* p = input.data();
+  const char* end = p + input.size();
+  while (p < end) {
+    const char* comma = find_byte<','>(p, end);
+    const auto value = parse_field_double({p, static_cast<size_t>(comma - p)});
+    if (!value) {
+      count = begin;
+      return false;
+    }
+    if (count == beatmap.velocity_presets.size()) {
+      count = begin;
+      return false;
+    }
+    beatmap.velocity_presets[count++] = *value;
+    p = comma == end ? end : comma + 1;
+  }
+  return true;
+}
+
 inline const char* parse_editor_section(Beatmap& beatmap,
+                                        size_t& velocity_preset_count,
                                         const char* p,
                                         const char* end) {
-  return parse_key_value_section(beatmap, kEditorFields, p, end);
+  return for_each_section_line(p, end, [&](std::string_view line) {
+    const auto field = split_key_value(line);
+    if (!field)
+      return;
+    if (field->key == "VelocityPresets") {
+      if (!parse_velocity_presets(beatmap, velocity_preset_count, field->value))
+        ++beatmap.stats.malformed_lines;
+      return;
+    }
+    parse_key_value(beatmap, kEditorFields, *field);
+  });
 }
 
 }  // namespace fosu::internal

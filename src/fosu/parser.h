@@ -60,10 +60,26 @@ struct ParserArenaPoolCleanup {
 inline ParserArenaPoolCleanup parser_arena_pool_cleanup;
 #endif
 
+inline size_t first_section_body_size(std::span<const char> input, Section target) {
+  const char* p = input.data();
+  const char* end = p + input.size();
+  while (p < end) {
+    const Line header = read_line(p, end);
+    if (match_section(header.text) != target) {
+      p = header.next;
+      continue;
+    }
+    const char* body = header.next;
+    return static_cast<size_t>(skip_section(body, end) - body);
+  }
+  return 0;
+}
+
 inline bool allocate_beatmap_arrays(Arena* arena,
                                     Beatmap& beatmap,
-                                    size_t input_size,
+                                    std::span<const char> input,
                                     uint32_t selected_sections) noexcept {
+  const size_t input_size = input.size();
   // Each capacity is a conservative bound derived from the shortest accepted
   // spelling. sizeof includes the string literal's trailing null byte.
   // The arena reserves address space for the bound, but physical pages are
@@ -82,6 +98,15 @@ inline bool allocate_beatmap_arrays(Arena* arena,
     if (!values)
       return false;
     beatmap.combo_colours = {values, capacity};
+  }
+
+  if (selected_sections & kSectionEditor) {
+    const size_t editor_size = first_section_body_size(input, Section::Editor);
+    const size_t capacity = editor_size / (sizeof("0") - 1) + 1;
+    double* values = arena_push_array<double>(arena, capacity);
+    if (!values)
+      return false;
+    beatmap.velocity_presets = {values, capacity};
   }
 
   if (selected_sections & kSectionTimingPoints) {
@@ -104,6 +129,13 @@ inline bool allocate_beatmap_arrays(Arena* arena,
     if (!sliders)
       return false;
     beatmap.sliders = {sliders, slider_capacity};
+
+    const size_t segment_capacity =
+        input_size / (sizeof("|L|0:0") - 1) + 1;
+    CurveSegment* segments = arena_push_array<CurveSegment>(arena, segment_capacity);
+    if (!segments)
+      return false;
+    beatmap.slider_segments = {segments, segment_capacity};
 
     const size_t point_capacity = input_size / (sizeof("|0:0") - 1) + 1;
     SliderPoint* points = arena_push_array<SliderPoint>(arena, point_capacity);
@@ -256,14 +288,15 @@ class Parser {
   }
 
   Result<Beatmap*> finish_parse(ParseOptions opts) noexcept {
+    const std::span<const char> input{input_, input_size_};
     if (input_size_ != 0) {
-      if (!internal::allocate_beatmap_arrays(result_arena_, beatmap_, input_size_,
+      if (!internal::allocate_beatmap_arrays(result_arena_, beatmap_, input,
                                              opts.sections)) {
         reset_working_result();
         return Error{ErrorCode::AllocationFailure};
       }
     }
-    engine_->parse_document({input_, input_size_}, beatmap_, opts);
+    engine_->parse_document(input, beatmap_, opts);
     if (!internal::apply_legacy_rules(beatmap_, scratch_arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};

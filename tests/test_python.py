@@ -487,7 +487,8 @@ def test_fractional_times_and_malformed_numeric_fields():
 def test_complete_map(tmp_path):
     data = (
         "osu file format v14\n[General]\nAudioFilename:song.mp3\nMode:3\n"
-        "LetterboxInBreaks:1\nSampleVolume:73\n[Editor]\nBookmarks:100,-200,300\n"
+        "LetterboxInBreaks:1\nSampleVolume:73\n[Editor]\n"
+        "Bookmarks:100,-200,300\nVelocityPresets:1,1.5,2\n"
         "[Metadata]\nTitle:日本語\nArtist:artist\nVersion:Hard\nBeatmapID:12345\n"
         "[Difficulty]\nOverallDifficulty:9\nCircleSize:4\n"
         '[Events]\n0,0,"bg.jpg",0,0\n2,100,200\n'
@@ -516,6 +517,7 @@ def test_complete_map(tmp_path):
     assert b.mode is fosu.GameMode.MANIA and b.letterbox_in_breaks is True
     assert b.sample_volume == 73
     assert b.bookmark_list == [100, -200, 300]
+    assert b.velocity_presets == [1, 1.5, 2]
     assert isinstance(b.hit_objects, list) and len(b.hit_objects) == 4
     circle, slider, spinner, hold = b.hit_objects
     assert isinstance(circle, fosu.Circle) and circle.is_circle
@@ -546,6 +548,21 @@ def test_complete_map(tmp_path):
     assert b.combo_colours == [0x0C2238]
     assert b.stats.fast_path_lines + b.stats.slow_path_lines == 4
     assert "hit_objects=4" in repr(b) and len(repr(b)) < 150
+
+
+def test_modern_curve_segments_drive_path_calculation():
+    slider = fosu.parse(
+        b"osu file format v128\n[HitObjects]\n"
+        b"10,20,100,2,0,B2|30.5:40.25|50:60|L|70.75:80.5,1,100\n",
+        calculate_slider_paths=True,
+    ).hit_objects[0]
+    assert isinstance(slider, fosu.Slider)
+    assert [(segment.type, segment.degree) for segment in slider.curve_segments] == [
+        (fosu.CurveType.BEZIER, 2),
+        (fosu.CurveType.LINEAR, 0),
+    ]
+    assert slider.path is not None
+    assert len(slider.path.points) > 2
 
 
 def test_empty_input_defaults():

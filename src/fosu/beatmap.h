@@ -43,10 +43,23 @@ struct SliderPoint {
   float y;
 };
 
+struct CurveSegment {
+  CurveType type;
+  // Zero is the legacy/default degree. A positive value is an explicit
+  // lazer B-spline degree (for example, B2).
+  uint32_t degree;
+  uint32_t point_begin;
+  uint32_t point_count;
+};
+
 struct Slider {
   uint32_t point_begin;  // range into Beatmap::slider_points
   uint32_t point_count;
+  uint32_t segment_begin;  // range into Beatmap::slider_segments
+  uint32_t segment_count;
   int32_t slides;  // 1 = no repeats
+  // The only path type for legacy sliders, and the first type for a modern
+  // multi-segment path.
   CurveType curve_type;
   double length;  // declared pixel length; zero uses the natural path for duration
   std::string_view edge_sounds;
@@ -87,7 +100,9 @@ struct Beatmap : BeatmapHeader {
   std::span<TimingPoint> timing_points;
   std::span<HitObject> hit_objects;
   std::span<Slider> sliders;
+  std::span<CurveSegment> slider_segments;
   std::span<SliderPoint> slider_points;
+  std::span<double> velocity_presets;
   // Empty unless requested; otherwise indexed identically to sliders.
   std::span<SliderPath> slider_paths;
   std::span<std::span<SliderEvent>> slider_events;
@@ -106,13 +121,16 @@ struct Beatmap : BeatmapHeader {
     auto copied_timing_points = copy_array(destination, timing_points);
     auto copied_hit_objects = copy_array(destination, hit_objects);
     auto copied_sliders = copy_array(destination, sliders);
+    auto copied_slider_segments = copy_array(destination, slider_segments);
     auto copied_slider_points = copy_array(destination, slider_points);
+    auto copied_velocity_presets = copy_array(destination, velocity_presets);
     auto copied_paths = copy_array(destination, slider_paths);
     auto copied_events = copy_array(destination, slider_events);
     auto copied_stacking = copy_array(destination, stacking);
     if (!copied_breaks || !copied_colours || !copied_timing_points ||
-        !copied_hit_objects || !copied_sliders || !copied_slider_points ||
-        !copied_paths || !copied_events || !copied_stacking) {
+        !copied_hit_objects || !copied_sliders || !copied_slider_segments ||
+        !copied_slider_points || !copied_velocity_presets || !copied_paths ||
+        !copied_events || !copied_stacking) {
       return rewind_failed_copy(destination, checkpoint);
     }
 
@@ -160,7 +178,9 @@ struct Beatmap : BeatmapHeader {
     result.timing_points = copied_timing_points.value();
     result.hit_objects = mutable_hit_objects;
     result.sliders = mutable_sliders;
+    result.slider_segments = copied_slider_segments.value();
     result.slider_points = copied_slider_points.value();
+    result.velocity_presets = copied_velocity_presets.value();
     result.slider_paths = copied_paths.value();
     result.slider_events = copied_events.value();
     result.stacking = copied_stacking.value();

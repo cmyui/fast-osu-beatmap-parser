@@ -110,10 +110,8 @@ inline bool set_slider_end_times(Beatmap& map,
     const auto& slider = map.sliders[object.slider];
     auto distance = !map.slider_paths.empty()
                         ? Result<double>{map.slider_paths[object.slider].distance()}
-                        : slider_distance(object, slider,
-                                          map.slider_points.subspan(slider.point_begin,
-                                                                    slider.point_count),
-                                          scratch_arena);
+                        : slider_distance(object, slider, map.slider_points,
+                                          map.slider_segments, scratch_arena);
     if (!distance)
       return false;
     const double pixels_per_millisecond =

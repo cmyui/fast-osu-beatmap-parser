@@ -21,6 +21,7 @@ namespace fosu::internal {
 __attribute__((noinline)) inline bool parse_slider(
     Beatmap& beatmap,
     size_t& slider_count,
+    size_t& segment_count,
     size_t& point_count,
     HitObject& object,
     const char* p,
@@ -29,10 +30,15 @@ __attribute__((noinline)) inline bool parse_slider(
   if (p >= end) [[unlikely]]
     return false;
 
-  const auto curve_type = parse_curve_type(*p++);
-  if (!curve_type)
+  const auto first_curve = parse_curve_type(p, end);
+  if (!first_curve)
     return false;
+  p = first_curve->next;
   const size_t point_begin = point_count;
+  const size_t segment_begin = segment_count;
+  size_t current_segment_begin = point_count;
+  auto curve = *first_curve;
+  bool segmented = false;
 #if FOSU_SIMD
   if (const auto initial_points =
           try_parse_slider_point_prefix_fast<SliderPoint>(p, constants)) {
@@ -43,9 +49,35 @@ __attribute__((noinline)) inline bool parse_slider(
   }
 #endif
   while (p < end && *p == '|') {
-    const auto point = parse_slider_point<SliderPoint>(p, end, constants);
+    if (p + 1 < end && (p[1] == 'B' || p[1] == 'C' || p[1] == 'L' || p[1] == 'P')) {
+      const auto next_curve = parse_curve_type(p + 1, end);
+      if (!next_curve || point_count == current_segment_begin) {
+        point_count = point_begin;
+        segment_count = segment_begin;
+        return false;
+      }
+      if (segment_count == beatmap.slider_segments.size()) {
+        point_count = point_begin;
+        segment_count = segment_begin;
+        return false;
+      }
+      beatmap.slider_segments[segment_count++] = {
+          .type = curve.type,
+          .degree = curve.degree,
+          .point_begin = static_cast<uint32_t>(current_segment_begin),
+          .point_count = static_cast<uint32_t>(point_count - current_segment_begin),
+      };
+      segmented = true;
+      current_segment_begin = point_count - 1;
+      curve = *next_curve;
+      p = next_curve->next;
+      continue;
+    }
+    const auto point =
+        parse_slider_point<SliderPoint>(p, end, constants, beatmap.format_version >= 128);
     if (!point) [[unlikely]] {
       point_count = point_begin;
+      segment_count = segment_begin;
       return false;
     }
     beatmap.slider_points[point_count++] = point->value;
@@ -53,14 +85,37 @@ __attribute__((noinline)) inline bool parse_slider(
   }
 
   const auto tail = parse_slider_tail(p, end, constants);
-  if (!tail) [[unlikely]]
+  if (!tail) [[unlikely]] {
+    segment_count = segment_begin;
     return false;
+  }
+
+  if (segmented) {
+    if (point_count == current_segment_begin) {
+      point_count = point_begin;
+      segment_count = segment_begin;
+      return false;
+    }
+    if (segment_count == beatmap.slider_segments.size()) {
+      point_count = point_begin;
+      segment_count = segment_begin;
+      return false;
+    }
+    beatmap.slider_segments[segment_count++] = {
+        .type = curve.type,
+        .degree = curve.degree,
+        .point_begin = static_cast<uint32_t>(current_segment_begin),
+        .point_count = static_cast<uint32_t>(point_count - current_segment_begin),
+    };
+  }
 
   Slider slider{
       .point_begin = static_cast<uint32_t>(point_begin),
       .point_count = static_cast<uint32_t>(point_count - point_begin),
+      .segment_begin = static_cast<uint32_t>(segment_begin),
+      .segment_count = static_cast<uint32_t>(segment_count - segment_begin),
       .slides = std::max(1, tail->slides),
-      .curve_type = *curve_type,
+      .curve_type = first_curve->type,
       .length = std::max(0.0, tail->length),
       .edge_sounds = tail->sounds.edge_sounds,
       .edge_sets = tail->sounds.edge_sets,
@@ -75,6 +130,7 @@ __attribute__((noinline)) inline bool parse_slider(
 // spinner/hold end times, or a trailing hit sample.
 inline bool parse_hitobject_details(Beatmap& beatmap,
                                     size_t& slider_count,
+                                    size_t& segment_count,
                                     size_t& point_count,
                                     HitObject& object,
                                     const char* p,
@@ -91,8 +147,8 @@ inline bool parse_hitobject_details(Beatmap& beatmap,
     }
     case HitObjectKind::Slider:
       return p < end && *p == ',' &&
-             parse_slider(beatmap, slider_count, point_count, object, p + 1, end,
-                          constants);
+             parse_slider(beatmap, slider_count, segment_count, point_count, object,
+                          p + 1, end, constants);
     case HitObjectKind::Spinner: {
       const auto details = parse_spinner_details(p, end);
       if (!details)
@@ -120,6 +176,7 @@ inline bool parse_hitobject_details(Beatmap& beatmap,
 __attribute__((noinline)) inline bool parse_hitobject_line_scalar(
     Beatmap& beatmap,
     size_t& slider_count,
+    size_t& segment_count,
     size_t& point_count,
     HitObject& object,
     const char* p,
@@ -130,8 +187,8 @@ __attribute__((noinline)) inline bool parse_hitobject_line_scalar(
     return false;
   initialize_hitobject(object, prefix->value);
   ++beatmap.stats.slow_path_lines;
-  return parse_hitobject_details(beatmap, slider_count, point_count, object, prefix->next,
-                                 line_end, constants);
+  return parse_hitobject_details(beatmap, slider_count, segment_count, point_count,
+                                 object, prefix->next, line_end, constants);
 }
 
 // Interpret a successfully decoded record before publishing it to the arena.
@@ -168,6 +225,7 @@ inline const char* parse_hitobjects_section_scalar(
     Beatmap& beatmap,
     size_t& hit_object_count,
     size_t& slider_count,
+    size_t& segment_count,
     size_t& point_count,
     const char* p,
     const char* file_end,
@@ -189,8 +247,8 @@ inline const char* parse_hitobjects_section_scalar(
     const char* next_line = newline ? newline + 1 : file_end;
     if (!ignored_line(p, line_end)) {
       HitObject object{};
-      if (parse_hitobject_line_scalar(beatmap, slider_count, point_count, object, p,
-                                      line_end, constants)) {
+      if (parse_hitobject_line_scalar(beatmap, slider_count, segment_count, point_count,
+                                      object, p, line_end, constants)) {
         beatmap.hit_objects[hit_object_count] =
             normalize_hitobject(object, beatmap, hit_object_count, time_offset);
         ++hit_object_count;
@@ -209,6 +267,7 @@ inline const char* parse_hitobjects_section_scalar(
 inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
                                                  size_t& hit_object_count,
                                                  size_t& slider_count,
+                                                 size_t& segment_count,
                                                  size_t& point_count,
                                                  const char* p,
                                                  const char* file_end,
@@ -251,20 +310,23 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
             object.hit_sample = {p + shape.p4 + 1, 8};
             accepted = true;
           } else {
-            accepted = parse_hitobject_details(beatmap, slider_count, point_count, object,
-                                               p + shape.p4, line_end, constants);
+            accepted =
+                parse_hitobject_details(beatmap, slider_count, segment_count, point_count,
+                                        object, p + shape.p4, line_end, constants);
           }
         } else if (kind == HitObjectKind::Slider) {
           accepted = shape.p4 < length && after_prefix == ',' &&
-                     parse_slider(beatmap, slider_count, point_count, object,
-                                  p + shape.p4 + 1, line_end, constants);
+                     parse_slider(beatmap, slider_count, segment_count, point_count,
+                                  object, p + shape.p4 + 1, line_end, constants);
         } else {
-          accepted = parse_hitobject_details(beatmap, slider_count, point_count, object,
-                                             p + shape.p4, line_end, constants);
+          accepted =
+              parse_hitobject_details(beatmap, slider_count, segment_count, point_count,
+                                      object, p + shape.p4, line_end, constants);
         }
       } else {
-        accepted = parse_hitobject_line_scalar(beatmap, slider_count, point_count, object,
-                                               p, line_end, constants);
+        accepted =
+            parse_hitobject_line_scalar(beatmap, slider_count, segment_count, point_count,
+                                        object, p, line_end, constants);
       }
 
       if (accepted) {
@@ -283,8 +345,8 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
         break;
       if (!ignored_line(p, line_end)) {
         HitObject object{};
-        if (parse_hitobject_line_scalar(beatmap, slider_count, point_count, object, p,
-                                        line_end, constants)) {
+        if (parse_hitobject_line_scalar(beatmap, slider_count, segment_count, point_count,
+                                        object, p, line_end, constants)) {
           beatmap.hit_objects[hit_object_count] =
               normalize_hitobject(object, beatmap, hit_object_count, time_offset);
           ++hit_object_count;
@@ -305,6 +367,7 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
 inline const char* parse_hitobjects_section(Beatmap& beatmap,
                                             size_t& hit_object_count,
                                             size_t& slider_count,
+                                            size_t& segment_count,
                                             size_t& point_count,
                                             const char* p,
                                             const char* file_end,
@@ -312,11 +375,12 @@ inline const char* parse_hitobjects_section(Beatmap& beatmap,
   const HitObjectParseConstants constants;
 #if FOSU_SIMD
   return parse_hitobjects_section_simd(beatmap, hit_object_count, slider_count,
-                                       point_count, p, file_end, constants, time_offset);
+                                       segment_count, point_count, p, file_end, constants,
+                                       time_offset);
 #else
   return parse_hitobjects_section_scalar(beatmap, hit_object_count, slider_count,
-                                         point_count, p, file_end, constants,
-                                         time_offset);
+                                         segment_count, point_count, p, file_end,
+                                         constants, time_offset);
 #endif
 }
 

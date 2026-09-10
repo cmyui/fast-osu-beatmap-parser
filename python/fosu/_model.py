@@ -40,6 +40,13 @@ class Point:
 
 
 @dataclass(slots=True)
+class CurveSegment:
+    type: CurveType
+    degree: int
+    control_points: list[Point]
+
+
+@dataclass(slots=True)
 class PathPoint:
     x: float
     y: float
@@ -115,6 +122,7 @@ class Slider(_HitObject):
     end_time: float
     slides: int
     curve_type: CurveType
+    curve_segments: list[CurveSegment]
     length: float
     edge_sounds: str
     edge_sets: str
@@ -186,6 +194,7 @@ class Beatmap:
     overlay_position: str
     skin_preference: str
     bookmark_list: list[int]
+    velocity_presets: list[float]
     distance_spacing: float
     beat_divisor: int
     grid_size: int

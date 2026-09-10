@@ -26,8 +26,32 @@ inline std::optional<CurveType> parse_curve_type(char value) {
   }
 }
 
+struct ParsedCurveType {
+  CurveType type;
+  uint32_t degree;
+  const char* next;
+};
+
+inline std::optional<ParsedCurveType> parse_curve_type(const char* p, const char* end) {
+  if (p == end)
+    return std::nullopt;
+  const auto type = parse_curve_type(*p++);
+  if (!type)
+    return std::nullopt;
+  uint32_t degree = 0;
+  if (*type == CurveType::Bezier && p < end && is_digit(*p)) {
+    int64_t value;
+    const char* next = parse_osu_int(p, end, value);
+    if (next == p || value <= 0 || value > UINT32_MAX)
+      return std::nullopt;
+    degree = static_cast<uint32_t>(value);
+    p = next;
+  }
+  return ParsedCurveType{*type, degree, p};
+}
+
 struct ParsedSliderCoordinate {
-  int32_t value;
+  float value;
   const char* next;
 };
 
@@ -45,13 +69,13 @@ inline std::optional<ParsedSliderCoordinate> parse_slider_coordinate(const char*
   const uint32_t run = digit_run8(p);
   if (run - 1 <= 3 && run <= static_cast<size_t>(end - p) &&
       (p[run] == ':' || p[run] == '|' || p[run] == ',')) {
-    return ParsedSliderCoordinate{static_cast<int32_t>(swar_parse_u32(p, run)), p + run};
+    return ParsedSliderCoordinate{static_cast<float>(swar_parse_u32(p, run)), p + run};
   }
   float v;
   const char* q = parse_osu_float(p, end, v, 131072);
   if (q == p)
     return std::nullopt;
-  return ParsedSliderCoordinate{static_cast<int32_t>(v), q};
+  return ParsedSliderCoordinate{v, q};
 }
 
 #if FOSU_SIMD
@@ -257,7 +281,8 @@ template <typename Point>
 inline std::optional<ParsedSliderPoint<Point>> parse_slider_point(
     const char* p,
     const char* end,
-    [[maybe_unused]] const HitObjectParseConstants& k) {
+    [[maybe_unused]] const HitObjectParseConstants& k,
+    bool preserve_fraction = false) {
   if (p >= end || *p != '|')
     return std::nullopt;
 #if FOSU_SIMD
@@ -286,8 +311,11 @@ inline std::optional<ParsedSliderPoint<Point>> parse_slider_point(
   const auto y = parse_slider_coordinate(x->next + 1, end);
   if (!y)
     return std::nullopt;
-  return ParsedSliderPoint<Point>{
-      Point{static_cast<float>(x->value), static_cast<float>(y->value)}, y->next};
+  const float x_value =
+      preserve_fraction ? x->value : static_cast<float>(static_cast<int32_t>(x->value));
+  const float y_value =
+      preserve_fraction ? y->value : static_cast<float>(static_cast<int32_t>(y->value));
+  return ParsedSliderPoint<Point>{Point{x_value, y_value}, y->next};
 }
 
 }  // namespace fosu::internal
