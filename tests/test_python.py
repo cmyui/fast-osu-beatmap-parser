@@ -487,7 +487,7 @@ def test_fractional_times_and_malformed_numeric_fields():
 def test_complete_map(tmp_path):
     data = (
         "osu file format v14\n[General]\nAudioFilename:song.mp3\nMode:3\n"
-        "LetterboxInBreaks:1\n[Editor]\nBookmarks:100,-200,300\n"
+        "LetterboxInBreaks:1\nSampleVolume:73\n[Editor]\nBookmarks:100,-200,300\n"
         "[Metadata]\nTitle:日本語\nArtist:artist\nVersion:Hard\nBeatmapID:12345\n"
         "[Difficulty]\nOverallDifficulty:9\nCircleSize:4\n"
         '[Events]\n0,0,"bg.jpg",0,0\n2,100,200\n'
@@ -514,6 +514,7 @@ def test_complete_map(tmp_path):
         4,
     )
     assert b.mode is fosu.GameMode.MANIA and b.letterbox_in_breaks is True
+    assert b.sample_volume == 73
     assert b.bookmark_list == [100, -200, 300]
     assert isinstance(b.hit_objects, list) and len(b.hit_objects) == 4
     circle, slider, spinner, hold = b.hit_objects

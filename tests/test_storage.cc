@@ -1,6 +1,8 @@
 #include "support/equality.h"
 #include "support/test.h"
 
+#include <limits>
+
 static void test_reparse_reuses_arena_memory() {
   auto input = fosu::make_padded("[HitObjects]\n16,32,100,1,0\n32,64,200,1,0\n");
   fosu::Parser parser;
@@ -318,27 +320,12 @@ void test_read_into_reuse() {
   unlink(path);
 }
 
-static void test_input_size_limit() {
+static void test_input_size_overflow() {
   char byte = 0;
   fosu::Parser parser;
-  auto memory_result = parser.parse(&byte, fosu::kMaxInputSize + 1);
+  auto memory_result = parser.parse(&byte, std::numeric_limits<size_t>::max());
   CHECK(!memory_result);
   CHECK(memory_result.error().code == fosu::ErrorCode::InputTooLarge);
-
-  char path[] = "/tmp/fosu_oversized_XXXXXX";
-  const int fd = mkstemp(path);
-  CHECK(fd >= 0);
-  CHECK_EQ(ftruncate(fd, static_cast<off_t>(fosu::kMaxInputSize + 1)), 0);
-  close(fd);
-
-  auto file_result = parser.parse_file(path);
-  CHECK(!file_result);
-  CHECK(file_result.error().code == fosu::ErrorCode::InputTooLarge);
-  fosu::FileBuffer buffer;
-  errno = 0;
-  CHECK(!fosu::read_into(path, buffer));
-  CHECK_EQ(errno, EFBIG);
-  unlink(path);
 }
 
 static void test_parser_prepares_engine_input_and_output() {
@@ -482,6 +469,6 @@ int main() {
   test_failed_copy_rewinds_destination();
   test_arena_interface();
   test_read_into_reuse();
-  test_input_size_limit();
+  test_input_size_overflow();
   return test_result();
 }

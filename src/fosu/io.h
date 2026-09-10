@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <new>
 #include <string_view>
@@ -19,7 +20,10 @@ namespace fosu {
 // one-pass timing point parser on garbage input (~90 bytes past a line
 // start near EOF).
 inline constexpr size_t kBufferPadding = 128;
-inline constexpr size_t kMaxInputSize = 128u * 1024u * 1024u;
+
+inline constexpr bool can_pad_input(size_t size) {
+  return size <= std::numeric_limits<size_t>::max() - kBufferPadding;
+}
 
 struct FileBuffer {
   std::unique_ptr<char[]> data;
@@ -38,7 +42,8 @@ struct FileBuffer {
 // padding needs zeroing. mmap measured 13% slower end-to-end than read()
 // on the real-map corpus: per-file munmap alone costs about as much as
 // the entire read copy, plus soft page faults during the parse.
-// Returns false on an I/O error or an input larger than kMaxInputSize.
+// Returns false on an I/O error or when the input cannot fit in the address
+// space together with the parser's readable padding.
 inline bool read_into(const char* path, FileBuffer& buf) {
   buf.size = 0;
   const int fd = open(path, O_RDONLY);
@@ -52,7 +57,8 @@ inline bool read_into(const char* path, FileBuffer& buf) {
     errno = error;
     return false;
   }
-  if (static_cast<uint64_t>(st.st_size) > kMaxInputSize) {
+  if (static_cast<uint64_t>(st.st_size) >
+      std::numeric_limits<size_t>::max() - kBufferPadding) {
     close(fd);
     errno = EFBIG;
     return false;
@@ -96,7 +102,7 @@ inline FileBuffer read_file_padded(const char* path) {
 
 // For tests/benchmarks: copy an in-memory string into a padded buffer.
 inline FileBuffer make_padded(std::string_view content) {
-  if (content.size() > kMaxInputSize)
+  if (!can_pad_input(content.size()))
     return {};
   FileBuffer buf;
   buf.data.reset(new (std::nothrow) char[content.size() + kBufferPadding]);

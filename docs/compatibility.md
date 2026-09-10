@@ -78,11 +78,10 @@ rules while `type` retains the source bits. Section-selective parsing applies
 rules using only the selected data; omitted events cannot contribute breaks,
 and omitted General metadata leaves the mode at its default.
 
-All entry points accept at most **128 MiB** of source bytes. Python rejects
-larger inputs with `ValueError`; C++ returns `ErrorCode::InputTooLarge`.
-C++ `Parser::parse` and `Parser::parse_file` return `ErrorCode::InputTooLarge`;
-`make_padded` returns an empty `FileBuffer`, and `read_into` returns failure with
-`errno=EFBIG`.
+Inputs are bounded by the process address space rather than an arbitrary format
+limit. Sizes that cannot fit together with the parser's readable padding return
+`ErrorCode::InputTooLarge`; `make_padded` returns an empty `FileBuffer`, and
+`read_into` returns failure with `errno=EFBIG`.
 Output arrays and temporary allocations can exceed the source size. This is
 not a strict memory or CPU quota, particularly for consumer geometry code.
 
@@ -155,5 +154,4 @@ This is bounded compatibility evidence, not complete format or stable-client
 parity. The raw parser is not a replacement for the game's package loader,
 storyboard interpreter or ruleset processing. Empty raw buffers remain valid
 empty results even though the official file decoder requires a header/content.
-Lazer-only curve segments and versions are outside the supported scope. The
-128 MiB input cap is fosu's resource policy, not an official format restriction.
+Lazer-only curve segments and versions are outside the supported scope.

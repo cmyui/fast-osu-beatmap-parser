@@ -103,8 +103,6 @@ def parse(
     """Parse selected sections into detached values, copying mutable buffers."""
     if not isinstance(data, bytes):
         with memoryview(data) as view:
-            if view.nbytes > 64 * 1024 * 1024:
-                raise ValueError("beatmap input exceeds the supported size")
             data = view.tobytes()
     return _core.parse(
         data,

@@ -88,6 +88,8 @@ inline constexpr auto kGeneralFields = make_string_lookup<FieldParser>({
      assign_field_value<&BeatmapHeader::countdown_offset, parse_field_integer>},
     {"Countdown", assign_field_value<&BeatmapHeader::countdown, parse_countdown>},
     {"SampleSet", assign_field_value<&BeatmapHeader::sample_set, parse_field_sample_set>},
+    {"SampleVolume",
+     assign_field_value<&BeatmapHeader::sample_volume, parse_field_integer>},
     {"SamplesMatchPlaybackRate",
      assign_field_value<&BeatmapHeader::samples_match_playback_rate,
                         parse_field_boolean>},

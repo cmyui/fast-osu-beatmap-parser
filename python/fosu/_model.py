@@ -173,6 +173,7 @@ class Beatmap:
     preview_time: int | None
     countdown: int
     sample_set: SampleSet
+    sample_volume: int
     stack_leniency: float
     mode: GameMode
     letterbox_in_breaks: bool

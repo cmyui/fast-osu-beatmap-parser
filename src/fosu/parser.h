@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cerrno>
 #include <cstring>
+#include <limits>
 
 #include <fosu/beatmap.h>
 #include <fosu/engine/parse_document.h>
@@ -88,20 +89,29 @@ inline BeatmapArraySizes maximum_beatmap_array_sizes(size_t size,
   return sizes;
 }
 
-template <typename T>
-constexpr size_t arena_array_bytes(size_t count) {
-  return count ? count * sizeof(T) + alignof(T) - 1 : 0;
-}
-
 inline bool allocate_beatmap_arrays(Arena* arena,
                                     Beatmap& beatmap,
                                     const BeatmapArraySizes& sizes) noexcept {
-  const size_t bytes = arena_array_bytes<Break>(sizes.breaks) +
-                       arena_array_bytes<uint32_t>(sizes.colours) +
-                       arena_array_bytes<TimingPoint>(sizes.timing_points) +
-                       arena_array_bytes<HitObject>(sizes.hit_objects) +
-                       arena_array_bytes<Slider>(sizes.sliders) +
-                       arena_array_bytes<SliderPoint>(sizes.slider_points);
+  size_t bytes = 0;
+  auto add = [&]<typename T>(size_t count) {
+    if (!count)
+      return true;
+    constexpr size_t padding = alignof(T) - 1;
+    if (count > (std::numeric_limits<size_t>::max() - padding) / sizeof(T))
+      return false;
+    const size_t amount = count * sizeof(T) + padding;
+    if (amount > std::numeric_limits<size_t>::max() - bytes)
+      return false;
+    bytes += amount;
+    return true;
+  };
+  if (!add.template operator()<Break>(sizes.breaks) ||
+      !add.template operator()<uint32_t>(sizes.colours) ||
+      !add.template operator()<TimingPoint>(sizes.timing_points) ||
+      !add.template operator()<HitObject>(sizes.hit_objects) ||
+      !add.template operator()<Slider>(sizes.sliders) ||
+      !add.template operator()<SliderPoint>(sizes.slider_points))
+    return false;
   if (!bytes)
     return true;
 
@@ -199,7 +209,8 @@ class Parser {
       close(file);
       return Error{ErrorCode::IoFailure, kNoErrorOffset, error};
     }
-    if (static_cast<uint64_t>(info.st_size) > kMaxInputSize) {
+    if (static_cast<uint64_t>(info.st_size) >
+        std::numeric_limits<size_t>::max() - kBufferPadding) {
       close(file);
       return Error{ErrorCode::InputTooLarge};
     }
@@ -248,7 +259,7 @@ class Parser {
   }
 
   Result<char*> prepare_input(size_t size, const char* data) noexcept {
-    if (size > kMaxInputSize)
+    if (!can_pad_input(size))
       return Error{ErrorCode::InputTooLarge};
     if (!result_arena_)
       result_arena_ = internal::acquire_parser_arena(internal::parser_arena_pool.result);

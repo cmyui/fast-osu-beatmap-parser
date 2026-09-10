@@ -15,6 +15,7 @@ struct BeatmapHeader {
   int32_t preview_time = -1;
   int32_t countdown = 1;
   SampleSet sample_set = SampleSet::Normal;
+  int32_t sample_volume = 100;
   double stack_leniency = 0.7f;
   int32_t mode = 0;
   bool letterbox_in_breaks = false;

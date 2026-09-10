@@ -122,6 +122,7 @@ enum Field {
   f_audio_lead_in,
   f_preview_time,
   f_countdown,
+  f_sample_volume,
   f_stack_leniency,
   f_mode,
   f_letterbox_in_breaks,
@@ -209,6 +210,7 @@ const char* field_names[] = {"stacking",
                              "audio_lead_in",
                              "preview_time",
                              "countdown",
+                             "sample_volume",
                              "stack_leniency",
                              "mode",
                              "letterbox_in_breaks",
@@ -507,6 +509,7 @@ struct BeatmapConverter {
          {f_preview_time, optional_integer(m.preview_time)},
          {f_countdown, integer(m.countdown)},
          {f_sample_set, sample_set(m.sample_set)},
+         {f_sample_volume, integer(m.sample_volume)},
          {f_stack_leniency, number(m.stack_leniency)},
          {f_mode, PythonRef(PyObject_CallFunctionObjArgs(state.types[t_mode],
                                                          integer(m.mode).p, nullptr))},
@@ -620,7 +623,8 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
           PyErr_SetFromErrnoWithFilenameObject(PyExc_OSError, arg);
           break;
         case fosu::ErrorCode::InputTooLarge:
-          PyErr_SetString(PyExc_ValueError, "beatmap input exceeds the supported size");
+          PyErr_SetString(PyExc_ValueError,
+                          "beatmap input cannot fit in the process address space");
           break;
         case fosu::ErrorCode::InvalidInput:
           PyErr_SetString(PyExc_ValueError, "invalid input");
