@@ -122,6 +122,7 @@ static void test_byte_masks() {
       }
       CHECK_EQ(comma_mask32(v), value == ',' ? bit : 0u);
       CHECK_EQ(equal_mask32(v, broadcast_byte<'\n'>()), value == '\n' ? bit : 0u);
+      CHECK_EQ(count_equal_bytes32(v, broadcast_byte<'\n'>()), value == '\n' ? 1u : 0u);
     }
   }
 }

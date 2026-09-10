@@ -50,6 +50,9 @@ inline ByteVector broadcast_byte() {
 inline uint32_t equal_mask32(Bytes32 v, ByteVector c) {
   return static_cast<uint32_t>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, c)));
 }
+inline uint32_t count_equal_bytes32(Bytes32 v, ByteVector c) {
+  return std::popcount(equal_mask32(v, c));
+}
 // AVX2 has no unsigned byte comparison: adding 80 maps ASCII digits to
 // [-128, -119], below every other byte under a signed comparison.
 inline uint32_t nondigit_mask32(Bytes32 v) {
@@ -86,6 +89,11 @@ inline uint32_t byte_mask16(uint8x16_t v) {
 }
 inline uint32_t equal_mask32(Bytes32 v, ByteVector c) {
   return byte_mask16(vceqq_u8(v.val[0], c)) | (byte_mask16(vceqq_u8(v.val[1], c)) << 16);
+}
+inline uint32_t count_equal_bytes32(Bytes32 v, ByteVector c) {
+  const auto first = vshrq_n_u8(vceqq_u8(v.val[0], c), 7);
+  const auto second = vshrq_n_u8(vceqq_u8(v.val[1], c), 7);
+  return vaddvq_u8(first) + vaddvq_u8(second);
 }
 inline uint32_t nondigit_mask16(uint8x16_t v) {
   return byte_mask16(vcgtq_u8(vsubq_u8(v, vdupq_n_u8('0')), vdupq_n_u8(9)));

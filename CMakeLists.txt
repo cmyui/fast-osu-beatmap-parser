@@ -101,6 +101,7 @@ target_sources(fosu_headers INTERFACE FILE_SET HEADERS BASE_DIRS src FILES
   src/fosu/engine/hit_objects/samples.h
   src/fosu/engine/hit_objects/slider_fields.h
   src/fosu/engine/hit_objects/sliders.h
+  src/fosu/engine/count_document_arrays.h
   src/fosu/engine/parse_document.h
   src/fosu/engine/parsing/field_values.h
   src/fosu/engine/parsing/key_value.h

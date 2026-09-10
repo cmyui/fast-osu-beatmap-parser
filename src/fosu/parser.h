@@ -8,6 +8,7 @@
 #include <limits>
 
 #include <fosu/beatmap.h>
+#include <fosu/engine/count_document_arrays.h>
 #include <fosu/engine/parse_document.h>
 #include <fosu/engine/parsing_engine.h>
 #include <fosu/io.h>
@@ -60,81 +61,51 @@ struct ParserArenaPoolCleanup {
 inline ParserArenaPoolCleanup parser_arena_pool_cleanup;
 #endif
 
-struct BeatmapArraySizes {
-  size_t breaks = 0;
-  size_t colours = 0;
-  size_t timing_points = 0;
-  size_t hit_objects = 0;
-  size_t sliders = 0;
-  size_t slider_points = 0;
-};
-
-// Derive safe upper bounds from the shortest accepted spelling of each
-// record. Virtual arena space is cheap; only pages containing accepted records
-// are touched. This avoids a sizing pass over the input.
-inline BeatmapArraySizes maximum_beatmap_array_sizes(size_t size,
-                                                     uint32_t selected_sections) {
-  BeatmapArraySizes sizes;
-  if (selected_sections & kSectionEvents)
-    sizes.breaks = size / 5 + 1;  // 2,0,0
-  if (selected_sections & kSectionColours)
-    sizes.colours = size / 11 + 1;  // Combo:0,0,0
-  if (selected_sections & kSectionTimingPoints)
-    sizes.timing_points = size / 3 + 1;  // 0,0
-  if (selected_sections & kSectionHitObjects) {
-    sizes.hit_objects = size / 9 + 1;    // 0,0,0,1,0
-    sizes.sliders = size / 14 + 1;       // 0,0,0,2,0,L,0
-    sizes.slider_points = size / 4 + 1;  // |0:0
-  }
-  return sizes;
-}
-
 inline bool allocate_beatmap_arrays(Arena* arena,
                                     Beatmap& beatmap,
-                                    const BeatmapArraySizes& sizes) noexcept {
-  size_t bytes = 0;
-  auto add = [&]<typename T>(size_t count) {
-    if (!count)
-      return true;
-    constexpr size_t padding = alignof(T) - 1;
-    if (count > (std::numeric_limits<size_t>::max() - padding) / sizeof(T))
+                                    const BeatmapArrayCapacities& capacities) noexcept {
+  if (capacities.breaks) {
+    Break* values = arena_push_array<Break>(arena, capacities.breaks);
+    if (!values)
       return false;
-    const size_t amount = count * sizeof(T) + padding;
-    if (amount > std::numeric_limits<size_t>::max() - bytes)
+    beatmap.breaks = {values, capacities.breaks};
+  }
+
+  if (capacities.colours) {
+    uint32_t* values = arena_push_array<uint32_t>(arena, capacities.colours);
+    if (!values)
       return false;
-    bytes += amount;
-    return true;
-  };
-  if (!add.template operator()<Break>(sizes.breaks) ||
-      !add.template operator()<uint32_t>(sizes.colours) ||
-      !add.template operator()<TimingPoint>(sizes.timing_points) ||
-      !add.template operator()<HitObject>(sizes.hit_objects) ||
-      !add.template operator()<Slider>(sizes.sliders) ||
-      !add.template operator()<SliderPoint>(sizes.slider_points))
-    return false;
-  if (!bytes)
-    return true;
+    beatmap.combo_colours = {values, capacities.colours};
+  }
 
-  auto* cursor =
-      static_cast<uint8_t*>(arena_push(arena, bytes, alignof(std::max_align_t)));
-  if (!cursor)
-    return false;
-  auto take = [&]<typename T>(size_t count) -> std::span<T> {
-    if (!count)
-      return {};
-    cursor = reinterpret_cast<uint8_t*>(
-        align_up(reinterpret_cast<uintptr_t>(cursor), alignof(T)));
-    auto* values = reinterpret_cast<T*>(cursor);
-    cursor += count * sizeof(T);
-    return {values, count};
-  };
+  if (capacities.timing_points) {
+    TimingPoint* values = arena_push_array<TimingPoint>(arena, capacities.timing_points);
+    if (!values)
+      return false;
+    beatmap.timing_points = {values, capacities.timing_points};
+  }
 
-  beatmap.breaks = take.template operator()<Break>(sizes.breaks);
-  beatmap.combo_colours = take.template operator()<uint32_t>(sizes.colours);
-  beatmap.timing_points = take.template operator()<TimingPoint>(sizes.timing_points);
-  beatmap.hit_objects = take.template operator()<HitObject>(sizes.hit_objects);
-  beatmap.sliders = take.template operator()<Slider>(sizes.sliders);
-  beatmap.slider_points = take.template operator()<SliderPoint>(sizes.slider_points);
+  if (capacities.hit_objects) {
+    HitObject* values = arena_push_array<HitObject>(arena, capacities.hit_objects);
+    if (!values)
+      return false;
+    beatmap.hit_objects = {values, capacities.hit_objects};
+  }
+
+  if (capacities.sliders) {
+    Slider* values = arena_push_array<Slider>(arena, capacities.sliders);
+    if (!values)
+      return false;
+    beatmap.sliders = {values, capacities.sliders};
+  }
+
+  if (capacities.slider_points) {
+    SliderPoint* values = arena_push_array<SliderPoint>(arena, capacities.slider_points);
+    if (!values)
+      return false;
+    beatmap.slider_points = {values, capacities.slider_points};
+  }
+
   return true;
 }
 
@@ -280,9 +251,9 @@ class Parser {
 
   Result<Beatmap*> finish_parse(ParseOptions opts) noexcept {
     if (input_size_ != 0) {
-      const auto sizes =
-          internal::maximum_beatmap_array_sizes(input_size_, opts.sections);
-      if (!internal::allocate_beatmap_arrays(result_arena_, beatmap_, sizes)) {
+      const auto capacities =
+          internal::count_document_arrays({input_, input_size_}, opts.sections);
+      if (!internal::allocate_beatmap_arrays(result_arena_, beatmap_, capacities)) {
         reset_working_result();
         return Error{ErrorCode::AllocationFailure};
       }

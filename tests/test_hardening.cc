@@ -53,6 +53,8 @@ int main() {
   auto empty = parser.parse(nullptr, 0);
   assert(empty && empty.value()->hit_objects.empty());
   assert(must_parse(parser, fosu::make_padded({})).hit_objects.empty());
+  auto bom_section = fosu::make_padded("\xEF\xBB\xBF[HitObjects]\n1,2,3,1,0\n");
+  assert(must_parse(parser, bom_section).hit_objects.size() == 1);
   auto embedded = fosu::make_padded(
       "[Metadata]\nTitle:[HitObjects]\n1,2,3,1,0\n[HitObjects]\n1,2,4,1,0\n");
   auto selected = must_parse(parser, embedded, {.sections = fosu::kSectionHitObjects});

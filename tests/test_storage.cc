@@ -336,7 +336,7 @@ static void test_parser_prepares_engine_input_and_output() {
          fosu::ParseOptions options) noexcept {
         ++calls;
         CHECK_EQ(options.sections, fosu::kSectionHitObjects);
-        CHECK_EQ(std::string_view(input.data(), input.size()), "1,2,3,1,0");
+        CHECK_EQ(std::string_view(input.data(), input.size()), "[HitObjects]\n1,2,3,1,0");
         for (size_t i = 0; i < fosu::kBufferPadding; ++i)
           CHECK_EQ(input.data()[input.size() + i], '\0');
         CHECK(!beatmap.hit_objects.empty());
@@ -349,7 +349,7 @@ static void test_parser_prepares_engine_input_and_output() {
       },
   };
   fosu::Parser parser(engine);
-  std::string input = "1,2,3,1,0";
+  std::string input = "[HitObjects]\n1,2,3,1,0";
   const auto& beatmap = require_parse(
       parser.parse(std::span<const char>(input), {.sections = fosu::kSectionHitObjects}));
   CHECK_EQ(beatmap.hit_objects.size(), 1u);
