@@ -127,8 +127,8 @@ remain raw strings. Storyboard command bodies are counted and skipped;
 lazer's newer per-segment curve syntax is outside this parser's scope.
 
 Malformed numeric records are skipped and counted; this is not a strict
-playability validator. Inputs are limited to 64 MiB. Fast paths use speculative
-reads; `Parser` copies inputs into owned storage with **128 readable zero bytes
+playability validator. Fast paths use speculative reads; `Parser` copies inputs
+into owned storage with **128 readable zero bytes
 after the logical end**. See the
 [full input contract](docs/compatibility.md) before integrating a consumer.
 The compiled library and Python package select AVX2 on supported x86-64 CPUs

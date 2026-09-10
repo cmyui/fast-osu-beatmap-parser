@@ -11,6 +11,7 @@ static void test_all_sections() {
       "PreviewTime: 53342\r\n"
       "Countdown: 0\r\n"
       "SampleSet: Soft\r\n"
+      "SampleVolume: 73\r\n"
       "StackLeniency: 0.7\r\n"
       "Mode: 0\r\n"
       "LetterboxInBreaks: 0\r\n"
@@ -74,6 +75,7 @@ static void test_all_sections() {
     CHECK(bm.audio_filename == "audio.mp3");
     CHECK_EQ(bm.preview_time, 53342);
     CHECK(bm.sample_set == fosu::SampleSet::Soft);
+    CHECK_EQ(bm.sample_volume, 73);
     CHECK(bm.widescreen_storyboard);
     CHECK(!bm.letterbox_in_breaks);
     CHECK(bm.bookmarks == "11240,22540");

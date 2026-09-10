@@ -1,6 +1,8 @@
 #include "support/equality.h"
 #include "support/test.h"
 
+#include <limits>
+
 static void test_reparse_reuses_arena_memory() {
   auto input = fosu::make_padded("[HitObjects]\n16,32,100,1,0\n32,64,200,1,0\n");
   fosu::Parser parser;
@@ -318,6 +320,14 @@ void test_read_into_reuse() {
   unlink(path);
 }
 
+static void test_input_size_overflow() {
+  char byte = 0;
+  fosu::Parser parser;
+  auto memory_result = parser.parse(&byte, std::numeric_limits<size_t>::max());
+  CHECK(!memory_result);
+  CHECK(memory_result.error().code == fosu::ErrorCode::InputTooLarge);
+}
+
 static void test_parser_prepares_engine_input_and_output() {
   static int calls = 0;
   const fosu::ParsingEngine engine{
@@ -459,5 +469,6 @@ int main() {
   test_failed_copy_rewinds_destination();
   test_arena_interface();
   test_read_into_reuse();
+  test_input_size_overflow();
   return test_result();
 }
