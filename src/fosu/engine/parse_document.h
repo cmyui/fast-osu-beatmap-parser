@@ -1,6 +1,6 @@
 #pragma once
 
-#include <fosu/engine/parsing/arena_list.h>
+#include <fosu/engine/parsing/chunk_list.h>
 #include <fosu/engine/parsing/section_names.h>
 #include <fosu/engine/parsing_engine.h>
 #include <fosu/engine/sections/colours.h>
@@ -46,12 +46,12 @@ inline bool parse_document(std::span<const char> input,
   if (input.empty())
     return true;
   const TempArena temporary_storage{scratch_arena};
-  ArenaList<Break> breaks;
-  ArenaList<uint32_t> colours;
-  ArenaList<TimingPoint> timing_points;
-  ArenaList<HitObject> hit_objects;
-  ArenaList<Slider> sliders;
-  ArenaList<SliderPoint> slider_points;
+  ChunkList<Break> breaks;
+  ChunkList<uint32_t> colours;
+  ChunkList<TimingPoint> timing_points;
+  ChunkList<HitObject> hit_objects;
+  ChunkList<Slider> sliders;
+  ChunkList<SliderPoint> slider_points;
   const char* end = input.data() + input.size();
   const char* p = parse_preamble(beatmap, input.data(), end);
   const int time_offset = beatmap.format_version < 5 ? 24 : 0;
@@ -112,12 +112,12 @@ inline bool parse_document(std::span<const char> input,
   // General may follow Difficulty or repeat; CS depends on the final mode.
   beatmap.cs = beatmap.mode == 3 ? std::clamp(beatmap.cs, 1.0, 18.0)
                                  : std::clamp(beatmap.cs, 0.0, 10.0);
-  auto flat_breaks = flatten_arena_list(result_arena, breaks);
-  auto flat_colours = flatten_arena_list(result_arena, colours);
-  auto flat_timing_points = flatten_arena_list(result_arena, timing_points);
-  auto flat_hit_objects = flatten_arena_list(result_arena, hit_objects);
-  auto flat_sliders = flatten_arena_list(result_arena, sliders);
-  auto flat_slider_points = flatten_arena_list(result_arena, slider_points);
+  auto flat_breaks = flatten_chunk_list(result_arena, breaks);
+  auto flat_colours = flatten_chunk_list(result_arena, colours);
+  auto flat_timing_points = flatten_chunk_list(result_arena, timing_points);
+  auto flat_hit_objects = flatten_chunk_list(result_arena, hit_objects);
+  auto flat_sliders = flatten_chunk_list(result_arena, sliders);
+  auto flat_slider_points = flatten_chunk_list(result_arena, slider_points);
   if (!flat_breaks || !flat_colours || !flat_timing_points || !flat_hit_objects ||
       !flat_sliders || !flat_slider_points) {
     return false;

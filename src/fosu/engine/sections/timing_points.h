@@ -1,7 +1,7 @@
 #pragma once
 
 #include <fosu/beatmap.h>
-#include <fosu/engine/parsing/arena_list.h>
+#include <fosu/engine/parsing/chunk_list.h>
 #include <fosu/engine/parsing/lines.h>
 #include <fosu/engine/primitives/byte_scan.h>
 #include <fosu/engine/timing_points/point.h>
@@ -12,7 +12,7 @@ namespace fosu::internal {
 // Each point is parsed into a local value and then copied into the beatmap arena.
 inline const char* parse_timing_points_section_simd(Beatmap& beatmap,
                                                     Arena* arena,
-                                                    ArenaList<TimingPoint>& points,
+                                                    ChunkList<TimingPoint>& points,
                                                     const char* p,
                                                     const char* file_end,
                                                     int time_offset) {
@@ -43,7 +43,7 @@ inline const char* parse_timing_points_section_simd(Beatmap& beatmap,
                                  line_mask;
       if (const auto point = try_parse_timing_point_fast_masked(commas, nondigits, p,
                                                                 length, time_offset)) {
-        if (!arena_list_push(arena, points, *point))
+        if (!chunk_list_push(arena, points, *point))
           return nullptr;
         p = next_line;
         continue;
@@ -62,7 +62,7 @@ inline const char* parse_timing_points_section_simd(Beatmap& beatmap,
                              ? parse_timing_point<true>(p, line_end, commas, time_offset)
                              : parse_timing_point(p, line_end, 0, time_offset);
       if (point) {
-        if (!arena_list_push(arena, points, *point))
+        if (!chunk_list_push(arena, points, *point))
           return nullptr;
       } else
         ++malformed;
@@ -77,14 +77,14 @@ inline const char* parse_timing_points_section_simd(Beatmap& beatmap,
 
 inline const char* parse_timing_points_section_scalar(Beatmap& beatmap,
                                                       Arena* arena,
-                                                      ArenaList<TimingPoint>& points,
+                                                      ChunkList<TimingPoint>& points,
                                                       const char* p,
                                                       const char* file_end,
                                                       int time_offset) {
   return for_each_section_line_until(p, file_end, [&](std::string_view line) {
     if (const auto point =
             parse_timing_point(line.data(), line.data() + line.size(), 0, time_offset)) {
-      return arena_list_push(arena, points, *point) != nullptr;
+      return chunk_list_push(arena, points, *point) != nullptr;
     } else {
       ++beatmap.stats.malformed_lines;
       return true;
@@ -94,7 +94,7 @@ inline const char* parse_timing_points_section_scalar(Beatmap& beatmap,
 
 inline const char* parse_timing_points_section(Beatmap& beatmap,
                                                Arena* arena,
-                                               ArenaList<TimingPoint>& points,
+                                               ChunkList<TimingPoint>& points,
                                                const char* p,
                                                const char* file_end,
                                                int time_offset = 0) {

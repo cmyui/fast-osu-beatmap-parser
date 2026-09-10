@@ -8,6 +8,13 @@ Interfaces may break. Optimize for useful code changes, not release-level polish
 - Prefer readable, domain-accurate code, explicit ownership, and simple inputs
   and results. Favor returning parsed values over mutable output parameters
   where practical. Near-zero-cost abstractions should earn their complexity.
+- Prefer straightforward code in which each statement performs one obvious
+  operation. Keep state explicit and derive it from one source of truth. Extra
+  lines are preferable to compressed control flow, synchronized cached state,
+  clever syntax, or helpers that combine several conceptually distinct steps.
+- Start with the simplest literal implementation of the domain operation. Add
+  specialized machinery only after measurement shows that it matters, and keep
+  the simple data flow recognizable when optimizing it.
 - Change interfaces directly and update affected callers. Do not preserve aliases,
   old formats, or speculative extension points unless explicitly requested.
 - Before editing, define the question and briefly trace the affected implementation,

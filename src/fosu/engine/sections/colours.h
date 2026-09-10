@@ -1,7 +1,7 @@
 #pragma once
 
 #include <fosu/beatmap.h>
-#include <fosu/engine/parsing/arena_list.h>
+#include <fosu/engine/parsing/chunk_list.h>
 #include <fosu/engine/parsing/field_values.h>
 #include <fosu/engine/parsing/lines.h>
 
@@ -30,7 +30,7 @@ inline std::optional<uint32_t> parse_colour(std::string_view input) {
 
 inline const char* parse_colours_section(Beatmap& beatmap,
                                          Arena* arena,
-                                         ArenaList<uint32_t>& colours,
+                                         ChunkList<uint32_t>& colours,
                                          const char* p,
                                          const char* end) {
   return for_each_section_line_until(p, end, [&](std::string_view line) {
@@ -49,7 +49,7 @@ inline const char* parse_colours_section(Beatmap& beatmap,
       return true;
     const auto index = parse_field_integer(key.substr(5));
     if (index && *index >= 1 && *index <= 8)
-      return arena_list_push(arena, colours, *colour) != nullptr;
+      return chunk_list_push(arena, colours, *colour) != nullptr;
     return true;
   });
 }

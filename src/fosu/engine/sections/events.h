@@ -1,6 +1,6 @@
 #pragma once
 #include <fosu/beatmap.h>
-#include <fosu/engine/parsing/arena_list.h>
+#include <fosu/engine/parsing/chunk_list.h>
 #include <fosu/engine/parsing/lines.h>
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/parsing/string_lookup.h>
@@ -44,7 +44,7 @@ inline std::optional<std::string_view> parse_event_filename(const char* rest,
 
 inline bool parse_background_event(Beatmap& bm,
                                    Arena*,
-                                   ArenaList<Break>&,
+                                   ChunkList<Break>&,
                                    const char* rest,
                                    const char* end,
                                    int) {
@@ -55,7 +55,7 @@ inline bool parse_background_event(Beatmap& bm,
 
 inline bool parse_video_event(Beatmap& bm,
                               Arena*,
-                              ArenaList<Break>&,
+                              ChunkList<Break>&,
                               const char* rest,
                               const char* end,
                               int) {
@@ -66,7 +66,7 @@ inline bool parse_video_event(Beatmap& bm,
 
 inline bool parse_break_event(Beatmap& bm,
                               Arena* arena,
-                              ArenaList<Break>& breaks,
+                              ChunkList<Break>& breaks,
                               const char* rest,
                               const char* end,
                               int time_offset) {
@@ -83,11 +83,11 @@ inline bool parse_break_event(Beatmap& bm,
   }
   start += time_offset;
   const Break parsed{start, std::max(start, stop + time_offset)};
-  return arena_list_push(arena, breaks, parsed) != nullptr;
+  return chunk_list_push(arena, breaks, parsed) != nullptr;
 }
 
 using EventHandler =
-    bool (*)(Beatmap&, Arena*, ArenaList<Break>&, const char*, const char*, int);
+    bool (*)(Beatmap&, Arena*, ChunkList<Break>&, const char*, const char*, int);
 inline constexpr auto kEventHandlers = make_string_lookup<EventHandler>({
     {"0", parse_background_event},
     {"1", parse_video_event},
@@ -98,7 +98,7 @@ inline constexpr auto kEventHandlers = make_string_lookup<EventHandler>({
 
 inline bool parse_event_line(Beatmap& bm,
                              Arena* arena,
-                             ArenaList<Break>& breaks,
+                             ChunkList<Break>& breaks,
                              const char* p,
                              size_t len,
                              int time_offset) {
@@ -126,7 +126,7 @@ inline bool parse_event_line(Beatmap& bm,
 #if FOSU_SIMD
 inline const char* parse_events_section_simd(Beatmap& bm,
                                              Arena* arena,
-                                             ArenaList<Break>& breaks,
+                                             ChunkList<Break>& breaks,
                                              const char* p,
                                              const char* file_end,
                                              int time_offset) {
@@ -179,7 +179,7 @@ inline const char* parse_events_section_simd(Beatmap& bm,
 
 inline const char* parse_events_section_scalar(Beatmap& bm,
                                                Arena* arena,
-                                               ArenaList<Break>& breaks,
+                                               ChunkList<Break>& breaks,
                                                const char* p,
                                                const char* file_end,
                                                int time_offset) {
@@ -190,7 +190,7 @@ inline const char* parse_events_section_scalar(Beatmap& bm,
 
 inline const char* parse_events_section(Beatmap& bm,
                                         Arena* arena,
-                                        ArenaList<Break>& breaks,
+                                        ChunkList<Break>& breaks,
                                         const char* p,
                                         const char* file_end,
                                         int time_offset = 0) {
