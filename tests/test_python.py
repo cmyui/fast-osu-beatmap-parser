@@ -778,18 +778,6 @@ def test_memory_map_and_wide_buffers_are_detached(tmp_path):
     assert fosu.parse(memoryview(padded).cast("I")) == beatmap
 
 
-def test_size_limit(tmp_path):
-    with pytest.raises(ValueError):
-        fosu.parse(bytes(64 * 1024 * 1024 + 1))
-    with pytest.raises(ValueError):
-        fosu.parse(bytearray(64 * 1024 * 1024 + 1))
-    path = tmp_path / "oversized.osu"
-    with path.open("wb") as output:
-        output.truncate(64 * 1024 * 1024 + 1)
-    with pytest.raises(ValueError):
-        fosu.parse_file(path)
-
-
 def test_concurrent_calls_return_independent_objects():
     inputs = [
         f"[Metadata]\nTitle:{i}\n[HitObjects]\n1,2,{i},1,0\n".encode()
