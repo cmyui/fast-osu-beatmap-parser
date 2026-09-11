@@ -565,8 +565,7 @@ def test_modern_curve_segments_drive_path_calculation():
     assert len(slider.path.points) > 2
 
     legacy = fosu.parse(
-        b"osu file format v14\n[HitObjects]\n"
-        b"10,20,100,2,0,B|30.5:40.25,1,100\n"
+        b"osu file format v14\n[HitObjects]\n10,20,100,2,0,B|30.5:40.25,1,100\n"
     ).hit_objects[0]
     assert isinstance(legacy, fosu.Slider)
     assert legacy.curve_segments == []
