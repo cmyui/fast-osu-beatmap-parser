@@ -269,6 +269,7 @@ static void test_modern_curve_segments() {
         "10,20,100,2,0,B|30.5:40.25,1,100\n",
         simd);
     const auto& legacy_slider = legacy.sliders[legacy.hit_objects[0].slider];
+    CHECK_EQ(legacy_slider.segment_count, 0u);
     CHECK_EQ(legacy.slider_points[legacy_slider.point_begin].x, 30.0f);
     CHECK_EQ(legacy.slider_points[legacy_slider.point_begin].y, 40.0f);
   }

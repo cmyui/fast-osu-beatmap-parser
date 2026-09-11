@@ -412,20 +412,6 @@ struct BeatmapConverter {
     return record(circle ? t_circle : h.type & 8 ? t_spinner : t_hold, {}, common);
   }
   PythonRef curve_segments(const fosu::HitObject& object, const fosu::Slider& slider) {
-    if (!slider.segment_count) {
-      return list(1, [&](size_t) {
-        return record(t_curve_segment,
-                      {{f_type, curve(slider.curve_type)},
-                       {f_degree, integer(0)},
-                       {f_control_points, list(slider.point_count + 1, [&](size_t i) {
-                          if (!i)
-                            return point(object.x, object.y);
-                          const auto& value =
-                              map.slider_points[slider.point_begin + i - 1];
-                          return point(value.x, value.y);
-                        })}});
-      });
-    }
     return list(slider.segment_count, [&](size_t i) {
       const auto& segment = map.slider_segments[slider.segment_begin + i];
       const bool head = i == 0;

@@ -64,8 +64,8 @@ struct ParsedSliderPoint {
 // Slider control point coordinate: overwhelmingly 1-4 plain digits, parsed
 // branchlessly via SWAR. Signs, 5+ digit values, and empty fields take the
 // general path.
-inline std::optional<ParsedSliderCoordinate> parse_slider_coordinate(const char* p,
-                                                                     const char* end) {
+inline std::optional<ParsedSliderCoordinate>
+parse_slider_coordinate(const char* p, const char* end, bool preserve_fraction = false) {
   const uint32_t run = digit_run8(p);
   if (run - 1 <= 3 && run <= static_cast<size_t>(end - p) &&
       (p[run] == ':' || p[run] == '|' || p[run] == ',')) {
@@ -75,7 +75,8 @@ inline std::optional<ParsedSliderCoordinate> parse_slider_coordinate(const char*
   const char* q = parse_osu_float(p, end, v, 131072);
   if (q == p)
     return std::nullopt;
-  return ParsedSliderCoordinate{v, q};
+  return ParsedSliderCoordinate{
+      preserve_fraction ? v : static_cast<float>(static_cast<int32_t>(v)), q};
 }
 
 #if FOSU_SIMD
@@ -305,17 +306,13 @@ inline std::optional<ParsedSliderPoint<Point>> parse_slider_point(
       return ParsedSliderPoint<Point>{decode_slider_point<Point>(v, xl, yl, k), next};
   }
 #endif
-  const auto x = parse_slider_coordinate(p + 1, end);
+  const auto x = parse_slider_coordinate(p + 1, end, preserve_fraction);
   if (!x || *x->next != ':')
     return std::nullopt;
-  const auto y = parse_slider_coordinate(x->next + 1, end);
+  const auto y = parse_slider_coordinate(x->next + 1, end, preserve_fraction);
   if (!y)
     return std::nullopt;
-  const float x_value =
-      preserve_fraction ? x->value : static_cast<float>(static_cast<int32_t>(x->value));
-  const float y_value =
-      preserve_fraction ? y->value : static_cast<float>(static_cast<int32_t>(y->value));
-  return ParsedSliderPoint<Point>{Point{x_value, y_value}, y->next};
+  return ParsedSliderPoint<Point>{Point{x->value, y->value}, y->next};
 }
 
 }  // namespace fosu::internal

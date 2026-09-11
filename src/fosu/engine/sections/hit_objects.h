@@ -30,6 +30,7 @@ __attribute__((noinline)) inline bool parse_slider(
   if (p >= end) [[unlikely]]
     return false;
 
+  const bool lazer_format = beatmap.format_version >= 128;
   const auto first_curve = parse_curve_type(p, end);
   if (!first_curve)
     return false;
@@ -49,7 +50,8 @@ __attribute__((noinline)) inline bool parse_slider(
   }
 #endif
   while (p < end && *p == '|') {
-    if (p + 1 < end && (p[1] == 'B' || p[1] == 'C' || p[1] == 'L' || p[1] == 'P')) {
+    if (lazer_format && p + 1 < end &&
+        (p[1] == 'B' || p[1] == 'C' || p[1] == 'L' || p[1] == 'P')) {
       const auto next_curve = parse_curve_type(p + 1, end);
       if (!next_curve || point_count == current_segment_begin) {
         point_count = point_begin;
@@ -73,8 +75,7 @@ __attribute__((noinline)) inline bool parse_slider(
       p = next_curve->next;
       continue;
     }
-    const auto point =
-        parse_slider_point<SliderPoint>(p, end, constants, beatmap.format_version >= 128);
+    const auto point = parse_slider_point<SliderPoint>(p, end, constants, lazer_format);
     if (!point) [[unlikely]] {
       point_count = point_begin;
       segment_count = segment_begin;

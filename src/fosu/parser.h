@@ -78,7 +78,8 @@ inline size_t first_section_body_size(std::span<const char> input, Section targe
 inline bool allocate_beatmap_arrays(Arena* arena,
                                     Beatmap& beatmap,
                                     std::span<const char> input,
-                                    uint32_t selected_sections) noexcept {
+                                    uint32_t selected_sections,
+                                    bool lazer_format) noexcept {
   const size_t input_size = input.size();
   // Each capacity is a conservative bound derived from the shortest accepted
   // spelling. sizeof includes the string literal's trailing null byte.
@@ -130,12 +131,13 @@ inline bool allocate_beatmap_arrays(Arena* arena,
       return false;
     beatmap.sliders = {sliders, slider_capacity};
 
-    const size_t segment_capacity =
-        input_size / (sizeof("|L|0:0") - 1) + 1;
-    CurveSegment* segments = arena_push_array<CurveSegment>(arena, segment_capacity);
-    if (!segments)
-      return false;
-    beatmap.slider_segments = {segments, segment_capacity};
+    if (lazer_format) {
+      const size_t segment_capacity = input_size / (sizeof("|L|0:0") - 1) + 1;
+      CurveSegment* segments = arena_push_array<CurveSegment>(arena, segment_capacity);
+      if (!segments)
+        return false;
+      beatmap.slider_segments = {segments, segment_capacity};
+    }
 
     const size_t point_capacity = input_size / (sizeof("|0:0") - 1) + 1;
     SliderPoint* points = arena_push_array<SliderPoint>(arena, point_capacity);
@@ -290,8 +292,11 @@ class Parser {
   Result<Beatmap*> finish_parse(ParseOptions opts) noexcept {
     const std::span<const char> input{input_, input_size_};
     if (input_size_ != 0) {
+      Beatmap preamble;
+      internal::parse_preamble(preamble, input.data(), input.data() + input.size());
       if (!internal::allocate_beatmap_arrays(result_arena_, beatmap_, input,
-                                             opts.sections)) {
+                                             opts.sections,
+                                             preamble.format_version >= 128)) {
         reset_working_result();
         return Error{ErrorCode::AllocationFailure};
       }
