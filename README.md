@@ -40,60 +40,58 @@ fosu::Beatmap& map = *parsed.value();
 
 ## Performance
 
-These are historical measurements, not necessarily benchmarks of the current revision.
+Benchmarks use public APIs and include result construction and release. Lower is
+better. The current snapshot uses parser source `feb0606` and a representative
+1,024-entry corpus: 256 entries per game mode and 46,029,610 bytes total.
 
-### Python APIs
+### Python: structural decode
 
-FOSU's eager AVX2 Python interface averages **498 µs per map** from resident bytes on our
-Hetzner Zen 4 VM. We compared public parser APIs on the fixed **10,000-map
-corpus**, using the same **9,758 mutually accepted maps** for every row below.
-Lower is better.
+This scenario requests a normal decoded beatmap without optional gameplay
+calculations. Every row uses the same 1,004 mutually accepted all-mode entries.
+
+| Python interface | Result contract | Resident bytes (µs/map) | Warm file (µs/map) |
+|---|---|---:|---:|
+| FOSU AVX2 | Full supported document; exact baseline | 443.6 | 444.1 |
+| FOSU scalar | Full supported document; exact baseline | 514.0 | 499.1 |
+| OsuPyParser 1.0.7 | Different eager model and derived statistics | Unsupported | 4,885.0 |
+
+rosu-pp and its Python bindings are intentionally excluded: they construct a
+significantly reduced PP-oriented model, not a general-purpose beatmap document.
+
+### Python: slider geometry
+
+This standard-mode scenario requires slider end times and queryable paths. FOSU
+enables `calculate_slider_end_times` and `calculate_slider_paths`; slider performs
+its end-time and curve construction during ordinary parsing. Stacking is disabled
+for both parsers. All 256 entries are accepted by both parsers.
 
 | Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---:|---:|
-| FOSU Python AVX2 (eager) | 498.3 | 510.7 |
-| FOSU Python scalar (eager) | 548.7 | 554.7 |
-| rosu-pp-py 4.0.2 | 310.5 | 319.1 |
-| pyttanko 2.1.0 | 2,501.5 | 2,501.2 |
-| OsuPyParser 1.0.7 | Unsupported (file-only API) | 5,070.8 |
-| slider 0.8.4 | 14,091.0 | 14,119.7 |
+| FOSU AVX2 | 1,120.7 | 1,060.1 |
+| FOSU scalar | 1,107.0 | 1,096.1 |
+| slider 0.8.4 | 13,338.3 | 13,387.6 |
 
-Two complete batch passes on one pinned CPU, CPython 3.12; imports and startup
-excluded. File inputs are in the OS page cache. FOSU's timings include constructing
-and releasing every supported field as detached Python values. FOSU and rosu-pp-py
-were measured together again; other libraries retain the same-cohort measurements from the
-[comparison report](docs/comparison.md). Native PP-oriented results, such as
-rosu-pp-py's, do not construct an equivalent Python object graph.
+### Native and other languages
 
-### C++ and other languages
+Resident-input public API latency on the same Zen 4 host. These two interleaved
+passes use 1,023 common all-mode entries and are not directly comparable to the
+isolated Python batch measurements above.
 
-Resident-input API latency on the same Hetzner host, using **9,986 common maps**
-for every row. These are means of two per-call passes, **not directly
-comparable to the Python batch measurements above**. Lower is better.
+| Library / interface | Result scope | Mean µs/map |
+|---|---|---:|
+| FOSU C++ AVX2 | Full supported document | 46.1 |
+| FOSU C++ scalar | Full supported document | 97.8 |
+| rosu-map 0.2.1 (Rust) | General-purpose legacy document | 556.4 |
+| Coosu 2.5.1 (C#) | Typed document plus normal post-processing | 712.1 |
+| OsuParsers 1.7.2 (C#) | Rich document and storyboard decoding | 916.1 |
+| Official osu!lazer decoder (C#) | Rich ruleset model and legacy processing | 2,873.4 |
+| osu-parsers 4.1.7 (TypeScript) | Rich document model | 2,991.3 |
+| osu-parser 0.3.3 (JavaScript) | Automatically derives slider/gameplay values | 13,339.3 |
 
-| Library / interface | Mean µs/map |
-|---|---:|
-| FOSU C++ AVX2 | 32.5 |
-| FOSU C++ scalar | 77.8 |
-| rosu-pp (Rust) | 332.9 |
-| Coosu (C#) | 619.6 |
-| rosu-map (Rust) | 680.0 |
-| OsuParsers (C#) | 851.0 |
-| Official osu!lazer decoder (C#) | 2,839.7 |
-| osu-parsers (TypeScript/JS) | 2,842.5 |
-| osu-parser (JavaScript) | 54,387.8 |
-
-FOSU rows were refreshed on the same cohort in a FOSU-only interleaved run;
-competitor rows retain the original multi-runtime sweep. Different worker mixes
-can affect CPU-cache warmth. See the report for both runs and their limitations.
-
-Parsers differ in output and may also build slider geometry, apply gameplay
-defaults, or derive statistics. No PP/difficulty calculation is requested in either comparison.
-These are practical API costs, not identical-work claims.
-
-See the [full comparison](docs/comparison.md) for versions, exact APIs,
-Python object traversal, per-pass variation, failure counts,
-and the [reproducible harness](bench/comparison/README.md). See [performance](docs/performance.md) for internal measurement commands.
+The [full comparison](docs/comparison.md) defines the result contracts, execution
+models, versions, per-pass variation and coverage. [Performance details](docs/performance.md)
+show the cost of each FOSU option on x86-64 and AArch64. See the
+[reproducible harness](bench/comparison/README.md) for exact timing boundaries.
 
 ## Interfaces
 

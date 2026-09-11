@@ -1,8 +1,8 @@
 # Comparing public parser APIs
 
 These adapters measure practical public entry points, not a shared internal
-representation. See [the comparison report](../../docs/comparison.md) for the
-scope differences that must accompany the numbers.
+representation. Comparisons are organized by requested outcome; see the
+[comparison report](../../docs/comparison.md) for the exact result contracts.
 
 ## Reproduce on Linux/x86-64
 
@@ -58,15 +58,29 @@ successful files across every included variant and both rounds.
 When a mode manifest is supplied, coverage includes separate standard, taiko,
 catch, and mania counts. The report adds `_all_modes` and `_mode_0` through
 `_mode_3` tables. A variant's optional `modes` list declares supported native
-modes; pyttanko is standard-only. Unsupported variants are excluded from the
-corresponding mode tables, not silently allowed to eliminate every map in that
-mode. All variants are still attempted in the raw sweep. A table with no common
-successful maps has no timings. Every nonempty table uses one shared cohort;
-different tables may have different cohorts and must not be mixed for speedups.
+modes. Unsupported variants are excluded from the corresponding mode tables,
+not silently allowed to eliminate every map in that mode. All variants are still
+attempted in the raw sweep. A table with no common successful maps has no timings.
+Every nonempty table uses one shared cohort; different tables may have different
+cohorts and must not be mixed for speedups.
 
-Use `python_batch.py --table python_mode_0` for a standard-only comparison that
-includes pyttanko. `--table python_all_modes` excludes standard-only libraries
-and uses the same mixed-mode cohort for every remaining Python API.
+Use `python_batch.py --table python_mode_0` for a standard-only comparison.
+`--table python_all_modes` excludes mode-limited libraries and uses the same
+mixed-mode cohort for every remaining Python API.
+
+### Geometry-ready Python comparison
+
+Use a standard-only corpus and retain only `fosu-python-avx2`,
+`fosu-python-scalar` and `slider` in a copy of `variants.json`. Set
+`FOSU_BENCH_PROFILE=geometry` in each FOSU variant's environment. This makes
+FOSU calculate slider end times and paths; slider already calculates end times
+and constructs curve objects during its normal parse. Stacking remains disabled
+for both parsers.
+
+Run `run.py` and `report.py` normally, then use the resulting `python` cohort
+with `python_batch.py`. Do not set the profile for slider: it names a FOSU option
+bundle, not a cross-library switch. The report must describe the comparable
+outcome and the different path representations.
 
 ### Refresh only FOSU
 
@@ -119,7 +133,8 @@ The following describes the supplementary interleaved `run.py` experiment:
   OsuPyParser only offers this input boundary; no artificial bytes API is added.
 - `visit`: `bytes` plus summing every hitobject's start time using public Python
   record access. FOSU's records are already eager Python values. `slider`
-  stacking is explicitly disabled; no PP or difficulty calculation is requested.
+  stacking is explicitly disabled. No PP or difficulty calculation is requested.
+  The optional FOSU geometry profile affects parsing but not this traversal.
 - Normal garbage collection remains enabled. We retain **all** timed samples,
   including slow ones and collection that occurs during measured work. We do
   not force a collection after each parse; deferred collections outside the

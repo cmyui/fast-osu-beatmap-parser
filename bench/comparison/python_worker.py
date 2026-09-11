@@ -1,7 +1,7 @@
 """Persistent worker; JSON and IPC are outside the measured intervals."""
 
 import json
-import io
+import os
 import sys
 from pathlib import Path
 from time import perf_counter_ns
@@ -12,8 +12,23 @@ def load_parser(name):
     if name == "fosu":
         import fosu
 
+        profile = os.environ.get("FOSU_BENCH_PROFILE", "decode")
+        if profile == "decode":
+            options = {}
+        elif profile == "geometry":
+            options = {
+                "calculate_slider_end_times": True,
+                "calculate_slider_paths": True,
+            }
+        else:
+            raise ValueError(f"unknown FOSU benchmark profile: {profile}")
+
         def parse(data, path, workload):
-            return fosu.parse_file(path) if workload == "file" else fosu.parse(data)
+            return (
+                fosu.parse_file(path, **options)
+                if workload == "file"
+                else fosu.parse(data, **options)
+            )
 
         def count(beatmap):
             return len(beatmap.hit_objects)
@@ -41,19 +56,6 @@ def load_parser(name):
                 for obj in beatmap.hit_objects(stacking=False)
             )
 
-    elif name == "rosu-pp-py":
-        import rosu_pp_py
-
-        def parse(data, path, workload):
-            return (
-                rosu_pp_py.Beatmap(path=str(path))
-                if workload == "file"
-                else rosu_pp_py.Beatmap(bytes=data)
-            )
-
-        def count(beatmap):
-            return beatmap.n_objects
-
     elif name == "osupyparser":
         from osupyparser import OsuFile
 
@@ -63,26 +65,6 @@ def load_parser(name):
 
         def count(beatmap):
             return len(beatmap.hit_objects)
-
-    elif name == "pyttanko":
-        import pyttanko
-
-        decoder = pyttanko.parser()
-
-        def parse(data, path, workload):
-            source = (
-                path.open(encoding="utf-8-sig")
-                if workload == "file"
-                else io.StringIO(data.decode("utf-8-sig"))
-            )
-            with source:
-                return decoder.map(source)
-
-        def count(beatmap):
-            return len(beatmap.hitobjects)
-
-        def visit(beatmap):
-            return sum(obj.time for obj in beatmap.hitobjects)
 
     else:
         raise ValueError(name)

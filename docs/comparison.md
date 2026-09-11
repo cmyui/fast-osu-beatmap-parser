@@ -1,241 +1,155 @@
-# Parser comparison
+# Public parser comparison
 
-Historical measurements; these tables do not describe the current revision.
-Refresh at benchmark milestones, retaining the methodology and scope caveats below.
+Measured on 2026-09-11. This comparison asks how long documented public APIs
+take to produce useful beatmap results. It does not pretend that every parser
+returns the same model.
 
-This comparison asks: **how long does a normal public API take to produce a
-decoded beatmap?** It covers Python, Rust, C#, JavaScript, and FOSU's native C++
-interface. It is not a claim that every library produces the same model or
-supports the same operations.
+## Result contracts
 
-## Scope
+Performance is grouped by requested outcome. A number is published only when the
+parser's public API produces that outcome; unavailable work is `Unsupported`.
+Unavoidable additional work stays inside the timer.
 
-The selection covers the official osu! decoder, established general-purpose
-libraries across these ecosystems, and the widely used rosu PP bindings.
-Versions are pinned published packages rather than unreviewed development
-branches. This is a broad selection, not an exhaustive ranking of every parser.
+- **Structural decode** returns the parser's normal typed beatmap without asking
+  for optional geometry, gameplay transforms, difficulty or PP.
+- **Geometry-ready** additionally requires slider end times and a public way to
+  query slider paths. Representations may still differ.
+- **Gameplay-ready** means FOSU slider events and stacking. No measured competitor
+  currently exposes a sufficiently equivalent result, so this remains a
+  [FOSU feature-cost comparison](performance.md), not a ranking.
+- **Mod-adjusted gameplay** is likewise reported only for FOSU until another
+  measured public API offers an equivalent bulk result.
 
-| Library | Version | Entry point and relevant work |
-|---|---|---|
-| [FOSU](https://github.com/cmyui/fast-osu-beatmap-parser) | C++ and Python: `d31cddf` | Python `parse` / `parse_file` return detached dataclasses and lists; C++ `Parser` returns native records. No slider geometry or PP calculation. |
-| [slider](https://github.com/llllllllll/slider) | 0.8.4 | `Beatmap.parse` / `from_path`. Eager Python objects and slider-curve construction. Public object access uses `stacking=False`; no difficulty or mods requested. |
-| [rosu-pp-py](https://github.com/MaxOhn/rosu-pp-py) | 4.0.2 | `Beatmap(bytes=...)` / `Beatmap(path=...)`. Native PP-oriented model, not a full document representation. No PP/difficulty calculation requested. |
-| [OsuPyParser](https://github.com/lenforiee/osupyparser) | 1.0.7 | `OsuFile(path).parse_file()`. Eager Python objects, file hash and derived statistics. Published API is file-only. |
-| [pyttanko](https://github.com/Francesco149/pyttanko) | 2.1.0 | `parser.map(text_stream)`. Historical pure-Python, osu!standard-only PP model; no difficulty or PP calculation requested. |
-| [rosu-map](https://github.com/MaxOhn/rosu-map) | 0.2.1 | `from_bytes::<Beatmap>`. General-purpose legacy document decoding. |
-| [rosu-pp](https://github.com/MaxOhn/rosu-pp) | 4.0.1 | `Beatmap::from_bytes`. PP-oriented model; no difficulty calculation. |
-| [osu!lazer](https://github.com/ppy/osu) | 2026.730.0 | Official `Decoder.GetDecoder<Beatmap>(reader).Decode(reader)`. Defaults, samples, control points and stable object sorting; all four rulesets registered. No separate storyboard, star/PP or rendering calls. |
-| [OsuParsers](https://github.com/mrflashstudio/OsuParsers) | 1.7.2 | `BeatmapDecoder.Decode(lines)` using timed `StreamReader.ReadLine`. Rich C# objects and storyboard decoding. Its stream overload mishandles CRLF on Linux. |
-| [Coosu](https://github.com/Coosu/Coosu) | 2.5.1 | `OsuFile.ReadFromStream(stream)`. Typed C# sections and normal post-deserialization processing. |
-| [osu-parsers](https://github.com/kionell/osu-parsers) | 4.1.7 | `BeatmapDecoder.decodeFromBuffer(buffer, false)`. Rich TypeScript model; optional storyboard decoder disabled. `osu-classes` 3.1.0. |
-| [osu-parser](https://github.com/nojhamster/osu-parser) | 0.3.3 | `parseContent(string)`. Legacy JavaScript API automatically derives slider endpoints, duration and max combo. Especially different work from FOSU. |
+`Exact` means the invocation requests the stated FOSU contract. `Superset` means
+the parser unavoidably performs additional work. `Different` covers richer models
+whose fields and processing do not form a strict subset or superset.
 
-Replay-only libraries such as `osrparse` are not beatmap decoders. Historical
-PP implementations/ports such as `oppai-ng` and `peace-performance-python` are
-not measured here. `oppai-ng`'s documented `ezpp` entry point also calculates PP,
-so timing it against parse-only calls would be misleading; this comparison
-does not reach into its internal parsing functions. In particular, do not interpret this table
-as a PP-calculator ranking: FOSU does not calculate PP.
+## Capability and execution model
 
-## Measurement
+| Library | Normal timed result | Slider/gameplay work | Relation to structural decode |
+|---|---|---|---|
+| FOSU | Full supported document; detached objects in Python and parser-owned records in C++ | End times, paths, events, stacking and mods are explicit parse options | Exact baseline |
+| slider 0.8.4 | Eager Python beatmap objects; reliable on the measured standard, taiko and catch maps | Slider end times and curve objects are eager; stacking and mods are follow-up calls | Superset for structural decode; comparable geometry outcome |
+| OsuPyParser 1.0.7 | Eager Python document, file hash and derived statistics | File-only public API | Different, with additional eager work |
+| rosu-map 0.2.1 | General-purpose legacy document | Ordinary decode only | Closest structural scope; representation differs |
+| osu!lazer 2026.730.0 | Official rich ruleset model | Defaults, samples, control points and stable object sorting are eager | Superset work |
+| OsuParsers 1.7.2 | Rich C# document | Storyboard decoding is eager | Superset work |
+| Coosu 2.5.1 | Typed C# document | Normal post-deserialization processing is eager | Different, with additional work |
+| osu-parsers 4.1.7 | Rich TypeScript document | Optional storyboard decoder disabled | Different |
+| osu-parser 0.3.3 | Legacy JavaScript document | Slider endpoints, duration and maximum combo are eager | Superset work |
 
-Measured on 2026-09-08 UTC, using the fixed 10,000-map corpus: **402,593,897
-bytes**, selected by Akatsuki playcount from ranked/approved maps. This is a
-popularity-weighted selection, not a representative sample of all modes,
-unranked maps or pathological input. Each selected map has equal weight in the
-averages; playcount does not multiply its contribution.
+rosu-pp, its Python bindings and pyttanko are intentionally excluded. Their
+significantly reduced PP-oriented models are not general-purpose beatmap
+documents, so presenting their construction time in the same ranking would be
+misleading. Replay-only libraries are not beatmap decoders. `oppai-ng` is also
+omitted because its documented convenience API calculates PP; reaching into
+internal parsing would not be a public-API comparison.
 
-The host is an eight-vCPU, 16 GiB shared-tenancy AMD EPYC Genoa (Zen 4) VM, Ubuntu 24.04,
-kernel 6.8 and glibc 2.39. Workers were pinned to logical CPU 3. Other resident
-server workloads were not stopped; these are not isolated bare-metal results.
-No benchmark builds or other FOSU benchmarks ran concurrently with the timed
-sweep.
+## Python structural decode: all modes
 
-- CPython 3.12.3; published Python wheels where available. FOSU was built from
-  source with its bundled C++ runtime and selected via `FOSU_BACKEND`.
-- GCC 13.3, `-O3`. AVX2 C++: `-march=x86-64-v3 -mtune=znver4`; scalar:
-  `-march=x86-64 -DFOSU_DISABLE_SIMD`. Both retain stack protection/fortification.
-- Rust 1.98.1 release build, thin LTO, one codegen unit and
-  `-C target-cpu=x86-64-v3`.
-- Node 20.20.2 / npm 10.8.2; .NET SDK 10.0.400 / Release, default runtime JIT/GC.
+Two isolated complete-process batch passes on the 1,004-entry common cohort:
+250 standard, 248 taiko, 254 catch and 252 mania entries; 44,321,288 bytes.
+Microseconds per map; lower is better.
 
-### Python headline: separate-process batches
+| Python interface | Contract | Resident bytes | Warm file | Passes: bytes / file |
+|---|---|---:|---:|---|
+| FOSU AVX2 | Exact | 443.6 | 444.1 | 450.9 / 436.3; 439.6 / 448.5 |
+| FOSU scalar | Exact | 514.0 | 499.1 | 551.2 / 476.8; 506.2 / 492.1 |
+| OsuPyParser | Different | Unsupported | 4,885.0 | —; 5,014.4 / 4,755.6 |
 
-The Python headline uses the 9,758-map common cohort established by the full
-sweep below. Each library/API gets a **fresh process for each pass**, preloads
-the inputs, warms on 64 evenly spaced maps (three parses each), then parses the
-entire cohort in one timed loop. The second pass reverses library/API order.
-Both passes count equally. Parsing, required text conversion, allocations,
-object-count access, result release, loop bookkeeping and normal GC during the
-loop are included. Imports, preloading, warmup and process shutdown are not.
-Every map's object count must agree across all batches, not just the total.
-
-This prevents a preceding file or traversal call in the same process from
-warming a resident-input call. It measures amortized warm batch cost, not cold
-startup or isolated-request latency. File APIs still open/read/close the file;
-preloading ensures warm OS page-cache contents. No concurrent benchmark workers
-run during these batches. Two passes are not a confidence interval.
-
-### Supplement: interleaved full-corpus sweeps
-
-Each decoder warms on 64 evenly spaced maps before two complete passes through
-the corpus. We take one timed sample per map per pass, rotate worker/workload
-order per map, and reverse it in pass two. **Means retain every timed sample**,
-not per-map minima or only fast passes. Per-pass means in the evidence report
-show variation; two passes do not establish a confidence interval.
-Processes stay alive, but interleaving these runtimes does **not** guarantee hot
-CPU caches. This is not an isolated, tight-loop batch benchmark.
-
-Timers include parsing, required text conversion, allocation, reading the
-hitobject count, and immediate result cleanup. Imports, JSON IPC and input
-pre-reading are excluded. Managed runtimes use normal GC, not a forced
-collection per map; any deferred collection outside the timer is not charged
-to parsing. This measures warm per-call API latency, not process startup,
-end-to-end batch throughput or peak memory.
-
-Resident input and warm-file API calls are separate workloads. File contents
-are already in the OS page cache; no claim about cold disk I/O is made. FOSU
-does not receive pre-parsed input or skip required native input copies.
-
-The original `8a51ae8` native-view Python calls shared a process per library/backend. Their
-order materially affects CPU-cache warmth: FOSU AVX2 resident-input means were
-84.3 and 40.3 µs in the two passes. We **do not
-use their pooled means for the Python headline**. Non-Python workers have one
-workload each. The traversal supplement also exposes both pass means rather
-than pretending it is an isolated workload.
-
-## Python APIs: warm batch cost
-
-Same **9,758 maps / 392,122,516 bytes / 7,863,673 hitobjects** in every batch.
-Microseconds per map, lower is better. Means include both complete passes;
 OsuPyParser has no published resident-input API.
 
-FOSU and rosu-pp-py rows use a two-pass measurement on the same host, interpreter
-and cohort. Other libraries retain the original measurements. Full Python
-value construction and release are included for FOSU; these FOSU Python
-batches use source `2d010a1`; native and traversal rows below retain `d31cddf`.
+## Python structural decode: standard
 
-| Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
-|---|---:|---:|
-| FOSU Python AVX2 (eager) | 498.3 | 510.7 |
-| FOSU Python scalar (eager) | 548.7 | 554.7 |
-| rosu-pp-py 4.0.2 | 310.5 | 319.1 |
-| pyttanko 2.1.0 | 2,501.5 | 2,501.2 |
-| OsuPyParser 1.0.7 | Unsupported (file-only API) | 5,070.8 |
-| slider 0.8.4 | 14,091.0 | 14,119.7 |
+The 250-entry common standard cohort allows standard-only and standard-focused
+libraries to participate. slider's normal parse already performs the geometry
+work described in the next section.
 
-| Python interface | Resident bytes: pass 1 / 2 | Warm file: pass 1 / 2 |
-|---|---:|---:|
-| FOSU Python AVX2 (eager) | 496.0 / 500.6 | 507.0 / 514.3 |
-| FOSU Python scalar (eager) | 551.1 / 546.3 | 556.7 / 552.8 |
-| rosu-pp-py 4.0.2 | 315.7 / 305.2 | 314.9 / 323.3 |
-| pyttanko 2.1.0 | 2,510.7 / 2,492.3 | 2,510.2 / 2,492.2 |
-| OsuPyParser 1.0.7 | — | 5,080.7 / 5,060.9 |
-| slider 0.8.4 | 14,067.5 / 14,114.5 | 14,004.4 / 14,235.0 |
+| Python interface | Contract | Resident bytes | Warm file |
+|---|---|---:|---:|
+| FOSU AVX2 | Exact | 445.9 | 428.3 |
+| FOSU scalar | Exact | 432.9 | 447.5 |
+| OsuPyParser | Different | Unsupported | 4,405.4 |
+| slider | Superset | 12,349.7 | 12,467.7 |
 
-## Other languages: interleaved API latency
+Python result construction dominates these measurements. The small AVX2/scalar
+inversion in this two-pass standard subset is benchmark noise, not evidence that
+the scalar native parser is faster.
 
-Same **9,986 maps / 399,831,198 bytes** for every row. Resident input;
-microseconds per map, lower is better. These are supplemental interleaved
-per-call measurements, **not directly comparable to the Python batch table**.
-Do not interpret the C++/Python difference as binding overhead.
+## Python geometry-ready: standard
 
-FOSU rows are a separate **FOSU-only** refresh with the same timer boundary,
-cohort and two-pass mean; third-party rows retain the original multi-runtime
-sweep. A smaller worker mix can change CPU-cache interference. These are not
-a simultaneous rerun of all libraries or a controlled cross-revision speedup.
+FOSU enables `calculate_slider_end_times` and `calculate_slider_paths`. slider's
+ordinary parse eagerly constructs its end times and curve objects. Both accept
+all 256 entries in this table (10,347,075 bytes). The outcome is comparable—a
+caller can inspect end times and query the slider path—but the representations
+are not identical. Stacking is excluded: FOSU leaves `apply_stacking` disabled,
+and slider is accessed with `hit_objects(stacking=False)`.
 
-| Library / interface | Mean µs/map | Pass 1 / pass 2 |
-|---|---:|---:|
-| FOSU C++ AVX2 | 32.5 | 32.7 / 32.2 |
-| FOSU C++ scalar | 77.8 | 78.0 / 77.6 |
-| rosu-pp (Rust) | 332.9 | 331.9 / 334.0 |
-| Coosu (C#) | 619.6 | 621.3 / 617.9 |
-| rosu-map (Rust) | 680.0 | 683.6 / 676.4 |
-| OsuParsers (C#) | 851.0 | 841.1 / 861.0 |
-| Official osu!lazer decoder (C#) | 2,839.7 | 2,665.5 / 3,013.9 |
-| osu-parsers (TypeScript/JS) | 2,842.5 | 3,042.4 / 2,642.5 |
-| osu-parser (JavaScript) | 54,387.8 | 54,456.2 / 54,319.4 |
+| Python interface | Execution model | Resident bytes | Warm file | Passes: bytes / file |
+|---|---|---:|---:|---|
+| FOSU AVX2 | Explicit geometry options | 1,120.7 | 1,060.1 | 1,145.3 / 1,096.2; 1,041.8 / 1,078.3 |
+| FOSU scalar | Explicit geometry options | 1,107.0 | 1,096.1 | 1,052.2 / 1,161.9; 1,082.9 / 1,109.3 |
+| slider | Geometry built during parse | 13,338.3 | 13,387.6 | 13,465.4 / 13,211.2; 13,434.3 / 13,340.8 |
 
-## Python object traversal
+The same Python-dominated noise explains the near-equal FOSU backend timings in
+this scenario; native feature costs are reported separately in
+[the FOSU performance matrix](performance.md).
 
-FOSU rows use the eager API in the same FOSU-only refresh. Third-party rows
-retain the original sweep; the worker-mix limitation above also applies here.
+## Native and cross-language structural decode
 
-Parse resident bytes, then sum every hitobject's start time through the public
-Python API. Same **9,948 maps**; counts and summed times agree. These figures
-include both parsing and traversal, not traversal alone. They share the
-interleaved sweep's cache-order limitation described above.
+Resident-input API latency over the 1,023-entry common all-mode cohort. Every
+runtime is a persistent worker, but each timed call creates a fresh parser/result.
+Jobs rotate per map and reverse in pass two. This is an interleaved public-API
+comparison and is not directly comparable to the isolated Python batches.
 
-| Library | Mean µs/map | Pass 1 / pass 2 |
-|---|---:|---:|
-| FOSU Python AVX2 (eager) | 588.2 | 577.8 / 598.6 |
-| FOSU Python scalar (eager) | 630.2 | 620.7 / 639.6 |
-| pyttanko | 2,175.7 | 2,119.3 / 2,232.2 |
-| slider (`stacking=False`) | 14,252.8 | 13,793.1 / 14,712.6 |
+| Library / interface | Contract | Mean | Pass 1 / pass 2 |
+|---|---|---:|---:|
+| FOSU C++ AVX2 | Exact | 46.1 | 48.0 / 44.1 |
+| FOSU C++ scalar | Exact | 97.8 | 99.1 / 96.6 |
+| rosu-map (Rust) | Closest structural scope | 556.4 | 558.1 / 554.6 |
+| Coosu (C#) | Different | 712.1 | 836.0 / 588.3 |
+| OsuParsers (C#) | Superset | 916.1 | 1,041.3 / 790.8 |
+| Official osu!lazer decoder (C#) | Superset | 2,873.4 | 3,092.6 / 2,654.1 |
+| osu-parsers (TypeScript) | Different | 2,991.3 | 3,130.6 / 2,852.0 |
+| osu-parser (JavaScript) | Superset | 13,339.3 | 14,027.6 / 12,651.0 |
 
-## Full-corpus coverage
+## Coverage
 
-All **10,000 maps** were attempted in the interleaved sweep. A failed file
-means an exception or timeout in either pass; count differences are not counted
-again as failures. Matching FOSU's count is not an independent correctness verdict.
-Byte/file results agree for libraries with both APIs; FOSU scalar/AVX2 agree.
+All 1,024 entries were attempted. Matching object counts are a sanity check, not
+semantic proof. A failed or mismatching entry never contributes a fast timing.
 
-| Library | Failed files | Decoded with different object count | Matching files |
-|---|---:|---:|---:|
-| FOSU, rosu-map, rosu-pp, rosu-pp-py, osu!lazer, osu-parsers (each) | 0 | 0 | 10,000 |
-| OsuParsers | 0 | 1 | 9,999 |
-| Coosu | 6 | 1 | 9,993 |
-| osu-parser | 7 | 1 | 9,992 |
-| slider | 24 | 1 | 9,975 |
-| pyttanko | 48 | 1 | 9,951 |
-| OsuPyParser | 191 | 1 | 9,808 |
+| Library | Decoded / attempted | Matching FOSU object count | Notes |
+|---|---:|---:|---|
+| FOSU, rosu-map, osu!lazer, OsuParsers, Coosu, osu-parsers | 1,024 / 1,024 | 1,024 | All four modes |
+| osu-parser | 1,023 / 1,024 | 1,023 | One standard `TypeError` |
+| OsuPyParser | 1,004 / 1,024 | 1,004 | 20 parse failures across the modes |
+| slider | 799 / 1,024 | 799 | All standard/taiko/catch entries; 225 mania failures |
 
-`pyttanko` rejects 48 non-standard-mode maps. `osu-parser` has five timed-out
-files (10 seconds per request) and two `TypeError` files. OsuPyParser reports
-90 `IndexError` and 101 `ValueError` files; slider reports 24 `ValueError`
-files and Coosu six `InvalidOperationException` files. Exact file IDs and
-failure types remain in the evidence. We do not silently repair inputs for
-one parser or remove slow successful samples. The C# OsuParsers adapter uses
-its public line-based API to avoid the stream overload's Linux CRLF bug.
+## Measurement contract
 
-## Reading the results
+The corpus profile contains 1,024 entries (986 unique beatmaps), 256 from each
+mode and 46,029,610 bytes. It is stratified by ordinary map size, slider/hold
+share and timing-row count from popular ranked/approved Akatsuki maps. The corpus
+SHA-256 is `1f7e90f4ac0222f0a2b0890e6f07c70807e9cc5d5e6ac2b392b859b2fa042895`.
 
-Every row in a table uses the **same common subset** of the 10,000 attempted
-files: all included APIs must succeed in both passes and return matching
-hitobject counts. Python's resident/file columns share a cohort; the
-cross-language and traversal tables use their own intersections. Failed maps
-do not contribute artificially short timings. The evidence report preserves
-full-corpus coverage and excluded file IDs rather than silently dropping them.
+The host is an eight-vCPU shared-tenancy AMD EPYC Genoa VM running Ubuntu 24.04.
+Runs are pinned to logical CPU 3. C++ uses GCC 13.3 and `-O3`; AVX2 uses
+`-march=x86-64-v3 -mtune=znver4`, while scalar uses `-march=x86-64` and
+`FOSU_DISABLE_SIMD`. Python uses CPython 3.12.3.
 
-Count agreement is a sanity check, **not full semantic parity**. Libraries
-differ in metadata coverage, precision, malformed-record handling, slider
-representations, legacy corrections and derived data. FOSU retains raw hit
-samples and slider edge fields and skips storyboard command bodies. Richer
-libraries can do significantly more work; PP libraries can retain less.
+Python headline jobs each receive a fresh process, preload the common cohort,
+warm 64 evenly spaced entries three times, then time one complete pass. Pass two
+reverses job order. Parsing, required conversion, allocations, result inspection,
+normal GC and release are timed; imports, preload, warmup and shutdown are not.
+Warm-file calls open, read and close files already in the OS page cache.
 
-Every current FOSU Python row measures complete, detached Python results.
-The original `8a51ae8` native-view measurements remain only in the historical
-evidence artifacts; they do not describe the current API's result construction.
-The traversal workload additionally sums every hitobject start time through
-public Python objects, making that access cost visible. `rosu-pp-py` does not
-expose an equivalent iterable hitobject API, so it is not included in traversal.
-
-For the legacy JavaScript `osu-parser`, slider endpoint calculation is part of
-its public parse call. Its large costs on some maps are not evidence that
-JavaScript delimiter parsing alone is that slow. Similarly, the official osu!
-decoder is intended to prepare a much richer game representation.
-
-Choose a parser for its output and compatibility contract first. These results
-support FOSU for fast structural parsing, not replacing another library's PP,
-gameplay or geometry functionality without implementing those missing pieces.
+The cross-language sweep keeps independent workers alive, warms each worker,
+rotates job order per entry and reverses it in pass two. Input preparation and
+JSON IPC are outside the timer. Managed runtimes keep normal GC behavior. A
+10-second request budget records a timeout as failure and restarts the worker.
 
 ## Reproduction
 
-See [the harness](../bench/comparison/README.md) for pinned dependencies, public
-calls, build commands, timing boundaries and report inclusion rules. Generated
-reports belong under `build/`; historical result archives are available in Git
-history. The corpus itself is not bundled.
-
-The [FOSU-only measurements](performance.md) use means of per-map minima. Do
-not divide them into competitors' all-call means to claim a speedup.
+See [the comparison harness](../bench/comparison/README.md) for pinned versions,
+commands, inclusion rules and timing boundaries. Generated evidence belongs in
+ignored `build/` directories; the corpus itself is not bundled.
