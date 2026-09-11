@@ -51,17 +51,18 @@ calculations. Every row uses the same 1,004 mutually accepted all-mode entries.
 
 | Python interface | Result contract | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---|---:|---:|
-| FOSU AVX2 | Full supported document; exact baseline | 443.6 | 444.1 |
-| FOSU scalar | Full supported document; exact baseline | 514.0 | 499.1 |
+| FOSU AVX2 | Full supported document | 443.6 | 444.1 |
+| FOSU scalar | Full supported document | 514.0 | 499.1 |
 | OsuPyParser 1.0.7 | Different eager model and derived statistics | Unsupported | 4,885.0 |
 
-rosu-pp and its Python bindings are intentionally excluded: they construct a
-significantly reduced PP-oriented model, not a general-purpose beatmap document.
+Packages like rosu-pp and its Python bindings are intentionally excluded. They construct
+a significantly reduced PP-oriented model, not a general-purpose beatmap document.
 
 ### Python: slider geometry
 
 This standard-mode scenario requires slider end times and queryable paths. FOSU
-enables `calculate_slider_end_times` and `calculate_slider_paths`; slider performs
+enables `calculate_slider_end_times` and `calculate_slider_paths`; slider is the
+only comparable parser that supports this functionality in a Python API. It performs
 its end-time and curve construction during ordinary parsing. Stacking is disabled
 for both parsers. All 256 entries are accepted by both parsers.
 
@@ -81,12 +82,17 @@ isolated Python batch measurements above.
 |---|---|---:|
 | FOSU C++ AVX2 | Full supported document | 46.1 |
 | FOSU C++ scalar | Full supported document | 97.8 |
-| rosu-map 0.2.1 (Rust) | General-purpose legacy document | 556.4 |
+| rosu-map 0.2.1 (Rust) | General-purpose document | 556.4 |
 | Coosu 2.5.1 (C#) | Typed document plus normal post-processing | 712.1 |
 | OsuParsers 1.7.2 (C#) | Rich document and storyboard decoding | 916.1 |
-| Official osu!lazer decoder (C#) | Rich ruleset model and legacy processing | 2,873.4 |
+| Official osu!lazer decoder (C#) | Rich ruleset model and processing | 2,873.4 |
 | osu-parsers 4.1.7 (TypeScript) | Rich document model | 2,991.3 |
 | osu-parser 0.3.3 (JavaScript) | Automatically derives slider/gameplay values | 13,339.3 |
+
+It is worth noting that the official osu!lazer completely, rosu-map largely, and
+osu-parsers partially support lazer-specific v128 beatmap features, which are not
+supported by other parsers, including FOSU.
+[FOSU will support it in the future.](https://github.com/cmyui/fast-osu-beatmap-parser/pull/54).
 
 The [full comparison](docs/comparison.md) defines the result contracts, execution
 models, versions, per-pass variation and coverage. [Performance details](docs/performance.md)
