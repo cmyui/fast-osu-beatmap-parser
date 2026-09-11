@@ -103,9 +103,7 @@ def summarize(records, metadata, cohorts=None):
         "fosu-python-avx2",
         "fosu-python-scalar",
         "slider",
-        "rosu-pp-py",
         "osupyparser",
-        "pyttanko",
     }
     groups = {
         "python": sorted((n, k) for n, k in expected if n in python and k != "visit"),

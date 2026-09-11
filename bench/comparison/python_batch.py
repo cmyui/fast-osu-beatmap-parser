@@ -29,9 +29,7 @@ def main():
         "fosu-python-avx2",
         "fosu-python-scalar",
         "slider",
-        "rosu-pp-py",
         "osupyparser",
-        "pyttanko",
     }
     table = json.loads(args.summary.read_text())["tables"][args.table]
     jobs = [

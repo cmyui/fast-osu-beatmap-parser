@@ -58,15 +58,15 @@ successful files across every included variant and both rounds.
 When a mode manifest is supplied, coverage includes separate standard, taiko,
 catch, and mania counts. The report adds `_all_modes` and `_mode_0` through
 `_mode_3` tables. A variant's optional `modes` list declares supported native
-modes; pyttanko is standard-only. Unsupported variants are excluded from the
-corresponding mode tables, not silently allowed to eliminate every map in that
-mode. All variants are still attempted in the raw sweep. A table with no common
-successful maps has no timings. Every nonempty table uses one shared cohort;
-different tables may have different cohorts and must not be mixed for speedups.
+modes. Unsupported variants are excluded from the corresponding mode tables,
+not silently allowed to eliminate every map in that mode. All variants are still
+attempted in the raw sweep. A table with no common successful maps has no timings.
+Every nonempty table uses one shared cohort; different tables may have different
+cohorts and must not be mixed for speedups.
 
-Use `python_batch.py --table python_mode_0` for a standard-only comparison that
-includes pyttanko. `--table python_all_modes` excludes standard-only libraries
-and uses the same mixed-mode cohort for every remaining Python API.
+Use `python_batch.py --table python_mode_0` for a standard-only comparison.
+`--table python_all_modes` excludes mode-limited libraries and uses the same
+mixed-mode cohort for every remaining Python API.
 
 ### Geometry-ready Python comparison
 
@@ -74,7 +74,8 @@ Use a standard-only corpus and retain only `fosu-python-avx2`,
 `fosu-python-scalar` and `slider` in a copy of `variants.json`. Set
 `FOSU_BENCH_PROFILE=geometry` in each FOSU variant's environment. This makes
 FOSU calculate slider end times and paths; slider already calculates end times
-and constructs curve objects during its normal parse.
+and constructs curve objects during its normal parse. Stacking remains disabled
+for both parsers.
 
 Run `run.py` and `report.py` normally, then use the resulting `python` cohort
 with `python_batch.py`. Do not set the profile for slider: it names a FOSU option

@@ -36,10 +36,12 @@ for backend in ("avx2", "scalar"):
     )
 add("slider", "0.8.4", [*python, "slider"], ("bytes", "file", "visit"))
 variants[-1]["modes"] = [0, 1, 2]  # Measured mania corpus support is incomplete.
-add("rosu-pp-py", "4.0.2", [*python, "rosu-pp-py"], ("bytes", "file"))
 add("osupyparser", "1.0.7", [*python, "osupyparser"], ("file",))
-for name, version in (("rosu-map", "0.2.1"), ("rosu-pp", "4.0.1")):
-    add(name, version, [build / "rust-target/release/fosu-parser-comparison", name])
+add(
+    "rosu-map",
+    "0.2.1",
+    [build / "rust-target/release/fosu-parser-comparison", "rosu-map"],
+)
 for name, version in (
     ("osu-lazer", "2026.730.0"),
     ("osuparsers", "1.7.2"),
@@ -60,8 +62,6 @@ for name, version in (("osu-parser", "0.3.3"), ("osu-parsers", "4.1.7")):
     )
 for backend in ("avx2", "scalar"):
     add(f"fosu-cpp-{backend}", source, [build / f"native-{backend}"])
-add("pyttanko", "2.1.0", [*python, "pyttanko"], ("bytes", "file", "visit"))
-variants[-1]["modes"] = [0]  # objects() raises NotImplementedError for other modes.
 (build / "variants.json").write_text(
     json.dumps(
         {

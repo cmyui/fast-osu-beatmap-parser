@@ -1,6 +1,5 @@
 """Persistent worker; JSON and IPC are outside the measured intervals."""
 
-import io
 import json
 import os
 import sys
@@ -57,19 +56,6 @@ def load_parser(name):
                 for obj in beatmap.hit_objects(stacking=False)
             )
 
-    elif name == "rosu-pp-py":
-        import rosu_pp_py
-
-        def parse(data, path, workload):
-            return (
-                rosu_pp_py.Beatmap(path=str(path))
-                if workload == "file"
-                else rosu_pp_py.Beatmap(bytes=data)
-            )
-
-        def count(beatmap):
-            return beatmap.n_objects
-
     elif name == "osupyparser":
         from osupyparser import OsuFile
 
@@ -79,26 +65,6 @@ def load_parser(name):
 
         def count(beatmap):
             return len(beatmap.hit_objects)
-
-    elif name == "pyttanko":
-        import pyttanko
-
-        decoder = pyttanko.parser()
-
-        def parse(data, path, workload):
-            source = (
-                path.open(encoding="utf-8-sig")
-                if workload == "file"
-                else io.StringIO(data.decode("utf-8-sig"))
-            )
-            with source:
-                return decoder.map(source)
-
-        def count(beatmap):
-            return len(beatmap.hitobjects)
-
-        def visit(beatmap):
-            return sum(obj.time for obj in beatmap.hitobjects)
 
     else:
         raise ValueError(name)
