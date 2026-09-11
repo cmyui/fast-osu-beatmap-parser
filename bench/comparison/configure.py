@@ -35,6 +35,7 @@ for backend in ("avx2", "scalar"):
         {"FOSU_BACKEND": backend},
     )
 add("slider", "0.8.4", [*python, "slider"], ("bytes", "file", "visit"))
+variants[-1]["modes"] = [0, 1, 2]  # Measured mania corpus support is incomplete.
 add("rosu-pp-py", "4.0.2", [*python, "rosu-pp-py"], ("bytes", "file"))
 add("osupyparser", "1.0.7", [*python, "osupyparser"], ("file",))
 for name, version in (("rosu-map", "0.2.1"), ("rosu-pp", "4.0.1")):
