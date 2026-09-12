@@ -303,6 +303,7 @@ struct State {
   PyObject* sounds[16];
   PyObject* samples[4];
   PyObject* curves[4];
+  PyObject* bookmark_whitespace;
 };
 
 struct BeatmapConverter {
@@ -501,10 +502,8 @@ struct BeatmapConverter {
     PythonRef marks(PyList_New(0));
     // osu's legacy decoder uses invariant int.TryParse and skips invalid tokens.
     // SplitKeyVal trims .NET whitespace around the complete field first.
-    PythonRef trimmed(PyObject_CallMethod(
-        bookmarks, "strip", "s",
-        "\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004"
-        "\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"));
+    PythonRef trimmed(
+        PyObject_CallMethod(bookmarks, "strip", "O", state.bookmark_whitespace));
     PythonRef encoded(PyUnicode_AsEncodedString(trimmed, "utf-8", "surrogateescape"));
     char* bookmark_data;
     Py_ssize_t bookmark_size;
@@ -706,6 +705,7 @@ int traverse(PyObject* m, visitproc visit, void* arg) {
   for (auto* curve : s->curves) {
     Py_VISIT(curve);
   }
+  Py_VISIT(s->bookmark_whitespace);
   return 0;
 }
 int clear(PyObject* m) {
@@ -729,6 +729,7 @@ int clear(PyObject* m) {
   for (auto*& curve : s->curves) {
     Py_CLEAR(curve);
   }
+  Py_CLEAR(s->bookmark_whitespace);
   return 0;
 }
 void free_module(void* m) {
@@ -791,6 +792,14 @@ int exec_module(PyObject* m) {
       if (!s->curves[i])
         return -1;
     }
+    constexpr wchar_t bookmark_whitespace[] =
+        L"\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004"
+        L"\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000";
+    s->bookmark_whitespace = PyUnicode_FromWideChar(
+        bookmark_whitespace,
+        static_cast<Py_ssize_t>(sizeof(bookmark_whitespace) / sizeof(wchar_t) - 1));
+    if (!s->bookmark_whitespace)
+      return -1;
     return 0;
   } catch (PythonError&) {
     return -1;
