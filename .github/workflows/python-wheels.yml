@@ -85,7 +85,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - run: CMAKE_GENERATOR="Unix Makefiles" python -m pip install . pytest
+      - run: CMAKE_GENERATOR="Unix Makefiles" python -m pip install '.[test]'
       - run: python -m pytest tests/test_python.py
 
   sdist:
