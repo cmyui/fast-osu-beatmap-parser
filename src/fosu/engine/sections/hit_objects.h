@@ -254,7 +254,7 @@ inline std::optional<HitObject> parse_lazer_slider(
   return object;
 }
 
-__attribute__((noinline)) inline std::optional<HitObject> parse_slider(
+inline std::optional<HitObject> parse_slider(
     Beatmap& beatmap,
     size_t& slider_count,
     size_t& slider_segment_count,
