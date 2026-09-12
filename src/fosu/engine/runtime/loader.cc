@@ -119,9 +119,18 @@ const ParsingEngine* load_engine_library(const char* name) {
 }
 
 const ParsingEngine* select_engine_from_environment() {
+#if defined(_WIN32)
+  char request_buffer[16];
+  const DWORD request_length =
+      GetEnvironmentVariableA("FOSU_BACKEND", request_buffer, sizeof(request_buffer));
+  if (request_length >= sizeof(request_buffer))
+    return nullptr;
+  const char* request = request_length ? request_buffer : FOSU_DEFAULT_BACKEND;
+#else
   const char* request = std::getenv("FOSU_BACKEND");
   if (!request)
     request = FOSU_DEFAULT_BACKEND;
+#endif
   if (std::strcmp(request, "auto") == 0) {
     for (EngineKind kind : {EngineKind::Avx2, EngineKind::Neon}) {
       if (engine_available(kind))
