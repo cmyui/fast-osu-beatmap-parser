@@ -1,9 +1,10 @@
-find_package(Python REQUIRED COMPONENTS Interpreter)
-
 # FindPython does not always discover python3.lib in the Windows Python layouts
 # used by wheel builders. The Stable ABI must link to that unversioned import
 # library rather than python3XY.lib.
 if(WIN32 AND NOT Python_SABI_LIBRARY)
+  if(NOT Python_EXECUTABLE)
+    find_program(Python_EXECUTABLE NAMES python3 python REQUIRED)
+  endif()
   execute_process(
     COMMAND "${Python_EXECUTABLE}" -c
       "import subprocess, sys; subprocess.run([sys._base_executable, '-c', \"import sys; print(sys.base_prefix, end='')\"], check=True)"
@@ -19,7 +20,7 @@ if(WIN32 AND NOT Python_SABI_LIBRARY)
     "Python Stable ABI import library" FORCE)
 endif()
 
-find_package(Python REQUIRED COMPONENTS Development.SABIModule)
+find_package(Python REQUIRED COMPONENTS Interpreter Development.SABIModule)
 Python_add_library(_core MODULE USE_SABI 3.10 WITH_SOABI src/fosu/bindings/python.cc)
 fosu_dispatch(_core python)
 fosu_runtime(_core)
