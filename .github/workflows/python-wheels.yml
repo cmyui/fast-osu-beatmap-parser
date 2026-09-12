@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [master]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -11,31 +13,52 @@ permissions:
 
 jobs:
   wheels:
-    name: Wheel / ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Wheel / ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-26]
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x86_64
+          - runner: ubuntu-24.04-arm
+            platform: linux-aarch64
+          - runner: macos-26
+            platform: macos-arm64
+          - runner: macos-26-intel
+            platform: macos-x86_64
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
       - uses: pypa/cibuildwheel@v4.2.1
+        env:
+          CIBW_ARCHS: native
       - uses: actions/upload-artifact@v4
         with:
-          name: fosu-wheel-${{ matrix.os }}
+          name: fosu-wheel-${{ matrix.platform }}
           path: wheelhouse/*.whl
 
   installed:
-    name: Installed / ${{ matrix.os }} / Python ${{ matrix.python }}
+    name: Installed / ${{ matrix.platform }} / Python ${{ matrix.python }}
     needs: wheels
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-26]
-        python: ['3.14']
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x86_64
+            python: '3.14'
+          - runner: ubuntu-24.04-arm
+            platform: linux-aarch64
+            python: '3.14'
+          - runner: macos-26
+            platform: macos-arm64
+            python: '3.14'
+          - runner: macos-26-intel
+            platform: macos-x86_64
+            python: '3.14'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -45,9 +68,62 @@ jobs:
           python-version: ${{ matrix.python }}
       - uses: actions/download-artifact@v4
         with:
-          name: fosu-wheel-${{ matrix.os }}
+          name: fosu-wheel-${{ matrix.platform }}
           path: wheelhouse
       - run: python -m pip install wheelhouse/*.whl pytest mypy==2.3.1
       - run: python -m pytest tests/test_python.py
       - run: FOSU_BACKEND=scalar python -m pytest tests/test_python.py
       - run: python tests/test_binary_hardening.py
+
+  source-install:
+    name: Source install / Unix Makefiles
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: CMAKE_GENERATOR="Unix Makefiles" python -m pip install . pytest
+      - run: python -m pytest tests/test_python.py
+
+  sdist:
+    name: Source distribution
+    if: github.event_name == 'release'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - run: python -m pip install build
+      - run: python -m build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fosu-sdist
+          path: dist/*.tar.gz
+
+  publish:
+    name: Publish release artifacts
+    if: github.event_name == 'release'
+    needs: [wheels, sdist]
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/fosu
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fosu-*
+          path: dist
+          merge-multiple: true
+      - run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: pypa/gh-action-pypi-publish@release/v1
