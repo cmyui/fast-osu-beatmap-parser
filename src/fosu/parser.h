@@ -61,19 +61,26 @@ struct ParserArenaPoolCleanup {
 inline ParserArenaPoolCleanup parser_arena_pool_cleanup;
 #endif
 
-inline size_t first_section_body_size(std::span<const char> input, Section target) {
-  const char* p = input.data();
-  const char* end = p + input.size();
-  while (p < end) {
-    const Line header = read_line(p, end);
-    if (match_section(header.text) != target) {
-      p = header.next;
-      continue;
-    }
-    const char* body = header.next;
-    return static_cast<size_t>(skip_section(body, end) - body);
+inline size_t velocity_preset_capacity(std::span<const char> input) {
+  constexpr std::string_view field = "VelocityPresets:";
+  const std::string_view document{input.data(), input.size()};
+  size_t capacity = 3;
+  size_t search_from = 0;
+  for (;;) {
+    const size_t field_begin = document.find(field, search_from);
+    if (field_begin == std::string_view::npos)
+      break;
+    const size_t value_begin = field_begin + field.size();
+    const size_t line_end = document.find('\n', value_begin);
+    const size_t value_end =
+        line_end == std::string_view::npos ? document.size() : line_end;
+    size_t values = 1;
+    for (size_t i = value_begin; i < value_end; ++i)
+      values += document[i] == ',';
+    capacity = std::max(capacity, values);
+    search_from = value_end;
   }
-  return 0;
+  return capacity;
 }
 
 inline bool allocate_beatmap_arrays(Arena* arena,
@@ -103,8 +110,7 @@ inline bool allocate_beatmap_arrays(Arena* arena,
   }
 
   if (selected_sections & kSectionEditor) {
-    const size_t editor_size = first_section_body_size(input, Section::Editor);
-    const size_t capacity = std::max<size_t>(3, editor_size / (sizeof("0") - 1) + 1);
+    const size_t capacity = lazer_format ? velocity_preset_capacity(input) : 3;
     double* values = arena_push_array<double>(arena, capacity);
     if (!values)
       return false;

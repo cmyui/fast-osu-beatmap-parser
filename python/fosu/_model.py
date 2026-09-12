@@ -42,7 +42,7 @@ class Point:
 @dataclass(slots=True)
 class CurveSegment:
     type: CurveType
-    degree: int
+    degree: int | None
     control_points: list[Point]
 
 

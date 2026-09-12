@@ -257,11 +257,11 @@ static void test_modern_curve_segments() {
     CHECK_EQ(first.degree, 2u);
     CHECK_EQ(first.point_count, 3u);
     CHECK_EQ(second.type, fosu::CurveType::Linear);
-    CHECK_EQ(second.degree, 0u);
+    CHECK(!second.degree);
     CHECK_EQ(second.point_count, 1u);
-    CHECK_EQ(modern.slider_points[first.point_begin].x, 30.5f);
-    CHECK_EQ(modern.slider_points[first.point_begin].y, 40.25f);
-    CHECK_EQ(modern.slider_points[second.point_begin].x, 70.75f);
+    CHECK_EQ(modern.slider_points[slider.point_begin + first.point_begin].x, 30.5f);
+    CHECK_EQ(modern.slider_points[slider.point_begin + first.point_begin].y, 40.25f);
+    CHECK_EQ(modern.slider_points[slider.point_begin + second.point_begin].x, 70.75f);
 
     const auto degree = parse_str(
         "osu file format v128\n[HitObjects]\n"
@@ -688,6 +688,19 @@ static void test_repeated_section_bodies() {
   }
 }
 
+static void test_repeated_lazer_velocity_presets() {
+  const auto map = parse_str(
+      "osu file format v128\n[Editor]\nVelocityPresets:1,2\n"
+      "[Metadata]\nTitle:test\n[Editor]\nVelocityPresets:3,4,5,6,7\n");
+  CHECK_EQ(map.velocity_presets.size(), 5u);
+  CHECK_EQ(map.velocity_presets[0], 3);
+  CHECK_EQ(map.velocity_presets[1], 4);
+  CHECK_EQ(map.velocity_presets[2], 5);
+  CHECK_EQ(map.velocity_presets[3], 6);
+  CHECK_EQ(map.velocity_presets[4], 7);
+  CHECK_EQ(map.stats.malformed_lines, 0u);
+}
+
 static void test_combo_colour_domain() {
   for (bool simd : {false, true}) {
     const auto map = parse_str(
@@ -789,6 +802,7 @@ int main() {
   test_combo_colour_domain();
   test_header_field_failures_preserve_values();
   test_repeated_section_bodies();
+  test_repeated_lazer_velocity_presets();
   test_enum_contracts();
   test_byte_scan_boundaries<','>();
   test_byte_scan_boundaries<':'>();

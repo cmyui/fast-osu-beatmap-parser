@@ -118,11 +118,11 @@ sealed class RawFields
         : Coordinate(text);
     static string At(string[] fields, int index, string fallback = "") => index < fields.Length ? fields[index] : fallback;
 
-    static (string type, int degree) Curve(string text)
+    static (string type, int? degree) Curve(string text)
     {
-        int degree = text[0] == 'B' && text.Length > 1 && int.TryParse(text.AsSpan(1), out int value) && value > 0
+        int? degree = text[0] == 'B' && text.Length > 1 && int.TryParse(text.AsSpan(1), out int value) && value > 0
             ? value
-            : 0;
+            : null;
         return (text[0].ToString(), degree);
     }
 
@@ -131,8 +131,8 @@ sealed class RawFields
         var curve = Curve(path[0]);
         var points = new List<Point> { head };
         var segments = new List<object>();
-        (string type, int degree)? pending = null;
-        bool segmented = curve.degree != 0;
+        (string type, int? degree)? pending = null;
+        bool segmented = curve.degree.HasValue;
         foreach (string token in path.Skip(1))
         {
             if (char.IsLetter(token[0]))

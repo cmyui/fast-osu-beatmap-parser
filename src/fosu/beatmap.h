@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -45,9 +46,10 @@ struct SliderPoint {
 
 struct CurveSegment {
   CurveType type;
-  // Zero is the legacy/default degree. A positive value is an explicit
-  // lazer B-spline degree (for example, B2).
-  uint32_t degree;
+  // Present only for an explicit lazer B-spline degree (for example, B2).
+  // An absent degree on Bezier means an ordinary Bezier segment.
+  std::optional<uint32_t> degree;
+  // Range relative to the owning Slider's control-point range.
   uint32_t point_begin;
   uint32_t point_count;
 };

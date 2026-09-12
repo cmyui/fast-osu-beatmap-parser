@@ -28,7 +28,7 @@ inline std::optional<CurveType> parse_curve_type(char value) {
 
 struct ParsedCurveType {
   CurveType type;
-  uint32_t degree;
+  std::optional<uint32_t> degree;
   const char* next;
 };
 
@@ -38,7 +38,7 @@ inline std::optional<ParsedCurveType> parse_curve_type(const char* p, const char
   const auto type = parse_curve_type(*p++);
   if (!type)
     return std::nullopt;
-  uint32_t degree = 0;
+  std::optional<uint32_t> degree;
   if (*type == CurveType::Bezier && p < end && is_digit(*p)) {
     int64_t value;
     const char* next = parse_osu_int(p, end, value);

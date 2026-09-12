@@ -51,8 +51,15 @@ struct HitObjectPrefix {
 struct ParsedHitObjectPrefix {
   HitObjectPrefix value;
   const char* next;
-  float precise_x = 0;
-  float precise_y = 0;
+};
+
+struct ParsedScalarHitObjectPrefix {
+  float x;
+  float y;
+  uint32_t type;
+  uint32_t hit_sound;
+  double time;
+  const char* next;
 };
 
 template <typename HitObject>
@@ -68,9 +75,10 @@ inline void initialize_hitobject(HitObject& object, const HitObjectPrefix& prefi
 
 // Lenient reference implementation: tolerates negative values, decimal
 // coordinates (truncated), and values of any length.
-inline std::optional<ParsedHitObjectPrefix> parse_hitobject_prefix_scalar(
+inline std::optional<ParsedScalarHitObjectPrefix> parse_hitobject_prefix_scalar(
     const char* line,
-    size_t len) {
+    size_t len,
+    bool preserve_fraction = false) {
   const char* p = line;
   const char* end = line + len;
   float coord[2];
@@ -93,10 +101,16 @@ inline std::optional<ParsedHitObjectPrefix> parse_hitobject_prefix_scalar(
   q = parse_osu_int(p, end, sound);
   if (q == p || (q < end && *q != ','))
     return std::nullopt;
-  return ParsedHitObjectPrefix{
-      HitObjectPrefix{static_cast<int32_t>(coord[0]), static_cast<int32_t>(coord[1]),
-                      static_cast<uint32_t>(type), static_cast<uint32_t>(sound), time},
-      q, coord[0], coord[1]};
+  if (!preserve_fraction) {
+    coord[0] = static_cast<float>(static_cast<int32_t>(coord[0]));
+    coord[1] = static_cast<float>(static_cast<int32_t>(coord[1]));
+  }
+  return ParsedScalarHitObjectPrefix{coord[0],
+                                    coord[1],
+                                    static_cast<uint32_t>(type),
+                                    static_cast<uint32_t>(sound),
+                                    time,
+                                    q};
 }
 
 #if FOSU_SIMD_X86
@@ -255,13 +269,13 @@ inline constexpr auto kPrefixShuffles = make_prefix_shuffles();
 // from the non-digit and comma masks alone. The four field lengths are packed
 // into 16-bit lanes so one subtraction, one addition and one AND validate
 // every length bound at once, and one multiply reduces the delimiter
-// positions to the table index. `p4` is the first non-digit after hitSound
+// positions to the table index. `prefix_end` is the first non-digit after hitSound
 // (32 when the window holds none); the caller decides whether that byte ends
 // the prefix. `index` is meaningful only when `ok`.
 struct HitObjectPrefixShape {
   uint32_t index;
   uint32_t time_span;  // p2 - p1: time digits + 1
-  uint32_t p4;
+  uint32_t prefix_end;
   bool ok;
 };
 
@@ -296,7 +310,7 @@ inline HitObjectPrefixShape classify_hitobject_prefix(uint32_t nondig, uint32_t 
   shape.index = static_cast<uint32_t>((pk * 0x003C001B00020001ull) >> 48) - 158;
   shape.index = shape.index * 2 + hl - 1;
   shape.time_span = static_cast<uint32_t>(p2 - p1);
-  shape.p4 = p4;
+  shape.prefix_end = p4;
   shape.ok = lens_ok & commas_ok & hs_ok;
   return shape;
 }
@@ -384,14 +398,15 @@ inline std::optional<ParsedHitObjectPrefix> try_parse_hitobject_prefix_fast(
       classify_hitobject_prefix(nondigit_mask32(ascii), comma_mask32(ascii));
   if (!shape.ok)
     return std::nullopt;
-  const char after = line[shape.p4];
+  const char after = line[shape.prefix_end];
   if (!(after == ',' || after == '\n' || after == '\0' ||
-        (after == '\r' && (line[shape.p4 + 1] == '\n' || line[shape.p4 + 1] == '\0'))))
+        (after == '\r' &&
+         (line[shape.prefix_end + 1] == '\n' || line[shape.prefix_end + 1] == '\0'))))
     return std::nullopt;
   const auto prefix = decode_hitobject_prefix(ascii, broadcast_byte<'0'>(), shape);
   if (!prefix)
     return std::nullopt;
-  return ParsedHitObjectPrefix{*prefix, line + shape.p4};
+  return ParsedHitObjectPrefix{*prefix, line + shape.prefix_end};
 }
 
 inline std::optional<ParsedHitObjectPrefix> try_parse_hitobject_prefix_fast(

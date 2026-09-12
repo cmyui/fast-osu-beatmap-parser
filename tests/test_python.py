@@ -559,7 +559,7 @@ def test_modern_curve_segments_drive_path_calculation():
     assert isinstance(slider, fosu.Slider)
     assert [(segment.type, segment.degree) for segment in slider.curve_segments] == [
         (fosu.CurveType.BEZIER, 2),
-        (fosu.CurveType.LINEAR, 0),
+        (fosu.CurveType.LINEAR, None),
     ]
     assert [
         [(point.x, point.y) for point in segment.control_points]

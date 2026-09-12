@@ -146,11 +146,11 @@ static void test_prefix_shapes() {
               continue;
             CHECK_EQ(fast->next - line.data(), int(len));
             CHECK_EQ(scalar->next - line.data(), int(len));
-            CHECK_EQ(fast->value.x, scalar->value.x);
-            CHECK_EQ(fast->value.y, scalar->value.y);
-            CHECK_EQ(fast->value.time, scalar->value.time);
-            CHECK_EQ(fast->value.type, scalar->value.type);
-            CHECK_EQ(fast->value.hit_sound, scalar->value.hit_sound);
+            CHECK_EQ(fast->value.x, scalar->x);
+            CHECK_EQ(fast->value.y, scalar->y);
+            CHECK_EQ(fast->value.time, scalar->time);
+            CHECK_EQ(fast->value.type, scalar->type);
+            CHECK_EQ(fast->value.hit_sound, scalar->hit_sound);
           }
 }
 
@@ -166,8 +166,8 @@ static void test_prefix_timestamp_boundaries() {
     CHECK_EQ(fast.has_value(), scalar.has_value());
     if (!fast || !scalar)
       continue;
-    CHECK_EQ(fast->value.time, scalar->value.time);
-    CHECK_EQ(fast->value.hit_sound, scalar->value.hit_sound);
+    CHECK_EQ(fast->value.time, scalar->time);
+    CHECK_EQ(fast->value.hit_sound, scalar->hit_sound);
     CHECK_EQ(fast->next, scalar->next);
   }
 }
@@ -330,11 +330,11 @@ static void test_fuzz_equivalence() {
     if (!reference)
       continue;
     CHECK_EQ(fast->next, reference->next);
-    CHECK_EQ(fast->value.x, reference->value.x);
-    CHECK_EQ(fast->value.y, reference->value.y);
-    CHECK_EQ(fast->value.time, reference->value.time);
-    CHECK_EQ(fast->value.type, reference->value.type);
-    CHECK_EQ(fast->value.hit_sound, reference->value.hit_sound);
+    CHECK_EQ(fast->value.x, reference->x);
+    CHECK_EQ(fast->value.y, reference->y);
+    CHECK_EQ(fast->value.time, reference->time);
+    CHECK_EQ(fast->value.type, reference->type);
+    CHECK_EQ(fast->value.hit_sound, reference->hit_sound);
     if (g_failures) {
       printf("  failing line: %s\n", buf);
       return;
