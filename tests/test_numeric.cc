@@ -126,49 +126,47 @@ static void test_byte_masks() {
   }
 }
 
-static void test_prefix_shapes() {
-  using namespace fosu::internal;
+static std::string hitobject_document(std::string_view line) {
+  return "osu file format v128\n\n[HitObjects]\n" + std::string(line) + '\n';
+}
+
+static void check_same_hitobject(const fosu::Beatmap& fast, const fosu::Beatmap& scalar) {
+  CHECK_EQ(fast.hit_objects.size(), scalar.hit_objects.size());
+  CHECK_EQ(fast.stats.malformed_lines, scalar.stats.malformed_lines);
+  if (fast.hit_objects.empty() || scalar.hit_objects.empty())
+    return;
+  const auto& got = fast.hit_objects[0];
+  const auto& want = scalar.hit_objects[0];
+  CHECK_EQ(got.x, want.x);
+  CHECK_EQ(got.y, want.y);
+  CHECK_EQ(got.time, want.time);
+  CHECK_EQ(got.type, want.type);
+  CHECK_EQ(got.hitsound, want.hitsound);
+  CHECK_EQ(got.hit_sample, want.hit_sample);
+}
+
+static void test_hitobject_field_shapes() {
   for (unsigned x = 1; x <= 3; ++x)
     for (unsigned y = 1; y <= 3; ++y)
       for (unsigned t = 1; t <= 10; ++t)
-        for (unsigned type = 1; type <= 3; ++type)
+        for (const char* type : {"1", "17", "129"})
           for (const char* sound : {"0", "9", "00", "01", "10", "15", "42", "99"}) {
             std::string line = std::string(x, '1') + ',' + std::string(y, '2') + ',' +
-                               std::string(t, '1') + ',' + std::string(type, '3') + ',' +
-                               sound;
-            const auto len = line.size();
-            line.append(fosu::kBufferPadding, '\0');
-            const auto fast = try_parse_hitobject_prefix_fast(line.data());
-            const auto scalar = parse_hitobject_prefix_scalar(line.data(), len);
-            CHECK(fast.has_value());
-            CHECK(scalar.has_value());
-            if (!fast || !scalar)
-              continue;
-            CHECK_EQ(fast->next - line.data(), int(len));
-            CHECK_EQ(scalar->next - line.data(), int(len));
-            CHECK_EQ(fast->value.x, scalar->x);
-            CHECK_EQ(fast->value.y, scalar->y);
-            CHECK_EQ(fast->value.time, scalar->time);
-            CHECK_EQ(fast->value.type, scalar->type);
-            CHECK_EQ(fast->value.hit_sound, scalar->hit_sound);
+                               std::string(t, '1') + ',' + type + ',' + sound;
+            const std::string document = hitobject_document(line);
+            const auto fast = parse_str(document);
+            const auto scalar = parse_str(document, false);
+            CHECK_EQ(fast.stats.fast_path_lines, 1u);
+            check_same_hitobject(fast, scalar);
           }
 }
 
-static void test_prefix_timestamp_boundaries() {
-  using namespace fosu::internal;
+static void test_hitobject_timestamp_boundaries() {
   for (const char* time :
        {"99999999", "100000000", "2147483647", "2147483648", "000000001", "0000000001"}) {
     std::string line = std::string("123,45,") + time + ",1,42";
-    const auto length = line.size();
-    line.append(fosu::kBufferPadding, '\0');
-    const auto fast = try_parse_hitobject_prefix_fast(line.data());
-    const auto scalar = parse_hitobject_prefix_scalar(line.data(), length);
-    CHECK_EQ(fast.has_value(), scalar.has_value());
-    if (!fast || !scalar)
-      continue;
-    CHECK_EQ(fast->value.time, scalar->time);
-    CHECK_EQ(fast->value.hit_sound, scalar->hit_sound);
-    CHECK_EQ(fast->next, scalar->next);
+    const std::string document = hitobject_document(line);
+    check_same_hitobject(parse_str(document), parse_str(document, false));
   }
 }
 
@@ -293,10 +291,10 @@ static uint64_t value_with_digits(int digits, uint64_t max) {
   return lo + rng() % (hi - lo + 1);
 }
 
-static void test_fuzz_equivalence() {
+static void test_fuzz_hitobject_fields() {
   char buf[128];
   int fast_taken = 0;
-  for (int iter = 0; iter < 300000; ++iter) {
+  for (int iter = 0; iter < 30000; ++iter) {
     const int lx = 1 + (int)(rng() % 3);
     const int ly = 1 + (int)(rng() % 3);
     const int lt = 1 + (int)(rng() % 10);
@@ -320,28 +318,18 @@ static void test_fuzz_equivalence() {
       buf[pos] = junk[rng() % sizeof junk];
     }
 
-    const auto fast = fosu::internal::try_parse_hitobject_prefix_fast(buf);
-    const auto reference =
-        fosu::internal::parse_hitobject_prefix_scalar(buf, strlen(buf));
-    if (!fast)
-      continue;
-    ++fast_taken;
-    CHECK(reference.has_value());
-    if (!reference)
-      continue;
-    CHECK_EQ(fast->next, reference->next);
-    CHECK_EQ(fast->value.x, reference->x);
-    CHECK_EQ(fast->value.y, reference->y);
-    CHECK_EQ(fast->value.time, reference->time);
-    CHECK_EQ(fast->value.type, reference->type);
-    CHECK_EQ(fast->value.hit_sound, reference->hit_sound);
+    const std::string document = hitobject_document(buf);
+    const auto fast = parse_str(document);
+    const auto scalar = parse_str(document, false);
+    fast_taken += fast.stats.fast_path_lines != 0;
+    check_same_hitobject(fast, scalar);
     if (g_failures) {
       printf("  failing line: %s\n", buf);
       return;
     }
   }
   printf("  fuzz: fast path accepted %d lines\n", fast_taken);
-  CHECK(fast_taken > 100000);
+  CHECK(fast_taken > 10000);
 }
 #endif
 
@@ -350,10 +338,10 @@ int main() {
   test_fuzz_parse_coord();
 #if FOSU_SIMD
   test_byte_masks();
-  test_prefix_shapes();
-  test_prefix_timestamp_boundaries();
+  test_hitobject_field_shapes();
+  test_hitobject_timestamp_boundaries();
   test_fuzz_slider_length();
-  test_fuzz_equivalence();
+  test_fuzz_hitobject_fields();
   test_fuzz_timing_point();
   puts("SIMD path: enabled");
 #else

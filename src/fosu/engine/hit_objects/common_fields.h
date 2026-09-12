@@ -21,16 +21,11 @@
 // the buffer (see io.h); all paths rely on it to load past short lines
 // and speculate past field boundaries safely.
 
+#include <fosu/engine/primitives/digit_groups.h>
+#include <fosu/engine/primitives/vector_ops.h>
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
-#include <optional>
-
-#include <fosu/engine/parsing/numbers.h>
-#include <fosu/engine/primitives/digit_groups.h>
-
-#include <fosu/engine/primitives/vector_ops.h>
 
 namespace fosu::internal {
 
@@ -39,65 +34,6 @@ struct HitObjectParseConstants {};  // the scalar path has no vector constants
 #endif
 
 inline constexpr uint32_t kNPrefixVariants = 3 * 3 * 10 * 3;
-
-struct HitObjectPrefix {
-  int32_t x;
-  int32_t y;
-  uint32_t type;
-  uint32_t hit_sound;
-  double time;
-};
-
-struct ParsedHitObjectPrefix {
-  HitObjectPrefix value;
-  const char* next;
-};
-
-struct ParsedScalarHitObjectPrefix {
-  float x;
-  float y;
-  uint32_t type;
-  uint32_t hit_sound;
-  double time;
-  const char* next;
-};
-
-// Lenient reference implementation: tolerates negative values, decimal
-// coordinates (truncated), and values of any length.
-inline std::optional<ParsedScalarHitObjectPrefix> parse_hitobject_prefix_scalar(
-    const char* line,
-    size_t len,
-    bool preserve_fraction = false) {
-  const char* p = line;
-  const char* end = line + len;
-  float coord[2];
-  for (int i = 0; i < 2; ++i) {
-    const char* q = parse_osu_float(p, end, coord[i], 131072);
-    if (q == p || q >= end || *q != ',')
-      return std::nullopt;
-    p = q + 1;
-  }
-  double time;
-  const char* q = parse_osu_double(p, end, time);
-  if (q == p || q >= end || *q != ',')
-    return std::nullopt;
-  p = q + 1;
-  int64_t type, sound;
-  q = parse_osu_int(p, end, type);
-  if (q == p || q >= end || *q != ',')
-    return std::nullopt;
-  p = q + 1;
-  q = parse_osu_int(p, end, sound);
-  if (q == p || (q < end && *q != ','))
-    return std::nullopt;
-  if (!preserve_fraction) {
-    coord[0] = static_cast<float>(static_cast<int32_t>(coord[0]));
-    coord[1] = static_cast<float>(static_cast<int32_t>(coord[1]));
-  }
-  return ParsedScalarHitObjectPrefix{
-      coord[0], coord[1], static_cast<uint32_t>(type), static_cast<uint32_t>(sound),
-      time,     q};
-}
 
 #if FOSU_SIMD_X86
 
@@ -249,158 +185,5 @@ consteval auto make_prefix_shuffles() {
 }
 inline constexpr auto kPrefixShuffles = make_prefix_shuffles();
 #endif
-
-#if FOSU_SIMD
-// Delimiter geometry of one hitobject prefix inside a 32-byte window, derived
-// from the non-digit and comma masks alone. The four field lengths are packed
-// into 16-bit lanes so one subtraction, one addition and one AND validate
-// every length bound at once, and one multiply reduces the delimiter
-// positions to the table index. `prefix_end` is the first non-digit after hitSound
-// (32 when the window holds none); the caller decides whether that byte ends
-// the prefix. `index` is meaningful only when `ok`.
-struct HitObjectPrefixShape {
-  uint32_t index;
-  uint32_t time_span;  // p2 - p1: time digits + 1
-  uint32_t prefix_end;
-  bool ok;
-};
-
-inline HitObjectPrefixShape classify_hitobject_prefix(uint32_t nondig, uint32_t commas) {
-  const uint32_t m1 = (nondig & (nondig - 1));
-  const uint32_t m2 = (m1 & (m1 - 1));
-  const uint32_t m3 = (m2 & (m2 - 1));
-  const uint32_t m4 = (m3 & (m3 - 1));
-  const uint64_t p0 = trailing_zeros(nondig);
-  const uint64_t p1 = trailing_zeros(m1);
-  const uint64_t p2 = trailing_zeros(m2);
-  const uint64_t p3 = trailing_zeros(m3);
-  const uint32_t p4 = trailing_zeros(m4);
-  // Lanes (low to high): p0, p1, p2, p3 — each at most 32.
-  const uint64_t pk = p0 | p1 << 16 | p2 << 32 | p3 << 48;
-  // Lanes: len_x, len_y, len_time, len_type. A lane below zero borrows from
-  // the next one, but such a lane fails the sign test itself, and a borrow
-  // can only shrink a neighbour, never rescue an invalid line.
-  const uint64_t lens = (pk - (pk << 16)) - 0x0002000200020001ull;
-  // Bounds 2, 2, 9, 2: adding 0x7FFF - bound sets bit 15 exactly when a
-  // non-negative lane exceeds its bound.
-  const uint64_t over = lens + 0x7FFD7FF67FFD7FFDull;
-  const bool lens_ok = ((lens | over) & 0x8000800080008000ull) == 0;
-  // The first four non-digits must be literal commas.
-  const uint32_t through_p3 = static_cast<uint32_t>((2ull << p3) - 1);
-  const bool commas_ok = ((nondig ^ commas) & through_p3) == 0;
-  // hitSound: one or two digits.
-  const uint32_t hl = p4 - static_cast<uint32_t>(p3) - 1;
-  const bool hs_ok = hl - 1 <= 1;
-  HitObjectPrefixShape shape;
-  // 60*p0 + 27*p1 + 2*p2 + p3 lands in the top lane; lower lanes cannot carry.
-  shape.index = static_cast<uint32_t>((pk * 0x003C001B00020001ull) >> 48) - 158;
-  shape.index = shape.index * 2 + hl - 1;
-  shape.time_span = static_cast<uint32_t>(p2 - p1);
-  shape.prefix_end = p4;
-  shape.ok = lens_ok & commas_ok & hs_ok;
-  return shape;
-}
-
-// Decodes a prefix whose delimiter geometry has already been classified.
-// Returns nullopt only for 9-10 digit timestamps above INT32_MAX, which the
-// scalar parser also rejects.
-__attribute__((always_inline)) inline std::optional<HitObjectPrefix>
-decode_hitobject_prefix(Bytes32 ascii,
-                        ByteVector zero,
-                        const HitObjectPrefixShape& shape) {
-  HitObjectPrefix prefix;
-  static_assert(offsetof(HitObjectPrefix, x) == 0 && offsetof(HitObjectPrefix, y) == 4 &&
-                    offsetof(HitObjectPrefix, type) == 8 &&
-                    offsetof(HitObjectPrefix, hit_sound) == 12 &&
-                    offsetof(HitObjectPrefix, time) == 16,
-                "the fast path decodes prefix fields as one record");
-#if FOSU_SIMD_X86
-  const __m256i digits = _mm256_sub_epi8(ascii, zero);
-  const LaneMasks& lm = kLaneMasks[shape.index];
-  const __m256i perm = _mm256_load_si256(reinterpret_cast<const __m256i*>(lm.perm));
-  const __m256i shuf = _mm256_load_si256(reinterpret_cast<const __m256i*>(lm.shuf));
-  const __m256i placed =
-      _mm256_shuffle_epi8(_mm256_permutevar8x32_epi32(digits, perm), shuf);
-  const __m256i pair_weights =
-      _mm256_setr_epi8(0, 100, 10, 1, 0, 100, 10, 1, 0, 100, 10, 1, 0, 0, 10, 1, 0, 0, 10,
-                       1, 0, 0, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1);
-  const __m256i word_weights =
-      _mm256_setr_epi16(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 100, 1, 100, 1);
-  const __m256i words = _mm256_maddubs_epi16(placed, pair_weights);
-  const __m256i dwords = _mm256_madd_epi16(words, word_weights);
-  const __m128i lo = _mm256_castsi256_si128(dwords);
-  const __m128i thi = _mm256_extracti128_si256(dwords, 1);
-  // Sum hitSound contributions from the two lanes into the fourth field.
-  const __m128i fields = _mm_add_epi32(lo, _mm_slli_si128(thi, 12));
-  _mm_storeu_si128(reinterpret_cast<__m128i*>(&prefix), fields);
-  if (shape.time_span <= 9) [[likely]] {
-    // Up to eight time digits fit in signed int32. Combine and widen in
-    // SIMD registers.
-    const __m128i packed = _mm_packus_epi32(thi, thi);
-    const __m128i combined =
-        _mm_madd_epi16(packed, _mm_setr_epi16(0, 0, 10000, 1, 0, 0, 0, 0));
-    const __m128i pair = _mm_shuffle_epi32(combined, _MM_SHUFFLE(0, 0, 0, 1));
-    _mm_store_sd(&prefix.time, _mm_cvtepi32_pd(pair));
-  } else {
-    const uint64_t t = static_cast<uint32_t>(_mm_extract_epi32(thi, 1)) * 100000000ull +
-                       static_cast<uint32_t>(_mm_extract_epi32(thi, 2)) * 10000ull +
-                       static_cast<uint32_t>(_mm_extract_epi32(thi, 3));
-    if (t > INT32_MAX)
-      return std::nullopt;
-    prefix.time = static_cast<double>(t);
-  }
-#else
-  const Bytes32 digits{{vsubq_u8(ascii.val[0], zero), vsubq_u8(ascii.val[1], zero)}};
-  const auto& shuf = kPrefixShuffles[shape.index];
-  const auto fields = decimal_groups(vqtbl2q_u8(digits, vld1q_u8(shuf.bytes)));
-  const auto times = decimal_groups(vqtbl2q_u8(digits, vld1q_u8(shuf.bytes + 16)));
-  vst1q_u32(reinterpret_cast<uint32_t*>(&prefix), fields);
-  if (shape.time_span <= 9) [[likely]] {
-    // Up to eight digits fit in uint32; combine the two four-digit groups
-    // before converting to double.
-    const uint32_t weights[2] = {10000, 1};
-    const auto terms = vmul_u32(vget_high_u32(times), vld1_u32(weights));
-    const auto sum = vpadd_u32(terms, terms);
-    prefix.time = vgetq_lane_f64(vcvtq_f64_u64(vmovl_u32(sum)), 0);
-  } else {
-    const uint64_t t = uint64_t(vgetq_lane_u32(times, 1)) * 100000000 +
-                       uint64_t(vgetq_lane_u32(times, 2)) * 10000 +
-                       vgetq_lane_u32(times, 3);
-    if (t > INT32_MAX)
-      return std::nullopt;
-    prefix.time = static_cast<double>(t);
-  }
-#endif
-  return prefix;
-}
-
-// Returns nullopt to request the scalar parser for a structurally unusual
-// prefix: signs, decimals, empty or over-long fields, or missing delimiters.
-// The byte after hitSound must be a comma or line ending.
-inline std::optional<ParsedHitObjectPrefix> try_parse_hitobject_prefix_fast(
-    Bytes32 ascii,
-    const char* line) {
-  const auto shape =
-      classify_hitobject_prefix(nondigit_mask32(ascii), comma_mask32(ascii));
-  if (!shape.ok)
-    return std::nullopt;
-  const char after = line[shape.prefix_end];
-  if (!(after == ',' || after == '\n' || after == '\0' ||
-        (after == '\r' &&
-         (line[shape.prefix_end + 1] == '\n' || line[shape.prefix_end + 1] == '\0'))))
-    return std::nullopt;
-  const auto prefix = decode_hitobject_prefix(ascii, broadcast_byte<'0'>(), shape);
-  if (!prefix)
-    return std::nullopt;
-  return ParsedHitObjectPrefix{*prefix, line + shape.prefix_end};
-}
-
-inline std::optional<ParsedHitObjectPrefix> try_parse_hitobject_prefix_fast(
-    const char* line) {
-  const Bytes32 ascii = load32(line);
-  return try_parse_hitobject_prefix_fast(ascii, line);
-}
-
-#endif  // FOSU_SIMD
 
 }  // namespace fosu::internal

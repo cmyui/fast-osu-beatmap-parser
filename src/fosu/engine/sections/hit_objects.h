@@ -13,36 +13,6 @@
 
 namespace fosu::internal {
 
-inline HitObject make_hitobject(const HitObjectPrefix& prefix) {
-  return HitObject{
-      .x = static_cast<float>(prefix.x),
-      .y = static_cast<float>(prefix.y),
-      .type = prefix.type,
-      .hitsound = prefix.hit_sound,
-      .time = prefix.time,
-      .end_time = 0,
-      .slider = HitObject::kNoSlider,
-      .new_combo = false,
-      .combo_skip = 0,
-      .hit_sample = {},
-  };
-}
-
-inline HitObject make_hitobject(const ParsedScalarHitObjectPrefix& prefix) {
-  return HitObject{
-      .x = prefix.x,
-      .y = prefix.y,
-      .type = prefix.type,
-      .hitsound = prefix.hit_sound,
-      .time = prefix.time,
-      .end_time = 0,
-      .slider = HitObject::kNoSlider,
-      .new_combo = false,
-      .combo_skip = 0,
-      .hit_sample = {},
-  };
-}
-
 // Slider params after "type,hitSound,":
 //   curveType|x:y|x:y...,slides,length[,edgeSounds,edgeSets][,hitSample]
 //
@@ -325,15 +295,55 @@ inline std::optional<HitObject> parse_hitobject_line_scalar(
     const char* p,
     const char* line_end,
     const HitObjectParseConstants& constants) {
-  const auto prefix = parse_hitobject_prefix_scalar(p, static_cast<size_t>(line_end - p),
-                                                    beatmap.format_version >= 128);
-  if (!prefix)
+  float x;
+  const char* next = parse_osu_float(p, line_end, x, 131072);
+  if (next == p || next >= line_end || *next != ',')
     return std::nullopt;
+  p = next + 1;
+
+  float y;
+  next = parse_osu_float(p, line_end, y, 131072);
+  if (next == p || next >= line_end || *next != ',')
+    return std::nullopt;
+  p = next + 1;
+
+  double time;
+  next = parse_osu_double(p, line_end, time);
+  if (next == p || next >= line_end || *next != ',')
+    return std::nullopt;
+  p = next + 1;
+
+  int64_t type;
+  next = parse_osu_int(p, line_end, type);
+  if (next == p || next >= line_end || *next != ',')
+    return std::nullopt;
+  p = next + 1;
+
+  int64_t hitsound;
+  next = parse_osu_int(p, line_end, hitsound);
+  if (next == p || (next < line_end && *next != ','))
+    return std::nullopt;
+
+  if (beatmap.format_version < 128) {
+    x = static_cast<float>(static_cast<int32_t>(x));
+    y = static_cast<float>(static_cast<int32_t>(y));
+  }
+
   ++beatmap.stats.slow_path_lines;
-  HitObject object = make_hitobject(*prefix);
+  HitObject object{
+      .x = x,
+      .y = y,
+      .type = static_cast<uint32_t>(type),
+      .hitsound = static_cast<uint32_t>(hitsound),
+      .time = time,
+      .end_time = 0,
+      .slider = HitObject::kNoSlider,
+      .new_combo = false,
+      .combo_skip = 0,
+      .hit_sample = {},
+  };
   if (!parse_hitobject_details(beatmap, slider_count, slider_segment_count,
-                               slider_point_count, object, prefix->next, line_end,
-                               constants)) {
+                               slider_point_count, object, next, line_end, constants)) {
     return std::nullopt;
   }
   return object;
@@ -437,41 +447,150 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
     const char* next_line = newline + (newline < file_end);
     const char* line_end = newline - (newline > p && newline[-1] == '\r');
     const auto length = static_cast<size_t>(line_end - p);
-    const auto shape = classify_hitobject_prefix(nondigits, commas);
-    const char after_prefix = p[shape.prefix_end];
+    const uint32_t m1 = nondigits & (nondigits - 1);
+    const uint32_t m2 = m1 & (m1 - 1);
+    const uint32_t m3 = m2 & (m2 - 1);
+    const uint32_t m4 = m3 & (m3 - 1);
+    const uint64_t p0 = trailing_zeros(nondigits);
+    const uint64_t p1 = trailing_zeros(m1);
+    const uint64_t p2 = trailing_zeros(m2);
+    const uint64_t p3 = trailing_zeros(m3);
+    const uint32_t prefix_end = trailing_zeros(m4);
 
-    if (shape.ok && (shape.prefix_end == length || after_prefix == ',' ||
-                     after_prefix == '\0')) [[likely]] {
-      const auto prefix = decode_hitobject_prefix(ascii, zero, shape);
-      if (prefix) [[likely]] {
+    // Lanes (low to high): the first four delimiter positions. Their
+    // differences are the lengths of x, y, time and type.
+    const uint64_t delimiter_positions = p0 | p1 << 16 | p2 << 32 | p3 << 48;
+    const uint64_t field_lengths =
+        (delimiter_positions - (delimiter_positions << 16)) - 0x0002000200020001ull;
+    const uint64_t overlong_fields = field_lengths + 0x7FFD7FF67FFD7FFDull;
+    const bool field_lengths_ok =
+        ((field_lengths | overlong_fields) & 0x8000800080008000ull) == 0;
+    const uint32_t through_type = static_cast<uint32_t>((2ull << p3) - 1);
+    const bool delimiters_are_commas = ((nondigits ^ commas) & through_type) == 0;
+    const uint32_t hitsound_length = prefix_end - static_cast<uint32_t>(p3) - 1;
+    const bool hitsound_length_ok = hitsound_length - 1 <= 1;
+    const bool common_layout =
+        field_lengths_ok & delimiters_are_commas & hitsound_length_ok;
+    const char after_prefix = p[prefix_end];
+
+    if (common_layout && (prefix_end == length || after_prefix == ',' ||
+                          after_prefix == '\0')) [[likely]] {
+      // 60*p0 + 27*p1 + 2*p2 + p3 identifies the shuffle for these
+      // delimiter positions. hitSound has a separate one/two-digit dimension.
+      uint32_t mask_index =
+          static_cast<uint32_t>((delimiter_positions * 0x003C001B00020001ull) >> 48) -
+          158;
+      mask_index = mask_index * 2 + hitsound_length - 1;
+      const uint32_t time_span = static_cast<uint32_t>(p2 - p1);
+
+      uint32_t x;
+      uint32_t y;
+      uint32_t type;
+      uint32_t hitsound;
+      double time;
+      bool time_ok = true;
+#if FOSU_SIMD_X86
+      const __m256i digits = _mm256_sub_epi8(ascii, zero);
+      const LaneMasks& masks = kLaneMasks[mask_index];
+      const __m256i perm =
+          _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.perm));
+      const __m256i shuf =
+          _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.shuf));
+      const __m256i placed =
+          _mm256_shuffle_epi8(_mm256_permutevar8x32_epi32(digits, perm), shuf);
+      const __m256i pair_weights =
+          _mm256_setr_epi8(0, 100, 10, 1, 0, 100, 10, 1, 0, 100, 10, 1, 0, 0, 10, 1, 0, 0,
+                           10, 1, 0, 0, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1);
+      const __m256i word_weights =
+          _mm256_setr_epi16(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 100, 1, 100, 1);
+      const __m256i words = _mm256_maddubs_epi16(placed, pair_weights);
+      const __m256i values = _mm256_madd_epi16(words, word_weights);
+      const __m128i low = _mm256_castsi256_si128(values);
+      const __m128i time_groups = _mm256_extracti128_si256(values, 1);
+      const __m128i fields = _mm_add_epi32(low, _mm_slli_si128(time_groups, 12));
+      x = static_cast<uint32_t>(_mm_extract_epi32(fields, 0));
+      y = static_cast<uint32_t>(_mm_extract_epi32(fields, 1));
+      type = static_cast<uint32_t>(_mm_extract_epi32(fields, 2));
+      hitsound = static_cast<uint32_t>(_mm_extract_epi32(fields, 3));
+      if (time_span <= 9) [[likely]] {
+        const __m128i packed = _mm_packus_epi32(time_groups, time_groups);
+        const __m128i combined =
+            _mm_madd_epi16(packed, _mm_setr_epi16(0, 0, 10000, 1, 0, 0, 0, 0));
+        const __m128i pair = _mm_shuffle_epi32(combined, _MM_SHUFFLE(0, 0, 0, 1));
+        _mm_store_sd(&time, _mm_cvtepi32_pd(pair));
+      } else {
+        const uint64_t parsed_time =
+            static_cast<uint32_t>(_mm_extract_epi32(time_groups, 1)) * 100000000ull +
+            static_cast<uint32_t>(_mm_extract_epi32(time_groups, 2)) * 10000ull +
+            static_cast<uint32_t>(_mm_extract_epi32(time_groups, 3));
+        time_ok = parsed_time <= INT32_MAX;
+        time = static_cast<double>(parsed_time);
+      }
+#else
+      const Bytes32 digits{{vsubq_u8(ascii.val[0], zero), vsubq_u8(ascii.val[1], zero)}};
+      const PrefixShuffle& masks = kPrefixShuffles[mask_index];
+      const auto fields = decimal_groups(vqtbl2q_u8(digits, vld1q_u8(masks.bytes)));
+      const auto time_groups =
+          decimal_groups(vqtbl2q_u8(digits, vld1q_u8(masks.bytes + 16)));
+      x = vgetq_lane_u32(fields, 0);
+      y = vgetq_lane_u32(fields, 1);
+      type = vgetq_lane_u32(fields, 2);
+      hitsound = vgetq_lane_u32(fields, 3);
+      if (time_span <= 9) [[likely]] {
+        const uint32_t weights[2] = {10000, 1};
+        const auto terms = vmul_u32(vget_high_u32(time_groups), vld1_u32(weights));
+        const auto sum = vpadd_u32(terms, terms);
+        time = vgetq_lane_f64(vcvtq_f64_u64(vmovl_u32(sum)), 0);
+      } else {
+        const uint64_t parsed_time =
+            uint64_t(vgetq_lane_u32(time_groups, 1)) * 100000000 +
+            uint64_t(vgetq_lane_u32(time_groups, 2)) * 10000 +
+            vgetq_lane_u32(time_groups, 3);
+        time_ok = parsed_time <= INT32_MAX;
+        time = static_cast<double>(parsed_time);
+      }
+#endif
+
+      if (time_ok) [[likely]] {
         ++fast_lines;
-        HitObject object = make_hitobject(*prefix);
-        const HitObjectKind kind = classify_hitobject_kind(prefix->type);
+        HitObject object{
+            .x = static_cast<float>(x),
+            .y = static_cast<float>(y),
+            .type = type,
+            .hitsound = hitsound,
+            .time = time,
+            .end_time = 0,
+            .slider = HitObject::kNoSlider,
+            .new_combo = false,
+            .combo_skip = 0,
+            .hit_sample = {},
+        };
+        const HitObjectKind kind = classify_hitobject_kind(type);
         if (kind == HitObjectKind::Circle) {
-          if (shape.prefix_end == length) {
+          if (prefix_end == length) {
             object.hit_sample = {};
-          } else if (length - shape.prefix_end == 9 && after_prefix == ',' &&
-                     short_sample(p + shape.prefix_end + 1)) {
-            object.hit_sample = {p + shape.prefix_end + 1, 8};
-          } else if (!parse_hitobject_details(
-                         beatmap, slider_count, slider_segment_count, slider_point_count,
-                         object, p + shape.prefix_end, line_end, constants)) {
+          } else if (length - prefix_end == 9 && after_prefix == ',' &&
+                     short_sample(p + prefix_end + 1)) {
+            object.hit_sample = {p + prefix_end + 1, 8};
+          } else if (!parse_hitobject_details(beatmap, slider_count, slider_segment_count,
+                                              slider_point_count, object, p + prefix_end,
+                                              line_end, constants)) {
             ++malformed;
             p = next_line;
             continue;
           }
         } else if (kind == HitObjectKind::Slider) {
-          if (shape.prefix_end >= length || after_prefix != ',' ||
+          if (prefix_end >= length || after_prefix != ',' ||
               !parse_slider(beatmap, slider_count, slider_segment_count,
-                            slider_point_count, object, p + shape.prefix_end + 1,
-                            line_end, constants)) {
+                            slider_point_count, object, p + prefix_end + 1, line_end,
+                            constants)) {
             ++malformed;
             p = next_line;
             continue;
           }
         } else if (!parse_hitobject_details(beatmap, slider_count, slider_segment_count,
-                                            slider_point_count, object,
-                                            p + shape.prefix_end, line_end, constants)) {
+                                            slider_point_count, object, p + prefix_end,
+                                            line_end, constants)) {
           ++malformed;
           p = next_line;
           continue;
