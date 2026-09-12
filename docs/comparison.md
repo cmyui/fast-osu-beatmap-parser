@@ -1,8 +1,8 @@
 # Public parser comparison
 
-Measured on 2026-09-11. This comparison asks how long documented public APIs
-take to produce useful beatmap results. It does not pretend that every parser
-returns the same model.
+Measured on 2026-09-12 from FOSU revision `164d691`. This comparison asks how
+long documented public APIs take to produce useful beatmap results. It does not
+pretend that every parser returns the same model.
 
 ## Result contracts
 
@@ -53,9 +53,9 @@ Microseconds per map; lower is better.
 
 | Python interface | Contract | Resident bytes | Warm file | Passes: bytes / file |
 |---|---|---:|---:|---|
-| FOSU AVX2 | Exact | 443.6 | 444.1 | 450.9 / 436.3; 439.6 / 448.5 |
-| FOSU scalar | Exact | 514.0 | 499.1 | 551.2 / 476.8; 506.2 / 492.1 |
-| OsuPyParser | Different | Unsupported | 4,885.0 | —; 5,014.4 / 4,755.6 |
+| FOSU AVX2 | Exact | 438.1 | 460.3 | 431.6 / 458.9; 444.6 / 461.8 |
+| FOSU scalar | Exact | 497.5 | 522.2 | 492.5 / 512.3; 502.5 / 532.0 |
+| OsuPyParser | Different | Unsupported | 4,817.2 | —; 4,820.1 / 4,814.3 |
 
 OsuPyParser has no published resident-input API.
 
@@ -67,14 +67,13 @@ work described in the next section.
 
 | Python interface | Contract | Resident bytes | Warm file |
 |---|---|---:|---:|
-| FOSU AVX2 | Exact | 445.9 | 428.3 |
-| FOSU scalar | Exact | 432.9 | 447.5 |
-| OsuPyParser | Different | Unsupported | 4,405.4 |
-| slider | Superset | 12,349.7 | 12,467.7 |
+| FOSU AVX2 | Exact | 407.6 | 419.9 |
+| FOSU scalar | Exact | 460.7 | 472.4 |
+| OsuPyParser | Different | Unsupported | 4,409.3 |
+| slider | Superset | 12,733.3 | 12,523.7 |
 
-Python result construction dominates these measurements. The small AVX2/scalar
-inversion in this two-pass standard subset is benchmark noise, not evidence that
-the scalar native parser is faster.
+Python result construction dominates these measurements, so the backend difference
+is smaller here than at the native parsing boundary.
 
 ## Python geometry-ready: standard
 
@@ -87,9 +86,9 @@ and slider is accessed with `hit_objects(stacking=False)`.
 
 | Python interface | Execution model | Resident bytes | Warm file | Passes: bytes / file |
 |---|---|---:|---:|---|
-| FOSU AVX2 | Explicit geometry options | 1,120.7 | 1,060.1 | 1,145.3 / 1,096.2; 1,041.8 / 1,078.3 |
-| FOSU scalar | Explicit geometry options | 1,107.0 | 1,096.1 | 1,052.2 / 1,161.9; 1,082.9 / 1,109.3 |
-| slider | Geometry built during parse | 13,338.3 | 13,387.6 | 13,465.4 / 13,211.2; 13,434.3 / 13,340.8 |
+| FOSU AVX2 | Explicit geometry options | 991.6 | 976.2 | 970.8 / 976.4; 1,012.4 / 976.1 |
+| FOSU scalar | Explicit geometry options | 1,001.4 | 1,060.8 | 1,009.3 / 1,048.5; 993.6 / 1,073.1 |
+| slider | Geometry built during parse | 13,855.4 | 14,411.9 | 13,633.0 / 14,421.0; 14,077.7 / 14,402.7 |
 
 The same Python-dominated noise explains the near-equal FOSU backend timings in
 this scenario; native feature costs are reported separately in
@@ -104,14 +103,14 @@ comparison and is not directly comparable to the isolated Python batches.
 
 | Library / interface | Contract | Mean | Pass 1 / pass 2 |
 |---|---|---:|---:|
-| FOSU C++ AVX2 | Exact | 46.1 | 48.0 / 44.1 |
-| FOSU C++ scalar | Exact | 97.8 | 99.1 / 96.6 |
-| rosu-map (Rust) | Closest structural scope | 556.4 | 558.1 / 554.6 |
-| Coosu (C#) | Different | 712.1 | 836.0 / 588.3 |
-| OsuParsers (C#) | Superset | 916.1 | 1,041.3 / 790.8 |
-| Official osu!lazer decoder (C#) | Superset | 2,873.4 | 3,092.6 / 2,654.1 |
-| osu-parsers (TypeScript) | Different | 2,991.3 | 3,130.6 / 2,852.0 |
-| osu-parser (JavaScript) | Superset | 13,339.3 | 14,027.6 / 12,651.0 |
+| FOSU C++ AVX2 | Exact | 46.1 | 46.4 / 45.9 |
+| FOSU C++ scalar | Exact | 103.5 | 103.8 / 103.2 |
+| rosu-map (Rust) | Closest structural scope | 576.4 | 575.9 / 577.0 |
+| Coosu (C#) | Different | 723.9 | 835.1 / 612.7 |
+| OsuParsers (C#) | Superset | 860.5 | 932.0 / 789.0 |
+| Official osu!lazer decoder (C#) | Superset | 2,957.1 | 3,162.8 / 2,751.4 |
+| osu-parsers (TypeScript) | Different | 3,009.8 | 3,100.4 / 2,919.2 |
+| osu-parser (JavaScript) | Superset | 13,190.3 | 13,568.2 / 12,812.4 |
 
 ## Coverage
 

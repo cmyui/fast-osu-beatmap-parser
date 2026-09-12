@@ -7,7 +7,13 @@ generated reports stay outside version control.
 The current performance snapshot uses 1,024 entries (986 unique beatmaps), 256
 per mode and 46,029,610 bytes. Selection is stratified by file size,
 slider/hold share and timing-row count from popular ranked/approved maps. Its
-content fingerprint is recorded in [the comparison report](../../docs/comparison.md).
+content fingerprint is recorded in [the performance report](../../docs/performance.md).
+
+The lazer performance snapshot uses 100 real v128 maps: 8 osu!standard, 43
+osu!taiko, 18 osu!catch and 31 osu!mania maps, totalling 2,634,547 bytes. This
+corpus is intentionally reported separately: its smaller files and different
+mode distribution make absolute latency comparisons with the legacy profile
+misleading.
 
 The retained compatibility corpus contains 15,952 ranked/approved maps:
 9,952 standard and 2,000 each of taiko, catch and mania. Selection used playcount;
