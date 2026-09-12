@@ -483,10 +483,7 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
       mask_index = mask_index * 2 + hitsound_length - 1;
       const uint32_t time_span = static_cast<uint32_t>(p2 - p1);
 
-      uint32_t x;
-      uint32_t y;
-      uint32_t type;
-      uint32_t hitsound;
+      uint32_t fields[4];
       double time;
       bool time_ok = true;
 #if FOSU_SIMD_X86
@@ -507,11 +504,8 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
       const __m256i values = _mm256_madd_epi16(words, word_weights);
       const __m128i low = _mm256_castsi256_si128(values);
       const __m128i time_groups = _mm256_extracti128_si256(values, 1);
-      const __m128i fields = _mm_add_epi32(low, _mm_slli_si128(time_groups, 12));
-      x = static_cast<uint32_t>(_mm_extract_epi32(fields, 0));
-      y = static_cast<uint32_t>(_mm_extract_epi32(fields, 1));
-      type = static_cast<uint32_t>(_mm_extract_epi32(fields, 2));
-      hitsound = static_cast<uint32_t>(_mm_extract_epi32(fields, 3));
+      const __m128i field_values = _mm_add_epi32(low, _mm_slli_si128(time_groups, 12));
+      _mm_storeu_si128(reinterpret_cast<__m128i*>(fields), field_values);
       if (time_span <= 9) [[likely]] {
         const __m128i packed = _mm_packus_epi32(time_groups, time_groups);
         const __m128i combined =
@@ -529,13 +523,10 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
 #else
       const Bytes32 digits{{vsubq_u8(ascii.val[0], zero), vsubq_u8(ascii.val[1], zero)}};
       const PrefixShuffle& masks = kPrefixShuffles[mask_index];
-      const auto fields = decimal_groups(vqtbl2q_u8(digits, vld1q_u8(masks.bytes)));
+      const auto field_values = decimal_groups(vqtbl2q_u8(digits, vld1q_u8(masks.bytes)));
       const auto time_groups =
           decimal_groups(vqtbl2q_u8(digits, vld1q_u8(masks.bytes + 16)));
-      x = vgetq_lane_u32(fields, 0);
-      y = vgetq_lane_u32(fields, 1);
-      type = vgetq_lane_u32(fields, 2);
-      hitsound = vgetq_lane_u32(fields, 3);
+      vst1q_u32(fields, field_values);
       if (time_span <= 9) [[likely]] {
         const uint32_t weights[2] = {10000, 1};
         const auto terms = vmul_u32(vget_high_u32(time_groups), vld1_u32(weights));
@@ -554,10 +545,10 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
       if (time_ok) [[likely]] {
         ++fast_lines;
         HitObject object{
-            .x = static_cast<float>(x),
-            .y = static_cast<float>(y),
-            .type = type,
-            .hitsound = hitsound,
+            .x = static_cast<float>(fields[0]),
+            .y = static_cast<float>(fields[1]),
+            .type = fields[2],
+            .hitsound = fields[3],
             .time = time,
             .end_time = 0,
             .slider = HitObject::kNoSlider,
@@ -565,7 +556,7 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
             .combo_skip = 0,
             .hit_sample = {},
         };
-        const HitObjectKind kind = classify_hitobject_kind(type);
+        const HitObjectKind kind = classify_hitobject_kind(fields[2]);
         if (kind == HitObjectKind::Circle) {
           if (prefix_end == length) {
             object.hit_sample = {};
