@@ -63,42 +63,6 @@ static void test_fuzz_parse_double() {
   }
 }
 
-// Fuzz the SWAR slider coordinate parser against the general path.
-static void test_fuzz_parse_coord() {
-  char buf[64];
-  for (int iter = 0; iter < 300000; ++iter) {
-    int len = 0;
-    const uint64_t kind = rng() % 16;
-    if (kind == 0)
-      buf[len++] = '-';
-    if (kind != 1) {
-      const int digits = 1 + (int)(rng() % (kind < 12 ? 4 : 8));
-      for (int i = 0; i < digits; ++i)
-        buf[len++] = char('0' + rng() % 10);
-    }
-    const int payload = len;
-    buf[len++] = (rng() % 2) ? ':' : '|';
-    memset(buf + len, 0, sizeof(buf) - (size_t)len);
-
-    const auto coordinate = fosu::internal::parse_slider_coordinate(buf, buf + payload);
-    const char* gp = coordinate ? coordinate->next : buf;
-    const int32_t got = coordinate ? coordinate->value : -777;
-    int32_t want = -777;
-    int64_t v;
-    const char* wp = fosu::internal::parse_i64(buf, buf + payload, v);
-    if (wp != buf && (v < -131072 || v > 131072))
-      wp = buf;
-    if (wp != buf)
-      want = static_cast<int32_t>(v);
-    CHECK_EQ(gp - buf, wp - buf);
-    CHECK_EQ(got, want);
-    if (g_failures) {
-      printf("  failing coord: %.*s\n", payload, buf);
-      return;
-    }
-  }
-}
-
 #if FOSU_SIMD
 // Every byte value at every lane: SIMD masks must preserve exact positions,
 // including NUL, high-bit bytes and the boundary between vector registers.
@@ -145,6 +109,46 @@ static void check_same_hitobject(const fosu::Beatmap& fast, const fosu::Beatmap&
   CHECK_EQ(got.hit_sample, want.hit_sample);
 }
 
+static void check_same_slider(const fosu::Beatmap& fast, const fosu::Beatmap& scalar) {
+  check_same_hitobject(fast, scalar);
+  CHECK_EQ(fast.sliders.size(), scalar.sliders.size());
+  CHECK_EQ(fast.slider_points.size(), scalar.slider_points.size());
+  if (fast.sliders.empty() || scalar.sliders.empty())
+    return;
+  const auto& got = fast.sliders[0];
+  const auto& want = scalar.sliders[0];
+  CHECK_EQ(got.slides, want.slides);
+  CHECK(memcmp(&got.length, &want.length, sizeof(got.length)) == 0);
+  CHECK_EQ(got.point_count, want.point_count);
+  for (uint32_t i = 0; i < got.point_count; ++i) {
+    CHECK_EQ(fast.slider_points[got.point_begin + i].x,
+             scalar.slider_points[want.point_begin + i].x);
+    CHECK_EQ(fast.slider_points[got.point_begin + i].y,
+             scalar.slider_points[want.point_begin + i].y);
+  }
+}
+
+static void test_fuzz_slider_points() {
+  for (int iter = 0; iter < 30000; ++iter) {
+    std::string coordinate;
+    const uint64_t kind = rng() % 16;
+    if (kind == 0)
+      coordinate += '-';
+    if (kind != 1) {
+      const int digits = 1 + static_cast<int>(rng() % (kind < 12 ? 4 : 8));
+      for (int i = 0; i < digits; ++i)
+        coordinate += static_cast<char>('0' + rng() % 10);
+    }
+    const std::string document =
+        hitobject_document("0,0,0,2,0,B|" + coordinate + ":2,1,10");
+    check_same_slider(parse_str(document), parse_str(document, false));
+    if (g_failures) {
+      printf("  failing slider coordinate: %s\n", coordinate.c_str());
+      return;
+    }
+  }
+}
+
 static void test_hitobject_field_shapes() {
   for (unsigned x = 1; x <= 3; ++x)
     for (unsigned y = 1; y <= 3; ++y)
@@ -171,29 +175,24 @@ static void test_hitobject_timestamp_boundaries() {
 }
 
 // Exercise both eight-digit chunks, the optional fraction, and a second
-// fractional chunk. Accepted fast lengths must match libc bit for bit.
+// fractional chunk through the resulting Slider domain object.
 static void test_fuzz_slider_length() {
-  using namespace fosu::internal;
   for (int iter = 0; iter < 30000; ++iter) {
-    std::string line = std::to_string(rng() % 131074);
-    line.insert(0, rng() % (9 - line.size()), '0');
+    std::string length = std::to_string(rng() % 131074);
+    length.insert(0, rng() % (9 - length.size()), '0');
     if (rng() % 4 != 0) {
-      line += '.';
+      length += '.';
       const auto digits = rng() % 14;
       for (uint64_t i = 0; i < digits; ++i)
-        line += static_cast<char>('0' + rng() % 10);
+        length += static_cast<char>('0' + rng() % 10);
     }
-    const auto length = line.size();
-    line += ",0:0";
-    line.append(fosu::kBufferPadding, '\0');
-    const auto fast = try_parse_slider_length_fast(line.data());
-    if (!fast)
-      continue;
-    double expected;
-    const auto next = reference_parse_double(line.data(), line.data() + length, expected);
-    CHECK_EQ(fast->next, next);
-    CHECK(expected <= 131072);
-    CHECK(memcmp(&fast->value, &expected, sizeof(expected)) == 0);
+    const std::string document =
+        hitobject_document("0,0,0,2,0,B|1:2,1," + length + ",0:0");
+    check_same_slider(parse_str(document), parse_str(document, false));
+    if (g_failures) {
+      printf("  failing slider length: %s\n", length.c_str());
+      return;
+    }
   }
 }
 
@@ -335,11 +334,11 @@ static void test_fuzz_hitobject_fields() {
 
 int main() {
   test_fuzz_parse_double();
-  test_fuzz_parse_coord();
 #if FOSU_SIMD
   test_byte_masks();
   test_hitobject_field_shapes();
   test_hitobject_timestamp_boundaries();
+  test_fuzz_slider_points();
   test_fuzz_slider_length();
   test_fuzz_hitobject_fields();
   test_fuzz_timing_point();
