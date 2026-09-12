@@ -5,14 +5,17 @@ find_package(Python REQUIRED COMPONENTS Interpreter)
 # library rather than python3XY.lib.
 if(WIN32 AND NOT Python_SABI_LIBRARY)
   execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c "import sys; print(sys.base_prefix, end='')"
-    OUTPUT_VARIABLE _python_root
+    COMMAND "${Python_EXECUTABLE}" -c
+      "import pathlib, sysconfig; print((pathlib.Path(sysconfig.get_path('include')).parent / 'libs' / 'python3.lib').as_posix(), end='')"
+    OUTPUT_VARIABLE _python_sabi_library
+    OUTPUT_STRIP_TRAILING_WHITESPACE
     COMMAND_ERROR_IS_FATAL ANY
   )
-  set(_python_sabi_library "${_python_root}/libs/python3.lib")
-  if(EXISTS "${_python_sabi_library}")
-    set(Python_SABI_LIBRARY "${_python_sabi_library}")
+  if(NOT _python_sabi_library)
+    message(FATAL_ERROR "python3.lib was not found beside the Windows Python installation")
   endif()
+  set(Python_SABI_LIBRARY "${_python_sabi_library}" CACHE FILEPATH
+    "Python Stable ABI import library" FORCE)
 endif()
 
 find_package(Python REQUIRED COMPONENTS Development.SABIModule)
