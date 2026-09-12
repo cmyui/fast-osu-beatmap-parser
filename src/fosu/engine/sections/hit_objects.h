@@ -317,7 +317,7 @@ __attribute__((noinline)) inline bool parse_hitobject_details(
 
 // Lines the fast prefix does not accept: the scalar prefix parser handles
 // signed, decimal, spaced or wide fields; anything else is malformed.
-__attribute__((noinline)) inline std::optional<HitObject> parse_hitobject_line_scalar(
+inline std::optional<HitObject> parse_hitobject_line_scalar(
     Beatmap& beatmap,
     size_t& slider_count,
     size_t& slider_segment_count,
