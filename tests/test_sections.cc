@@ -23,6 +23,7 @@ static void test_all_sections() {
       "BeatDivisor: 4\r\n"
       "GridSize: 32\r\n"
       "TimelineZoom: 2.4\r\n"
+      "VelocityPresets: 1,1.5,2\r\n"
       "\r\n"
       "[Metadata]\r\n"
       "Title:Painters of the Tempest\r\n"
@@ -80,6 +81,10 @@ static void test_all_sections() {
     CHECK(!bm.letterbox_in_breaks);
     CHECK(bm.bookmarks == "11240,22540");
     CHECK_EQ(bm.grid_size, 32);
+    CHECK_EQ(bm.velocity_presets.size(), 3u);
+    CHECK_EQ(bm.velocity_presets[0], 1);
+    CHECK_EQ(bm.velocity_presets[1], 1.5);
+    CHECK_EQ(bm.velocity_presets[2], 2);
     CHECK(bm.title == "Painters of the Tempest");
     CHECK(bm.creator == "cmyui");
     CHECK_EQ(bm.beatmap_id, 1193177);
@@ -237,6 +242,56 @@ static void test_aspire_edge_cases() {
 #endif
 }
 
+static void test_modern_curve_segments() {
+  for (bool simd : {false, true}) {
+    const auto modern = parse_str(
+        "osu file format v128\n[HitObjects]\n"
+        "10,20,100,2,0,B2|30.5:40.25|50:60|L|70.75:80.5,1,100\n",
+        simd);
+    CHECK_EQ(modern.hit_objects.size(), 1u);
+    const auto& slider = modern.sliders[modern.hit_objects[0].slider];
+    CHECK_EQ(slider.segment_count, 2u);
+    const auto first = modern.slider_segments[slider.segment_begin];
+    const auto second = modern.slider_segments[slider.segment_begin + 1];
+    CHECK_EQ(first.type, fosu::CurveType::Bezier);
+    CHECK_EQ(first.degree, 2u);
+    CHECK_EQ(first.point_count, 3u);
+    CHECK_EQ(second.type, fosu::CurveType::Linear);
+    CHECK(!second.degree);
+    CHECK_EQ(second.point_count, 1u);
+    CHECK_EQ(modern.slider_points[slider.point_begin + first.point_begin].x, 30.5f);
+    CHECK_EQ(modern.slider_points[slider.point_begin + first.point_begin].y, 40.25f);
+    CHECK_EQ(modern.slider_points[slider.point_begin + second.point_begin].x, 70.75f);
+
+    const auto degree = parse_str(
+        "osu file format v128\n[HitObjects]\n"
+        "0,0,100,2,0,B2|100:0|100:100|0:100,1,300\n",
+        simd);
+    const auto& degree_slider = degree.sliders[degree.hit_objects[0].slider];
+    CHECK_EQ(degree_slider.segment_count, 1u);
+    const auto degree_segment = degree.slider_segments[degree_slider.segment_begin];
+    CHECK_EQ(degree_segment.type, fosu::CurveType::Bezier);
+    CHECK_EQ(degree_segment.degree, 2u);
+    CHECK_EQ(degree_segment.point_count, 3u);
+
+    const auto coordinates = parse_str(
+        "osu file format v128\n[HitObjects]\n"
+        "256.99853,256.001,100,1,0\n",
+        simd);
+    CHECK_EQ(coordinates.hit_objects[0].x, static_cast<float>(256.99853));
+    CHECK_EQ(coordinates.hit_objects[0].y, static_cast<float>(256.001));
+
+    const auto legacy = parse_str(
+        "osu file format v14\n[HitObjects]\n"
+        "10,20,100,2,0,B|30.5:40.25,1,100\n",
+        simd);
+    const auto& legacy_slider = legacy.sliders[legacy.hit_objects[0].slider];
+    CHECK_EQ(legacy_slider.segment_count, 0u);
+    CHECK_EQ(legacy.slider_points[legacy_slider.point_begin].x, 30.0f);
+    CHECK_EQ(legacy.slider_points[legacy_slider.point_begin].y, 40.0f);
+  }
+}
+
 static void test_malformed() {
   auto bm = parse_str(
       "osu file format v14\n"
@@ -269,6 +324,10 @@ static void test_omitted_sections_use_defaults() {
     CHECK(bm.timing_points.empty() && bm.breaks.empty());
     CHECK(bm.combo_colours.empty() && bm.hit_objects.empty());
     CHECK(bm.sliders.empty() && bm.slider_points.empty());
+    CHECK_EQ(bm.velocity_presets.size(), 3u);
+    CHECK_EQ(bm.velocity_presets[0], 0.75);
+    CHECK_EQ(bm.velocity_presets[1], 1);
+    CHECK_EQ(bm.velocity_presets[2], 1.5);
     CHECK_EQ(bm.stats.malformed_lines, 0u);
   }
 }
@@ -629,6 +688,19 @@ static void test_repeated_section_bodies() {
   }
 }
 
+static void test_repeated_lazer_velocity_presets() {
+  const auto map = parse_str(
+      "osu file format v128\n[Editor]\nVelocityPresets:1,2\n"
+      "[Metadata]\nTitle:test\n[Editor]\nVelocityPresets:3,4,5,6,7\n");
+  CHECK_EQ(map.velocity_presets.size(), 5u);
+  CHECK_EQ(map.velocity_presets[0], 3);
+  CHECK_EQ(map.velocity_presets[1], 4);
+  CHECK_EQ(map.velocity_presets[2], 5);
+  CHECK_EQ(map.velocity_presets[3], 6);
+  CHECK_EQ(map.velocity_presets[4], 7);
+  CHECK_EQ(map.stats.malformed_lines, 0u);
+}
+
 static void test_combo_colour_domain() {
   for (bool simd : {false, true}) {
     const auto map = parse_str(
@@ -730,6 +802,7 @@ int main() {
   test_combo_colour_domain();
   test_header_field_failures_preserve_values();
   test_repeated_section_bodies();
+  test_repeated_lazer_velocity_presets();
   test_enum_contracts();
   test_byte_scan_boundaries<','>();
   test_byte_scan_boundaries<':'>();
@@ -745,6 +818,7 @@ int main() {
   test_old_format();
   test_mania_hold();
   test_aspire_edge_cases();
+  test_modern_curve_segments();
   test_malformed();
   test_long_timing_offsets();
   test_omitted_sections_use_defaults();

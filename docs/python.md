@@ -66,7 +66,8 @@ Shared fields use C++ names. Important Python-specific behavior:
   Other object types still have numeric endpoints. Omitted sections use their default settings.
   Hit samples and slider edge fields remain text.
 - Slider `control_points` includes the head position, unlike the native point
-  range. `slides=2` means forward and back.
+  range. `curve_segments` preserves modern segment boundaries and explicit
+  B-spline degrees. `slides=2` means forward and back.
 - `tag_list` and `bookmark_list` are parsed conveniences alongside the
   `tags` and `bookmarks` text fields.
 - IDs and preview time map the `-1` sentinel to `None`.

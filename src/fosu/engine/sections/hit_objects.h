@@ -2,84 +2,31 @@
 
 #include <algorithm>
 #include <cstring>
+#include <optional>
 
 #include <fosu/beatmap.h>
 #include <fosu/engine/hit_objects/common_fields.h>
 #include <fosu/engine/hit_objects/object_types.h>
-#include <fosu/engine/hit_objects/slider_fields.h>
+#include <fosu/engine/hit_objects/slider.h>
 #include <fosu/engine/parsing/lines.h>
 #include <fosu/engine/primitives/byte_scan.h>
 
 namespace fosu::internal {
 
-// Slider params after "type,hitSound,":
-//   curveType|x:y|x:y...,slides,length[,edgeSounds,edgeSets][,hitSample]
-//
-// Each point is parsed into a local value before it is copied into the
-// beatmap arena. A malformed point list is discarded. Points parsed before a
-// malformed later field remain, matching the official decoder's behavior.
-__attribute__((noinline)) inline bool parse_slider(
+// Parses one complete [HitObjects] section and publishes accepted objects.
+// Object-specific syntax is delegated after the common fields are decoded.
+
+// Everything after the "x,y,time,type,hitSound" prefix: slider params,
+// spinner/hold end times, or a trailing hit sample.
+__attribute__((noinline)) inline bool parse_hitobject_details(
     Beatmap& beatmap,
     size_t& slider_count,
-    size_t& point_count,
+    size_t& slider_segment_count,
+    size_t& slider_point_count,
     HitObject& object,
     const char* p,
     const char* end,
     const HitObjectParseConstants& constants) {
-  if (p >= end) [[unlikely]]
-    return false;
-
-  const auto curve_type = parse_curve_type(*p++);
-  if (!curve_type)
-    return false;
-  const size_t point_begin = point_count;
-#if FOSU_SIMD
-  if (const auto initial_points =
-          try_parse_slider_point_prefix_fast<SliderPoint>(p, constants)) {
-    beatmap.slider_points[point_count++] = initial_points->first;
-    if (initial_points->has_second)
-      beatmap.slider_points[point_count++] = initial_points->second;
-    p = initial_points->next;
-  }
-#endif
-  while (p < end && *p == '|') {
-    const auto point = parse_slider_point<SliderPoint>(p, end, constants);
-    if (!point) [[unlikely]] {
-      point_count = point_begin;
-      return false;
-    }
-    beatmap.slider_points[point_count++] = point->value;
-    p = point->next;
-  }
-
-  const auto tail = parse_slider_tail(p, end, constants);
-  if (!tail) [[unlikely]]
-    return false;
-
-  Slider slider{
-      .point_begin = static_cast<uint32_t>(point_begin),
-      .point_count = static_cast<uint32_t>(point_count - point_begin),
-      .slides = std::max(1, tail->slides),
-      .curve_type = *curve_type,
-      .length = std::max(0.0, tail->length),
-      .edge_sounds = tail->sounds.edge_sounds,
-      .edge_sets = tail->sounds.edge_sets,
-  };
-  object.hit_sample = tail->sounds.hit_sample;
-  object.slider = static_cast<uint32_t>(slider_count);
-  beatmap.sliders[slider_count++] = slider;
-  return true;
-}
-
-// Everything after the "x,y,time,type,hitSound" prefix: slider params,
-// spinner/hold end times, or a trailing hit sample.
-inline bool parse_hitobject_details(Beatmap& beatmap,
-                                    size_t& slider_count,
-                                    size_t& point_count,
-                                    HitObject& object,
-                                    const char* p,
-                                    const char* end,
-                                    const HitObjectParseConstants& constants) {
   switch (classify_hitobject_kind(object.type)) {
     case HitObjectKind::Circle: {
       const auto details = parse_circle_details(p, end);
@@ -91,8 +38,8 @@ inline bool parse_hitobject_details(Beatmap& beatmap,
     }
     case HitObjectKind::Slider:
       return p < end && *p == ',' &&
-             parse_slider(beatmap, slider_count, point_count, object, p + 1, end,
-                          constants);
+             parse_slider(beatmap, slider_count, slider_segment_count, slider_point_count,
+                          object, p + 1, end, constants);
     case HitObjectKind::Spinner: {
       const auto details = parse_spinner_details(p, end);
       if (!details)
@@ -117,21 +64,66 @@ inline bool parse_hitobject_details(Beatmap& beatmap,
 
 // Lines the fast prefix does not accept: the scalar prefix parser handles
 // signed, decimal, spaced or wide fields; anything else is malformed.
-__attribute__((noinline)) inline bool parse_hitobject_line_scalar(
+inline std::optional<HitObject> parse_hitobject_line_scalar(
     Beatmap& beatmap,
     size_t& slider_count,
-    size_t& point_count,
-    HitObject& object,
+    size_t& slider_segment_count,
+    size_t& slider_point_count,
     const char* p,
     const char* line_end,
     const HitObjectParseConstants& constants) {
-  const auto prefix = parse_hitobject_prefix_scalar(p, static_cast<size_t>(line_end - p));
-  if (!prefix)
-    return false;
-  initialize_hitobject(object, prefix->value);
+  float x;
+  const char* next = parse_osu_float(p, line_end, x, 131072);
+  if (next == p || next >= line_end || *next != ',')
+    return std::nullopt;
+  p = next + 1;
+
+  float y;
+  next = parse_osu_float(p, line_end, y, 131072);
+  if (next == p || next >= line_end || *next != ',')
+    return std::nullopt;
+  p = next + 1;
+
+  double time;
+  next = parse_osu_double(p, line_end, time);
+  if (next == p || next >= line_end || *next != ',')
+    return std::nullopt;
+  p = next + 1;
+
+  int64_t type;
+  next = parse_osu_int(p, line_end, type);
+  if (next == p || next >= line_end || *next != ',')
+    return std::nullopt;
+  p = next + 1;
+
+  int64_t hitsound;
+  next = parse_osu_int(p, line_end, hitsound);
+  if (next == p || (next < line_end && *next != ','))
+    return std::nullopt;
+
+  if (beatmap.format_version < 128) {
+    x = static_cast<float>(static_cast<int32_t>(x));
+    y = static_cast<float>(static_cast<int32_t>(y));
+  }
+
   ++beatmap.stats.slow_path_lines;
-  return parse_hitobject_details(beatmap, slider_count, point_count, object, prefix->next,
-                                 line_end, constants);
+  HitObject object{
+      .x = x,
+      .y = y,
+      .type = static_cast<uint32_t>(type),
+      .hitsound = static_cast<uint32_t>(hitsound),
+      .time = time,
+      .end_time = 0,
+      .slider = HitObject::kNoSlider,
+      .new_combo = false,
+      .combo_skip = 0,
+      .hit_sample = {},
+  };
+  if (!parse_hitobject_details(beatmap, slider_count, slider_segment_count,
+                               slider_point_count, object, next, line_end, constants)) {
+    return std::nullopt;
+  }
+  return object;
 }
 
 // Interpret a successfully decoded record before publishing it to the arena.
@@ -168,7 +160,8 @@ inline const char* parse_hitobjects_section_scalar(
     Beatmap& beatmap,
     size_t& hit_object_count,
     size_t& slider_count,
-    size_t& point_count,
+    size_t& slider_segment_count,
+    size_t& slider_point_count,
     const char* p,
     const char* file_end,
     const HitObjectParseConstants& constants,
@@ -188,11 +181,11 @@ inline const char* parse_hitobjects_section_scalar(
       --line_end;
     const char* next_line = newline ? newline + 1 : file_end;
     if (!ignored_line(p, line_end)) {
-      HitObject object{};
-      if (parse_hitobject_line_scalar(beatmap, slider_count, point_count, object, p,
-                                      line_end, constants)) {
+      if (const auto object =
+              parse_hitobject_line_scalar(beatmap, slider_count, slider_segment_count,
+                                          slider_point_count, p, line_end, constants)) {
         beatmap.hit_objects[hit_object_count] =
-            normalize_hitobject(object, beatmap, hit_object_count, time_offset);
+            normalize_hitobject(*object, beatmap, hit_object_count, time_offset);
         ++hit_object_count;
       } else [[unlikely]] {
         ++beatmap.stats.malformed_lines;
@@ -209,7 +202,8 @@ inline const char* parse_hitobjects_section_scalar(
 inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
                                                  size_t& hit_object_count,
                                                  size_t& slider_count,
-                                                 size_t& point_count,
+                                                 size_t& slider_segment_count,
+                                                 size_t& slider_point_count,
                                                  const char* p,
                                                  const char* file_end,
                                                  const HitObjectParseConstants& constants,
@@ -230,49 +224,161 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
     const char* next_line = newline + (newline < file_end);
     const char* line_end = newline - (newline > p && newline[-1] == '\r');
     const auto length = static_cast<size_t>(line_end - p);
-    const auto shape = classify_hitobject_prefix(nondigits, commas);
-    const char after_prefix = p[shape.p4];
+    const uint32_t m1 = nondigits & (nondigits - 1);
+    const uint32_t m2 = m1 & (m1 - 1);
+    const uint32_t m3 = m2 & (m2 - 1);
+    const uint32_t m4 = m3 & (m3 - 1);
+    const uint64_t p0 = trailing_zeros(nondigits);
+    const uint64_t p1 = trailing_zeros(m1);
+    const uint64_t p2 = trailing_zeros(m2);
+    const uint64_t p3 = trailing_zeros(m3);
+    const uint32_t prefix_end = trailing_zeros(m4);
 
-    if (shape.ok && (shape.p4 == length || after_prefix == ',' || after_prefix == '\0'))
-        [[likely]] {
-      HitObject object{};
-      bool accepted;
-      const auto prefix = decode_hitobject_prefix(ascii, zero, shape);
-      if (prefix) [[likely]] {
-        initialize_hitobject(object, *prefix);
+    // Lanes (low to high): the first four delimiter positions. Their
+    // differences are the lengths of x, y, time and type.
+    const uint64_t delimiter_positions = p0 | p1 << 16 | p2 << 32 | p3 << 48;
+    const uint64_t field_lengths =
+        (delimiter_positions - (delimiter_positions << 16)) - 0x0002000200020001ull;
+    const uint64_t overlong_fields = field_lengths + 0x7FFD7FF67FFD7FFDull;
+    const bool field_lengths_ok =
+        ((field_lengths | overlong_fields) & 0x8000800080008000ull) == 0;
+    const uint32_t through_type = static_cast<uint32_t>((2ull << p3) - 1);
+    const bool delimiters_are_commas = ((nondigits ^ commas) & through_type) == 0;
+    const uint32_t hitsound_length = prefix_end - static_cast<uint32_t>(p3) - 1;
+    const bool hitsound_length_ok = hitsound_length - 1 <= 1;
+    const bool common_layout =
+        field_lengths_ok & delimiters_are_commas & hitsound_length_ok;
+    const char after_prefix = p[prefix_end];
+
+    if (common_layout && (prefix_end == length || after_prefix == ',' ||
+                          after_prefix == '\0')) [[likely]] {
+      // 60*p0 + 27*p1 + 2*p2 + p3 identifies the shuffle for these
+      // delimiter positions. hitSound has a separate one/two-digit dimension.
+      uint32_t mask_index =
+          static_cast<uint32_t>((delimiter_positions * 0x003C001B00020001ull) >> 48) -
+          158;
+      mask_index = mask_index * 2 + hitsound_length - 1;
+      const uint32_t time_span = static_cast<uint32_t>(p2 - p1);
+
+      uint32_t fields[4];
+      double time;
+      bool time_ok = true;
+#if FOSU_SIMD_X86
+      const __m256i digits = _mm256_sub_epi8(ascii, zero);
+      const LaneMasks& masks = kLaneMasks[mask_index];
+      const __m256i perm =
+          _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.perm));
+      const __m256i shuf =
+          _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.shuf));
+      const __m256i placed =
+          _mm256_shuffle_epi8(_mm256_permutevar8x32_epi32(digits, perm), shuf);
+      const __m256i pair_weights =
+          _mm256_setr_epi8(0, 100, 10, 1, 0, 100, 10, 1, 0, 100, 10, 1, 0, 0, 10, 1, 0, 0,
+                           10, 1, 0, 0, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1);
+      const __m256i word_weights =
+          _mm256_setr_epi16(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 100, 1, 100, 1);
+      const __m256i words = _mm256_maddubs_epi16(placed, pair_weights);
+      const __m256i values = _mm256_madd_epi16(words, word_weights);
+      const __m128i low = _mm256_castsi256_si128(values);
+      const __m128i time_groups = _mm256_extracti128_si256(values, 1);
+      const __m128i field_values = _mm_add_epi32(low, _mm_slli_si128(time_groups, 12));
+      _mm_storeu_si128(reinterpret_cast<__m128i*>(fields), field_values);
+      if (time_span <= 9) [[likely]] {
+        const __m128i packed = _mm_packus_epi32(time_groups, time_groups);
+        const __m128i combined =
+            _mm_madd_epi16(packed, _mm_setr_epi16(0, 0, 10000, 1, 0, 0, 0, 0));
+        const __m128i pair = _mm_shuffle_epi32(combined, _MM_SHUFFLE(0, 0, 0, 1));
+        _mm_store_sd(&time, _mm_cvtepi32_pd(pair));
+      } else {
+        const uint64_t parsed_time =
+            static_cast<uint32_t>(_mm_extract_epi32(time_groups, 1)) * 100000000ull +
+            static_cast<uint32_t>(_mm_extract_epi32(time_groups, 2)) * 10000ull +
+            static_cast<uint32_t>(_mm_extract_epi32(time_groups, 3));
+        time_ok = parsed_time <= INT32_MAX;
+        time = static_cast<double>(parsed_time);
+      }
+#else
+      const Bytes32 digits{{vsubq_u8(ascii.val[0], zero), vsubq_u8(ascii.val[1], zero)}};
+      const PrefixShuffle& masks = kPrefixShuffles[mask_index];
+      const auto field_values = decimal_groups(vqtbl2q_u8(digits, vld1q_u8(masks.bytes)));
+      const auto time_groups =
+          decimal_groups(vqtbl2q_u8(digits, vld1q_u8(masks.bytes + 16)));
+      vst1q_u32(fields, field_values);
+      if (time_span <= 9) [[likely]] {
+        const uint32_t weights[2] = {10000, 1};
+        const auto terms = vmul_u32(vget_high_u32(time_groups), vld1_u32(weights));
+        const auto sum = vpadd_u32(terms, terms);
+        time = vgetq_lane_f64(vcvtq_f64_u64(vmovl_u32(sum)), 0);
+      } else {
+        const uint64_t parsed_time =
+            uint64_t(vgetq_lane_u32(time_groups, 1)) * 100000000 +
+            uint64_t(vgetq_lane_u32(time_groups, 2)) * 10000 +
+            vgetq_lane_u32(time_groups, 3);
+        time_ok = parsed_time <= INT32_MAX;
+        time = static_cast<double>(parsed_time);
+      }
+#endif
+
+      if (time_ok) [[likely]] {
         ++fast_lines;
-        const HitObjectKind kind = classify_hitobject_kind(prefix->type);
+        HitObject object{
+            .x = static_cast<float>(fields[0]),
+            .y = static_cast<float>(fields[1]),
+            .type = fields[2],
+            .hitsound = fields[3],
+            .time = time,
+            .end_time = 0,
+            .slider = HitObject::kNoSlider,
+            .new_combo = false,
+            .combo_skip = 0,
+            .hit_sample = {},
+        };
+        const HitObjectKind kind = classify_hitobject_kind(fields[2]);
         if (kind == HitObjectKind::Circle) {
-          if (shape.p4 == length) {
+          if (prefix_end == length) {
             object.hit_sample = {};
-            accepted = true;
-          } else if (length - shape.p4 == 9 && after_prefix == ',' &&
-                     short_sample(p + shape.p4 + 1)) {
-            object.hit_sample = {p + shape.p4 + 1, 8};
-            accepted = true;
-          } else {
-            accepted = parse_hitobject_details(beatmap, slider_count, point_count, object,
-                                               p + shape.p4, line_end, constants);
+          } else if (length - prefix_end == 9 && after_prefix == ',' &&
+                     short_sample(p + prefix_end + 1)) {
+            object.hit_sample = {p + prefix_end + 1, 8};
+          } else if (!parse_hitobject_details(beatmap, slider_count, slider_segment_count,
+                                              slider_point_count, object, p + prefix_end,
+                                              line_end, constants)) {
+            ++malformed;
+            p = next_line;
+            continue;
           }
         } else if (kind == HitObjectKind::Slider) {
-          accepted = shape.p4 < length && after_prefix == ',' &&
-                     parse_slider(beatmap, slider_count, point_count, object,
-                                  p + shape.p4 + 1, line_end, constants);
-        } else {
-          accepted = parse_hitobject_details(beatmap, slider_count, point_count, object,
-                                             p + shape.p4, line_end, constants);
+          if (prefix_end >= length || after_prefix != ',' ||
+              !parse_slider(beatmap, slider_count, slider_segment_count,
+                            slider_point_count, object, p + prefix_end + 1, line_end,
+                            constants)) {
+            ++malformed;
+            p = next_line;
+            continue;
+          }
+        } else if (!parse_hitobject_details(beatmap, slider_count, slider_segment_count,
+                                            slider_point_count, object, p + prefix_end,
+                                            line_end, constants)) {
+          ++malformed;
+          p = next_line;
+          continue;
         }
-      } else {
-        accepted = parse_hitobject_line_scalar(beatmap, slider_count, point_count, object,
-                                               p, line_end, constants);
-      }
 
-      if (accepted) {
         beatmap.hit_objects[hit_object_count] =
             normalize_hitobject(object, beatmap, hit_object_count, time_offset);
         ++hit_object_count;
-      } else [[unlikely]]
-        ++malformed;
+      } else {
+        const auto object =
+            parse_hitobject_line_scalar(beatmap, slider_count, slider_segment_count,
+                                        slider_point_count, p, line_end, constants);
+        if (object) {
+          beatmap.hit_objects[hit_object_count] =
+              normalize_hitobject(*object, beatmap, hit_object_count, time_offset);
+          ++hit_object_count;
+        } else [[unlikely]] {
+          ++malformed;
+        }
+      }
     } else {
       const char c = *p;
       if (c == '\r' || c == '\n') {
@@ -282,11 +388,11 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
       if (c == '[')
         break;
       if (!ignored_line(p, line_end)) {
-        HitObject object{};
-        if (parse_hitobject_line_scalar(beatmap, slider_count, point_count, object, p,
-                                        line_end, constants)) {
+        if (const auto object =
+                parse_hitobject_line_scalar(beatmap, slider_count, slider_segment_count,
+                                            slider_point_count, p, line_end, constants)) {
           beatmap.hit_objects[hit_object_count] =
-              normalize_hitobject(object, beatmap, hit_object_count, time_offset);
+              normalize_hitobject(*object, beatmap, hit_object_count, time_offset);
           ++hit_object_count;
         } else [[unlikely]] {
           ++malformed;
@@ -305,18 +411,20 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
 inline const char* parse_hitobjects_section(Beatmap& beatmap,
                                             size_t& hit_object_count,
                                             size_t& slider_count,
-                                            size_t& point_count,
+                                            size_t& slider_segment_count,
+                                            size_t& slider_point_count,
                                             const char* p,
                                             const char* file_end,
                                             int time_offset = 0) {
   const HitObjectParseConstants constants;
 #if FOSU_SIMD
   return parse_hitobjects_section_simd(beatmap, hit_object_count, slider_count,
-                                       point_count, p, file_end, constants, time_offset);
+                                       slider_segment_count, slider_point_count, p,
+                                       file_end, constants, time_offset);
 #else
   return parse_hitobjects_section_scalar(beatmap, hit_object_count, slider_count,
-                                         point_count, p, file_end, constants,
-                                         time_offset);
+                                         slider_segment_count, slider_point_count, p,
+                                         file_end, constants, time_offset);
 #endif
 }
 

@@ -36,14 +36,15 @@ sealed class RawFields
         fields["timeline_zoom"] = map.TimelineZoom;
         fields["preview_time"] = map.Metadata.PreviewTime == -1 ? null : map.Metadata.PreviewTime;
         fields["bookmark_list"] = map.Bookmarks;
+        fields["velocity_presets"] = map.SliderVelocityPresets;
         hit_objects.Clear();
         foreach (var decoded in map.HitObjects)
         {
             if (!objects.TryGetValue(decoded, out var record)) continue;
             var combo = (IHasCombo)decoded;
             var position = ((IHasPosition)decoded).Position;
-            record["x"] = (int)position.X;
-            record["y"] = (int)position.Y;
+            record["x"] = (double)position.X;
+            record["y"] = (double)position.Y;
             record["time"] = decoded.StartTime;
             record["new_combo"] = combo.NewCombo;
             record["combo_skip"] = combo.ComboOffset;
@@ -112,7 +113,47 @@ sealed class RawFields
     static double Number(string text) => Parsing.ParseDouble(text);
     static int Integer(string text) => Parsing.ParseInt(text);
     static int Coordinate(string text) => (int)Parsing.ParseFloat(text, Parsing.MAX_COORDINATE_VALUE);
+    static double Coordinate(string text, bool preserveFraction) => preserveFraction
+        ? Parsing.ParseFloat(text, Parsing.MAX_COORDINATE_VALUE)
+        : Coordinate(text);
     static string At(string[] fields, int index, string fallback = "") => index < fields.Length ? fields[index] : fallback;
+
+    static (string type, int? degree) Curve(string text)
+    {
+        int? degree = text[0] == 'B' && text.Length > 1 && int.TryParse(text.AsSpan(1), out int value) && value > 0
+            ? value
+            : null;
+        return (text[0].ToString(), degree);
+    }
+
+    static object[] CurveSegments(string[] path, Point head, bool preserveFraction)
+    {
+        var curve = Curve(path[0]);
+        var points = new List<Point> { head };
+        var segments = new List<object>();
+        (string type, int? degree)? pending = null;
+        bool segmented = curve.degree.HasValue;
+        foreach (string token in path.Skip(1))
+        {
+            if (char.IsLetter(token[0]))
+            {
+                pending = Curve(token);
+                segmented = true;
+                continue;
+            }
+            var xy = token.Split(':');
+            var point = new Point(Coordinate(xy[0], preserveFraction), Coordinate(xy[1], preserveFraction));
+            points.Add(point);
+            if (pending == null) continue;
+            segments.Add(new { type = curve.type, degree = curve.degree, control_points = points.ToArray() });
+            curve = pending.Value;
+            points = new List<Point> { point };
+            pending = null;
+        }
+        if (segmented)
+            segments.Add(new { type = curve.type, degree = curve.degree, control_points = points.ToArray() });
+        return segments.ToArray();
+    }
 
     public void Capture(Beatmap map, string section, string line)
     {
@@ -228,20 +269,23 @@ sealed class RawFields
                 break;
             case "slider":
                 var path = parts[5].Split('|');
-                if (path[0].Length != 1 || !"BCLP".Contains(path[0]))
+                if (path[0].Length == 0 || !"BCLP".Contains(path[0][0]))
                 {
                     policy_rejections.Add("HitObjects.CurveType");
                     return;
                 }
-                result["curve_type"] = path[0];
+                bool preserveFraction = map.BeatmapVersion >= LegacyBeatmapEncoder.FIRST_LAZER_VERSION;
+                var head = new Point(Coordinate(parts[0], preserveFraction), Coordinate(parts[1], preserveFraction));
+                result["curve_type"] = path[0][0].ToString();
                 result["slides"] = Math.Max(1, Integer(parts[6]));
                 result["length"] = parts.Length > 7 ? Math.Max(0, Parsing.ParseDouble(parts[7], Parsing.MAX_COORDINATE_VALUE)) : 0.0;
                 result["edge_sounds"] = At(parts, 8);
                 result["edge_sets"] = At(parts, 9);
-                result["control_points"] = new[] { new Point(Coordinate(parts[0]), Coordinate(parts[1])) }.Concat(path.Skip(1).Select(point => {
+                result["control_points"] = new[] { head }.Concat(path.Skip(1).Where(point => !char.IsLetter(point[0])).Select(point => {
                     var xy = point.Split(':');
-                    return new Point(Coordinate(xy[0]), Coordinate(xy[1]));
+                    return new Point(Coordinate(xy[0], preserveFraction), Coordinate(xy[1], preserveFraction));
                 })).ToArray();
+                result["curve_segments"] = CurveSegments(path, head, preserveFraction);
                 sample = At(parts, 10);
                 break;
         }

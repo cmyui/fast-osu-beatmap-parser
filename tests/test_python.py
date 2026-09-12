@@ -487,7 +487,8 @@ def test_fractional_times_and_malformed_numeric_fields():
 def test_complete_map(tmp_path):
     data = (
         "osu file format v14\n[General]\nAudioFilename:song.mp3\nMode:3\n"
-        "LetterboxInBreaks:1\nSampleVolume:73\n[Editor]\nBookmarks:100,-200,300\n"
+        "LetterboxInBreaks:1\nSampleVolume:73\n[Editor]\n"
+        "Bookmarks:100,-200,300\nVelocityPresets:1,1.5,2\n"
         "[Metadata]\nTitle:日本語\nArtist:artist\nVersion:Hard\nBeatmapID:12345\n"
         "[Difficulty]\nOverallDifficulty:9\nCircleSize:4\n"
         '[Events]\n0,0,"bg.jpg",0,0\n2,100,200\n'
@@ -516,6 +517,7 @@ def test_complete_map(tmp_path):
     assert b.mode is fosu.GameMode.MANIA and b.letterbox_in_breaks is True
     assert b.sample_volume == 73
     assert b.bookmark_list == [100, -200, 300]
+    assert b.velocity_presets == [1, 1.5, 2]
     assert isinstance(b.hit_objects, list) and len(b.hit_objects) == 4
     circle, slider, spinner, hold = b.hit_objects
     assert isinstance(circle, fosu.Circle) and circle.is_circle
@@ -548,6 +550,43 @@ def test_complete_map(tmp_path):
     assert "hit_objects=4" in repr(b) and len(repr(b)) < 150
 
 
+def test_modern_curve_segments_drive_path_calculation():
+    slider = fosu.parse(
+        b"osu file format v128\n[HitObjects]\n"
+        b"10,20,100,2,0,B2|30.5:40.25|50:60|L|70.75:80.5,1,100\n",
+        calculate_slider_paths=True,
+    ).hit_objects[0]
+    assert isinstance(slider, fosu.Slider)
+    assert [(segment.type, segment.degree) for segment in slider.curve_segments] == [
+        (fosu.CurveType.BEZIER, 2),
+        (fosu.CurveType.LINEAR, None),
+    ]
+    assert [
+        [(point.x, point.y) for point in segment.control_points]
+        for segment in slider.curve_segments
+    ] == [
+        [(10, 20), (30.5, 40.25), (50, 60), (70.75, 80.5)],
+        [(70.75, 80.5)],
+    ]
+    assert slider.path is not None
+    assert len(slider.path.points) > 2
+
+    degree = fosu.parse(
+        b"osu file format v128\n[HitObjects]\n"
+        b"0,0,100,2,0,B2|100:0|100:100|0:100,1,300\n"
+    ).hit_objects[0]
+    assert isinstance(degree, fosu.Slider)
+    assert [(segment.type, segment.degree) for segment in degree.curve_segments] == [
+        (fosu.CurveType.BEZIER, 2)
+    ]
+
+    legacy = fosu.parse(
+        b"osu file format v14\n[HitObjects]\n10,20,100,2,0,B|30.5:40.25,1,100\n"
+    ).hit_objects[0]
+    assert isinstance(legacy, fosu.Slider)
+    assert legacy.curve_segments == []
+
+
 def test_empty_input_defaults():
     b = fosu.parse(b"")
     assert b.title == "" and b.sample_set is fosu.SampleSet.NORMAL
@@ -560,6 +599,7 @@ def test_omitted_general_uses_defaults():
     b = fosu.parse(b"[Metadata]\nTitle:Only metadata\n")
     assert b.title == "Only metadata" and b.audio_filename == ""
     assert b.mode is fosu.GameMode.OSU
+    assert b.velocity_presets == [0.75, 1, 1.5]
 
 
 def test_omitted_metadata_uses_defaults():

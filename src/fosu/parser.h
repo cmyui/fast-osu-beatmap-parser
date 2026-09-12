@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstring>
@@ -60,10 +61,34 @@ struct ParserArenaPoolCleanup {
 inline ParserArenaPoolCleanup parser_arena_pool_cleanup;
 #endif
 
+inline size_t velocity_preset_capacity(std::span<const char> input) {
+  constexpr std::string_view field = "VelocityPresets:";
+  const std::string_view document{input.data(), input.size()};
+  size_t capacity = 3;
+  size_t search_from = 0;
+  for (;;) {
+    const size_t field_begin = document.find(field, search_from);
+    if (field_begin == std::string_view::npos)
+      break;
+    const size_t value_begin = field_begin + field.size();
+    const size_t line_end = document.find('\n', value_begin);
+    const size_t value_end =
+        line_end == std::string_view::npos ? document.size() : line_end;
+    size_t values = 1;
+    for (size_t i = value_begin; i < value_end; ++i)
+      values += document[i] == ',';
+    capacity = std::max(capacity, values);
+    search_from = value_end;
+  }
+  return capacity;
+}
+
 inline bool allocate_beatmap_arrays(Arena* arena,
                                     Beatmap& beatmap,
-                                    size_t input_size,
-                                    uint32_t selected_sections) noexcept {
+                                    std::span<const char> input,
+                                    uint32_t selected_sections,
+                                    bool lazer_format) noexcept {
+  const size_t input_size = input.size();
   // Each capacity is a conservative bound derived from the shortest accepted
   // spelling. sizeof includes the string literal's trailing null byte.
   // The arena reserves address space for the bound, but physical pages are
@@ -82,6 +107,14 @@ inline bool allocate_beatmap_arrays(Arena* arena,
     if (!values)
       return false;
     beatmap.combo_colours = {values, capacity};
+  }
+
+  if (selected_sections & kSectionEditor) {
+    const size_t capacity = lazer_format ? velocity_preset_capacity(input) : 3;
+    double* values = arena_push_array<double>(arena, capacity);
+    if (!values)
+      return false;
+    beatmap.velocity_presets = {values, capacity};
   }
 
   if (selected_sections & kSectionTimingPoints) {
@@ -104,6 +137,14 @@ inline bool allocate_beatmap_arrays(Arena* arena,
     if (!sliders)
       return false;
     beatmap.sliders = {sliders, slider_capacity};
+
+    if (lazer_format) {
+      const size_t segment_capacity = input_size / (sizeof("|L|0:0") - 1) + 1;
+      CurveSegment* segments = arena_push_array<CurveSegment>(arena, segment_capacity);
+      if (!segments)
+        return false;
+      beatmap.slider_segments = {segments, segment_capacity};
+    }
 
     const size_t point_capacity = input_size / (sizeof("|0:0") - 1) + 1;
     SliderPoint* points = arena_push_array<SliderPoint>(arena, point_capacity);
@@ -256,14 +297,18 @@ class Parser {
   }
 
   Result<Beatmap*> finish_parse(ParseOptions opts) noexcept {
+    const std::span<const char> input{input_, input_size_};
     if (input_size_ != 0) {
-      if (!internal::allocate_beatmap_arrays(result_arena_, beatmap_, input_size_,
-                                             opts.sections)) {
+      Beatmap preamble;
+      internal::parse_preamble(preamble, input.data(), input.data() + input.size());
+      if (!internal::allocate_beatmap_arrays(result_arena_, beatmap_, input,
+                                             opts.sections,
+                                             preamble.format_version >= 128)) {
         reset_working_result();
         return Error{ErrorCode::AllocationFailure};
       }
     }
-    engine_->parse_document({input_, input_size_}, beatmap_, opts);
+    engine_->parse_document(input, beatmap_, opts);
     if (!internal::apply_legacy_rules(beatmap_, scratch_arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};

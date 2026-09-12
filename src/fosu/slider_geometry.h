@@ -44,8 +44,16 @@ struct CurveDistance {
   double length = 0;
   CurvePoint last{}, previous{};
   size_t count = 0;
+  bool first_in_segment = false;
+
+  void begin_segment() { first_in_segment = true; }
 
   void append(CurvePoint point) {
+    if (first_in_segment && count && last == point) {
+      first_in_segment = false;
+      return;
+    }
+    first_in_segment = false;
     if (count)
       length += (point - last).length();
     previous = last;
@@ -66,6 +74,52 @@ inline void subdivide_bezier(std::span<const CurvePoint> points,
     for (size_t j = 0; j < count - i - 1; ++j)
       midpoints[j] = (midpoints[j] + midpoints[j + 1]) * 0.5f;
   }
+}
+
+template <typename Curve>
+inline bool bezier_distance(std::span<const CurvePoint> points,
+                            Curve& distance,
+                            Arena* arena);
+
+template <typename Curve>
+inline bool bspline_distance(std::span<const CurvePoint> points,
+                             uint32_t requested_degree,
+                             Curve& distance,
+                             Arena* arena) {
+  if (points.size() < 2) {
+    for (auto point : points)
+      distance.append(point);
+    return true;
+  }
+  const size_t point_count = points.size() - 1;
+  const size_t degree = std::min<size_t>(requested_degree, point_count);
+  if (!degree)
+    return false;
+  if (degree == point_count)
+    return bezier_distance(points, distance, arena);
+
+  auto* work = arena_push_array<CurvePoint>(arena, points.size());
+  auto* bezier = arena_push_array<CurvePoint>(arena, degree + 1);
+  if (!work || !bezier)
+    return false;
+  std::copy(points.begin(), points.end(), work);
+  for (size_t i = 0; i < point_count - degree; ++i) {
+    bezier[0] = work[i];
+    for (size_t j = 0; j < degree - 1; ++j) {
+      bezier[j + 1] = work[i + 1];
+      for (size_t k = 1; k < degree - j; ++k) {
+        const size_t weight = std::min(k, point_count - degree - i);
+        work[i + k] = (work[i + k] * static_cast<float>(weight) + work[i + k + 1]) /
+                      static_cast<float>(weight + 1);
+      }
+    }
+    bezier[degree] = work[i + 1];
+    distance.begin_segment();
+    if (!bezier_distance({bezier, degree + 1}, distance, arena))
+      return false;
+  }
+  distance.begin_segment();
+  return bezier_distance({work + point_count - degree, degree + 1}, distance, arena);
 }
 
 template <typename Curve>
@@ -185,6 +239,7 @@ inline bool circular_arc_distance(std::span<const CurvePoint> points, Curve& dis
 template <typename Curve>
 inline bool approximate_curve_segment(std::span<const CurvePoint> points,
                                       CurveType type,
+                                      std::optional<uint32_t> degree,
                                       Curve& segment,
                                       Arena* arena) {
   if (points.size() == 1 || type == CurveType::Linear ||
@@ -195,10 +250,19 @@ inline bool approximate_curve_segment(std::span<const CurvePoint> points,
     catmull_distance(points, segment);
   } else if (type != CurveType::PerfectCurve || points.size() != 3 ||
              !circular_arc_distance(points, segment)) {
-    if (!bezier_distance(points, segment, arena))
+    const uint32_t spline_degree = degree.value_or(points.size() - 1);
+    if (!bspline_distance(points, spline_degree, segment, arena))
       return false;
   }
   return true;
+}
+
+template <typename Curve>
+inline bool approximate_curve_segment(std::span<const CurvePoint> points,
+                                      CurveType type,
+                                      Curve& segment,
+                                      Arena* arena) {
+  return approximate_curve_segment(points, type, std::nullopt, segment, arena);
 }
 
 inline bool curve_segment_distance(std::span<const CurvePoint> points,
@@ -219,10 +283,81 @@ inline bool curve_segment_distance(std::span<const CurvePoint> points,
   return true;
 }
 
+inline CurveType legacy_curve_type(std::span<const CurvePoint> points, CurveType type) {
+  if (type != CurveType::PerfectCurve)
+    return type;
+  if (points.size() != 3)
+    return CurveType::Bezier;
+  const float cross = (points[1].y - points[0].y) * (points[2].x - points[0].x) -
+                      (points[1].x - points[0].x) * (points[2].y - points[0].y);
+  return std::abs(cross) < 1e-3f ? CurveType::Linear : type;
+}
+
+inline CurveType lazer_curve_type(std::span<const CurvePoint> points, CurveType type) {
+  return type == CurveType::PerfectCurve && points.size() > 3 ? CurveType::Bezier : type;
+}
+
+inline bool calculate_legacy_slider_distance(std::span<const CurvePoint> points,
+                                             CurveType type,
+                                             CurveDistance& distance,
+                                             Arena* arena) {
+  type = legacy_curve_type(points, type);
+  size_t begin = 0;
+  for (size_t i = 1; i < points.size(); ++i) {
+    if (points[i] != points[i - 1] || i == points.size() - 1 ||
+        (type == CurveType::Catmull && i > 1)) {
+      continue;
+    }
+    if (i - begin > 1 && !curve_segment_distance(points.subspan(begin, i - begin), type,
+                                                 distance, arena)) {
+      return false;
+    }
+    begin = i;
+  }
+  return curve_segment_distance(points.subspan(begin), type, distance, arena);
+}
+
+inline bool calculate_lazer_slider_distance(std::span<const CurvePoint> points,
+                                            std::span<const CurveSegment> segments,
+                                            CurveType type,
+                                            CurveDistance& distance,
+                                            Arena* arena) {
+  if (segments.empty()) {
+    type = lazer_curve_type(points, type);
+    size_t begin = 0;
+    for (size_t i = 1; i < points.size(); ++i) {
+      if (points[i] != points[i - 1] || i == points.size() - 1)
+        continue;
+      if (i - begin > 1 && !curve_segment_distance(points.subspan(begin, i - begin), type,
+                                                   distance, arena)) {
+        return false;
+      }
+      begin = i;
+    }
+    return curve_segment_distance(points.subspan(begin), type, distance, arena);
+  }
+
+  for (size_t i = 0; i < segments.size(); ++i) {
+    const auto& source = segments[i];
+    const size_t start = source.point_begin + (i == 0 ? 0 : 1);
+    const size_t count = source.point_count + (i == 0 ? 1 : 0);
+    const auto segment_points = points.subspan(start, count);
+    const auto segment_type = lazer_curve_type(segment_points, source.type);
+    distance.begin_segment();
+    if (!approximate_curve_segment(segment_points, segment_type, source.degree, distance,
+                                   arena)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 inline Result<double> slider_distance(const HitObject& object,
                                       const Slider& slider,
                                       std::span<const SliderPoint> control_points,
-                                      Arena* arena) {
+                                      std::span<const CurveSegment> segments,
+                                      Arena* arena,
+                                      bool lazer_format) {
   // A non-degenerate final linear edge can always reach the declared length.
   // No approximation or scratch allocation is needed to establish its distance.
   if (slider.length > 0 && !control_points.empty()) {
@@ -242,26 +377,19 @@ inline Result<double> slider_distance(const HitObject& object,
     points[i + 1] = {static_cast<float>(control_points[i].x - object.x),
                      static_cast<float>(control_points[i].y - object.y)};
   const size_t count = control_points.size() + 1;
-  auto type = slider.curve_type;
-  if (type == CurveType::PerfectCurve) {
-    if (count != 3)
-      type = CurveType::Bezier;
-    else if (std::abs((points[1].y - points[0].y) * (points[2].x - points[0].x) -
-                      (points[1].x - points[0].x) * (points[2].y - points[0].y)) < 1e-3f)
-      type = CurveType::Linear;
-  }
   CurveDistance distance;
-  size_t begin = 0;
-  for (size_t i = 1; i < count; ++i) {
-    if (points[i] != points[i - 1] || i == count - 1 ||
-        (type == CurveType::Catmull && i > 1))
-      continue;
-    if (!curve_segment_distance({points + begin, i - begin}, type, distance, arena))
+  const std::span<const CurvePoint> relative_points{points, count};
+  if (lazer_format) {
+    if (!calculate_lazer_slider_distance(relative_points, segments, slider.curve_type,
+                                         distance, arena)) {
       return Error{ErrorCode::AllocationFailure};
-    begin = i;
+    }
+  } else {
+    if (!calculate_legacy_slider_distance(relative_points, slider.curve_type, distance,
+                                          arena)) {
+      return Error{ErrorCode::AllocationFailure};
+    }
   }
-  if (!curve_segment_distance({points + begin, count - begin}, type, distance, arena))
-    return Error{ErrorCode::AllocationFailure};
   // A missing/zero declared length uses the natural path. Otherwise osu! trims
   // or extends it, except when a duplicate final vertex prevents extension.
   if (slider.length > 0 && distance.count > 1 &&
@@ -286,6 +414,8 @@ struct CurveVertices {
   CurvePoint last_point{};
   bool first_in_segment = true;
   bool failed = false;
+
+  void begin_segment() { first_in_segment = true; }
 
   void append(CurvePoint point) {
     const bool shared = first_in_segment && count && last_point == point;
@@ -318,12 +448,79 @@ struct CurveVertices {
   }
 };
 
+inline bool calculate_legacy_slider_curve(std::span<const CurvePoint> points,
+                                          CurveType type,
+                                          CurveVertices& curve,
+                                          Arena* arena) {
+  type = legacy_curve_type(points, type);
+  size_t begin = 0;
+  for (size_t i = 1; i <= points.size(); ++i) {
+    if (i < points.size() && (points[i] != points[i - 1] || i == points.size() - 1 ||
+                              (type == CurveType::Catmull && i > 1))) {
+      continue;
+    }
+    if (i == points.size() || i - begin > 1) {
+      curve.first_in_segment = i - begin > 1;
+      if (!approximate_curve_segment(points.subspan(begin, i - begin), type, curve,
+                                     arena) ||
+          curve.failed) {
+        return false;
+      }
+    }
+    begin = i;
+  }
+  return true;
+}
+
+inline bool calculate_lazer_slider_curve(std::span<const CurvePoint> points,
+                                         std::span<const CurveSegment> segments,
+                                         CurveType type,
+                                         CurveVertices& curve,
+                                         Arena* arena) {
+  if (segments.empty()) {
+    type = lazer_curve_type(points, type);
+    size_t begin = 0;
+    for (size_t i = 1; i <= points.size(); ++i) {
+      if (i < points.size() && (points[i] != points[i - 1] || i == points.size() - 1)) {
+        continue;
+      }
+      if (i == points.size() || i - begin > 1) {
+        curve.first_in_segment = i - begin > 1;
+        if (!approximate_curve_segment(points.subspan(begin, i - begin), type, curve,
+                                       arena) ||
+            curve.failed) {
+          return false;
+        }
+      }
+      begin = i;
+    }
+    return true;
+  }
+
+  for (size_t i = 0; i < segments.size(); ++i) {
+    const auto& source = segments[i];
+    const size_t start = source.point_begin + (i == 0 ? 0 : 1);
+    const size_t count = source.point_count + (i == 0 ? 1 : 0);
+    const auto segment_points = points.subspan(start, count);
+    const auto segment_type = lazer_curve_type(segment_points, source.type);
+    curve.begin_segment();
+    if (!approximate_curve_segment(segment_points, segment_type, source.degree, curve,
+                                   arena) ||
+        curve.failed) {
+      return false;
+    }
+  }
+  return true;
+}
+
 inline Result<SliderPath> calculate_slider_path(
     const HitObject& object,
     const Slider& slider,
     std::span<const SliderPoint> control_points,
+    std::span<const CurveSegment> segments,
     Arena* result_arena,
-    Arena* scratch_arena) {
+    Arena* scratch_arena,
+    bool lazer_format) {
   const TempArena work{scratch_arena};
   auto* points = arena_push_array<CurvePoint>(scratch_arena, control_points.size() + 1);
   if (!points)
@@ -333,29 +530,22 @@ inline Result<SliderPath> calculate_slider_path(
     points[i + 1] = {static_cast<float>(control_points[i].x - object.x),
                      static_cast<float>(control_points[i].y - object.y)};
   const size_t count = control_points.size() + 1;
-  auto type = slider.curve_type;
-  if (type == CurveType::PerfectCurve) {
-    if (count != 3)
-      type = CurveType::Bezier;
-    else if (std::abs(points[1].y * points[2].x - points[1].x * points[2].y) < 1e-3f)
-      type = CurveType::Linear;
-  }
   CurveVertices curve{scratch_arena};
   // The first typed control point is itself a one-vertex segment in osu!.
   // Circular approximation can produce a slightly different first vertex.
   if (count > 1 && points[0] != points[1])
     curve.append(points[0]);
-  size_t begin = 0;
-  for (size_t i = 1; i <= count; ++i) {
-    if (i < count && (points[i] != points[i - 1] || i == count - 1 ||
-                      (type == CurveType::Catmull && i > 1)))
-      continue;
-    curve.first_in_segment = i - begin > 1;
-    if (!approximate_curve_segment({points + begin, i - begin}, type, curve,
-                                   scratch_arena) ||
-        curve.failed)
+  const std::span<const CurvePoint> relative_points{points, count};
+  if (lazer_format) {
+    if (!calculate_lazer_slider_curve(relative_points, segments, slider.curve_type, curve,
+                                      scratch_arena)) {
       return Error{ErrorCode::AllocationFailure};
-    begin = i;
+    }
+  } else {
+    if (!calculate_legacy_slider_curve(relative_points, slider.curve_type, curve,
+                                       scratch_arena)) {
+      return Error{ErrorCode::AllocationFailure};
+    }
   }
   auto* output = arena_push_array<PathPoint>(result_arena, curve.count);
   auto* lengths = arena_push_array<double>(result_arena, curve.count);
@@ -391,9 +581,13 @@ inline bool set_slider_paths(Beatmap& map, Arena* result_arena, Arena* scratch_a
     if (object.slider == HitObject::kNoSlider)
       continue;
     const auto& slider = map.sliders[object.slider];
-    auto path = calculate_slider_path(
-        object, slider, map.slider_points.subspan(slider.point_begin, slider.point_count),
-        result_arena, scratch_arena);
+    const auto control_points =
+        map.slider_points.subspan(slider.point_begin, slider.point_count);
+    const auto segments =
+        map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
+    auto path =
+        calculate_slider_path(object, slider, control_points, segments, result_arena,
+                              scratch_arena, map.format_version >= 128);
     if (!path) {
       success = false;
       break;

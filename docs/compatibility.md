@@ -154,4 +154,3 @@ This is bounded compatibility evidence, not complete format or stable-client
 parity. The raw parser is not a replacement for the game's package loader,
 storyboard interpreter or ruleset processing. Empty raw buffers remain valid
 empty results even though the official file decoder requires a header/content.
-Lazer-only curve segments and versions are outside the supported scope.
