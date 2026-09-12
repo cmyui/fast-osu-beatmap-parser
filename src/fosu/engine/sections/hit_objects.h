@@ -271,14 +271,15 @@ __attribute__((noinline)) inline bool parse_slider(
 
 // Everything after the "x,y,time,type,hitSound" prefix: slider params,
 // spinner/hold end times, or a trailing hit sample.
-inline bool parse_hitobject_details(Beatmap& beatmap,
-                                    size_t& slider_count,
-                                    size_t& slider_segment_count,
-                                    size_t& slider_point_count,
-                                    HitObject& object,
-                                    const char* p,
-                                    const char* end,
-                                    const HitObjectParseConstants& constants) {
+__attribute__((noinline)) inline bool parse_hitobject_details(
+    Beatmap& beatmap,
+    size_t& slider_count,
+    size_t& slider_segment_count,
+    size_t& slider_point_count,
+    HitObject& object,
+    const char* p,
+    const char* end,
+    const HitObjectParseConstants& constants) {
   switch (classify_hitobject_kind(object.type)) {
     case HitObjectKind::Circle: {
       const auto details = parse_circle_details(p, end);
