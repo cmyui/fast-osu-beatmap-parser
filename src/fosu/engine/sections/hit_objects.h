@@ -483,23 +483,30 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
     if (shape.ok && (shape.prefix_end == length || after_prefix == ',' ||
                      after_prefix == '\0')) [[likely]] {
       const auto prefix = decode_hitobject_prefix(ascii, zero, shape);
-      std::optional<HitObject> object;
       if (prefix) [[likely]] {
         ++fast_lines;
-        object = parse_hitobject_line_fast(beatmap, slider_count, slider_segment_count,
-                                           slider_point_count, *prefix, shape.prefix_end,
-                                           p, line_end, constants);
+        const auto object = parse_hitobject_line_fast(
+            beatmap, slider_count, slider_segment_count, slider_point_count, *prefix,
+            shape.prefix_end, p, line_end, constants);
+        if (object) {
+          beatmap.hit_objects[hit_object_count] =
+              normalize_hitobject(*object, beatmap, hit_object_count, time_offset);
+          ++hit_object_count;
+        } else [[unlikely]] {
+          ++malformed;
+        }
       } else {
-        object = parse_hitobject_line_scalar(beatmap, slider_count, slider_segment_count,
-                                             slider_point_count, p, line_end, constants);
+        const auto object =
+            parse_hitobject_line_scalar(beatmap, slider_count, slider_segment_count,
+                                        slider_point_count, p, line_end, constants);
+        if (object) {
+          beatmap.hit_objects[hit_object_count] =
+              normalize_hitobject(*object, beatmap, hit_object_count, time_offset);
+          ++hit_object_count;
+        } else [[unlikely]] {
+          ++malformed;
+        }
       }
-
-      if (object) {
-        beatmap.hit_objects[hit_object_count] =
-            normalize_hitobject(*object, beatmap, hit_object_count, time_offset);
-        ++hit_object_count;
-      } else [[unlikely]]
-        ++malformed;
     } else {
       const char c = *p;
       if (c == '\r' || c == '\n') {
