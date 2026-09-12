@@ -1,8 +1,10 @@
 # Public parser comparison
 
-Measured on 2026-09-11. This comparison asks how long documented public APIs
-take to produce useful beatmap results. It does not pretend that every parser
-returns the same model.
+Measured on 2026-09-11 from FOSU revision `feb0606`. This comparison asks how
+long documented public APIs take to produce useful beatmap results. It does not
+pretend that every parser returns the same model. Current isolated FOSU timings
+are maintained separately in [performance](performance.md); the rows here remain
+on their original revision so the interleaved cross-library snapshot stays intact.
 
 ## Result contracts
 

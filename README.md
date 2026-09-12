@@ -41,10 +41,29 @@ fosu::Beatmap& map = *parsed.value();
 ## Performance
 
 Benchmarks use public APIs and include result construction and release. Lower is
-better. The current snapshot uses parser source `feb0606` and a representative
-1,024-entry corpus: 256 entries per game mode and 46,029,610 bytes total.
+better. Current FOSU measurements use parser source `164d691` and a representative
+1,024-entry corpus: 256 entries per game mode and 46,029,610 bytes total. The
+cross-library tables remain a separately measured `feb0606` snapshot so their
+interleaved results stay comparable.
 
-### Python: structural decode
+### Current FOSU headline
+
+Resident-input latency in microseconds per map. `Gameplay` enables slider events
+and stacking; `Decode` uses the default options.
+
+| Corpus / profile | x86 C++ AVX2 | x86 Python AVX2 | M3 C++ NEON | M3 Python NEON |
+|---|---:|---:|---:|---:|
+| Legacy / Decode | 24.5 | 421.9 | 20.3 | 311.5 |
+| Legacy / Gameplay | 56.0 | 907.4 | 37.0 | 644.1 |
+| Real v128 / Decode | 18.8 | 204.7 | 19.3 | 156.7 |
+| Real v128 / Gameplay | 22.8 | 256.8 | 21.6 | 194.9 |
+
+The 100-map v128 corpus is smaller and has a different mode distribution, so its
+absolute values are not directly comparable to the legacy rows. The
+[performance details](docs/performance.md) include scalar results, every option
+profile, corpus fingerprints and the measurement method.
+
+### Comparison snapshot: Python structural decode
 
 This scenario requests a normal decoded beatmap without optional gameplay
 calculations. Every row uses the same 1,004 mutually accepted all-mode entries.
@@ -58,7 +77,7 @@ calculations. Every row uses the same 1,004 mutually accepted all-mode entries.
 Packages like rosu-pp and its Python bindings are intentionally excluded. They construct
 a significantly reduced PP-oriented model, not a general-purpose beatmap document.
 
-### Python: slider geometry
+### Comparison snapshot: Python slider geometry
 
 This standard-mode scenario requires slider end times and queryable paths. FOSU
 enables `calculate_slider_end_times` and `calculate_slider_paths`; slider is the
@@ -72,7 +91,7 @@ for both parsers. All 256 entries are accepted by both parsers.
 | FOSU scalar | 1,107.0 | 1,096.1 |
 | slider 0.8.4 | 13,338.3 | 13,387.6 |
 
-### Native and other languages
+### Comparison snapshot: native and other languages
 
 Resident-input public API latency on the same Zen 4 host. These two interleaved
 passes use 1,023 common all-mode entries and are not directly comparable to the
@@ -89,10 +108,9 @@ isolated Python batch measurements above.
 | osu-parsers 4.1.7 (TypeScript) | Rich document model | 2,991.3 |
 | osu-parser 0.3.3 (JavaScript) | Automatically derives slider/gameplay values | 13,339.3 |
 
-It is worth noting that the official osu!lazer completely, rosu-map largely, and
-osu-parsers partially support lazer-specific v128 beatmap features, which are not
-supported by other parsers, including FOSU.
-[FOSU will support it in the future.](https://github.com/cmyui/fast-osu-beatmap-parser/pull/54).
+The official osu!lazer completely and rosu-map largely support lazer-specific
+v128 beatmap features. FOSU supports the v128 fields represented by its public
+model; other parsers in this table have more limited or no v128 coverage.
 
 The [full comparison](docs/comparison.md) defines the result contracts, execution
 models, versions, per-pass variation and coverage. [Performance details](docs/performance.md)
