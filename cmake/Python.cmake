@@ -19,7 +19,7 @@ if(WIN32 AND NOT Python_SABI_LIBRARY)
     "Python Stable ABI import library" FORCE)
 endif()
 
-find_package(Python REQUIRED COMPONENTS Interpreter Development.SABIModule)
+find_package(Python REQUIRED COMPONENTS Development.SABIModule)
 Python_add_library(_core MODULE USE_SABI 3.10 WITH_SOABI src/fosu/bindings/python.cc)
 fosu_dispatch(_core python)
 fosu_runtime(_core)
