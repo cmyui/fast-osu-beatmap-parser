@@ -101,22 +101,6 @@ that v128 parsing is faster than legacy parsing.
 | Gameplay | 22.8 | 56.4 | 256.8 | 298.7 | 21.6 | 46.7 | 194.9 | 223.6 |
 | Double time | 19.9 | 52.5 | 206.2 | 241.5 | 19.7 | 44.9 | 157.3 | 187.1 |
 
-## Revision cost
-
-An interleaved comparison against the previous `feb0606` benchmark revision used
-the same legacy corpus and pinned x86 core. Each direction was measured separately
-to control for variant order. Current `164d691` was slower by the following average
-of the forward and reverse changes:
-
-| Interface | AVX2 | Scalar |
-|---|---:|---:|
-| Native C++ | 4.40% | 4.42% |
-| Python | 2.17% | 2.31% |
-
-The matching native AVX2 and scalar changes indicate added parser work rather than
-a scalar-only compiler regression. Python exposes a smaller relative change because
-detached model construction is a larger part of that timing boundary.
-
 ## Standard gameplay and mods
 
 HR is currently supported for standard and taiko, so the combined-mod profile is
