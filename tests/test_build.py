@@ -11,14 +11,27 @@ with tempfile.TemporaryDirectory(prefix="fosu-consumer-") as temp:
     root = Path(temp)
     prefix = root / "install"
     subprocess.run(
-        ["cmake", "--install", str(build), "--prefix", str(prefix)], check=True
+        [
+            "cmake",
+            "--install",
+            str(build),
+            "--config",
+            "Release",
+            "--prefix",
+            str(prefix),
+        ],
+        check=True,
     )
     (root / "CMakeLists.txt").write_text("""cmake_minimum_required(VERSION 3.26)
 project(consumer LANGUAGES C CXX)
 find_package(fosu CONFIG REQUIRED)
 add_executable(headers main.cc)
 target_link_libraries(headers PRIVATE fosu::headers)
-target_compile_options(headers PRIVATE -fno-exceptions)
+if(MSVC)
+  target_compile_options(headers PRIVATE /EHs-c-)
+else()
+  target_compile_options(headers PRIVATE -fno-exceptions)
+endif()
 add_executable(runtime runtime.cc)
 target_link_libraries(runtime PRIVATE fosu::fosu)
 """)
@@ -50,13 +63,20 @@ int main() {
         ],
         check=True,
     )
-    subprocess.run(["cmake", "--build", str(root / "build")], check=True)
-    subprocess.run([str(root / "build" / "headers")], check=True)
-    consumer = str(root / "build" / "runtime")
+    subprocess.run(
+        ["cmake", "--build", str(root / "build"), "--config", "Release"],
+        check=True,
+    )
+    executable_dir = root / "build" / ("Release" if os.name == "nt" else "")
+    suffix = ".exe" if os.name == "nt" else ""
+    subprocess.run([str(executable_dir / f"headers{suffix}")], check=True)
+    consumer = str(executable_dir / f"runtime{suffix}")
     env = dict(os.environ, FOSU_BACKEND="auto")
+    if os.name == "nt":
+        env["PATH"] = str(prefix / "bin") + os.pathsep + env["PATH"]
     selected = subprocess.check_output([consumer], env=env, text=True).strip()
     # Change only this temporary installation, never the source build.
-    engines = list(prefix.rglob("libfosu_engine_*"))
+    engines = list(prefix.rglob("*fosu_engine_*"))
     for engine in engines:
         engine.rename(engine.with_name(engine.name + ".unavailable"))
     assert subprocess.check_output([consumer], env=env, text=True).strip() == "scalar"

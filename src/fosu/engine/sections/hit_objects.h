@@ -18,7 +18,7 @@ namespace fosu::internal {
 
 // Everything after the "x,y,time,type,hitSound" prefix: slider params,
 // spinner/hold end times, or a trailing hit sample.
-__attribute__((noinline)) inline bool parse_hitobject_details(
+FOSU_NOINLINE inline bool parse_hitobject_details(
     Beatmap& beatmap,
     size_t& slider_count,
     size_t& slider_segment_count,

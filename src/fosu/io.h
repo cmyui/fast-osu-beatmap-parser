@@ -1,18 +1,158 @@
 #pragma once
 
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <new>
 #include <string_view>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 namespace fosu {
+
+namespace internal {
+
+#if defined(_WIN32)
+using InputFile = HANDLE;
+inline const InputFile kInvalidInputFile = INVALID_HANDLE_VALUE;
+
+inline void set_file_error(DWORD error) {
+  switch (error) {
+    case ERROR_FILE_NOT_FOUND:
+    case ERROR_PATH_NOT_FOUND:
+      errno = ENOENT;
+      break;
+    case ERROR_ACCESS_DENIED:
+    case ERROR_SHARING_VIOLATION:
+      errno = EACCES;
+      break;
+    case ERROR_INVALID_NAME:
+    case ERROR_INVALID_PARAMETER:
+      errno = EINVAL;
+      break;
+    case ERROR_NOT_ENOUGH_MEMORY:
+    case ERROR_OUTOFMEMORY:
+      errno = ENOMEM;
+      break;
+    default:
+      errno = EIO;
+      break;
+  }
+}
+
+inline InputFile open_input_file(const char* path) {
+  const int length =
+      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, nullptr, 0);
+  if (!length) {
+    set_file_error(GetLastError());
+    return kInvalidInputFile;
+  }
+  auto wide = std::unique_ptr<wchar_t[]>(new (std::nothrow) wchar_t[length]);
+  if (!wide) {
+    errno = ENOMEM;
+    return kInvalidInputFile;
+  }
+  if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide.get(), length)) {
+    set_file_error(GetLastError());
+    return kInvalidInputFile;
+  }
+  InputFile file = CreateFileW(
+      wide.get(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+      nullptr, OPEN_EXISTING,
+      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_BACKUP_SEMANTICS,
+      nullptr);
+  if (file == kInvalidInputFile) {
+    set_file_error(GetLastError());
+    return file;
+  }
+  BY_HANDLE_FILE_INFORMATION info;
+  if (!GetFileInformationByHandle(file, &info)) {
+    const DWORD error = GetLastError();
+    CloseHandle(file);
+    set_file_error(error);
+    return kInvalidInputFile;
+  }
+  if (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+    CloseHandle(file);
+    errno = EISDIR;
+    return kInvalidInputFile;
+  }
+  return file;
+}
+
+inline void close_input_file(InputFile file) {
+  CloseHandle(file);
+}
+
+inline bool input_file_size(InputFile file, uint64_t& size) {
+  LARGE_INTEGER value;
+  if (!GetFileSizeEx(file, &value)) {
+    set_file_error(GetLastError());
+    return false;
+  }
+  if (value.QuadPart < 0) {
+    errno = EIO;
+    return false;
+  }
+  size = static_cast<uint64_t>(value.QuadPart);
+  return true;
+}
+
+inline ptrdiff_t read_input_file(InputFile file, char* data, size_t size) {
+  const DWORD amount = static_cast<DWORD>(std::min<size_t>(size, UINT32_MAX));
+  DWORD read = 0;
+  if (!ReadFile(file, data, amount, &read, nullptr)) {
+    set_file_error(GetLastError());
+    return -1;
+  }
+  return static_cast<ptrdiff_t>(read);
+}
+#else
+using InputFile = int;
+inline constexpr InputFile kInvalidInputFile = -1;
+
+inline InputFile open_input_file(const char* path) {
+  return open(path, O_RDONLY);
+}
+
+inline void close_input_file(InputFile file) {
+  close(file);
+}
+
+inline bool input_file_size(InputFile file, uint64_t& size) {
+  struct stat info;
+  if (fstat(file, &info) != 0)
+    return false;
+  if (info.st_size < 0) {
+    errno = EIO;
+    return false;
+  }
+  size = static_cast<uint64_t>(info.st_size);
+  return true;
+}
+
+inline ptrdiff_t read_input_file(InputFile file, char* data, size_t size) {
+  return read(file, data, size);
+}
+#endif
+
+}  // namespace internal
 
 // The parser requires kBufferPadding readable zero bytes past the end of
 // the input so vector loads and speculative SWAR reads never run
@@ -46,28 +186,26 @@ struct FileBuffer {
 // space together with the parser's readable padding.
 inline bool read_into(const char* path, FileBuffer& buf) {
   buf.size = 0;
-  const int fd = open(path, O_RDONLY);
-  if (fd < 0)
+  const internal::InputFile file = internal::open_input_file(path);
+  if (file == internal::kInvalidInputFile)
     return false;
-  struct stat st;
-  const int stat_result = fstat(fd, &st);
-  if (stat_result != 0 || st.st_size < 0) {
-    const int error = stat_result ? errno : EIO;
-    close(fd);
+  uint64_t file_size;
+  if (!internal::input_file_size(file, file_size)) {
+    const int error = errno;
+    internal::close_input_file(file);
     errno = error;
     return false;
   }
-  if (static_cast<uint64_t>(st.st_size) >
-      std::numeric_limits<size_t>::max() - kBufferPadding) {
-    close(fd);
+  if (file_size > std::numeric_limits<size_t>::max() - kBufferPadding) {
+    internal::close_input_file(file);
     errno = EFBIG;
     return false;
   }
-  const size_t len = static_cast<size_t>(st.st_size);
+  const size_t len = static_cast<size_t>(file_size);
   if (buf.capacity < len + kBufferPadding) {
     auto data = std::unique_ptr<char[]>(new (std::nothrow) char[len + kBufferPadding]);
     if (!data) {
-      close(fd);
+      internal::close_input_file(file);
       errno = ENOMEM;
       return false;
     }
@@ -76,18 +214,18 @@ inline bool read_into(const char* path, FileBuffer& buf) {
   }
   size_t got = 0;
   while (got < len) {
-    const ssize_t r = read(fd, buf.data.get() + got, len - got);
+    const ptrdiff_t r = internal::read_input_file(file, buf.data.get() + got, len - got);
     if (r < 0 && errno == EINTR)
       continue;
     if (r <= 0) {
       const int error = r < 0 ? errno : EIO;
-      close(fd);
+      internal::close_input_file(file);
       errno = error;
       return false;
     }
     got += static_cast<size_t>(r);
   }
-  close(fd);
+  internal::close_input_file(file);
   memset(buf.data.get() + got, 0, kBufferPadding);
   buf.size = got;
   return true;

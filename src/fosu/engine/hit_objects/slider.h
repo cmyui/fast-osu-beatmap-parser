@@ -13,6 +13,7 @@
 #include <string_view>
 
 #include <fosu/beatmap.h>
+#include <fosu/compiler.h>
 #include <fosu/engine/hit_objects/common_fields.h>
 #include <fosu/engine/hit_objects/samples.h>
 #include <fosu/engine/parsing/numbers.h>
@@ -102,7 +103,7 @@ inline SliderPoint decode_slider_point(uint8x16_t input,
 // are written into their arena arrays as they are accepted. Failures while
 // parsing the path roll those arrays back. A malformed later field may leave
 // parsed points unused, matching the official decoder's behavior.
-__attribute__((noinline)) inline bool parse_slider(
+FOSU_NOINLINE inline bool parse_slider(
     Beatmap& beatmap,
     size_t& slider_count,
     size_t& slider_segment_count,

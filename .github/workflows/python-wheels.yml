@@ -27,6 +27,8 @@ jobs:
             platform: macos-arm64
           - runner: macos-26-intel
             platform: macos-x86_64
+          - runner: windows-2025
+            platform: windows-x86_64
     steps:
       - uses: actions/checkout@v6
         with:
@@ -59,6 +61,9 @@ jobs:
           - runner: macos-26-intel
             platform: macos-x86_64
             python: '3.14'
+          - runner: windows-2025
+            platform: windows-x86_64
+            python: '3.14'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -73,7 +78,9 @@ jobs:
       - run: python -m pip install pytest mypy==2.3.1
       - run: python -m pip install --no-index --find-links wheelhouse fosu
       - run: python -m pytest tests/test_python.py
-      - run: FOSU_BACKEND=scalar python -m pytest tests/test_python.py
+      - run: python -m pytest tests/test_python.py
+        env:
+          FOSU_BACKEND: scalar
       - run: python tests/test_binary_hardening.py
 
   source-install:

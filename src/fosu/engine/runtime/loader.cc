@@ -3,13 +3,24 @@
 #include <fosu/engine/runtime/cpu_features.h>
 #include <fosu/engine/runtime/loader.h>
 
-#include <dlfcn.h>
-#include <limits.h>
-#include <unistd.h>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <cwchar>
+#else
+#include <dlfcn.h>
+#include <limits.h>
+#include <unistd.h>
+#endif
 
 namespace fosu::internal {
 static_assert(!FOSU_SIMD, "the core embeds only the scalar engine");
@@ -21,7 +32,12 @@ static_assert(embedded_scalar_engine.kind == EngineKind::Scalar);
 // after library cleanup. No parser or arena lives in an engine library.
 constinit std::atomic<const ParsingEngine*> selected{nullptr};
 constinit std::atomic_flag selecting = ATOMIC_FLAG_INIT;
-constinit void* library = nullptr;
+#if defined(_WIN32)
+using EngineLibrary = HMODULE;
+#else
+using EngineLibrary = void*;
+#endif
+constinit EngineLibrary library = nullptr;
 constexpr ParsingEngine unavailable{};
 constexpr auto kEngineKinds = make_string_lookup<EngineKind>({
     {"scalar", EngineKind::Scalar},
@@ -29,6 +45,33 @@ constexpr auto kEngineKinds = make_string_lookup<EngineKind>({
     {"neon", EngineKind::Neon},
 });
 
+#if defined(_WIN32)
+inline constexpr size_t kPathCapacity = 32768;
+int module_anchor;
+
+bool engine_path(const char* name, wchar_t (&path)[kPathCapacity]) {
+  HMODULE module;
+  if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                          reinterpret_cast<const wchar_t*>(&module_anchor), &module)) {
+    return false;
+  }
+  const DWORD length = GetModuleFileNameW(module, path, kPathCapacity);
+  if (!length || length >= kPathCapacity)
+    return false;
+  wchar_t* slash = std::wcsrchr(path, L'\\');
+  if (!slash)
+    return false;
+  const wchar_t* filename =
+      std::strcmp(name, "avx2") == 0 ? L"fosu_engine_avx2.dll" : L"fosu_engine_neon.dll";
+  const size_t directory_length = static_cast<size_t>(slash - path) + 1;
+  const size_t filename_length = std::wcslen(filename) + 1;
+  if (directory_length + filename_length > kPathCapacity)
+    return false;
+  std::wmemcpy(path + directory_length, filename, filename_length);
+  return true;
+}
+#else
 bool engine_path(const char* name, char (&path)[PATH_MAX]) {
   Dl_info info{};
   if (!dladdr(reinterpret_cast<const void*>(&engine_path), &info))
@@ -41,8 +84,23 @@ bool engine_path(const char* name, char (&path)[PATH_MAX]) {
                     static_cast<int>(slash - info.dli_fname), info.dli_fname, name);
   return length > 0 && static_cast<size_t>(length) < sizeof(path);
 }
+#endif
 
 const ParsingEngine* load_engine_library(const char* name) {
+#if defined(_WIN32)
+  wchar_t path[kPathCapacity];
+  if (!engine_path(name, path))
+    return nullptr;
+  HMODULE loaded = LoadLibraryW(path);
+  if (!loaded)
+    return nullptr;
+  const auto entry = reinterpret_cast<const ParsingEngine* (*)()>(
+      GetProcAddress(loaded, "fosu_engine_v2"));
+  if (!entry) {
+    FreeLibrary(loaded);
+    return nullptr;
+  }
+#else
   char path[PATH_MAX];
   if (!engine_path(name, path))
     return nullptr;
@@ -55,14 +113,24 @@ const ParsingEngine* load_engine_library(const char* name) {
     dlclose(loaded);
     return nullptr;
   }
+#endif
   library = loaded;
   return entry();
 }
 
 const ParsingEngine* select_engine_from_environment() {
+#if defined(_WIN32)
+  char request_buffer[16];
+  const DWORD request_length =
+      GetEnvironmentVariableA("FOSU_BACKEND", request_buffer, sizeof(request_buffer));
+  if (request_length >= sizeof(request_buffer))
+    return nullptr;
+  const char* request = request_length ? request_buffer : FOSU_DEFAULT_BACKEND;
+#else
   const char* request = std::getenv("FOSU_BACKEND");
   if (!request)
     request = FOSU_DEFAULT_BACKEND;
+#endif
   if (std::strcmp(request, "auto") == 0) {
     for (EngineKind kind : {EngineKind::Avx2, EngineKind::Neon}) {
       if (engine_available(kind))
@@ -112,8 +180,14 @@ bool engine_available(EngineKind kind) {
     supported = neon;
   }
 #endif
+#if defined(_WIN32)
+  wchar_t path[kPathCapacity];
+  return supported && engine_path(engine_name(kind), path) &&
+         GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES;
+#else
   char path[PATH_MAX];
   return supported && engine_path(engine_name(kind), path) && access(path, R_OK) == 0;
+#endif
 }
 
 const ParsingEngine* selected_engine() {
@@ -135,8 +209,13 @@ const ParsingEngine* selected_engine() {
 
 void unload_engine() {
   selected.store(nullptr, std::memory_order_relaxed);
-  if (library)
+  if (library) {
+#if defined(_WIN32)
+    FreeLibrary(library);
+#else
     dlclose(library);
+#endif
+  }
   library = nullptr;
 }
 }  // namespace fosu::internal
