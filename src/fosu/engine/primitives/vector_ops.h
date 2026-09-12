@@ -2,7 +2,7 @@
 #include <bit>
 #include <cstdint>
 
-#if ((defined(_MSC_VER) && defined(_M_AVX2)) ||                        \
+#if (defined(FOSU_COMPILE_AVX2) ||                                     \
      (!defined(_MSC_VER) && defined(__AVX2__) && defined(__BMI__))) && \
     !defined(FOSU_DISABLE_SIMD)
 #define FOSU_SIMD_X86 1
