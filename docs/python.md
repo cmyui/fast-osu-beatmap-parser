@@ -5,12 +5,19 @@ Parsing returns eager, mutable dataclasses and lists, detached from native memor
 
 ## Install and use
 
-Requires CPython 3.10+. Wheels target Linux x86-64 and macOS arm64; source
-installation requires a C++20 compiler.
+Requires CPython 3.10+. Stable-ABI wheels target glibc and musl Linux on x86-64
+and AArch64, plus macOS 11+ on Intel and Apple Silicon. One wheel per platform
+supports every compatible CPython version. Windows users can use the Linux
+x86-64 wheel under WSL; native Windows is not currently supported.
 
 ```sh
-python -m pip install .
+python -m pip install fosu
 ```
+
+Installing from a source checkout requires a C++20 compiler. An ordinary
+isolated `pip install .` provisions CMake and Ninja when needed; Unix Makefiles
+are also supported when Ninja is unavailable. `--no-build-isolation` makes the
+caller responsible for all build tools.
 
 ```python
 import fosu

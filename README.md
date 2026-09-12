@@ -22,7 +22,8 @@ support is planned. DT, NC, and HT support every mode.
 
 Python returns fully populated, mutable dataclasses and lists. All supported
 fields are eager; returned values do not retain native memory or depend on a parser.
-Install a prebuilt wheel, or run `python -m pip install .` in a source checkout.
+Install a prebuilt wheel with `python -m pip install fosu`, or run
+`python -m pip install .` in a source checkout.
 See the [Python guide](docs/python.md) for installation and the complete API.
 
 The C++20 interface is header-only:

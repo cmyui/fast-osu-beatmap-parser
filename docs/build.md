@@ -57,6 +57,11 @@ Reinstall after native changes before testing the installed Python API.
 Release Linux wheels bundle the C++ runtime; source installs can request this
 with `FOSU_BUNDLE_RUNTIME=1`.
 
+Ordinary isolated pip builds obtain compatible CMake and Ninja versions through
+the build backend. Ninja is not a system prerequisite: scikit-build-core falls
+back to Unix Makefiles when Ninja is unavailable. Builds using
+`--no-build-isolation` must provide their own backend and native build tools.
+
 Use focused checks during iteration; see [AGENTS.md](../AGENTS.md) for scope.
 [Compatibility](compatibility.md) documents official-reference checks, and
 [performance](performance.md) describes measurement entry points.

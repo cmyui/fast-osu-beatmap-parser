@@ -44,20 +44,20 @@ Repository = "https://github.com/cmyui/fast-osu-beatmap-parser"
 
 [tool.scikit-build]
 cmake.version = ">=3.26"
+ninja.make-fallback = true
 wheel.packages = ["python/fosu"]
 wheel.py-api = "cp310"
 sdist.exclude = ["build", "dist", "tests/reference/official/bin", "tests/reference/official/obj", "bench/comparison/results"]
 
 [tool.cibuildwheel]
 build = "cp310-*"
-skip = "*-musllinux* *-win* *-manylinux_i686 *-macosx_x86_64"
+skip = "*-win* *-manylinux_i686"
 test-requires = ["pytest>=8", "mypy==2.3.1"]
 test-command = "python -m pytest {project}/tests/test_python.py && FOSU_BACKEND=scalar python -m pytest {project}/tests/test_python.py && python {project}/tests/test_binary_hardening.py"
 
 [tool.cibuildwheel.linux]
-archs = ["x86_64"]
 manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
 
 [tool.cibuildwheel.macos]
-archs = ["arm64"]
 environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
