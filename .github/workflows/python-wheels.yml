@@ -131,7 +131,7 @@ jobs:
           pattern: fosu-*
           path: dist
           merge-multiple: true
-      - run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber
+      - run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ github.token }}
       - uses: pypa/gh-action-pypi-publish@release/v1
