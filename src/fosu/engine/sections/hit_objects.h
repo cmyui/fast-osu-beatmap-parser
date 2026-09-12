@@ -153,31 +153,30 @@ inline std::optional<ParsedLazerSliderPoints> parse_lazer_slider_points(
   return ParsedLazerSliderPoints{p, curve, segment_point_begin, has_explicit_segments};
 }
 
-inline std::optional<HitObject> parse_legacy_slider(
-    Beatmap& beatmap,
-    size_t& slider_count,
-    size_t& slider_point_count,
-    HitObject object,
-    const char* p,
-    const char* end,
-    const HitObjectParseConstants& constants) {
+inline bool parse_legacy_slider(Beatmap& beatmap,
+                                size_t& slider_count,
+                                size_t& slider_point_count,
+                                HitObject& object,
+                                const char* p,
+                                const char* end,
+                                const HitObjectParseConstants& constants) {
   if (p >= end) [[unlikely]]
-    return std::nullopt;
+    return false;
 
   const auto first_curve = parse_curve_type(p, end);
   if (!first_curve)
-    return std::nullopt;
+    return false;
   p = first_curve->next;
   const size_t slider_point_begin = slider_point_count;
   p = parse_legacy_slider_points(beatmap, slider_point_count, p, end, constants);
   if (!p) {
     slider_point_count = slider_point_begin;
-    return std::nullopt;
+    return false;
   }
 
   const auto tail = parse_slider_tail(p, end, constants);
   if (!tail) [[unlikely]]
-    return std::nullopt;
+    return false;
 
   Slider slider{
       .point_begin = static_cast<uint32_t>(slider_point_begin),
@@ -193,24 +192,23 @@ inline std::optional<HitObject> parse_legacy_slider(
   object.hit_sample = tail->sounds.hit_sample;
   object.slider = static_cast<uint32_t>(slider_count);
   beatmap.sliders[slider_count++] = slider;
-  return object;
+  return true;
 }
 
-inline std::optional<HitObject> parse_lazer_slider(
-    Beatmap& beatmap,
-    size_t& slider_count,
-    size_t& slider_segment_count,
-    size_t& slider_point_count,
-    HitObject object,
-    const char* p,
-    const char* end,
-    const HitObjectParseConstants& constants) {
+inline bool parse_lazer_slider(Beatmap& beatmap,
+                               size_t& slider_count,
+                               size_t& slider_segment_count,
+                               size_t& slider_point_count,
+                               HitObject& object,
+                               const char* p,
+                               const char* end,
+                               const HitObjectParseConstants& constants) {
   if (p >= end) [[unlikely]]
-    return std::nullopt;
+    return false;
 
   const auto first_curve = parse_curve_type(p, end);
   if (!first_curve)
-    return std::nullopt;
+    return false;
   const size_t slider_point_begin = slider_point_count;
   const size_t slider_segment_begin = slider_segment_count;
   const auto points = parse_lazer_slider_points(
@@ -219,13 +217,13 @@ inline std::optional<HitObject> parse_lazer_slider(
   if (!points) {
     slider_point_count = slider_point_begin;
     slider_segment_count = slider_segment_begin;
-    return std::nullopt;
+    return false;
   }
 
   const auto tail = parse_slider_tail(points->next, end, constants);
   if (!tail) [[unlikely]] {
     slider_segment_count = slider_segment_begin;
-    return std::nullopt;
+    return false;
   }
 
   if ((points->has_explicit_segments || first_curve->degree) &&
@@ -234,7 +232,7 @@ inline std::optional<HitObject> parse_lazer_slider(
                              slider_point_count)) {
     slider_point_count = slider_point_begin;
     slider_segment_count = slider_segment_begin;
-    return std::nullopt;
+    return false;
   }
 
   Slider slider{
@@ -251,15 +249,15 @@ inline std::optional<HitObject> parse_lazer_slider(
   object.hit_sample = tail->sounds.hit_sample;
   object.slider = static_cast<uint32_t>(slider_count);
   beatmap.sliders[slider_count++] = slider;
-  return object;
+  return true;
 }
 
-inline std::optional<HitObject> parse_slider(
+__attribute__((noinline)) inline bool parse_slider(
     Beatmap& beatmap,
     size_t& slider_count,
     size_t& slider_segment_count,
     size_t& slider_point_count,
-    HitObject object,
+    HitObject& object,
     const char* p,
     const char* end,
     const HitObjectParseConstants& constants) {
@@ -273,50 +271,47 @@ inline std::optional<HitObject> parse_slider(
 
 // Everything after the "x,y,time,type,hitSound" prefix: slider params,
 // spinner/hold end times, or a trailing hit sample.
-inline std::optional<HitObject> parse_hitobject_details(
-    Beatmap& beatmap,
-    size_t& slider_count,
-    size_t& slider_segment_count,
-    size_t& slider_point_count,
-    HitObject object,
-    const char* p,
-    const char* end,
-    const HitObjectParseConstants& constants) {
+inline bool parse_hitobject_details(Beatmap& beatmap,
+                                    size_t& slider_count,
+                                    size_t& slider_segment_count,
+                                    size_t& slider_point_count,
+                                    HitObject& object,
+                                    const char* p,
+                                    const char* end,
+                                    const HitObjectParseConstants& constants) {
   switch (classify_hitobject_kind(object.type)) {
     case HitObjectKind::Circle: {
       const auto details = parse_circle_details(p, end);
       if (!details)
-        return std::nullopt;
+        return false;
       object.end_time = 0;
       object.hit_sample = details->hit_sample;
-      return object;
+      return true;
     }
-    case HitObjectKind::Slider: {
-      if (p >= end || *p != ',')
-        return std::nullopt;
-      return parse_slider(beatmap, slider_count, slider_segment_count, slider_point_count,
+    case HitObjectKind::Slider:
+      return p < end && *p == ',' &&
+             parse_slider(beatmap, slider_count, slider_segment_count, slider_point_count,
                           object, p + 1, end, constants);
-    }
     case HitObjectKind::Spinner: {
       const auto details = parse_spinner_details(p, end);
       if (!details)
-        return std::nullopt;
+        return false;
       object.end_time = details->end_time;
       object.hit_sample = details->hit_sample;
-      return object;
+      return true;
     }
     case HitObjectKind::Hold: {
       const auto details = parse_hold_details(object.time, p, end);
       if (!details)
-        return std::nullopt;
+        return false;
       object.end_time = details->end_time;
       object.hit_sample = details->hit_sample;
-      return object;
+      return true;
     }
     case HitObjectKind::Invalid:
-      return std::nullopt;
+      return false;
   }
-  return std::nullopt;
+  return false;
 }
 
 // Lines the fast prefix does not accept: the scalar prefix parser handles
@@ -334,9 +329,13 @@ __attribute__((noinline)) inline std::optional<HitObject> parse_hitobject_line_s
   if (!prefix)
     return std::nullopt;
   ++beatmap.stats.slow_path_lines;
-  return parse_hitobject_details(beatmap, slider_count, slider_segment_count,
-                                 slider_point_count, make_hitobject(*prefix),
-                                 prefix->next, line_end, constants);
+  HitObject object = make_hitobject(*prefix);
+  if (!parse_hitobject_details(beatmap, slider_count, slider_segment_count,
+                               slider_point_count, object, prefix->next, line_end,
+                               constants)) {
+    return std::nullopt;
+  }
+  return object;
 }
 
 inline std::optional<HitObject> parse_hitobject_line_fast(
@@ -364,13 +363,19 @@ inline std::optional<HitObject> parse_hitobject_line_fast(
   } else if (kind == HitObjectKind::Slider) {
     if (prefix_end >= length || p[prefix_end] != ',')
       return std::nullopt;
-    return parse_slider(beatmap, slider_count, slider_segment_count, slider_point_count,
-                        object, p + prefix_end + 1, line_end, constants);
+    if (!parse_slider(beatmap, slider_count, slider_segment_count, slider_point_count,
+                      object, p + prefix_end + 1, line_end, constants)) {
+      return std::nullopt;
+    }
+    return object;
   }
 
-  return parse_hitobject_details(beatmap, slider_count, slider_segment_count,
-                                 slider_point_count, object, p + prefix_end, line_end,
-                                 constants);
+  if (!parse_hitobject_details(beatmap, slider_count, slider_segment_count,
+                               slider_point_count, object, p + prefix_end, line_end,
+                               constants)) {
+    return std::nullopt;
+  }
+  return object;
 }
 
 // Interpret a successfully decoded record before publishing it to the arena.
