@@ -561,8 +561,24 @@ def test_modern_curve_segments_drive_path_calculation():
         (fosu.CurveType.BEZIER, 2),
         (fosu.CurveType.LINEAR, 0),
     ]
+    assert [
+        [(point.x, point.y) for point in segment.control_points]
+        for segment in slider.curve_segments
+    ] == [
+        [(10, 20), (30.5, 40.25), (50, 60), (70.75, 80.5)],
+        [(70.75, 80.5)],
+    ]
     assert slider.path is not None
     assert len(slider.path.points) > 2
+
+    degree = fosu.parse(
+        b"osu file format v128\n[HitObjects]\n"
+        b"0,0,100,2,0,B2|100:0|100:100|0:100,1,300\n"
+    ).hit_objects[0]
+    assert isinstance(degree, fosu.Slider)
+    assert [(segment.type, segment.degree) for segment in degree.curve_segments] == [
+        (fosu.CurveType.BEZIER, 2)
+    ]
 
     legacy = fosu.parse(
         b"osu file format v14\n[HitObjects]\n10,20,100,2,0,B|30.5:40.25,1,100\n"
@@ -583,6 +599,7 @@ def test_omitted_general_uses_defaults():
     b = fosu.parse(b"[Metadata]\nTitle:Only metadata\n")
     assert b.title == "Only metadata" and b.audio_filename == ""
     assert b.mode is fosu.GameMode.OSU
+    assert b.velocity_presets == [0.75, 1, 1.5]
 
 
 def test_omitted_metadata_uses_defaults():

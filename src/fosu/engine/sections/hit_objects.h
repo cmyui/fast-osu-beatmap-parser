@@ -53,7 +53,14 @@ __attribute__((noinline)) inline bool parse_slider(
     if (lazer_format && p + 1 < end &&
         (p[1] == 'B' || p[1] == 'C' || p[1] == 'L' || p[1] == 'P')) {
       const auto next_curve = parse_curve_type(p + 1, end);
-      if (!next_curve || point_count == current_segment_begin) {
+      if (!next_curve) {
+        point_count = point_begin;
+        segment_count = segment_begin;
+        return false;
+      }
+      const auto boundary =
+          parse_slider_point<SliderPoint>(next_curve->next, end, constants, true);
+      if (!boundary) {
         point_count = point_begin;
         segment_count = segment_begin;
         return false;
@@ -63,6 +70,7 @@ __attribute__((noinline)) inline bool parse_slider(
         segment_count = segment_begin;
         return false;
       }
+      beatmap.slider_points[point_count++] = boundary->value;
       beatmap.slider_segments[segment_count++] = {
           .type = curve.type,
           .degree = curve.degree,
@@ -72,7 +80,7 @@ __attribute__((noinline)) inline bool parse_slider(
       segmented = true;
       current_segment_begin = point_count - 1;
       curve = *next_curve;
-      p = next_curve->next;
+      p = boundary->next;
       continue;
     }
     const auto point = parse_slider_point<SliderPoint>(p, end, constants, lazer_format);
@@ -91,12 +99,7 @@ __attribute__((noinline)) inline bool parse_slider(
     return false;
   }
 
-  if (segmented) {
-    if (point_count == current_segment_begin) {
-      point_count = point_begin;
-      segment_count = segment_begin;
-      return false;
-    }
+  if (segmented || first_curve->degree) {
     if (segment_count == beatmap.slider_segments.size()) {
       point_count = point_begin;
       segment_count = segment_begin;
@@ -187,6 +190,10 @@ __attribute__((noinline)) inline bool parse_hitobject_line_scalar(
   if (!prefix)
     return false;
   initialize_hitobject(object, prefix->value);
+  if (beatmap.format_version >= 128) {
+    object.x = prefix->precise_x;
+    object.y = prefix->precise_y;
+  }
   ++beatmap.stats.slow_path_lines;
   return parse_hitobject_details(beatmap, slider_count, segment_count, point_count,
                                  object, prefix->next, line_end, constants);

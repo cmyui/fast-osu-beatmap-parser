@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstring>
@@ -103,7 +104,7 @@ inline bool allocate_beatmap_arrays(Arena* arena,
 
   if (selected_sections & kSectionEditor) {
     const size_t editor_size = first_section_body_size(input, Section::Editor);
-    const size_t capacity = editor_size / (sizeof("0") - 1) + 1;
+    const size_t capacity = std::max<size_t>(3, editor_size / (sizeof("0") - 1) + 1);
     double* values = arena_push_array<double>(arena, capacity);
     if (!values)
       return false;

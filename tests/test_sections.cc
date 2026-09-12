@@ -255,14 +255,31 @@ static void test_modern_curve_segments() {
     const auto second = modern.slider_segments[slider.segment_begin + 1];
     CHECK_EQ(first.type, fosu::CurveType::Bezier);
     CHECK_EQ(first.degree, 2u);
-    CHECK_EQ(first.point_count, 2u);
+    CHECK_EQ(first.point_count, 3u);
     CHECK_EQ(second.type, fosu::CurveType::Linear);
     CHECK_EQ(second.degree, 0u);
-    CHECK_EQ(second.point_count, 2u);
+    CHECK_EQ(second.point_count, 1u);
     CHECK_EQ(modern.slider_points[first.point_begin].x, 30.5f);
     CHECK_EQ(modern.slider_points[first.point_begin].y, 40.25f);
-    CHECK_EQ(modern.slider_points[second.point_begin].x, 50.0f);
-    CHECK_EQ(modern.slider_points[second.point_begin + 1].x, 70.75f);
+    CHECK_EQ(modern.slider_points[second.point_begin].x, 70.75f);
+
+    const auto degree = parse_str(
+        "osu file format v128\n[HitObjects]\n"
+        "0,0,100,2,0,B2|100:0|100:100|0:100,1,300\n",
+        simd);
+    const auto& degree_slider = degree.sliders[degree.hit_objects[0].slider];
+    CHECK_EQ(degree_slider.segment_count, 1u);
+    const auto degree_segment = degree.slider_segments[degree_slider.segment_begin];
+    CHECK_EQ(degree_segment.type, fosu::CurveType::Bezier);
+    CHECK_EQ(degree_segment.degree, 2u);
+    CHECK_EQ(degree_segment.point_count, 3u);
+
+    const auto coordinates = parse_str(
+        "osu file format v128\n[HitObjects]\n"
+        "256.99853,256.001,100,1,0\n",
+        simd);
+    CHECK_EQ(coordinates.hit_objects[0].x, static_cast<float>(256.99853));
+    CHECK_EQ(coordinates.hit_objects[0].y, static_cast<float>(256.001));
 
     const auto legacy = parse_str(
         "osu file format v14\n[HitObjects]\n"
@@ -307,6 +324,10 @@ static void test_omitted_sections_use_defaults() {
     CHECK(bm.timing_points.empty() && bm.breaks.empty());
     CHECK(bm.combo_colours.empty() && bm.hit_objects.empty());
     CHECK(bm.sliders.empty() && bm.slider_points.empty());
+    CHECK_EQ(bm.velocity_presets.size(), 3u);
+    CHECK_EQ(bm.velocity_presets[0], 0.75);
+    CHECK_EQ(bm.velocity_presets[1], 1);
+    CHECK_EQ(bm.velocity_presets[2], 1.5);
     CHECK_EQ(bm.stats.malformed_lines, 0u);
   }
 }

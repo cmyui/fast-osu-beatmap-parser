@@ -5,6 +5,13 @@
 
 namespace fosu::internal {
 
+inline size_t set_default_velocity_presets(Beatmap& beatmap) {
+  beatmap.velocity_presets[0] = 0.75;
+  beatmap.velocity_presets[1] = 1;
+  beatmap.velocity_presets[2] = 1.5;
+  return 3;
+}
+
 inline std::optional<double> parse_editor_scale(std::string_view input) {
   if (const auto value = parse_field_double(input))
     return std::max(0.0, *value);
@@ -30,28 +37,26 @@ inline constexpr auto kEditorFields = make_string_lookup<FieldParser>({
 inline bool parse_velocity_presets(Beatmap& beatmap,
                                    size_t& count,
                                    std::string_view input) {
-  const size_t begin = count;
+  size_t parsed = 0;
   const char* p = input.data();
   const char* end = p + input.size();
   while (p < end) {
     const char* comma = find_byte<','>(p, end);
-    const auto value = parse_field_double({p, static_cast<size_t>(comma - p)});
-    if (!value) {
-      count = begin;
+    const auto value =
+        parse_field_double(trim_field({p, static_cast<size_t>(comma - p)}));
+    if (value && parsed == beatmap.velocity_presets.size())
       return false;
-    }
-    if (count == beatmap.velocity_presets.size()) {
-      count = begin;
-      return false;
-    }
-    beatmap.velocity_presets[count++] = *value;
+    if (value)
+      beatmap.velocity_presets[parsed++] = *value;
     p = comma == end ? end : comma + 1;
   }
+  count = parsed;
   return true;
 }
 
 inline const char* parse_editor_section(Beatmap& beatmap,
                                         size_t& velocity_preset_count,
+                                        bool& velocity_presets_seen,
                                         const char* p,
                                         const char* end) {
   return for_each_section_line(p, end, [&](std::string_view line) {
@@ -59,6 +64,7 @@ inline const char* parse_editor_section(Beatmap& beatmap,
     if (!field)
       return;
     if (field->key == "VelocityPresets") {
+      velocity_presets_seen = true;
       if (!parse_velocity_presets(beatmap, velocity_preset_count, field->value))
         ++beatmap.stats.malformed_lines;
       return;

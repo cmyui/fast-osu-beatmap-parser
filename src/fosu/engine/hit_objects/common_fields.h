@@ -51,6 +51,8 @@ struct HitObjectPrefix {
 struct ParsedHitObjectPrefix {
   HitObjectPrefix value;
   const char* next;
+  float precise_x = 0;
+  float precise_y = 0;
 };
 
 template <typename HitObject>
@@ -94,7 +96,7 @@ inline std::optional<ParsedHitObjectPrefix> parse_hitobject_prefix_scalar(
   return ParsedHitObjectPrefix{
       HitObjectPrefix{static_cast<int32_t>(coord[0]), static_cast<int32_t>(coord[1]),
                       static_cast<uint32_t>(type), static_cast<uint32_t>(sound), time},
-      q};
+      q, coord[0], coord[1]};
 }
 
 #if FOSU_SIMD_X86

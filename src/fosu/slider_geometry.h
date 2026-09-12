@@ -280,7 +280,8 @@ inline Result<double> slider_distance(const HitObject& object,
                                       const Slider& slider,
                                       std::span<const SliderPoint> all_points,
                                       std::span<const CurveSegment> all_segments,
-                                      Arena* arena) {
+                                      Arena* arena,
+                                      bool lazer_format) {
   const auto control_points = all_points.subspan(slider.point_begin, slider.point_count);
   // A non-degenerate final linear edge can always reach the declared length.
   // No approximation or scratch allocation is needed to establish its distance.
@@ -303,9 +304,10 @@ inline Result<double> slider_distance(const HitObject& object,
   const size_t count = control_points.size() + 1;
   auto type = slider.curve_type;
   if (type == CurveType::PerfectCurve) {
-    if (count != 3)
+    if (lazer_format ? count > 3 : count != 3)
       type = CurveType::Bezier;
-    else if (std::abs((points[1].y - points[0].y) * (points[2].x - points[0].x) -
+    else if (!lazer_format &&
+             std::abs((points[1].y - points[0].y) * (points[2].x - points[0].x) -
                       (points[1].x - points[0].x) * (points[2].y - points[0].y)) < 1e-3f)
       type = CurveType::Linear;
   }
@@ -329,9 +331,12 @@ inline Result<double> slider_distance(const HitObject& object,
       const auto points =
           std::span<const CurvePoint>{segment_points, source_points.size() + extra_head};
       if (type == CurveType::PerfectCurve &&
-          (points.size() != 3 ||
-           std::abs((points[1].y - points[0].y) * (points[2].x - points[0].x) -
-                    (points[1].x - points[0].x) * (points[2].y - points[0].y)) < 1e-3f))
+          ((lazer_format && points.size() > 3) ||
+           (!lazer_format &&
+            (points.size() != 3 ||
+             std::abs((points[1].y - points[0].y) * (points[2].x - points[0].x) -
+                      (points[1].x - points[0].x) * (points[2].y - points[0].y)) <
+                 1e-3f))))
         type = points.size() == 3 ? CurveType::Linear : CurveType::Bezier;
       distance.begin_segment();
       if (!approximate_curve_segment(points, type, source.degree, distance, arena))
@@ -345,9 +350,10 @@ inline Result<double> slider_distance(const HitObject& object,
   size_t begin = 0;
   for (size_t i = 1; i < count; ++i) {
     if (points[i] != points[i - 1] || i == count - 1 ||
-        (type == CurveType::Catmull && i > 1))
+        (type == CurveType::Catmull && i > 1 && !lazer_format))
       continue;
-    if (!curve_segment_distance({points + begin, i - begin}, type, distance, arena))
+    if (i - begin > 1 &&
+        !curve_segment_distance({points + begin, i - begin}, type, distance, arena))
       return Error{ErrorCode::AllocationFailure};
     begin = i;
   }
@@ -417,7 +423,8 @@ inline Result<SliderPath> calculate_slider_path(
     std::span<const SliderPoint> all_points,
     std::span<const CurveSegment> all_segments,
     Arena* result_arena,
-    Arena* scratch_arena) {
+    Arena* scratch_arena,
+    bool lazer_format) {
   const auto control_points = all_points.subspan(slider.point_begin, slider.point_count);
   const TempArena work{scratch_arena};
   auto* points = arena_push_array<CurvePoint>(scratch_arena, control_points.size() + 1);
@@ -430,12 +437,17 @@ inline Result<SliderPath> calculate_slider_path(
   const size_t count = control_points.size() + 1;
   auto type = slider.curve_type;
   if (type == CurveType::PerfectCurve) {
-    if (count != 3)
+    if (lazer_format ? count > 3 : count != 3)
       type = CurveType::Bezier;
-    else if (std::abs(points[1].y * points[2].x - points[1].x * points[2].y) < 1e-3f)
+    else if (!lazer_format &&
+             std::abs(points[1].y * points[2].x - points[1].x * points[2].y) < 1e-3f)
       type = CurveType::Linear;
   }
   CurveVertices curve{scratch_arena};
+  // The first typed control point is itself a one-vertex segment in osu!.
+  // Circular approximation can produce a slightly different first vertex.
+  if (count > 1 && points[0] != points[1])
+    curve.append(points[0]);
   if (slider.segment_count) {
     for (size_t i = 0; i < slider.segment_count; ++i) {
       const auto& source = all_segments[slider.segment_begin + i];
@@ -455,8 +467,10 @@ inline Result<SliderPath> calculate_slider_path(
       const auto segment =
           std::span<const CurvePoint>{segment_points, source_points.size() + extra_head};
       if (type == CurveType::PerfectCurve &&
-          (segment.size() != 3 ||
-           std::abs(segment[1].y * segment[2].x - segment[1].x * segment[2].y) < 1e-3f))
+          ((lazer_format && segment.size() > 3) ||
+           (!lazer_format &&
+            (segment.size() != 3 || std::abs(segment[1].y * segment[2].x -
+                                             segment[1].x * segment[2].y) < 1e-3f))))
         type = segment.size() == 3 ? CurveType::Linear : CurveType::Bezier;
       curve.begin_segment();
       if (!approximate_curve_segment(segment, type, source.degree, curve,
@@ -465,20 +479,18 @@ inline Result<SliderPath> calculate_slider_path(
         return Error{ErrorCode::AllocationFailure};
     }
   } else {
-    // The first typed control point is itself a one-vertex segment in osu!.
-    // Circular approximation can produce a slightly different first vertex.
-    if (count > 1 && points[0] != points[1])
-      curve.append(points[0]);
     size_t begin = 0;
     for (size_t i = 1; i <= count; ++i) {
       if (i < count && (points[i] != points[i - 1] || i == count - 1 ||
-                        (type == CurveType::Catmull && i > 1)))
+                        (type == CurveType::Catmull && i > 1 && !lazer_format)))
         continue;
-      curve.first_in_segment = i - begin > 1;
-      if (!approximate_curve_segment({points + begin, i - begin}, type, 0, curve,
-                                     scratch_arena) ||
-          curve.failed)
-        return Error{ErrorCode::AllocationFailure};
+      if (i == count || i - begin > 1) {
+        curve.first_in_segment = i - begin > 1;
+        if (!approximate_curve_segment({points + begin, i - begin}, type, 0, curve,
+                                       scratch_arena) ||
+            curve.failed)
+          return Error{ErrorCode::AllocationFailure};
+      }
       begin = i;
     }
   }
@@ -516,8 +528,9 @@ inline bool set_slider_paths(Beatmap& map, Arena* result_arena, Arena* scratch_a
     if (object.slider == HitObject::kNoSlider)
       continue;
     const auto& slider = map.sliders[object.slider];
-    auto path = calculate_slider_path(object, slider, map.slider_points,
-                                      map.slider_segments, result_arena, scratch_arena);
+    auto path =
+        calculate_slider_path(object, slider, map.slider_points, map.slider_segments,
+                              result_arena, scratch_arena, map.format_version >= 128);
     if (!path) {
       success = false;
       break;
