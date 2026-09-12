@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <optional>
 
 #include <fosu/beatmap.h>
 #include <fosu/engine/hit_objects/common_fields.h>
@@ -11,6 +12,36 @@
 #include <fosu/engine/primitives/byte_scan.h>
 
 namespace fosu::internal {
+
+inline HitObject make_hitobject(const HitObjectPrefix& prefix) {
+  return HitObject{
+      .x = static_cast<float>(prefix.x),
+      .y = static_cast<float>(prefix.y),
+      .type = prefix.type,
+      .hitsound = prefix.hit_sound,
+      .time = prefix.time,
+      .end_time = 0,
+      .slider = HitObject::kNoSlider,
+      .new_combo = false,
+      .combo_skip = 0,
+      .hit_sample = {},
+  };
+}
+
+inline HitObject make_hitobject(const ParsedScalarHitObjectPrefix& prefix) {
+  return HitObject{
+      .x = prefix.x,
+      .y = prefix.y,
+      .type = prefix.type,
+      .hitsound = prefix.hit_sound,
+      .time = prefix.time,
+      .end_time = 0,
+      .slider = HitObject::kNoSlider,
+      .new_combo = false,
+      .combo_skip = 0,
+      .hit_sample = {},
+  };
+}
 
 // Slider params after "type,hitSound,":
 //   curveType|x:y|x:y...,slides,length[,edgeSounds,edgeSets][,hitSample]
@@ -122,30 +153,31 @@ inline std::optional<ParsedLazerSliderPoints> parse_lazer_slider_points(
   return ParsedLazerSliderPoints{p, curve, segment_point_begin, has_explicit_segments};
 }
 
-inline bool parse_legacy_slider(Beatmap& beatmap,
-                                size_t& slider_count,
-                                size_t& slider_point_count,
-                                HitObject& object,
-                                const char* p,
-                                const char* end,
-                                const HitObjectParseConstants& constants) {
+inline std::optional<HitObject> parse_legacy_slider(
+    Beatmap& beatmap,
+    size_t& slider_count,
+    size_t& slider_point_count,
+    HitObject object,
+    const char* p,
+    const char* end,
+    const HitObjectParseConstants& constants) {
   if (p >= end) [[unlikely]]
-    return false;
+    return std::nullopt;
 
   const auto first_curve = parse_curve_type(p, end);
   if (!first_curve)
-    return false;
+    return std::nullopt;
   p = first_curve->next;
   const size_t slider_point_begin = slider_point_count;
   p = parse_legacy_slider_points(beatmap, slider_point_count, p, end, constants);
   if (!p) {
     slider_point_count = slider_point_begin;
-    return false;
+    return std::nullopt;
   }
 
   const auto tail = parse_slider_tail(p, end, constants);
   if (!tail) [[unlikely]]
-    return false;
+    return std::nullopt;
 
   Slider slider{
       .point_begin = static_cast<uint32_t>(slider_point_begin),
@@ -161,23 +193,24 @@ inline bool parse_legacy_slider(Beatmap& beatmap,
   object.hit_sample = tail->sounds.hit_sample;
   object.slider = static_cast<uint32_t>(slider_count);
   beatmap.sliders[slider_count++] = slider;
-  return true;
+  return object;
 }
 
-inline bool parse_lazer_slider(Beatmap& beatmap,
-                               size_t& slider_count,
-                               size_t& slider_segment_count,
-                               size_t& slider_point_count,
-                               HitObject& object,
-                               const char* p,
-                               const char* end,
-                               const HitObjectParseConstants& constants) {
+inline std::optional<HitObject> parse_lazer_slider(
+    Beatmap& beatmap,
+    size_t& slider_count,
+    size_t& slider_segment_count,
+    size_t& slider_point_count,
+    HitObject object,
+    const char* p,
+    const char* end,
+    const HitObjectParseConstants& constants) {
   if (p >= end) [[unlikely]]
-    return false;
+    return std::nullopt;
 
   const auto first_curve = parse_curve_type(p, end);
   if (!first_curve)
-    return false;
+    return std::nullopt;
   const size_t slider_point_begin = slider_point_count;
   const size_t slider_segment_begin = slider_segment_count;
   const auto points = parse_lazer_slider_points(
@@ -186,13 +219,13 @@ inline bool parse_lazer_slider(Beatmap& beatmap,
   if (!points) {
     slider_point_count = slider_point_begin;
     slider_segment_count = slider_segment_begin;
-    return false;
+    return std::nullopt;
   }
 
   const auto tail = parse_slider_tail(points->next, end, constants);
   if (!tail) [[unlikely]] {
     slider_segment_count = slider_segment_begin;
-    return false;
+    return std::nullopt;
   }
 
   if ((points->has_explicit_segments || first_curve->degree) &&
@@ -201,7 +234,7 @@ inline bool parse_lazer_slider(Beatmap& beatmap,
                              slider_point_count)) {
     slider_point_count = slider_point_begin;
     slider_segment_count = slider_segment_begin;
-    return false;
+    return std::nullopt;
   }
 
   Slider slider{
@@ -218,15 +251,15 @@ inline bool parse_lazer_slider(Beatmap& beatmap,
   object.hit_sample = tail->sounds.hit_sample;
   object.slider = static_cast<uint32_t>(slider_count);
   beatmap.sliders[slider_count++] = slider;
-  return true;
+  return object;
 }
 
-__attribute__((noinline)) inline bool parse_slider(
+__attribute__((noinline)) inline std::optional<HitObject> parse_slider(
     Beatmap& beatmap,
     size_t& slider_count,
     size_t& slider_segment_count,
     size_t& slider_point_count,
-    HitObject& object,
+    HitObject object,
     const char* p,
     const char* end,
     const HitObjectParseConstants& constants) {
@@ -240,74 +273,103 @@ __attribute__((noinline)) inline bool parse_slider(
 
 // Everything after the "x,y,time,type,hitSound" prefix: slider params,
 // spinner/hold end times, or a trailing hit sample.
-inline bool parse_hitobject_details(Beatmap& beatmap,
-                                    size_t& slider_count,
-                                    size_t& slider_segment_count,
-                                    size_t& slider_point_count,
-                                    HitObject& object,
-                                    const char* p,
-                                    const char* end,
-                                    const HitObjectParseConstants& constants) {
-  switch (classify_hitobject_kind(object.type)) {
-    case HitObjectKind::Circle: {
-      const auto details = parse_circle_details(p, end);
-      if (!details)
-        return false;
-      object.end_time = 0;
-      object.hit_sample = details->hit_sample;
-      return true;
-    }
-    case HitObjectKind::Slider:
-      return p < end && *p == ',' &&
-             parse_slider(beatmap, slider_count, slider_segment_count, slider_point_count,
-                          object, p + 1, end, constants);
-    case HitObjectKind::Spinner: {
-      const auto details = parse_spinner_details(p, end);
-      if (!details)
-        return false;
-      object.end_time = details->end_time;
-      object.hit_sample = details->hit_sample;
-      return true;
-    }
-    case HitObjectKind::Hold: {
-      const auto details = parse_hold_details(object.time, p, end);
-      if (!details)
-        return false;
-      object.end_time = details->end_time;
-      object.hit_sample = details->hit_sample;
-      return true;
-    }
-    case HitObjectKind::Invalid:
-      return false;
-  }
-  return false;
-}
-
-// Lines the fast prefix does not accept: the scalar prefix parser handles
-// signed, decimal, spaced or wide fields; anything else is malformed.
-__attribute__((noinline)) inline bool parse_hitobject_line_scalar(
+inline std::optional<HitObject> parse_hitobject_details(
     Beatmap& beatmap,
     size_t& slider_count,
     size_t& slider_segment_count,
     size_t& slider_point_count,
-    HitObject& object,
+    HitObject object,
+    const char* p,
+    const char* end,
+    const HitObjectParseConstants& constants) {
+  switch (classify_hitobject_kind(object.type)) {
+    case HitObjectKind::Circle: {
+      const auto details = parse_circle_details(p, end);
+      if (!details)
+        return std::nullopt;
+      object.end_time = 0;
+      object.hit_sample = details->hit_sample;
+      return object;
+    }
+    case HitObjectKind::Slider: {
+      if (p >= end || *p != ',')
+        return std::nullopt;
+      return parse_slider(beatmap, slider_count, slider_segment_count, slider_point_count,
+                          object, p + 1, end, constants);
+    }
+    case HitObjectKind::Spinner: {
+      const auto details = parse_spinner_details(p, end);
+      if (!details)
+        return std::nullopt;
+      object.end_time = details->end_time;
+      object.hit_sample = details->hit_sample;
+      return object;
+    }
+    case HitObjectKind::Hold: {
+      const auto details = parse_hold_details(object.time, p, end);
+      if (!details)
+        return std::nullopt;
+      object.end_time = details->end_time;
+      object.hit_sample = details->hit_sample;
+      return object;
+    }
+    case HitObjectKind::Invalid:
+      return std::nullopt;
+  }
+  return std::nullopt;
+}
+
+// Lines the fast prefix does not accept: the scalar prefix parser handles
+// signed, decimal, spaced or wide fields; anything else is malformed.
+__attribute__((noinline)) inline std::optional<HitObject> parse_hitobject_line_scalar(
+    Beatmap& beatmap,
+    size_t& slider_count,
+    size_t& slider_segment_count,
+    size_t& slider_point_count,
     const char* p,
     const char* line_end,
     const HitObjectParseConstants& constants) {
   const auto prefix = parse_hitobject_prefix_scalar(p, static_cast<size_t>(line_end - p),
                                                     beatmap.format_version >= 128);
   if (!prefix)
-    return false;
-  object.x = prefix->x;
-  object.y = prefix->y;
-  object.time = prefix->time;
-  object.type = prefix->type;
-  object.hitsound = prefix->hit_sound;
-  object.end_time = 0;
-  object.slider = HitObject::kNoSlider;
+    return std::nullopt;
   ++beatmap.stats.slow_path_lines;
   return parse_hitobject_details(beatmap, slider_count, slider_segment_count,
-                                 slider_point_count, object, prefix->next, line_end,
+                                 slider_point_count, make_hitobject(*prefix),
+                                 prefix->next, line_end, constants);
+}
+
+inline std::optional<HitObject> parse_hitobject_line_fast(
+    Beatmap& beatmap,
+    size_t& slider_count,
+    size_t& slider_segment_count,
+    size_t& slider_point_count,
+    const HitObjectPrefix& prefix,
+    size_t prefix_end,
+    const char* p,
+    const char* line_end,
+    const HitObjectParseConstants& constants) {
+  HitObject object = make_hitobject(prefix);
+  const auto length = static_cast<size_t>(line_end - p);
+  const HitObjectKind kind = classify_hitobject_kind(prefix.type);
+
+  if (kind == HitObjectKind::Circle) {
+    if (prefix_end == length)
+      return object;
+    if (length - prefix_end == 9 && p[prefix_end] == ',' &&
+        short_sample(p + prefix_end + 1)) {
+      object.hit_sample = {p + prefix_end + 1, 8};
+      return object;
+    }
+  } else if (kind == HitObjectKind::Slider) {
+    if (prefix_end >= length || p[prefix_end] != ',')
+      return std::nullopt;
+    return parse_slider(beatmap, slider_count, slider_segment_count, slider_point_count,
+                        object, p + prefix_end + 1, line_end, constants);
+  }
+
+  return parse_hitobject_details(beatmap, slider_count, slider_segment_count,
+                                 slider_point_count, object, p + prefix_end, line_end,
                                  constants);
 }
 
@@ -366,12 +428,11 @@ inline const char* parse_hitobjects_section_scalar(
       --line_end;
     const char* next_line = newline ? newline + 1 : file_end;
     if (!ignored_line(p, line_end)) {
-      HitObject object{};
-      if (parse_hitobject_line_scalar(beatmap, slider_count, slider_segment_count,
-                                      slider_point_count, object, p, line_end,
-                                      constants)) {
+      if (const auto object =
+              parse_hitobject_line_scalar(beatmap, slider_count, slider_segment_count,
+                                          slider_point_count, p, line_end, constants)) {
         beatmap.hit_objects[hit_object_count] =
-            normalize_hitobject(object, beatmap, hit_object_count, time_offset);
+            normalize_hitobject(*object, beatmap, hit_object_count, time_offset);
         ++hit_object_count;
       } else [[unlikely]] {
         ++beatmap.stats.malformed_lines;
@@ -415,45 +476,21 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
 
     if (shape.ok && (shape.prefix_end == length || after_prefix == ',' ||
                      after_prefix == '\0')) [[likely]] {
-      HitObject object{};
-      bool accepted;
       const auto prefix = decode_hitobject_prefix(ascii, zero, shape);
+      std::optional<HitObject> object;
       if (prefix) [[likely]] {
-        initialize_hitobject(object, *prefix);
         ++fast_lines;
-        const HitObjectKind kind = classify_hitobject_kind(prefix->type);
-        if (kind == HitObjectKind::Circle) {
-          if (shape.prefix_end == length) {
-            object.hit_sample = {};
-            accepted = true;
-          } else if (length - shape.prefix_end == 9 && after_prefix == ',' &&
-                     short_sample(p + shape.prefix_end + 1)) {
-            object.hit_sample = {p + shape.prefix_end + 1, 8};
-            accepted = true;
-          } else {
-            accepted = parse_hitobject_details(
-                beatmap, slider_count, slider_segment_count, slider_point_count, object,
-                p + shape.prefix_end, line_end, constants);
-          }
-        } else if (kind == HitObjectKind::Slider) {
-          accepted = shape.prefix_end < length && after_prefix == ',' &&
-                     parse_slider(beatmap, slider_count, slider_segment_count,
-                                  slider_point_count, object, p + shape.prefix_end + 1,
-                                  line_end, constants);
-        } else {
-          accepted = parse_hitobject_details(beatmap, slider_count, slider_segment_count,
-                                             slider_point_count, object,
-                                             p + shape.prefix_end, line_end, constants);
-        }
+        object = parse_hitobject_line_fast(beatmap, slider_count, slider_segment_count,
+                                           slider_point_count, *prefix, shape.prefix_end,
+                                           p, line_end, constants);
       } else {
-        accepted = parse_hitobject_line_scalar(beatmap, slider_count,
-                                               slider_segment_count, slider_point_count,
-                                               object, p, line_end, constants);
+        object = parse_hitobject_line_scalar(beatmap, slider_count, slider_segment_count,
+                                             slider_point_count, p, line_end, constants);
       }
 
-      if (accepted) {
+      if (object) {
         beatmap.hit_objects[hit_object_count] =
-            normalize_hitobject(object, beatmap, hit_object_count, time_offset);
+            normalize_hitobject(*object, beatmap, hit_object_count, time_offset);
         ++hit_object_count;
       } else [[unlikely]]
         ++malformed;
@@ -466,12 +503,11 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
       if (c == '[')
         break;
       if (!ignored_line(p, line_end)) {
-        HitObject object{};
-        if (parse_hitobject_line_scalar(beatmap, slider_count, slider_segment_count,
-                                        slider_point_count, object, p, line_end,
-                                        constants)) {
+        if (const auto object =
+                parse_hitobject_line_scalar(beatmap, slider_count, slider_segment_count,
+                                            slider_point_count, p, line_end, constants)) {
           beatmap.hit_objects[hit_object_count] =
-              normalize_hitobject(object, beatmap, hit_object_count, time_offset);
+              normalize_hitobject(*object, beatmap, hit_object_count, time_offset);
           ++hit_object_count;
         } else [[unlikely]] {
           ++malformed;

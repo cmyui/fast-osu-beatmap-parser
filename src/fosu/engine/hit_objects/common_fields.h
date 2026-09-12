@@ -62,17 +62,6 @@ struct ParsedScalarHitObjectPrefix {
   const char* next;
 };
 
-template <typename HitObject>
-inline void initialize_hitobject(HitObject& object, const HitObjectPrefix& prefix) {
-  object.x = prefix.x;
-  object.y = prefix.y;
-  object.time = prefix.time;
-  object.type = prefix.type;
-  object.hitsound = prefix.hit_sound;
-  object.end_time = 0;
-  object.slider = HitObject::kNoSlider;
-}
-
 // Lenient reference implementation: tolerates negative values, decimal
 // coordinates (truncated), and values of any length.
 inline std::optional<ParsedScalarHitObjectPrefix> parse_hitobject_prefix_scalar(
