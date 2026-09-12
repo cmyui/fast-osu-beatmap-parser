@@ -26,7 +26,15 @@ inline bool within_stack_distance(PathPoint a, PathPoint b) {
   return (a - b).length() < 3;
 }
 
-inline void calculate_modern_stacks(Beatmap& map, float threshold) {
+inline double stacking_end_time(const HitObject& object,
+                                std::span<const double> slider_end_times) {
+  return object.slider == HitObject::kNoSlider ? object.end_time
+                                               : slider_end_times[object.slider];
+}
+
+inline void calculate_modern_stacks(Beatmap& map,
+                                    float threshold,
+                                    std::span<const double> slider_end_times) {
   for (size_t i = map.hit_objects.size(); i-- > 1;) {
     size_t current = i;
     if (map.stacking[i].stack_height != 0 || map.hit_objects[i].is_spinner() ||
@@ -42,9 +50,10 @@ inline void calculate_modern_stacks(Beatmap& map, float threshold) {
         continue;
       // Stable truncates circle comparisons to integer timestamps. Use trunc
       // rather than an out-of-range integer conversion on malformed extremes.
-      const double elapsed = circle
-                                 ? std::trunc(object.time) - std::trunc(previous.end_time)
-                                 : object.time - previous.time;
+      const double elapsed =
+          circle ? std::trunc(object.time) -
+                       std::trunc(stacking_end_time(previous, slider_end_times))
+                 : object.time - previous.time;
       if (elapsed > threshold)
         break;
       if (circle && previous.is_slider() &&
@@ -68,12 +77,14 @@ inline void calculate_modern_stacks(Beatmap& map, float threshold) {
   }
 }
 
-inline void calculate_legacy_stacks(Beatmap& map, float threshold) {
+inline void calculate_legacy_stacks(Beatmap& map,
+                                    float threshold,
+                                    std::span<const double> slider_end_times) {
   for (size_t i = 0; i < map.hit_objects.size(); ++i) {
     const auto& object = map.hit_objects[i];
     if (map.stacking[i].stack_height != 0 && !object.is_slider())
       continue;
-    double end = object.end_time;
+    double end = stacking_end_time(object, slider_end_times);
     int slider_stack = 0;
     const auto tail = slider_end_position(map, object, false);
     for (size_t j = i + 1; j < map.hit_objects.size(); ++j) {
@@ -92,7 +103,9 @@ inline void calculate_legacy_stacks(Beatmap& map, float threshold) {
   }
 }
 
-inline bool apply_stacking(Beatmap& map, Arena* result_arena) {
+inline bool apply_stacking(Beatmap& map,
+                           Arena* result_arena,
+                           std::span<const double> slider_end_times) {
   if (map.mode != 0 || map.hit_objects.empty())
     return true;
   auto* stacking = arena_push_array<Stacking>(result_arena, map.hit_objects.size());
@@ -106,9 +119,9 @@ inline bool apply_stacking(Beatmap& map, Arena* result_arena) {
   const float threshold =
       static_cast<int>(preempt) * static_cast<float>(map.stack_leniency);
   if (map.format_version >= 6)
-    calculate_modern_stacks(map, threshold);
+    calculate_modern_stacks(map, threshold, slider_end_times);
   else
-    calculate_legacy_stacks(map, threshold);
+    calculate_legacy_stacks(map, threshold, slider_end_times);
   const double cs = static_cast<float>(map.cs);
   const float scale = static_cast<float>(1.0f - 0.7f * ((cs - 5) / 5)) / 2 * 1.00041f;
   for (size_t i = 0; i < map.stacking.size(); ++i) {

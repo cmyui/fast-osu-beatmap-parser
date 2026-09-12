@@ -452,6 +452,15 @@ static void test_exact_keys_and_event_aliases() {
   CHECK_EQ(map.stats.storyboard_lines, 1u);
 }
 
+static void test_malformed_events() {
+  for (bool simd : {false, true}) {
+    const auto map = parse_str("[Events]\n2,10,bad\nStoryboardLine\n", simd);
+    CHECK(map.breaks.empty());
+    CHECK_EQ(map.stats.malformed_lines, 1u);
+    CHECK_EQ(map.stats.storyboard_lines, 1u);
+  }
+}
+
 static void test_long_event_lines() {
   for (size_t length : {63u, 64u, 65u, 95u, 96u, 97u, 200u}) {
     for (const auto ending : {"", "\n", "\r\n"}) {
@@ -814,6 +823,7 @@ int main() {
   test_masked_timing_fallback();
   test_timing_integer_widths();
   test_exact_keys_and_event_aliases();
+  test_malformed_events();
   test_all_sections();
   test_old_format();
   test_mania_hold();

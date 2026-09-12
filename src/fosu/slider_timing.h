@@ -22,7 +22,8 @@ struct SliderTiming {
 
 inline bool set_slider_end_times(Beatmap& map,
                                  Arena* scratch_arena,
-                                 std::span<SliderTiming> timings = {}) {
+                                 std::span<SliderTiming> timings = {},
+                                 std::span<double> stacking_end_times = {}) {
   if (map.sliders.empty())
     return true;
   const TempArena temp{scratch_arena};
@@ -124,6 +125,17 @@ inline bool set_slider_end_times(Beatmap& map,
     // encoded span count on Slider, but use the effective count for duration.
     const int spans = distance.value() <= 1e-7 ? 1 : slider.slides;
     object.end_time = object.time + spans * distance.value() / pixels_per_millisecond;
+    if (!stacking_end_times.empty()) {
+      // Standard stacking uses the osu! ruleset slider velocity, including its
+      // legacy float precision adjustment. Keep the public end time as the
+      // generic decoder value and expose this difference only to stacking.
+      const double adjusted_multiplier =
+          std::clamp(static_cast<float>(100 / velocity), 10.0f, 1000.0f) / 100.0;
+      const double adjusted_beat_length = beat_length * adjusted_multiplier;
+      const double stacking_velocity = 100 * map.slider_multiplier / adjusted_beat_length;
+      stacking_end_times[object.slider] =
+          object.time + spans * distance.value() / stacking_velocity;
+    }
     if (!timings.empty()) {
       const double tick_distance =
           generate_ticks ? pixels_per_millisecond * beat_length / map.slider_tick_rate *

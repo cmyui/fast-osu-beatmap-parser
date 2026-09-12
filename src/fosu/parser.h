@@ -318,25 +318,41 @@ class Parser {
       return Error{ErrorCode::InvalidInput};
     }
     const bool stacking = opts.apply_stacking && beatmap_.mode == 0;
+    size_t stacking_scratch_pos = 0;
+    std::span<double> stacking_end_times;
+    if (stacking && !beatmap_.sliders.empty()) {
+      stacking_scratch_pos = arena_pos(scratch_arena_);
+      auto* end_times = arena_push_array<double>(scratch_arena_, beatmap_.sliders.size());
+      if (!end_times) {
+        reset_working_result();
+        return Error{ErrorCode::AllocationFailure};
+      }
+      stacking_end_times = {end_times, beatmap_.sliders.size()};
+    }
     if ((opts.calculate_slider_paths || opts.calculate_slider_events || stacking) &&
         !internal::set_slider_paths(beatmap_, result_arena_, scratch_arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
     if (opts.calculate_slider_events &&
-        !internal::set_slider_events(beatmap_, result_arena_, scratch_arena_)) {
+        !internal::set_slider_events(beatmap_, result_arena_, scratch_arena_,
+                                     stacking_end_times)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
     if ((opts.calculate_slider_end_times || stacking) && !opts.calculate_slider_events &&
-        !internal::set_slider_end_times(beatmap_, scratch_arena_)) {
+        !internal::set_slider_end_times(beatmap_, scratch_arena_, {},
+                                        stacking_end_times)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
-    if (stacking && !internal::apply_stacking(beatmap_, result_arena_)) {
+    if (stacking &&
+        !internal::apply_stacking(beatmap_, result_arena_, stacking_end_times)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
+    if (!stacking_end_times.empty())
+      arena_pop_to(scratch_arena_, stacking_scratch_pos);
     internal::apply_clock_rate(beatmap_, opts.mods);
     return &beatmap_;
   }

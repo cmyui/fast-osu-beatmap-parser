@@ -6,7 +6,10 @@
 
 namespace fosu::internal {
 
-inline bool set_slider_events(Beatmap& map, Arena* result_arena, Arena* scratch_arena) {
+inline bool set_slider_events(Beatmap& map,
+                              Arena* result_arena,
+                              Arena* scratch_arena,
+                              std::span<double> stacking_end_times = {}) {
   if (map.sliders.empty())
     return true;
   const TempArena temp{scratch_arena};
@@ -14,7 +17,8 @@ inline bool set_slider_events(Beatmap& map, Arena* result_arena, Arena* scratch_
   auto* ranges =
       arena_push_array<std::span<SliderEvent>>(result_arena, map.sliders.size());
   if (!timings || !ranges ||
-      !set_slider_end_times(map, scratch_arena, {timings, map.sliders.size()})) {
+      !set_slider_end_times(map, scratch_arena, {timings, map.sliders.size()},
+                            stacking_end_times)) {
     return false;
   }
   size_t remaining = 1u << 20;  // Bound pathological repeat/tick expansion.
