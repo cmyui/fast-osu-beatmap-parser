@@ -6,19 +6,20 @@ find_package(Python REQUIRED COMPONENTS Interpreter)
 if(WIN32 AND NOT Python_SABI_LIBRARY)
   execute_process(
     COMMAND "${Python_EXECUTABLE}" -c
-      "import pathlib, sysconfig; print((pathlib.Path(sysconfig.get_path('include')).parent / 'libs' / 'python3.lib').as_posix(), end='')"
-    OUTPUT_VARIABLE _python_sabi_library
+      "import subprocess, sys; subprocess.run([sys._base_executable, '-c', \"import sys; print(sys.base_prefix, end='')\"], check=True)"
+    OUTPUT_VARIABLE _python_root
     OUTPUT_STRIP_TRAILING_WHITESPACE
     COMMAND_ERROR_IS_FATAL ANY
   )
-  if(NOT _python_sabi_library)
+  if(NOT EXISTS "${_python_root}/libs/python3.lib")
     message(FATAL_ERROR "python3.lib was not found beside the Windows Python installation")
   endif()
-  set(Python_SABI_LIBRARY "${_python_sabi_library}" CACHE FILEPATH
+  set(Python_INCLUDE_DIR "${_python_root}/include" CACHE PATH "Python include directory" FORCE)
+  set(Python_SABI_LIBRARY "${_python_root}/libs/python3.lib" CACHE FILEPATH
     "Python Stable ABI import library" FORCE)
 endif()
 
-find_package(Python REQUIRED COMPONENTS Development.SABIModule)
+find_package(Python REQUIRED COMPONENTS Interpreter Development.SABIModule)
 Python_add_library(_core MODULE USE_SABI 3.10 WITH_SOABI src/fosu/bindings/python.cc)
 fosu_dispatch(_core python)
 fosu_runtime(_core)
