@@ -1,26 +1,19 @@
-# FindPython does not always discover python3.lib in the Windows Python layouts
-# used by wheel builders. The Stable ABI must link to that unversioned import
-# library rather than python3XY.lib.
-if(WIN32 AND NOT Python_SABI_LIBRARY)
-  if(NOT Python_EXECUTABLE)
-    find_program(Python_EXECUTABLE NAMES python3 python REQUIRED)
-  endif()
-  execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c
-      "import subprocess, sys; subprocess.run([sys._base_executable, '-c', \"import sys; print(sys.base_prefix, end='')\"], check=True)"
-    OUTPUT_VARIABLE _python_root
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    COMMAND_ERROR_IS_FATAL ANY
-  )
-  if(NOT EXISTS "${_python_root}/libs/python3.lib")
+if(WIN32)
+  find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
+  list(GET Python_LIBRARIES 0 _python_library)
+  get_filename_component(_python_library_directory "${_python_library}" DIRECTORY)
+  set(_python_sabi_library "${_python_library_directory}/python3.lib")
+  if(NOT EXISTS "${_python_sabi_library}")
     message(FATAL_ERROR "python3.lib was not found beside the Windows Python installation")
   endif()
-  set(Python_INCLUDE_DIR "${_python_root}/include" CACHE PATH "Python include directory" FORCE)
-  set(Python_SABI_LIBRARY "${_python_root}/libs/python3.lib" CACHE FILEPATH
-    "Python Stable ABI import library" FORCE)
+  add_library(Python::SABIModule INTERFACE IMPORTED)
+  set_target_properties(Python::SABIModule PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${Python_INCLUDE_DIRS}"
+    INTERFACE_LINK_LIBRARIES "${_python_sabi_library}")
+else()
+  find_package(Python REQUIRED COMPONENTS Interpreter Development.SABIModule)
 endif()
 
-find_package(Python REQUIRED COMPONENTS Interpreter Development.SABIModule)
 Python_add_library(_core MODULE USE_SABI 3.10 WITH_SOABI src/fosu/bindings/python.cc)
 fosu_dispatch(_core python)
 fosu_runtime(_core)
