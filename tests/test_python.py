@@ -323,6 +323,19 @@ def test_slider_tail_negative_stacks(version):
     assert map.hit_objects[0].events == []
 
 
+@pytest.mark.parametrize(
+    "fixture,heights",
+    [
+        ("stacking-slider-end-precision.osu", [0, -1, 0, -1, -2]),
+        ("stacking-zero-leniency.osu", [0, -1]),
+    ],
+)
+def test_stacking_uses_standard_slider_end_time_precision(fixture, heights):
+    source = Path(__file__).parent / "fixtures" / "official" / fixture
+    map = fosu.parse_file(source, apply_stacking=True)
+    assert [object.stacking.stack_height for object in map.hit_objects] == heights
+
+
 @pytest.mark.parametrize("mode", [1, 2, 3])
 def test_stacking_does_not_convert_other_modes(mode):
     data = (
@@ -585,6 +598,22 @@ def test_modern_curve_segments_drive_path_calculation():
     ).hit_objects[0]
     assert isinstance(legacy, fosu.Slider)
     assert legacy.curve_segments == []
+
+
+@pytest.mark.parametrize("length", ["300", "0", ""])
+def test_lazer_slider_timing_matches_retained_path(length):
+    slider_tail = f",1,{length}" if length else ",1"
+    data = (
+        "osu file format v128\n[Difficulty]\nSliderMultiplier:1.4\n"
+        "[TimingPoints]\n0,500\n[HitObjects]\n"
+        f"0,0,1000,2,0,B2|100:0|100:100|100:100{slider_tail}\n"
+    ).encode()
+    timed = fosu.parse(data, calculate_slider_end_times=True).hit_objects[0]
+    retained = fosu.parse(
+        data, calculate_slider_paths=True, calculate_slider_end_times=True
+    ).hit_objects[0]
+    with_events = fosu.parse(data, calculate_slider_events=True).hit_objects[0]
+    assert timed.end_time == retained.end_time == with_events.end_time
 
 
 def test_empty_input_defaults():
