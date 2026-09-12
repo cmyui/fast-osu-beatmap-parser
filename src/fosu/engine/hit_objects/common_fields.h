@@ -105,12 +105,9 @@ inline std::optional<ParsedScalarHitObjectPrefix> parse_hitobject_prefix_scalar(
     coord[0] = static_cast<float>(static_cast<int32_t>(coord[0]));
     coord[1] = static_cast<float>(static_cast<int32_t>(coord[1]));
   }
-  return ParsedScalarHitObjectPrefix{coord[0],
-                                    coord[1],
-                                    static_cast<uint32_t>(type),
-                                    static_cast<uint32_t>(sound),
-                                    time,
-                                    q};
+  return ParsedScalarHitObjectPrefix{
+      coord[0], coord[1], static_cast<uint32_t>(type), static_cast<uint32_t>(sound),
+      time,     q};
 }
 
 #if FOSU_SIMD_X86

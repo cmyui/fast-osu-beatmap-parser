@@ -415,16 +415,17 @@ struct BeatmapConverter {
     return list(slider.segment_count, [&](size_t i) {
       const auto& segment = map.slider_segments[slider.segment_begin + i];
       const bool head = i == 0;
-      return record(t_curve_segment,
-                    {{f_type, curve(segment.type)},
-                     {f_degree, segment.degree ? integer(*segment.degree) : none()},
-                     {f_control_points, list(segment.point_count + head, [&](size_t j) {
-                        if (head && !j)
-                          return point(object.x, object.y);
-                        const auto& value = map.slider_points
-                            [slider.point_begin + segment.point_begin + j - head];
-                        return point(value.x, value.y);
-                      })}});
+      return record(
+          t_curve_segment,
+          {{f_type, curve(segment.type)},
+           {f_degree, segment.degree ? integer(*segment.degree) : none()},
+           {f_control_points, list(segment.point_count + head, [&](size_t j) {
+              if (head && !j)
+                return point(object.x, object.y);
+              const auto& value =
+                  map.slider_points[slider.point_begin + segment.point_begin + j - head];
+              return point(value.x, value.y);
+            })}});
     });
   }
 
