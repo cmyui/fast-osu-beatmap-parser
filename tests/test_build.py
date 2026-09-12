@@ -11,7 +11,16 @@ with tempfile.TemporaryDirectory(prefix="fosu-consumer-") as temp:
     root = Path(temp)
     prefix = root / "install"
     subprocess.run(
-        ["cmake", "--install", str(build), "--prefix", str(prefix)], check=True
+        [
+            "cmake",
+            "--install",
+            str(build),
+            "--config",
+            "Release",
+            "--prefix",
+            str(prefix),
+        ],
+        check=True,
     )
     (root / "CMakeLists.txt").write_text("""cmake_minimum_required(VERSION 3.26)
 project(consumer LANGUAGES C CXX)

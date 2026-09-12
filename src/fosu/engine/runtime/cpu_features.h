@@ -67,7 +67,8 @@ inline bool host_supports_avx2() {
   // Query the maximum basic leaf once: CPUID can cause a costly VM exit.
   if (__get_cpuid_max(0, nullptr) < 7)
     return false;
-  __cpuid(1, a, b, c, d);
+  if (!__get_cpuid(1, &a, &b, &c, &d))
+    return false;
   f.leaf1 = c;
   if ((f.leaf1 & required_leaf1) != required_leaf1)
     return false;

@@ -33,7 +33,27 @@ using InputFile = HANDLE;
 inline const InputFile kInvalidInputFile = INVALID_HANDLE_VALUE;
 
 inline void set_file_error(DWORD error) {
-  _dosmaperr(error);
+  switch (error) {
+    case ERROR_FILE_NOT_FOUND:
+    case ERROR_PATH_NOT_FOUND:
+      errno = ENOENT;
+      break;
+    case ERROR_ACCESS_DENIED:
+    case ERROR_SHARING_VIOLATION:
+      errno = EACCES;
+      break;
+    case ERROR_INVALID_NAME:
+    case ERROR_INVALID_PARAMETER:
+      errno = EINVAL;
+      break;
+    case ERROR_NOT_ENOUGH_MEMORY:
+    case ERROR_OUTOFMEMORY:
+      errno = ENOMEM;
+      break;
+    default:
+      errno = EIO;
+      break;
+  }
 }
 
 inline InputFile open_input_file(const char* path) {
