@@ -1,5 +1,6 @@
 // Construct detached Python values using the CPython stable ABI.
 #include <Python.h>
+#include <fosu/compiler.h>
 #include <fosu/engine/runtime/loader.h>
 #include <fosu/parser.h>
 #include <cerrno>
@@ -325,7 +326,7 @@ struct BeatmapConverter {
       case fosu::CurveType::PerfectCurve:
         return retain(state.curves[3]);
     }
-    __builtin_unreachable();  // Only validated native enums reach conversion.
+    FOSU_UNREACHABLE();  // Only validated native enums reach conversion.
   }
 
   struct Value {

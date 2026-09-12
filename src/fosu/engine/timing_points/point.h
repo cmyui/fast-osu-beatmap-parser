@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fosu/beatmap.h>
+#include <fosu/compiler.h>
 #include <fosu/engine/parsing/sample_sets.h>
 #include <fosu/engine/primitives/byte_scan.h>
 #include <fosu/engine/primitives/digit_groups.h>
@@ -122,12 +123,12 @@ inline std::array<int32_t, 4> decode_timing_tail(const char* p,
 // general parser; these limits constrain only the fast path. A nullopt
 // result requests general parsing rather than declaring the line malformed.
 // Keep this inlined in the section loop so accepted records need no call.
-__attribute__((always_inline)) inline std::optional<TimingPoint>
-try_parse_timing_point_fast_masked(uint64_t commas,
-                                   uint64_t nondig,
-                                   const char* p,
-                                   size_t len,
-                                   int time_offset = 0) {
+FOSU_ALWAYS_INLINE std::optional<TimingPoint> try_parse_timing_point_fast_masked(
+    uint64_t commas,
+    uint64_t nondig,
+    const char* p,
+    size_t len,
+    int time_offset = 0) {
   if (std::popcount(commas) != 7)
     return std::nullopt;
 
@@ -245,8 +246,10 @@ try_parse_timing_point_fast_masked(uint64_t commas,
 }
 
 // Compute masks from the input vectors before attempting fast parsing.
-__attribute__((always_inline)) inline std::optional<TimingPoint>
-try_parse_timing_point_fast(Bytes32 a, Bytes32 b, const char* p, size_t len) {
+FOSU_ALWAYS_INLINE std::optional<TimingPoint> try_parse_timing_point_fast(Bytes32 a,
+                                                                          Bytes32 b,
+                                                                          const char* p,
+                                                                          size_t len) {
   if (len > 64 || len < 15)
     return std::nullopt;
   const uint64_t line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);

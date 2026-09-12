@@ -7,6 +7,14 @@
 #include <thread>
 #include <vector>
 
+void set_backend(const char* value) {
+#if defined(_WIN32)
+  _putenv_s("FOSU_BACKEND", value);
+#else
+  setenv("FOSU_BACKEND", value, 1);
+#endif
+}
+
 int main(int argc, char** argv) {
   using namespace fosu_dispatch;
   CpuFeatures full{required_leaf1, required_leaf7, required_extended, 6};
@@ -29,7 +37,7 @@ int main(int argc, char** argv) {
   }
   assert(argc == 2);
   const char* requested = argv[1];
-  setenv("FOSU_BACKEND", requested, 1);
+  set_backend(requested);
   bool avx2 = false, neon = false;
 #ifdef FOSU_TEST_avx2
   avx2 = host_supports_avx2();
@@ -68,6 +76,6 @@ int main(int argc, char** argv) {
   for (auto& t : threads)
     t.join();
   const auto* before = fosu::runtime_engine();
-  setenv("FOSU_BACKEND", "unknown", 1);
+  set_backend("unknown");
   assert(before == fosu::runtime_engine());
 }

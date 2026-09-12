@@ -1,6 +1,8 @@
 #include "support/equality.h"
 #include "support/test.h"
 
+#include <filesystem>
+#include <fstream>
 #include <limits>
 
 static void test_reparse_reuses_arena_memory() {
@@ -297,27 +299,22 @@ static void test_arena_interface() {
 }
 
 void test_read_into_reuse() {
-  char path[] = "/tmp/fosu_read_into_XXXXXX";
-  const int fd = mkstemp(path);
-  CHECK(fd >= 0);
+  const auto path = std::filesystem::temp_directory_path() / "fosu_read_into_test.osu";
   const std::string big(10000, 'A');
   const std::string little(100, 'B');
-  CHECK_EQ(write(fd, big.data(), big.size()), static_cast<ssize_t>(big.size()));
-  close(fd);
+  std::ofstream(path, std::ios::binary).write(big.data(), big.size());
 
   fosu::FileBuffer buffer;
-  CHECK(fosu::read_into(path, buffer));
+  CHECK(fosu::read_into(path.string().c_str(), buffer));
   const char* allocation = buffer.data.get();
   const size_t capacity = buffer.capacity;
 
-  FILE* file = fopen(path, "wb");
-  fwrite(little.data(), 1, little.size(), file);
-  fclose(file);
-  CHECK(fosu::read_into(path, buffer));
+  std::ofstream(path, std::ios::binary).write(little.data(), little.size());
+  CHECK(fosu::read_into(path.string().c_str(), buffer));
   CHECK(buffer.data.get() == allocation);
   CHECK_EQ(buffer.capacity, capacity);
   CHECK(memcmp(buffer.data.get(), little.data(), little.size()) == 0);
-  unlink(path);
+  std::filesystem::remove(path);
 }
 
 static void test_input_size_overflow() {

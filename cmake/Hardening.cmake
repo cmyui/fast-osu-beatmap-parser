@@ -18,6 +18,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 function(fosu_harden target)
+  if(MSVC)
+    target_compile_options(${target} PRIVATE /GS /guard:cf)
+    target_link_options(${target} PRIVATE /DYNAMICBASE /NXCOMPAT /guard:cf)
+    return()
+  endif()
   target_compile_options(${target} PRIVATE -fstack-protector-strong)
   # Sanitizers supply their own instrumentation; glibc fortification requires
   # optimization and can interfere with sanitizer diagnostics.

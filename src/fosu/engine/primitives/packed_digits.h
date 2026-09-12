@@ -10,6 +10,9 @@
 
 #include <cstdint>
 #include <cstring>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 
 namespace fosu::internal {
 
@@ -37,7 +40,13 @@ inline uint32_t digit_run8(const char* p) {
       (((chunk & kHi) ^ kThrees) | (((chunk + 0x0606060606060606ull) & kHi) ^ kThrees));
   if (nondigit == 0)
     return 8;
+#if defined(_MSC_VER)
+  unsigned long index;
+  _BitScanForward64(&index, nondigit);
+  return index >> 3;
+#else
   return static_cast<uint32_t>(__builtin_ctzll(nondigit)) >> 3;
+#endif
 }
 
 // Convert `len` (1..4) leading digits at `p`. Digits are left-shifted so

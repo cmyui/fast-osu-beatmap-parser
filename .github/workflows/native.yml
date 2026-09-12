@@ -88,6 +88,16 @@ jobs:
       - run: cmake -S . -B build/sanitize -G Ninja -DFOSU_SANITIZE=ON
       - run: cmake --build build/sanitize --target check -j3
 
+  native-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: cmake -S . -B build/native -G Ninja
+      - run: cmake --build build/native --target check
+      - run: python tests/test_build.py build/native
+
   official-acceptance:
     runs-on: ubuntu-24.04
     steps:

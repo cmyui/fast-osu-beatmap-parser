@@ -51,7 +51,7 @@ sdist.exclude = ["build", "dist", "tests/reference/official/bin", "tests/referen
 
 [tool.cibuildwheel]
 build = "cp310-*"
-skip = "*-win* *-manylinux_i686"
+skip = "*-manylinux_i686"
 test-requires = ["pytest>=8", "mypy==2.3.1"]
 test-command = "python -m pytest {project}/tests/test_python.py && FOSU_BACKEND=scalar python -m pytest {project}/tests/test_python.py && python {project}/tests/test_binary_hardening.py"
 
@@ -61,3 +61,7 @@ manylinux-aarch64-image = "manylinux_2_28"
 
 [tool.cibuildwheel.macos]
 environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
+
+[tool.cibuildwheel.windows]
+archs = ["AMD64"]
+test-command = "python -m pytest {project}/tests/test_python.py && set FOSU_BACKEND=scalar&& python -m pytest {project}/tests/test_python.py && python {project}/tests/test_binary_hardening.py"

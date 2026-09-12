@@ -1,6 +1,6 @@
 # Building and checking FOSU
 
-Requires C++20, CMake 3.26+, and Linux or macOS. Header-only consumers can
+Requires C++20, CMake 3.26+, and Linux, macOS or Windows. Header-only consumers can
 include `src/fosu/parser.h` without building a library.
 
 ## Native

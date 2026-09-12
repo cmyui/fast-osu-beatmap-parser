@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
-#if defined(__x86_64__)
+#if defined(_MSC_VER) && defined(_M_X64)
+#include <intrin.h>
+#elif defined(__x86_64__)
 #include <cpuid.h>
 #endif
 
@@ -36,7 +38,30 @@ constexpr bool supports_avx2(CpuFeatures f) {
          (f.extended & required_extended) == required_extended && (f.xcr0 & 6) == 6;
 }
 inline bool host_supports_avx2() {
-#if defined(__x86_64__)
+#if defined(_MSC_VER) && defined(_M_X64)
+  CpuFeatures f;
+  int registers[4];
+  __cpuid(registers, 0);
+  if (registers[0] < 7)
+    return false;
+  __cpuidex(registers, 1, 0);
+  f.leaf1 = static_cast<uint32_t>(registers[2]);
+  if ((f.leaf1 & required_leaf1) != required_leaf1)
+    return false;
+  f.xcr0 = _xgetbv(0);
+  if ((f.xcr0 & 6) != 6)
+    return false;
+  __cpuidex(registers, 7, 0);
+  f.leaf7 = static_cast<uint32_t>(registers[1]);
+  if ((f.leaf7 & required_leaf7) != required_leaf7)
+    return false;
+  __cpuid(registers, static_cast<int>(0x80000000));
+  if (static_cast<uint32_t>(registers[0]) >= 0x80000001) {
+    __cpuid(registers, static_cast<int>(0x80000001));
+    f.extended = static_cast<uint32_t>(registers[2]);
+  }
+  return supports_avx2(f);
+#elif defined(__x86_64__)
   CpuFeatures f;
   unsigned a, b, c, d;
   // Query the maximum basic leaf once: CPUID can cause a costly VM exit.

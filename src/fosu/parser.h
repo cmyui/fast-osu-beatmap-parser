@@ -1,7 +1,4 @@
 #pragma once
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
@@ -216,45 +213,44 @@ class Parser {
     if (!path || invalid_options(opts))
       return Error{ErrorCode::InvalidInput};
 
-    const int file = open(path, O_RDONLY);
-    if (file < 0)
+    const internal::InputFile file = internal::open_input_file(path);
+    if (file == internal::kInvalidInputFile)
       return Error{ErrorCode::IoFailure, kNoErrorOffset, errno};
 
-    struct stat info;
-    const int stat_result = fstat(file, &info);
-    if (stat_result || info.st_size < 0) {
-      const int error = stat_result ? errno : EIO;
-      close(file);
+    uint64_t file_size;
+    if (!internal::input_file_size(file, file_size)) {
+      const int error = errno;
+      internal::close_input_file(file);
       return Error{ErrorCode::IoFailure, kNoErrorOffset, error};
     }
-    if (static_cast<uint64_t>(info.st_size) >
-        std::numeric_limits<size_t>::max() - kBufferPadding) {
-      close(file);
+    if (file_size > std::numeric_limits<size_t>::max() - kBufferPadding) {
+      internal::close_input_file(file);
       return Error{ErrorCode::InputTooLarge};
     }
 
-    const size_t size = static_cast<size_t>(info.st_size);
+    const size_t size = static_cast<size_t>(file_size);
     auto prepared = prepare_input(size, nullptr);
     if (!prepared) {
       const Error error = prepared.error();
-      close(file);
+      internal::close_input_file(file);
       reset_working_result();
       return error;
     }
     size_t bytes_read = 0;
     while (bytes_read < size) {
-      const ssize_t count = read(file, input_ + bytes_read, size - bytes_read);
+      const ptrdiff_t count =
+          internal::read_input_file(file, input_ + bytes_read, size - bytes_read);
       if (count < 0 && errno == EINTR)
         continue;
       if (count <= 0) {
         const int error = count < 0 ? errno : EIO;
-        close(file);
+        internal::close_input_file(file);
         reset_working_result();
         return Error{ErrorCode::IoFailure, kNoErrorOffset, error};
       }
       bytes_read += static_cast<size_t>(count);
     }
-    close(file);
+    internal::close_input_file(file);
 
     return finish_parse(opts);
   }

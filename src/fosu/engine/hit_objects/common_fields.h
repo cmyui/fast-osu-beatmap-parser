@@ -26,6 +26,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 
 namespace fosu::internal {
 
@@ -96,7 +97,7 @@ consteval std::array<LaneMasks, kNPrefixVariants * 2> make_lane_masks() {
             };
             for (int b = 0; b < 32; ++b)
               if (src[b] >= 0 && find_or_add_word(src[b] / 4, b / 16) < 0)
-                __builtin_abort();
+                std::abort();
 
             // Put hitSound in the low lane where possible; use spare high-lane
             // space otherwise. Preserve each digit's decimal weight in either lane.
@@ -106,7 +107,7 @@ consteval std::array<LaneMasks, kNPrefixVariants * 2> make_lane_masks() {
                 src[16 - lhs + i] = source;
               } else {
                 if (find_or_add_word(source / 4, 1) < 0)
-                  __builtin_abort();
+                  std::abort();
                 src[20 - lhs + i] = source;
               }
             }

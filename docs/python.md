@@ -7,8 +7,8 @@ Parsing returns eager, mutable dataclasses and lists, detached from native memor
 
 Requires CPython 3.10+. Stable-ABI wheels target glibc and musl Linux on x86-64
 and AArch64, plus macOS 11+ on Intel and Apple Silicon. One wheel per platform
-supports every compatible CPython version. Windows users can use the Linux
-x86-64 wheel under WSL; native Windows is not currently supported.
+supports every compatible CPython version. Windows x86-64 is supported both
+natively and through the Linux x86-64 wheel under WSL.
 
 ```sh
 python -m pip install fosu

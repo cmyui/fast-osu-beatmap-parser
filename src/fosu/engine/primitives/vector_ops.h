@@ -2,7 +2,9 @@
 #include <bit>
 #include <cstdint>
 
-#if defined(__AVX2__) && defined(__BMI__) && !defined(FOSU_DISABLE_SIMD)
+#if ((defined(_MSC_VER) && defined(_M_AVX2)) ||                        \
+     (!defined(_MSC_VER) && defined(__AVX2__) && defined(__BMI__))) && \
+    !defined(FOSU_DISABLE_SIMD)
 #define FOSU_SIMD_X86 1
 #include <immintrin.h>
 #else
@@ -40,12 +42,16 @@ inline Bytes32 load32(const char* p) {
 }
 template <uint8_t Value>
 inline ByteVector broadcast_byte() {
+#if defined(_MSC_VER)
+  return _mm256_set1_epi8(static_cast<char>(Value));
+#else
   // A memory broadcast prevents GCC rebuilding constants through a general
   // register inside loops containing calls. Keep that detail out of parsers.
   static constexpr uint8_t value = Value;
   ByteVector result;
   __asm__("vpbroadcastb %1, %0" : "=x"(result) : "m"(value));
   return result;
+#endif
 }
 inline uint32_t equal_mask32(Bytes32 v, ByteVector c) {
   return static_cast<uint32_t>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, c)));

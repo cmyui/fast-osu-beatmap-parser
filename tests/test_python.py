@@ -830,6 +830,12 @@ def test_file_errors(tmp_path):
         fosu.parse_file("bad\0path")
 
 
+def test_parse_file_accepts_unicode_paths(tmp_path):
+    path = tmp_path / "日本語.osu"
+    path.write_bytes(b"[Metadata]\nTitle:Unicode path\n")
+    assert fosu.parse_file(path).title == "Unicode path"
+
+
 def test_memory_map_and_wide_buffers_are_detached(tmp_path):
     import mmap
 
