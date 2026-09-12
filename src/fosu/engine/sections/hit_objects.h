@@ -339,46 +339,6 @@ __attribute__((noinline)) inline std::optional<HitObject> parse_hitobject_line_s
   return object;
 }
 
-inline std::optional<HitObject> parse_hitobject_line_fast(
-    Beatmap& beatmap,
-    size_t& slider_count,
-    size_t& slider_segment_count,
-    size_t& slider_point_count,
-    const HitObjectPrefix& prefix,
-    size_t prefix_end,
-    const char* p,
-    const char* line_end,
-    const HitObjectParseConstants& constants) {
-  HitObject object = make_hitobject(prefix);
-  const auto length = static_cast<size_t>(line_end - p);
-  const HitObjectKind kind = classify_hitobject_kind(prefix.type);
-
-  if (kind == HitObjectKind::Circle) {
-    if (prefix_end == length)
-      return object;
-    if (length - prefix_end == 9 && p[prefix_end] == ',' &&
-        short_sample(p + prefix_end + 1)) {
-      object.hit_sample = {p + prefix_end + 1, 8};
-      return object;
-    }
-  } else if (kind == HitObjectKind::Slider) {
-    if (prefix_end >= length || p[prefix_end] != ',')
-      return std::nullopt;
-    if (!parse_slider(beatmap, slider_count, slider_segment_count, slider_point_count,
-                      object, p + prefix_end + 1, line_end, constants)) {
-      return std::nullopt;
-    }
-    return object;
-  }
-
-  if (!parse_hitobject_details(beatmap, slider_count, slider_segment_count,
-                               slider_point_count, object, p + prefix_end, line_end,
-                               constants)) {
-    return std::nullopt;
-  }
-  return object;
-}
-
 // Interpret a successfully decoded record before publishing it to the arena.
 // The preceding accepted object is still in source order, including across
 // repeated HitObjects sections. No separate state crosses the engine boundary.
@@ -485,16 +445,41 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
       const auto prefix = decode_hitobject_prefix(ascii, zero, shape);
       if (prefix) [[likely]] {
         ++fast_lines;
-        const auto object = parse_hitobject_line_fast(
-            beatmap, slider_count, slider_segment_count, slider_point_count, *prefix,
-            shape.prefix_end, p, line_end, constants);
-        if (object) {
-          beatmap.hit_objects[hit_object_count] =
-              normalize_hitobject(*object, beatmap, hit_object_count, time_offset);
-          ++hit_object_count;
-        } else [[unlikely]] {
+        HitObject object = make_hitobject(*prefix);
+        const HitObjectKind kind = classify_hitobject_kind(prefix->type);
+        if (kind == HitObjectKind::Circle) {
+          if (shape.prefix_end == length) {
+            object.hit_sample = {};
+          } else if (length - shape.prefix_end == 9 && after_prefix == ',' &&
+                     short_sample(p + shape.prefix_end + 1)) {
+            object.hit_sample = {p + shape.prefix_end + 1, 8};
+          } else if (!parse_hitobject_details(
+                         beatmap, slider_count, slider_segment_count, slider_point_count,
+                         object, p + shape.prefix_end, line_end, constants)) {
+            ++malformed;
+            p = next_line;
+            continue;
+          }
+        } else if (kind == HitObjectKind::Slider) {
+          if (shape.prefix_end >= length || after_prefix != ',' ||
+              !parse_slider(beatmap, slider_count, slider_segment_count,
+                            slider_point_count, object, p + shape.prefix_end + 1,
+                            line_end, constants)) {
+            ++malformed;
+            p = next_line;
+            continue;
+          }
+        } else if (!parse_hitobject_details(beatmap, slider_count, slider_segment_count,
+                                            slider_point_count, object,
+                                            p + shape.prefix_end, line_end, constants)) {
           ++malformed;
+          p = next_line;
+          continue;
         }
+
+        beatmap.hit_objects[hit_object_count] =
+            normalize_hitobject(object, beatmap, hit_object_count, time_offset);
+        ++hit_object_count;
       } else {
         const auto object =
             parse_hitobject_line_scalar(beatmap, slider_count, slider_segment_count,
