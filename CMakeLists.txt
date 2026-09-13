@@ -7,7 +7,7 @@ if(NOT CMAKE_HOST_WIN32)
   set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g" CACHE STRING "Debug C++ flags")
 endif()
 
-project(fosu VERSION 0.2.0 LANGUAGES C CXX)
+project(fosu VERSION 0.2.1 LANGUAGES C CXX)
 include(CTest)
 include(GNUInstallDirs)
 

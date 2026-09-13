@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "fosu"
-version = "0.2.0"
+version = "0.2.1"
 description = "Fast native osu! beatmap parsing with owned Python results"
 readme = "docs/python.md"
 requires-python = ">=3.10"
