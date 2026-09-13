@@ -60,7 +60,9 @@ malformed-line counts.
 
 ## Results and important distinctions
 
-The typed dataclasses in [_model.py](../python/fosu/_model.py) define the fields.
+The typed dataclasses in
+[_model.py](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/python/fosu/_model.py)
+define the fields.
 Shared fields use C++ names. Important Python-specific behavior:
 
 - `hit_objects` contains `Circle`, `Slider`, `Spinner`, or `HoldNote`, in
@@ -133,7 +135,9 @@ NIGHTCORE, and HT support every mode and divide gameplay timeline values by
 events, timing-point offsets and uninherited beat lengths, and breaks. General
 and Editor timestamp metadata remains in source-map time.
 
-See [compatibility](compatibility.md) for supported behavior and limitations;
+See
+[compatibility](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/docs/compatibility.md)
+for supported behavior and limitations;
 there is no ruleset conversion.
 
 ## CPU selection
@@ -141,4 +145,5 @@ there is no ruleset conversion.
 `fosu.backend` reports `"avx2"`, `"neon"`, or `"scalar"`.
 Set `FOSU_BACKEND=auto|scalar|avx2|neon` before importing to select an engine.
 Unsupported explicit requests raise `ImportError`; selection stays fixed for
-the loaded extension. See [development checks](build.md).
+the loaded extension. See
+[development checks](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/docs/build.md).
