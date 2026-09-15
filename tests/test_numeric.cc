@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <bit>
 #include "support/test.h"
 
 // Independent numeric oracle: libc conversion over a bounded copy, rather
@@ -16,6 +18,34 @@ static uint64_t rng() {
   z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
   z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
   return z ^ (z >> 31);
+}
+
+static void test_four_point_bezier_subdivision() {
+  using fosu::internal::CurvePoint;
+  for (int sample = 0; sample < 1000; ++sample) {
+    CurvePoint points[4];
+    for (auto& point : points) {
+      auto coordinate = [] {
+        const uint32_t bits = static_cast<uint32_t>(rng() & 0x807fffffu) |
+                              (static_cast<uint32_t>(126 + rng() % 10) << 23);
+        return std::bit_cast<float>(bits);
+      };
+      point = {coordinate(), coordinate()};
+    }
+    CurvePoint left[4], right[4], midpoints[4];
+    fosu::internal::subdivide_bezier({points, 4}, left, right, midpoints);
+
+    CurvePoint expected_left[4], expected_right[4], work[4];
+    std::copy_n(points, 4, work);
+    for (size_t i = 0; i < 4; ++i) {
+      expected_left[i] = work[0];
+      expected_right[3 - i] = work[3 - i];
+      for (size_t j = 0; j < 3 - i; ++j)
+        work[j] = (work[j] + work[j + 1]) * 0.5f;
+    }
+    CHECK(std::memcmp(left, expected_left, sizeof(left)) == 0);
+    CHECK(std::memcmp(right, expected_right, sizeof(right)) == 0);
+  }
 }
 
 // Compare decimal conversion against libc, including significands that
@@ -346,5 +376,6 @@ int main() {
 #else
   puts("SIMD path: not built");
 #endif
+  test_four_point_bezier_subdivision();
   return test_result();
 }

@@ -67,6 +67,23 @@ inline void subdivide_bezier(std::span<const CurvePoint> points,
                              CurvePoint* right,
                              CurvePoint* midpoints) {
   const size_t count = points.size();
+  if (count == 4) {
+    const auto a = (points[0] + points[1]) * 0.5f;
+    const auto b = (points[1] + points[2]) * 0.5f;
+    const auto c = (points[2] + points[3]) * 0.5f;
+    const auto d = (a + b) * 0.5f;
+    const auto e = (b + c) * 0.5f;
+    const auto f = (d + e) * 0.5f;
+    left[0] = points[0];
+    left[1] = a;
+    left[2] = d;
+    left[3] = f;
+    right[0] = f;
+    right[1] = e;
+    right[2] = c;
+    right[3] = points[3];
+    return;
+  }
   std::copy(points.begin(), points.end(), midpoints);
   for (size_t i = 0; i < count; ++i) {
     left[i] = midpoints[0];
