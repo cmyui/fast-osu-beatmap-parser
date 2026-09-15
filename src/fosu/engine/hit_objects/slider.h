@@ -144,64 +144,103 @@ FOSU_NOINLINE inline bool parse_slider(
   {
     const Bytes32 input = load32(p);
     const uint32_t non_digits = nondigit_mask32(input);
-    const uint32_t colons = equal_mask32(input, constants.colon);
-    const uint32_t pipes = equal_mask32(input, constants.pipe);
 #if FOSU_SIMD_X86
-    const uint32_t separators = static_cast<uint32_t>(
-        _mm256_movemask_epi8(_mm256_or_si256(_mm256_cmpeq_epi8(input, constants.pipe),
-                                             _mm256_cmpeq_epi8(input, constants.comma))));
-#else
-    const uint32_t separators =
-        byte_mask16(vorrq_u8(vceqq_u8(input.val[0], constants.pipe),
-                             vceqq_u8(input.val[0], constants.comma))) |
-        (byte_mask16(vorrq_u8(vceqq_u8(input.val[1], constants.pipe),
-                              vceqq_u8(input.val[1], constants.comma)))
-         << 16);
-#endif
-    uint32_t boundaries = non_digits & ~1u;
-    const uint32_t first_colon = trailing_zeros(boundaries);
-    boundaries &= boundaries - 1;
-    const uint32_t first_end = trailing_zeros(boundaries);
-    boundaries &= boundaries - 1;
-    const uint32_t second_colon = trailing_zeros(boundaries);
-    boundaries &= boundaries - 1;
-    const uint32_t second_end = trailing_zeros(boundaries);
-
-    const uint32_t first_x_digits = first_colon - 1;
-    const uint32_t first_y_digits = first_end - first_colon - 1;
-    const bool first_point_is_simple =
-        (pipes & 1) & (((first_x_digits - 1) | (first_y_digits - 1)) <= 3) &
-        ((static_cast<uint64_t>(colons) >> first_colon) & 1) &
-        ((static_cast<uint64_t>(separators) >> first_end) & 1);
-
-    if (first_point_is_simple) {
-#if FOSU_SIMD_X86
-      beatmap.slider_points[slider_point_count++] = decode_slider_point(
-          _mm256_castsi256_si128(input), first_x_digits, first_y_digits, constants);
-#else
+    // Common fixed-width points need no delimiter scan or shuffle-table index.
+    if ((non_digits & 0xffu) == 0x11u && p[0] == '|' && p[4] == ':' &&
+        (p[8] == '|' || p[8] == ',')) {
       beatmap.slider_points[slider_point_count++] =
-          decode_slider_point(input.val[0], first_x_digits, first_y_digits, constants);
+          decode_slider_point(_mm256_castsi256_si128(input), 3, 3, constants);
+      p += 8;
+      if (p[0] == '|' && ((non_digits >> 8) & 0xffu) == 0x11u && p[4] == ':' &&
+          (p[8] == '|' || p[8] == ',')) {
+        beatmap.slider_points[slider_point_count++] = decode_slider_point(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(p)), 3, 3, constants);
+        p += 8;
+      }
+    } else if ((non_digits & 0x7fu) == 0x11u && p[0] == '|' && p[4] == ':' &&
+               (p[7] == '|' || p[7] == ',')) {
+      beatmap.slider_points[slider_point_count++] =
+          decode_slider_point(_mm256_castsi256_si128(input), 3, 2, constants);
+      p += 7;
+      if (p[0] == '|' && ((non_digits >> 7) & 0x7fu) == 0x11u && p[4] == ':' &&
+          (p[7] == '|' || p[7] == ',')) {
+        beatmap.slider_points[slider_point_count++] = decode_slider_point(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(p)), 3, 2, constants);
+        p += 7;
+      }
+    } else if ((non_digits & 0xfu) == 0x5u && p[0] == '|' && p[2] == ':' &&
+               (p[4] == '|' || p[4] == ',')) {
+      beatmap.slider_points[slider_point_count++] =
+          decode_slider_point(_mm256_castsi256_si128(input), 1, 1, constants);
+      p += 4;
+      if (p[0] == '|' && ((non_digits >> 4) & 0xfu) == 0x5u && p[2] == ':' &&
+          (p[4] == '|' || p[4] == ',')) {
+        beatmap.slider_points[slider_point_count++] = decode_slider_point(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(p)), 1, 1, constants);
+        p += 4;
+      }
+    } else
 #endif
-      p += first_end;
-
-      const uint32_t second_x_digits = second_colon - first_end - 1;
-      const uint32_t second_y_digits = second_end - second_colon - 1;
-      const bool second_point_is_simple =
-          ((static_cast<uint64_t>(pipes) >> first_end) & 1) &
-          (((second_x_digits - 1) | (second_y_digits - 1)) <= 3) &
-          ((static_cast<uint64_t>(colons) >> second_colon) & 1) &
-          ((static_cast<uint64_t>(separators) >> second_end) & 1);
-      if (second_point_is_simple) {
+    {
+      const uint32_t colons = equal_mask32(input, constants.colon);
+      const uint32_t pipes = equal_mask32(input, constants.pipe);
 #if FOSU_SIMD_X86
-        beatmap.slider_points[slider_point_count++] =
-            decode_slider_point(_mm_loadu_si128(reinterpret_cast<const __m128i*>(p)),
-                                second_x_digits, second_y_digits, constants);
+      const uint32_t separators = static_cast<uint32_t>(_mm256_movemask_epi8(
+          _mm256_or_si256(_mm256_cmpeq_epi8(input, constants.pipe),
+                          _mm256_cmpeq_epi8(input, constants.comma))));
+#else
+      const uint32_t separators =
+          byte_mask16(vorrq_u8(vceqq_u8(input.val[0], constants.pipe),
+                               vceqq_u8(input.val[0], constants.comma))) |
+          (byte_mask16(vorrq_u8(vceqq_u8(input.val[1], constants.pipe),
+                                vceqq_u8(input.val[1], constants.comma)))
+           << 16);
+#endif
+      uint32_t boundaries = non_digits & ~1u;
+      const uint32_t first_colon = trailing_zeros(boundaries);
+      boundaries &= boundaries - 1;
+      const uint32_t first_end = trailing_zeros(boundaries);
+      boundaries &= boundaries - 1;
+      const uint32_t second_colon = trailing_zeros(boundaries);
+      boundaries &= boundaries - 1;
+      const uint32_t second_end = trailing_zeros(boundaries);
+
+      const uint32_t first_x_digits = first_colon - 1;
+      const uint32_t first_y_digits = first_end - first_colon - 1;
+      const bool first_point_is_simple =
+          (pipes & 1) & (((first_x_digits - 1) | (first_y_digits - 1)) <= 3) &
+          ((static_cast<uint64_t>(colons) >> first_colon) & 1) &
+          ((static_cast<uint64_t>(separators) >> first_end) & 1);
+
+      if (first_point_is_simple) {
+#if FOSU_SIMD_X86
+        beatmap.slider_points[slider_point_count++] = decode_slider_point(
+            _mm256_castsi256_si128(input), first_x_digits, first_y_digits, constants);
 #else
         beatmap.slider_points[slider_point_count++] =
-            decode_slider_point(vld1q_u8(reinterpret_cast<const uint8_t*>(p)),
-                                second_x_digits, second_y_digits, constants);
+            decode_slider_point(input.val[0], first_x_digits, first_y_digits, constants);
 #endif
-        p += second_end - first_end;
+        p += first_end;
+
+        const uint32_t second_x_digits = second_colon - first_end - 1;
+        const uint32_t second_y_digits = second_end - second_colon - 1;
+        const bool second_point_is_simple =
+            ((static_cast<uint64_t>(pipes) >> first_end) & 1) &
+            (((second_x_digits - 1) | (second_y_digits - 1)) <= 3) &
+            ((static_cast<uint64_t>(colons) >> second_colon) & 1) &
+            ((static_cast<uint64_t>(separators) >> second_end) & 1);
+        if (second_point_is_simple) {
+#if FOSU_SIMD_X86
+          beatmap.slider_points[slider_point_count++] =
+              decode_slider_point(_mm_loadu_si128(reinterpret_cast<const __m128i*>(p)),
+                                  second_x_digits, second_y_digits, constants);
+#else
+          beatmap.slider_points[slider_point_count++] =
+              decode_slider_point(vld1q_u8(reinterpret_cast<const uint8_t*>(p)),
+                                  second_x_digits, second_y_digits, constants);
+#endif
+          p += second_end - first_end;
+        }
       }
     }
   }
