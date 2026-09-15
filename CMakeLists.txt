@@ -247,7 +247,7 @@ function(fosu_dispatch target product)
 endfunction()
 
 if(NOT SKBUILD)
-  add_library(fosu SHARED src/fosu/runtime.cc)
+  add_library(fosu SHARED src/fosu/runtime.cc src/fosu/c_api.cc)
   add_library(fosu::fosu ALIAS fosu)
   target_link_libraries(fosu PUBLIC fosu_headers)
   target_compile_definitions(fosu PRIVATE FOSU_BUILDING_RUNTIME)
@@ -255,8 +255,19 @@ if(NOT SKBUILD)
   fosu_runtime(fosu)
   set_target_properties(fosu PROPERTIES CXX_VISIBILITY_PRESET hidden)
   target_include_directories(fosu PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+  # C/C++98 consumers get the linker file and C header, without inheriting
+  # fosu_headers' C++20 compile requirement.
+  add_library(fosu_c INTERFACE)
+  add_library(fosu::c ALIAS fosu_c)
+  set_target_properties(fosu_c PROPERTIES EXPORT_NAME c)
+  target_include_directories(fosu_c INTERFACE
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+  target_link_libraries(fosu_c INTERFACE $<LINK_ONLY:fosu>)
   install(TARGETS fosu fosu_headers EXPORT fosuTargets
     FILE_SET HEADERS DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  install(TARGETS fosu_c EXPORT fosuTargets)
+  install(FILES src/fosu/c_api.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fosu)
   install(FILES src/fosu/engine/third_party/fast_float.md DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fosu/engine/third_party)
   install(EXPORT fosuTargets NAMESPACE fosu:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fosu)
   include(CMakePackageConfigHelpers)
