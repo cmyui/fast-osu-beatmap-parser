@@ -224,40 +224,61 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
     const char* next_line = newline + (newline < file_end);
     const char* line_end = newline - (newline > p && newline[-1] == '\r');
     const auto length = static_cast<size_t>(line_end - p);
-    const uint32_t m1 = nondigits & (nondigits - 1);
-    const uint32_t m2 = m1 & (m1 - 1);
-    const uint32_t m3 = m2 & (m2 - 1);
-    const uint32_t m4 = m3 & (m3 - 1);
-    const uint64_t p0 = trailing_zeros(nondigits);
-    const uint64_t p1 = trailing_zeros(m1);
-    const uint64_t p2 = trailing_zeros(m2);
-    const uint64_t p3 = trailing_zeros(m3);
-    const uint32_t prefix_end = trailing_zeros(m4);
+    uint32_t p1, p2, prefix_end, hitsound_length, mask_index;
+    bool common_layout;
+#if FOSU_SIMD_X86
+    // Common editor prefixes: ddd,ddd,ddddd,d,d and ddd,ddd,dddddd,d,d.
+    // Match every digit boundary and comma before using fixed shuffle masks.
+    if ((nondigits & 0x3ffffu) == 0x2a088u && (commas & 0xffffu) == 0xa088u) {
+      p1 = 7;
+      p2 = 13;
+      prefix_end = 17;
+      hitsound_length = 1;
+      mask_index = 504;
+      common_layout = true;
+    } else if ((nondigits & 0x7ffffu) == 0x54088u && (commas & 0x1ffffu) == 0x14088u) {
+      p1 = 7;
+      p2 = 14;
+      prefix_end = 18;
+      hitsound_length = 1;
+      mask_index = 510;
+      common_layout = true;
+    } else
+#endif
+    {
+      const uint32_t m1 = nondigits & (nondigits - 1);
+      const uint32_t m2 = m1 & (m1 - 1);
+      const uint32_t m3 = m2 & (m2 - 1);
+      const uint32_t m4 = m3 & (m3 - 1);
+      const uint64_t p0 = trailing_zeros(nondigits);
+      p1 = trailing_zeros(m1);
+      p2 = trailing_zeros(m2);
+      const uint64_t p3 = trailing_zeros(m3);
+      prefix_end = trailing_zeros(m4);
 
-    // Lanes (low to high): the first four delimiter positions. Their
-    // differences are the lengths of x, y, time and type.
-    const uint64_t delimiter_positions = p0 | p1 << 16 | p2 << 32 | p3 << 48;
-    const uint64_t field_lengths =
-        (delimiter_positions - (delimiter_positions << 16)) - 0x0002000200020001ull;
-    const uint64_t overlong_fields = field_lengths + 0x7FFD7FF67FFD7FFDull;
-    const bool field_lengths_ok =
-        ((field_lengths | overlong_fields) & 0x8000800080008000ull) == 0;
-    const uint32_t through_type = static_cast<uint32_t>((2ull << p3) - 1);
-    const bool delimiters_are_commas = ((nondigits ^ commas) & through_type) == 0;
-    const uint32_t hitsound_length = prefix_end - static_cast<uint32_t>(p3) - 1;
-    const bool hitsound_length_ok = hitsound_length - 1 <= 1;
-    const bool common_layout =
-        field_lengths_ok & delimiters_are_commas & hitsound_length_ok;
+      // Lanes (low to high): the first four delimiter positions. Their
+      // differences are the lengths of x, y, time and type.
+      const uint64_t delimiter_positions =
+          p0 | uint64_t(p1) << 16 | uint64_t(p2) << 32 | p3 << 48;
+      const uint64_t field_lengths =
+          (delimiter_positions - (delimiter_positions << 16)) - 0x0002000200020001ull;
+      const uint64_t overlong_fields = field_lengths + 0x7FFD7FF67FFD7FFDull;
+      const bool field_lengths_ok =
+          ((field_lengths | overlong_fields) & 0x8000800080008000ull) == 0;
+      const uint32_t through_type = static_cast<uint32_t>((2ull << p3) - 1);
+      const bool delimiters_are_commas = ((nondigits ^ commas) & through_type) == 0;
+      hitsound_length = prefix_end - static_cast<uint32_t>(p3) - 1;
+      const bool hitsound_length_ok = hitsound_length - 1 <= 1;
+      common_layout = field_lengths_ok & delimiters_are_commas & hitsound_length_ok;
+      mask_index =
+          static_cast<uint32_t>((delimiter_positions * 0x003C001B00020001ull) >> 48) -
+          158;
+      mask_index = mask_index * 2 + hitsound_length - 1;
+    }
     const char after_prefix = p[prefix_end];
 
     if (common_layout && (prefix_end == length || after_prefix == ',' ||
                           after_prefix == '\0')) [[likely]] {
-      // 60*p0 + 27*p1 + 2*p2 + p3 identifies the shuffle for these
-      // delimiter positions. hitSound has a separate one/two-digit dimension.
-      uint32_t mask_index =
-          static_cast<uint32_t>((delimiter_positions * 0x003C001B00020001ull) >> 48) -
-          158;
-      mask_index = mask_index * 2 + hitsound_length - 1;
       const uint32_t time_span = static_cast<uint32_t>(p2 - p1);
 
       uint32_t fields[4];
