@@ -230,24 +230,29 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
     const char* next_line = newline + (newline < file_end);
     const char* line_end = newline - (newline > p && newline[-1] == '\r');
     const auto length = static_cast<size_t>(line_end - p);
-    uint32_t p1, p2, prefix_end, hitsound_length, mask_index;
+    uint32_t y_comma, time_comma, hit_sound_end, hit_sound_digits, shuffle_index;
     bool common_layout;
 #if FOSU_SIMD_X86
-    // Common editor prefixes: ddd,ddd,ddddd,d,d and ddd,ddd,dddddd,d,d.
     // Match every digit boundary and comma before using fixed shuffle masks.
-    if ((nondigits & 0x3ffffu) == 0x2a088u && (commas & 0xffffu) == 0xa088u) {
-      p1 = 7;
-      p2 = 13;
-      prefix_end = 17;
-      hitsound_length = 1;
-      mask_index = 504;
+    if ((nondigits & kHitObjectPrefixWithFiveDigitTime.nondigit_check) ==
+            kHitObjectPrefixWithFiveDigitTime.nondigit_bits &&
+        (commas & kHitObjectPrefixWithFiveDigitTime.comma_check) ==
+            kHitObjectPrefixWithFiveDigitTime.comma_bits) {
+      y_comma = kHitObjectPrefixWithFiveDigitTime.y_comma;
+      time_comma = kHitObjectPrefixWithFiveDigitTime.time_comma;
+      hit_sound_end = kHitObjectPrefixWithFiveDigitTime.hit_sound_end;
+      hit_sound_digits = kHitObjectPrefixWithFiveDigitTime.hit_sound_digits;
+      shuffle_index = kHitObjectPrefixWithFiveDigitTime.shuffle_index;
       common_layout = true;
-    } else if ((nondigits & 0x7ffffu) == 0x54088u && (commas & 0x1ffffu) == 0x14088u) {
-      p1 = 7;
-      p2 = 14;
-      prefix_end = 18;
-      hitsound_length = 1;
-      mask_index = 510;
+    } else if ((nondigits & kHitObjectPrefixWithSixDigitTime.nondigit_check) ==
+                   kHitObjectPrefixWithSixDigitTime.nondigit_bits &&
+               (commas & kHitObjectPrefixWithSixDigitTime.comma_check) ==
+                   kHitObjectPrefixWithSixDigitTime.comma_bits) {
+      y_comma = kHitObjectPrefixWithSixDigitTime.y_comma;
+      time_comma = kHitObjectPrefixWithSixDigitTime.time_comma;
+      hit_sound_end = kHitObjectPrefixWithSixDigitTime.hit_sound_end;
+      hit_sound_digits = kHitObjectPrefixWithSixDigitTime.hit_sound_digits;
+      shuffle_index = kHitObjectPrefixWithSixDigitTime.shuffle_index;
       common_layout = true;
     } else
 #endif
@@ -256,43 +261,43 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
       const uint32_t m2 = m1 & (m1 - 1);
       const uint32_t m3 = m2 & (m2 - 1);
       const uint32_t m4 = m3 & (m3 - 1);
-      const uint64_t p0 = trailing_zeros(nondigits);
-      p1 = trailing_zeros(m1);
-      p2 = trailing_zeros(m2);
-      const uint64_t p3 = trailing_zeros(m3);
-      prefix_end = trailing_zeros(m4);
+      const uint64_t x_comma = trailing_zeros(nondigits);
+      y_comma = trailing_zeros(m1);
+      time_comma = trailing_zeros(m2);
+      const uint64_t type_comma = trailing_zeros(m3);
+      hit_sound_end = trailing_zeros(m4);
 
       // Lanes (low to high): the first four delimiter positions. Their
       // differences are the lengths of x, y, time and type.
-      const uint64_t delimiter_positions =
-          p0 | uint64_t(p1) << 16 | uint64_t(p2) << 32 | p3 << 48;
+      const uint64_t delimiter_positions = x_comma | uint64_t(y_comma) << 16 |
+                                           uint64_t(time_comma) << 32 | type_comma << 48;
       const uint64_t field_lengths =
           (delimiter_positions - (delimiter_positions << 16)) - 0x0002000200020001ull;
       const uint64_t overlong_fields = field_lengths + 0x7FFD7FF67FFD7FFDull;
       const bool field_lengths_ok =
           ((field_lengths | overlong_fields) & 0x8000800080008000ull) == 0;
-      const uint32_t through_type = static_cast<uint32_t>((2ull << p3) - 1);
+      const uint32_t through_type = static_cast<uint32_t>((2ull << type_comma) - 1);
       const bool delimiters_are_commas = ((nondigits ^ commas) & through_type) == 0;
-      hitsound_length = prefix_end - static_cast<uint32_t>(p3) - 1;
-      const bool hitsound_length_ok = hitsound_length - 1 <= 1;
+      hit_sound_digits = hit_sound_end - static_cast<uint32_t>(type_comma) - 1;
+      const bool hitsound_length_ok = hit_sound_digits - 1 <= 1;
       common_layout = field_lengths_ok & delimiters_are_commas & hitsound_length_ok;
-      mask_index =
+      shuffle_index =
           static_cast<uint32_t>((delimiter_positions * 0x003C001B00020001ull) >> 48) -
           158;
-      mask_index = mask_index * 2 + hitsound_length - 1;
+      shuffle_index = shuffle_index * 2 + hit_sound_digits - 1;
     }
-    const char after_prefix = p[prefix_end];
+    const char after_hit_sound = p[hit_sound_end];
 
-    if (common_layout && (prefix_end == length || after_prefix == ',' ||
-                          after_prefix == '\0')) [[likely]] {
-      const uint32_t time_span = static_cast<uint32_t>(p2 - p1);
+    if (common_layout && (hit_sound_end == length || after_hit_sound == ',' ||
+                          after_hit_sound == '\0')) [[likely]] {
+      const uint32_t time_span = static_cast<uint32_t>(time_comma - y_comma);
 
       uint32_t fields[4];
       double time;
       bool time_ok = true;
 #if FOSU_SIMD_X86
       const __m256i digits = _mm256_sub_epi8(ascii, zero);
-      const LaneMasks& masks = kLaneMasks[mask_index];
+      const LaneMasks& masks = kLaneMasks[shuffle_index];
       const __m256i perm =
           _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.perm));
       const __m256i shuf =
@@ -326,7 +331,7 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
       }
 #else
       const Bytes32 digits{{vsubq_u8(ascii.val[0], zero), vsubq_u8(ascii.val[1], zero)}};
-      const PrefixShuffle& masks = kPrefixShuffles[mask_index];
+      const PrefixShuffle& masks = kPrefixShuffles[shuffle_index];
       const auto field_values = decimal_groups(vqtbl2q_u8(digits, vld1q_u8(masks.bytes)));
       const auto time_groups =
           decimal_groups(vqtbl2q_u8(digits, vld1q_u8(masks.bytes + 16)));
@@ -362,29 +367,29 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
         };
         const HitObjectKind kind = classify_hitobject_kind(fields[2]);
         if (kind == HitObjectKind::Circle) {
-          if (prefix_end == length) {
+          if (hit_sound_end == length) {
             object.hit_sample = {};
-          } else if (length - prefix_end == 9 && after_prefix == ',' &&
-                     short_sample(p + prefix_end + 1)) {
-            object.hit_sample = {p + prefix_end + 1, 8};
+          } else if (length - hit_sound_end == 9 && after_hit_sound == ',' &&
+                     short_sample(p + hit_sound_end + 1)) {
+            object.hit_sample = {p + hit_sound_end + 1, 8};
           } else if (!parse_hitobject_details(beatmap, slider_count, slider_segment_count,
-                                              slider_point_count, object, p + prefix_end,
-                                              line_end, constants)) {
+                                              slider_point_count, object,
+                                              p + hit_sound_end, line_end, constants)) {
             ++malformed;
             p = next_line;
             continue;
           }
         } else if (kind == HitObjectKind::Slider) {
-          if (prefix_end >= length || after_prefix != ',' ||
+          if (hit_sound_end >= length || after_hit_sound != ',' ||
               !parse_slider(beatmap, slider_count, slider_segment_count,
-                            slider_point_count, object, p + prefix_end + 1, line_end,
+                            slider_point_count, object, p + hit_sound_end + 1, line_end,
                             constants)) {
             ++malformed;
             p = next_line;
             continue;
           }
         } else if (!parse_hitobject_details(beatmap, slider_count, slider_segment_count,
-                                            slider_point_count, object, p + prefix_end,
+                                            slider_point_count, object, p + hit_sound_end,
                                             line_end, constants)) {
           ++malformed;
           p = next_line;

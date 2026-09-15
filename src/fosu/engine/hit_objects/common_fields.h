@@ -36,7 +36,57 @@ struct HitObjectParseConstants {};  // the scalar path has no vector constants
 
 inline constexpr uint32_t kNPrefixVariants = 3 * 3 * 10 * 3;
 
+// Both SIMD shuffle tables are ordered by the widths of the .osu fields.
+constexpr uint32_t hit_object_prefix_shuffle_index(uint32_t x_digits,
+                                                   uint32_t y_digits,
+                                                   uint32_t time_digits,
+                                                   uint32_t type_digits,
+                                                   uint32_t hitsound_digits) {
+  return (((((x_digits - 1) * 3 + (y_digits - 1)) * 10 + (time_digits - 1)) * 3 +
+           (type_digits - 1)) *
+              2 +
+          hitsound_digits - 1);
+}
+
 #if FOSU_SIMD_X86
+
+struct HitObjectLinePrefix {
+  uint32_t nondigit_check, nondigit_bits;
+  uint32_t comma_check, comma_bits;
+  uint32_t y_comma, time_comma, hit_sound_end, hit_sound_digits;
+  uint32_t shuffle_index;
+};
+
+constexpr HitObjectLinePrefix make_hit_object_line_prefix(uint32_t x_digits,
+                                                          uint32_t y_digits,
+                                                          uint32_t time_digits,
+                                                          uint32_t type_digits,
+                                                          uint32_t hit_sound_digits) {
+  const uint32_t x_comma = x_digits;
+  const uint32_t y_comma = x_comma + 1 + y_digits;
+  const uint32_t time_comma = y_comma + 1 + time_digits;
+  const uint32_t type_comma = time_comma + 1 + type_digits;
+  const uint32_t hit_sound_end = type_comma + 1 + hit_sound_digits;
+  const uint32_t comma_bits =
+      (1u << x_comma) | (1u << y_comma) | (1u << time_comma) | (1u << type_comma);
+  return {
+      .nondigit_check = (1u << (hit_sound_end + 1)) - 1,
+      .nondigit_bits = comma_bits | (1u << hit_sound_end),
+      .comma_check = (1u << (type_comma + 1)) - 1,
+      .comma_bits = comma_bits,
+      .y_comma = y_comma,
+      .time_comma = time_comma,
+      .hit_sound_end = hit_sound_end,
+      .hit_sound_digits = hit_sound_digits,
+      .shuffle_index = hit_object_prefix_shuffle_index(x_digits, y_digits, time_digits,
+                                                       type_digits, hit_sound_digits),
+  };
+}
+
+inline constexpr auto kHitObjectPrefixWithFiveDigitTime =
+    make_hit_object_line_prefix(3, 3, 5, 1, 1);
+inline constexpr auto kHitObjectPrefixWithSixDigitTime =
+    make_hit_object_line_prefix(3, 3, 6, 1, 1);
 
 // One entry per (len_x, len_y, len_time, len_type, len_hit_sound) combination. `perm`
 // feeds vpermd to move each field's dwords into the lane that needs them;
@@ -64,9 +114,7 @@ consteval std::array<LaneMasks, kNPrefixVariants * 2> make_lane_masks() {
             const int p1 = p0 + 1 + ly;
             const int p2 = p1 + 1 + lt;
             const int p3 = p2 + 1 + lty;
-            const int index =
-                ((((lx - 1) * 3 + (ly - 1)) * 10 + (lt - 1)) * 3 + (lty - 1)) * 2 + lhs -
-                1;
+            const int index = hit_object_prefix_shuffle_index(lx, ly, lt, lty, lhs);
 
             int src[32];
             for (auto& s : src)
@@ -167,8 +215,7 @@ consteval auto make_prefix_shuffles() {
       for (int t = 1; t <= 10; ++t)
         for (int type = 1; type <= 3; ++type)
           for (int sound = 1; sound <= 2; ++sound) {
-            auto& m = out[((((x - 1) * 3 + y - 1) * 10 + t - 1) * 3 + type - 1) * 2 +
-                          sound - 1];
+            auto& m = out[hit_object_prefix_shuffle_index(x, y, t, type, sound)];
             for (auto& b : m.bytes)
               b = 255;
             for (int i = 0; i < x; ++i)
