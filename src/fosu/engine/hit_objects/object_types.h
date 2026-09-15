@@ -70,7 +70,19 @@ inline std::optional<TimedHitObjectDetails> parse_hold_details(double start_time
   if (*p != ',')
     return std::nullopt;
   double end_time;
-  const char* next = parse_osu_double(p + 1, end, end_time);
+  const char* field = p + 1;
+  const char* next = field;
+  const uint32_t digits = digit_run8(field);
+  if (digits && digits <= static_cast<size_t>(end - field) &&
+      (field + digits == end || field[digits] == ',' || field[digits] == ':')) {
+    const uint64_t value = swar_parse_u64(field, digits);
+    if (value <= INT32_MAX) {
+      end_time = static_cast<double>(value);
+      next = field + digits;
+    }
+  }
+  if (next == field)
+    next = parse_osu_double(field, end, end_time);
   if (next == p + 1 || (next < end && *next != ',' && *next != ':'))
     return std::nullopt;
   // The official decoder ignores a comma-separated value here; a hold's

@@ -127,6 +127,9 @@ static void test_hitobject_details() {
       {128, "", 10, ""},
       {128, ",", 10, ""},
       {128, ",12.5:0:0:0:0:", 12.5, "0:0:0:0:"},
+      {128, ",12:0:0:0:0:", 12, "0:0:0:0:"},
+      {128, ",000012:0:0:0:0:", 12, "0:0:0:0:"},
+      {128, ",2147483647:0:0:0:0:", 2147483647, "0:0:0:0:"},
       {128, ",12.5,ignored", 12.5, ""},
       {136, ",12.5,0:0", 12.5, "0:0"},  // Spinner wins over hold.
   };
@@ -161,6 +164,11 @@ static void test_hitobject_details() {
     auto input = fosu::make_padded(text);
     CHECK(!fosu::internal::parse_spinner_details(input.data.get(),
                                                  input.data.get() + input.size));
+  }
+  for (const auto text : {",2147483648:0:0:0:0:", ",12x:0:0:0:0:"}) {
+    auto input = fosu::make_padded(text);
+    CHECK(!fosu::internal::parse_hold_details(10, input.data.get(),
+                                              input.data.get() + input.size));
   }
 }
 
