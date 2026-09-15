@@ -270,10 +270,15 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
       hitsound_length = prefix_end - static_cast<uint32_t>(p3) - 1;
       const bool hitsound_length_ok = hitsound_length - 1 <= 1;
       common_layout = field_lengths_ok & delimiters_are_commas & hitsound_length_ok;
-      mask_index =
-          static_cast<uint32_t>((delimiter_positions * 0x003C001B00020001ull) >> 48) -
-          158;
-      mask_index = mask_index * 2 + hitsound_length - 1;
+      if (common_layout &&
+          (prefix_end == length || p[prefix_end] == ',' || p[prefix_end] == '\0')) {
+        // 60*p0 + 27*p1 + 2*p2 + p3 selects the delimiter shuffle.
+        // hitSound has a separate one/two-digit dimension.
+        mask_index =
+            static_cast<uint32_t>((delimiter_positions * 0x003C001B00020001ull) >> 48) -
+            158;
+        mask_index = mask_index * 2 + hitsound_length - 1;
+      }
     }
     const char after_prefix = p[prefix_end];
 
