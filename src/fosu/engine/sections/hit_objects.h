@@ -130,18 +130,15 @@ inline std::optional<HitObject> parse_hitobject_line_scalar(
 // The preceding accepted object is still in source order, including across
 // repeated HitObjects sections. No separate state crosses the engine boundary.
 inline HitObject normalize_hitobject(HitObject object,
-                                     const Beatmap& beatmap,
                                      size_t preceding_count,
+                                     bool preceding_was_spinner,
                                      int offset) {
   const bool explicit_combo = object.type & 4;
   object.time += offset;
   object.new_combo = false;
   object.combo_skip = 0;
   if (object.is_circle() || object.is_slider()) {
-    object.new_combo =
-        !preceding_count || explicit_combo ||
-        classify_hitobject_kind(beatmap.hit_objects[preceding_count - 1].type) ==
-            HitObjectKind::Spinner;
+    object.new_combo = !preceding_count || explicit_combo || preceding_was_spinner;
     object.combo_skip = explicit_combo ? (object.type >> 4) & 7 : 0;
     object.end_time = object.is_circle() ? object.time : 0;
   } else if (object.is_spinner()) {
@@ -184,8 +181,13 @@ inline const char* parse_hitobjects_section_scalar(
       if (const auto object =
               parse_hitobject_line_scalar(beatmap, slider_count, slider_segment_count,
                                           slider_point_count, p, line_end, constants)) {
-        beatmap.hit_objects[hit_object_count] =
-            normalize_hitobject(*object, beatmap, hit_object_count, time_offset);
+        const bool preceding_was_spinner =
+            hit_object_count && (object->is_circle() || object->is_slider()) &&
+            !(object->type & 4) &&
+            classify_hitobject_kind(beatmap.hit_objects[hit_object_count - 1].type) ==
+                HitObjectKind::Spinner;
+        beatmap.hit_objects[hit_object_count] = normalize_hitobject(
+            *object, hit_object_count, preceding_was_spinner, time_offset);
         ++hit_object_count;
       } else [[unlikely]] {
         ++beatmap.stats.malformed_lines;
@@ -213,6 +215,10 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
   const ByteVector zero = constants.zero;
   uint32_t fast_lines = 0;
   uint32_t malformed = 0;
+  bool preceding_was_spinner =
+      hit_object_count &&
+      classify_hitobject_kind(beatmap.hit_objects[hit_object_count - 1].type) ==
+          HitObjectKind::Spinner;
 
   while (p < file_end) {
     const Bytes32 ascii = load32(p);
@@ -385,16 +391,19 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
           continue;
         }
 
-        beatmap.hit_objects[hit_object_count] =
-            normalize_hitobject(object, beatmap, hit_object_count, time_offset);
+        beatmap.hit_objects[hit_object_count] = normalize_hitobject(
+            object, hit_object_count, preceding_was_spinner, time_offset);
+        preceding_was_spinner = kind == HitObjectKind::Spinner;
         ++hit_object_count;
       } else {
         const auto object =
             parse_hitobject_line_scalar(beatmap, slider_count, slider_segment_count,
                                         slider_point_count, p, line_end, constants);
         if (object) {
-          beatmap.hit_objects[hit_object_count] =
-              normalize_hitobject(*object, beatmap, hit_object_count, time_offset);
+          beatmap.hit_objects[hit_object_count] = normalize_hitobject(
+              *object, hit_object_count, preceding_was_spinner, time_offset);
+          preceding_was_spinner =
+              classify_hitobject_kind(object->type) == HitObjectKind::Spinner;
           ++hit_object_count;
         } else [[unlikely]] {
           ++malformed;
@@ -412,8 +421,10 @@ inline const char* parse_hitobjects_section_simd(Beatmap& beatmap,
         if (const auto object =
                 parse_hitobject_line_scalar(beatmap, slider_count, slider_segment_count,
                                             slider_point_count, p, line_end, constants)) {
-          beatmap.hit_objects[hit_object_count] =
-              normalize_hitobject(*object, beatmap, hit_object_count, time_offset);
+          beatmap.hit_objects[hit_object_count] = normalize_hitobject(
+              *object, hit_object_count, preceding_was_spinner, time_offset);
+          preceding_was_spinner =
+              classify_hitobject_kind(object->type) == HitObjectKind::Spinner;
           ++hit_object_count;
         } else [[unlikely]] {
           ++malformed;

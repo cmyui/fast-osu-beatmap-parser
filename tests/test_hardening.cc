@@ -57,6 +57,23 @@ int main() {
       "[Metadata]\nTitle:[HitObjects]\n1,2,3,1,0\n[HitObjects]\n1,2,4,1,0\n");
   auto selected = must_parse(parser, embedded, {.sections = fosu::kSectionHitObjects});
   assert(selected.hit_objects.size() == 1 && selected.hit_objects[0].time == 4);
+  // Only accepted objects carry combo state across malformed lines and
+  // repeated HitObjects sections, including after a scalar-prefix spinner.
+  for (bool simd : {false, true}) {
+    fosu::Parser combo_parser(simd ? fosu::internal::compiled_engine
+                                   : fosu_test::scalar_engine());
+    auto input = fosu::make_padded(
+        "[HitObjects]\n256,192,100,8,0,150\n0,0,160,8,0,bad\n"
+        "[Metadata]\nTitle:gap\n[HitObjects]\n"
+        "100,100,200,1,0\n101,100,201,1,0\n"
+        "1.5,2,250,8,0,300\n1,2,310,1,0\n");
+    auto map = must_parse(combo_parser, input);
+    assert(map.stats.malformed_lines == 1);
+    assert(map.hit_objects.size() == 5);
+    assert(map.hit_objects[1].new_combo);
+    assert(!map.hit_objects[2].new_combo);
+    assert(map.hit_objects[4].new_combo);
+  }
   auto point_input = fosu::make_padded("[HitObjects]\n1,2,3,2,0,B|1:2.5|3:4e1,1,10\n");
   auto points = must_parse(parser, point_input);
   assert(points.sliders.size() == 1 && points.slider_points.size() == 2);
