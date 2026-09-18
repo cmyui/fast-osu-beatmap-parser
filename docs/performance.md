@@ -43,8 +43,9 @@ Microseconds per map; lower is better.
 
 ### AMD EPYC Genoa, Linux x86-64
 
-GCC 13.3, `-O3`; AVX2 uses `x86-64-v3` and `znver4` tuning. Python is CPython
-3.12.3. Runs were pinned to one vCPU on the eight-vCPU shared-tenancy host.
+GCC 13.3, `-O3`; native AVX2 uses `x86-64-v3`, while the Python AVX2 engine
+uses AVX2, BMI and BMI2 without host-specific tuning. Python is CPython 3.12.3.
+Runs were pinned to one vCPU on the eight-vCPU shared-tenancy host.
 
 | Profile | C++ AVX2 | C++ scalar | Python AVX2 | Python scalar |
 |---|---:|---:|---:|---:|
