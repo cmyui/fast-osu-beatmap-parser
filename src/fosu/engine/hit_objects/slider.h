@@ -139,9 +139,10 @@ FOSU_NOINLINE inline bool parse_slider(
   bool has_explicit_segments = false;
 
 #if FOSU_SIMD
-  // Most sliders have only one or two ordinary points. Decode both from one
-  // 32-byte window when their delimiter shape permits it.
-  {
+  // Decode ordinary points two at a time for as long as their delimiter shape
+  // permits it. The general loop below resumes at the first unusual point.
+  while (p < end && *p == '|') {
+    const char* batch_begin = p;
     const Bytes32 input = load32(p);
     const uint32_t non_digits = nondigit_mask32(input);
 #if FOSU_SIMD_X86
@@ -243,6 +244,8 @@ FOSU_NOINLINE inline bool parse_slider(
         }
       }
     }
+    if (p == batch_begin)
+      break;
   }
 #endif
 
