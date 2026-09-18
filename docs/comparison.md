@@ -59,8 +59,8 @@ minimum–maximum range.
 
 | Python interface | Contract | Resident bytes | Warm file | Pass detail: bytes / file |
 |---|---|---:|---:|---|
-| FOSU AVX2 | Exact | 464.1 | 472.0 | 459.6–467.9 / 467.8–478.0 |
-| FOSU scalar | Exact | 516.3 | 526.6 | 512.8–518.6 / 522.0–530.5 |
+| FOSU AVX2 | Exact | 469.7 | 478.2 | 467.3–476.3 / 477.3–483.6 |
+| FOSU scalar | Exact | 517.0 | 529.7 | 514.0–520.2 / 526.6–539.1 |
 | OsuPyParser | Different | Unsupported | 4,463.2 | — / 4,407.6–4,501.1 |
 
 OsuPyParser has no published resident-input API.
@@ -73,8 +73,8 @@ work described in the next section.
 
 | Python interface | Contract | Resident bytes | Warm file |
 |---|---|---:|---:|
-| FOSU AVX2 | Exact | 444.5 | 456.0 |
-| FOSU scalar | Exact | 483.6 | 491.9 |
+| FOSU AVX2 | Exact | 448.0 | 466.2 |
+| FOSU scalar | Exact | 489.7 | 496.5 |
 | OsuPyParser | Different | Unsupported | 4,123.4 |
 | slider | Superset | 15,866.3 | 15,897.3 |
 
@@ -92,8 +92,8 @@ and slider is accessed with `hit_objects(stacking=False)`.
 
 | Python interface | Execution model | Resident bytes | Warm file | Pass detail: bytes / file |
 |---|---|---:|---:|---|
-| FOSU AVX2 | Explicit geometry options | 1,011.4 | 1,014.4 | 1,004.2–1,100.6 / 1,005.7–1,018.0 |
-| FOSU scalar | Explicit geometry options | 1,057.3 | 1,067.8 | 1,039.7–1,081.2 / 1,051.9–1,078.4 |
+| FOSU AVX2 | Explicit geometry options | 1,010.9 | 1,023.8 | 1,005.6–1,054.2 / 1,014.0–1,126.7 |
+| FOSU scalar | Explicit geometry options | 1,053.1 | 1,068.8 | 1,050.3–1,057.4 / 1,053.5–1,081.1 |
 | slider | Geometry built during parse | 17,373.7 | 17,579.3 | 17,199.1–17,511.2 / 17,340.2–17,679.2 |
 
 The same Python-dominated noise explains the near-equal FOSU backend timings in
@@ -109,8 +109,8 @@ comparison and is not directly comparable to the isolated Python batches.
 
 | Library / interface | Contract | Mean | Pass 1 / pass 2 |
 |---|---|---:|---:|
-| FOSU C++ AVX2 | Exact | 49.0 | 49.6 / 48.5 |
-| FOSU C++ scalar | Exact | 107.5 | 107.9 / 107.2 |
+| FOSU C++ AVX2 | Exact | 50.5 | 51.0 / 50.1 |
+| FOSU C++ scalar | Exact | 106.1 | 106.9 / 105.4 |
 | rosu-map (Rust) | Closest structural scope | 652.4 | 650.9 / 654.0 |
 | Coosu (C#) | Different | 760.9 | 863.3 / 658.5 |
 | OsuParsers (C#) | Superset | 1,076.9 | 1,166.5 / 987.3 |
@@ -140,7 +140,7 @@ SHA-256 is `1f7e90f4ac0222f0a2b0890e6f07c70807e9cc5d5e6ac2b392b859b2fa042895`.
 The host is a six-core Intel Core i7-8700 running Ubuntu 22.04 under WSL2 on
 Windows 11. Inputs and build products use WSL's ext4 filesystem. Runs are pinned
 to logical CPU 8 with the Windows High performance power plan selected. C++ uses
-GCC 11.4 and `-O3`; AVX2 uses `-march=x86-64-v3`, while scalar uses
+GCC 16.2 and `-O3`; AVX2 uses `-march=x86-64-v3`, while scalar uses
 `-march=x86-64` and `FOSU_DISABLE_SIMD`. Python uses CPython 3.12.14.
 
 Python headlines use the median of three independent two-pass runs after one

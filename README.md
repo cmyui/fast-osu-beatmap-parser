@@ -52,8 +52,8 @@ calculations. Every row uses the same 1,004 mutually accepted all-mode entries.
 
 | Python interface | Result contract | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---|---:|---:|
-| FOSU AVX2 | Full supported document | 464.1 | 472.0 |
-| FOSU scalar | Full supported document | 516.3 | 526.6 |
+| FOSU AVX2 | Full supported document | 469.7 | 478.2 |
+| FOSU scalar | Full supported document | 517.0 | 529.7 |
 | OsuPyParser 1.0.7 | Different eager model and derived statistics | Unsupported | 4,463.2 |
 
 Packages like rosu-pp and its Python bindings are intentionally excluded. They construct
@@ -69,8 +69,8 @@ for both parsers. All 256 entries are accepted by both parsers.
 
 | Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---:|---:|
-| FOSU AVX2 | 1,011.4 | 1,014.4 |
-| FOSU scalar | 1,057.3 | 1,067.8 |
+| FOSU AVX2 | 1,010.9 | 1,023.8 |
+| FOSU scalar | 1,053.1 | 1,068.8 |
 | slider 0.8.4 | 17,373.7 | 17,579.3 |
 
 ### Native and other languages
@@ -81,8 +81,8 @@ comparable to the isolated Python batch measurements above.
 
 | Library / interface | Result scope | Mean µs/map |
 |---|---|---:|
-| FOSU C++ AVX2 | Full supported document | 49.0 |
-| FOSU C++ scalar | Full supported document | 107.5 |
+| FOSU C++ AVX2 | Full supported document | 50.5 |
+| FOSU C++ scalar | Full supported document | 106.1 |
 | rosu-map 0.2.1 (Rust) | General-purpose document | 652.4 |
 | Coosu 2.5.1 (C#) | Typed document plus normal post-processing | 760.9 |
 | OsuParsers 1.7.2 (C#) | Rich document and storyboard decoding | 1,076.9 |
@@ -106,8 +106,8 @@ corpus.
 
 | Profile | x86 C++ AVX2 | x86 Python AVX2 | M3 C++ NEON | M3 Python NEON |
 |---|---:|---:|---:|---:|
-| Decode | 25.0 | 216.5 | 18.3 | 150.3 |
-| Gameplay | 30.3 | 273.5 | 20.5 | 186.2 |
+| Decode | 24.6 | 216.2 | 18.3 | 150.3 |
+| Gameplay | 29.5 | 273.1 | 20.5 | 186.2 |
 
 The [full comparison](docs/comparison.md) defines the result contracts, execution
 models, versions, per-pass variation and coverage. [Performance details](docs/performance.md)
