@@ -45,10 +45,15 @@ Benchmarks use public APIs and include result construction and release. Lower is
 better. Current FOSU measurements use parser source `164d691` and a representative
 1,024-entry corpus: 256 entries per game mode and 46,029,610 bytes total.
 
-### Python: structural decode
+### Python: document decode
 
-This scenario requests a normal decoded beatmap without optional gameplay
-calculations. Every row uses the same 1,004 mutually accepted all-mode entries.
+This scenario parses every supported section into the library's normal typed
+beatmap. It includes slider definitions—curve types, declared lengths, repeats,
+control points, segments and edge data—but does not calculate slider paths, end
+times, events, stacking or mod transforms. Every row uses the same 1,004
+mutually accepted all-mode entries. See the [exact result
+contract](docs/comparison.md#document-decode-result) and [versioned
+corpus](bench/corpus/README.md#performance-v1).
 
 | Python interface | Result contract | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---|---:|---:|
@@ -73,7 +78,7 @@ for both parsers. All 256 entries are accepted by both parsers.
 | FOSU scalar | 1,001.4 | 1,060.8 |
 | slider 0.8.4 | 13,855.4 | 14,411.9 |
 
-### Native and other languages
+### Native and other languages: document decode
 
 Resident-input public API latency on the same Zen 4 host. These two interleaved
 passes use 1,023 common all-mode entries and are not directly comparable to the
@@ -103,7 +108,7 @@ corpus.
 
 | Profile | x86 C++ AVX2 | x86 Python AVX2 | M3 C++ NEON | M3 Python NEON |
 |---|---:|---:|---:|---:|
-| Decode | 18.8 | 204.7 | 19.3 | 156.7 |
+| Document decode | 18.8 | 204.7 | 19.3 | 156.7 |
 | Gameplay | 22.8 | 256.8 | 21.6 | 194.9 |
 
 The [full comparison](docs/comparison.md) defines the result contracts, execution

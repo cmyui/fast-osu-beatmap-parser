@@ -2,7 +2,8 @@
 
 These adapters measure practical public entry points, not a shared internal
 representation. Comparisons are organized by requested outcome; see the
-[comparison report](../../docs/comparison.md) for the exact result contracts.
+[comparison report](../../docs/comparison.md) for the exact result contracts,
+including the records and unevaluated slider data produced by document decode.
 
 ## Reproduce on Linux/x86-64
 
@@ -16,32 +17,34 @@ From the source revision being measured:
 
 ```sh
 b="$PWD/build/comparison"
+python3 bench/corpus/fetch.py "$PWD/build/corpus/performance-v1"
+corpus="$PWD/build/corpus/performance-v1"
 bash bench/comparison/prepare.sh "$b"
 python3 -m unittest discover -s bench/comparison -p 'test_*.py'
 
 # Smoke test all adapters before the long run. Outputs must not already exist.
-taskset -c 3 "$b/venv/bin/python" bench/comparison/run.py /path/to/corpus \
+taskset -c 3 "$b/venv/bin/python" bench/comparison/run.py "$corpus" \
   "$b/variants.json" "$b/smoke.jsonl" --limit 20 --warmup 8 --rounds 1
 python3 bench/comparison/report.py "$b/smoke.jsonl" "$b/smoke-summary.json"
 
 # No builds or competing benchmarks while this runs.
-taskset -c 3 "$b/venv/bin/python" bench/comparison/run.py /path/to/corpus \
+taskset -c 3 "$b/venv/bin/python" bench/comparison/run.py "$corpus" \
   "$b/variants.json" "$b/results.jsonl" --warmup 64 --rounds 2 --reps 1 \
-  --corpus-manifest /path/to/manifest.csv
+  --corpus-manifest bench/corpus/performance-v1.csv
 python3 bench/comparison/report.py "$b/results.jsonl" "$b/summary.json"
 
 # Python headline: one API per fresh process, two complete batch passes.
-taskset -c 3 "$b/venv/bin/python" bench/comparison/python_batch.py /path/to/corpus \
+taskset -c 3 "$b/venv/bin/python" bench/comparison/python_batch.py "$corpus" \
   "$b/variants.json" "$b/summary.json" "$b/python-batch.json" --table python_all_modes
 ```
 
 The driver hashes sorted filenames and each file's SHA-256 to identify the
 corpus. To repeat the published numbers, match that fingerprint, not just its
 file count. A different local `.osu` collection is useful but is a different
-benchmark. The default mixed-mode corpus is described in
-[the corpus guide](../corpus/README.md); it is not bundled.
-The `.corpus.csv.gz` manifest publishes file IDs, sizes and content hashes so
-that downloaded copies can be checked against the measured inputs.
+benchmark. The default mixed-mode input is the immutable
+[`performance-v1`](../corpus/README.md#performance-v1) corpus. The generated
+`.corpus.csv.gz` evidence repeats file IDs, sizes and content hashes so that a
+report remains independently tied to its measured inputs.
 
 The reporter also writes a compressed `.samples.csv.gz` next to the summary.
 It preserves every timing, count, traversal checksum and error type, but omits

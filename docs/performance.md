@@ -12,7 +12,7 @@ configuration.
 
 | Profile | Exact requested work |
 |---|---|
-| Decode | Defaults: all sections, no derived gameplay values, no mods |
+| Document decode | Defaults: all sections, no derived gameplay values, no mods |
 | Hit objects only | `sections=HIT_OBJECTS` |
 | End times | `calculate_slider_end_times=true` |
 | Paths | `calculate_slider_paths=true` |
@@ -24,6 +24,8 @@ configuration.
 
 The geometry and gameplay names describe benchmark outcomes. They do not hide
 new behavior or change the parser's explicit option interface.
+The positive [document-decode result contract](comparison.md#document-decode-result)
+defines the records and slider data produced by the default profile.
 
 ## Current feature costs
 
@@ -33,7 +35,8 @@ Repeated entries are deliberate products of the stratified selection. Input is
 resident in memory. Native rows create a fresh `Parser`; Python rows include the
 complete detached Python result and its release.
 
-The corpus SHA-256 is
+The exact input can be materialized as
+[`performance-v1`](../bench/corpus/README.md#performance-v1). Its corpus SHA-256 is
 `1f7e90f4ac0222f0a2b0890e6f07c70807e9cc5d5e6ac2b392b859b2fa042895`.
 
 Each cell is the arithmetic mean of the fastest sample for every corpus entry.
@@ -48,7 +51,7 @@ GCC 13.3, `-O3`; AVX2 uses `x86-64-v3` and `znver4` tuning. Python is CPython
 
 | Profile | C++ AVX2 | C++ scalar | Python AVX2 | Python scalar |
 |---|---:|---:|---:|---:|
-| Decode | 24.5 | 81.3 | 421.9 | 478.2 |
+| Document decode | 24.5 | 81.3 | 421.9 | 478.2 |
 | Hit objects only | 21.1 | 73.4 | 398.6 | 451.6 |
 | End times | 26.7 | 83.7 | 425.4 | 480.8 |
 | Paths | 47.3 | 106.9 | 599.1 | 654.0 |
@@ -64,7 +67,7 @@ Apple Clang 17, `-O3`; Python is CPython 3.12.9.
 
 | Profile | C++ NEON | C++ scalar | Python NEON | Python scalar |
 |---|---:|---:|---:|---:|
-| Decode | 20.3 | 62.0 | 311.5 | 354.5 |
+| Document decode | 20.3 | 62.0 | 311.5 | 354.5 |
 | Hit objects only | 18.1 | 55.3 | 294.6 | 334.4 |
 | End times | 21.4 | 63.2 | 313.0 | 355.6 |
 | Paths | 32.4 | 74.2 | 432.5 | 476.3 |
@@ -91,7 +94,7 @@ that v128 parsing is faster than legacy parsing.
 
 | Profile | x86 C++ AVX2 | x86 C++ scalar | x86 Python AVX2 | x86 Python scalar | M3 C++ NEON | M3 C++ scalar | M3 Python NEON | M3 Python scalar |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Decode | 18.8 | 51.3 | 204.7 | 237.7 | 19.3 | 44.5 | 156.7 | 188.2 |
+| Document decode | 18.8 | 51.3 | 204.7 | 237.7 | 19.3 | 44.5 | 156.7 | 188.2 |
 | Hit objects only | 15.1 | 43.8 | 185.2 | 215.3 | 16.3 | 37.3 | 143.5 | 167.9 |
 | End times | 19.1 | 52.0 | 205.5 | 238.2 | 19.6 | 44.6 | 157.9 | 186.8 |
 | Paths | 21.4 | 54.5 | 227.8 | 263.3 | 20.8 | 46.0 | 174.2 | 202.1 |
@@ -109,7 +112,7 @@ reported on the 256-entry standard subset (255 unique beatmaps, 10,347,075 bytes
 
 | Profile | x86 C++ AVX2 | x86 Python AVX2 | ARM C++ NEON | ARM Python NEON |
 |---|---:|---:|---:|---:|
-| Decode | 24.8 | 487.6 | 20.7 | 353.2 |
+| Document decode | 24.8 | 487.6 | 20.7 | 353.2 |
 | DT | 25.3 | 479.3 | 21.0 | 347.0 |
 | HR+DT | 25.8 | 474.4 | 21.3 | 345.6 |
 | Full HR+DT | 112.6 | 1,672.3 | 69.1 | 1,167.1 |

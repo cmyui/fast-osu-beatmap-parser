@@ -10,8 +10,9 @@ Performance is grouped by requested outcome. A number is published only when the
 parser's public API produces that outcome; unavailable work is `Unsupported`.
 Unavoidable additional work stays inside the timer.
 
-- **Structural decode** returns the parser's normal typed beatmap without asking
-  for optional geometry, gameplay transforms, difficulty or PP.
+- **Document decode** returns the parser's normal typed beatmap, including all
+  supported sections and structural slider data, without asking for optional
+  geometry, gameplay transforms, difficulty or PP.
 - **Geometry-ready** additionally requires slider end times and a public way to
   query slider paths. Representations may still differ.
 - **Gameplay-ready** means FOSU slider events and stacking. No measured competitor
@@ -24,14 +25,39 @@ Unavoidable additional work stays inside the timer.
 the parser unavoidably performs additional work. `Different` covers richer models
 whose fields and processing do not form a strict subset or superset.
 
+### Document decode result
+
+The FOSU document-decode benchmark calls the ordinary public parse API with all
+sections selected and every optional calculation disabled. It constructs:
+
+- General, Editor, Metadata and Difficulty fields.
+- Background, video and break events, combo colours and timing points.
+- Typed circles, sliders, spinners and mania holds, including hit samples.
+- Each slider's curve type, repeat count, declared pixel length, control points,
+  modern segment boundaries, explicit B-spline degree and raw edge fields.
+
+It does **not** approximate control points into a queryable path, resolve slider
+end times, generate slider events, apply stacking or mods, convert objects for a
+ruleset, or calculate difficulty or PP. “Slider definition” therefore means the
+data encoded in the `.osu` line; “slider geometry” means the optional evaluated
+path and is a separate benchmark contract.
+
+The native result is a parser-owned `Beatmap`: scalar/string header fields plus
+spans of breaks, colours, timing points, hit objects, sliders, curve segments and
+slider points. The Python result contains equivalent eager, detached dataclasses
+and lists. Native-to-Python construction and later result release are inside the
+Python timer. Competitors use their normal documented public models; the table
+labels unavoidable additional or different work rather than claiming identical
+representations.
+
 ## Capability and execution model
 
-| Library | Normal timed result | Slider/gameplay work | Relation to structural decode |
+| Library | Normal timed result | Slider/gameplay work | Relation to document decode |
 |---|---|---|---|
 | FOSU | Full supported document; detached objects in Python and parser-owned records in C++ | End times, paths, events, stacking and mods are explicit parse options | Exact baseline |
-| slider 0.8.4 | Eager Python beatmap objects; reliable on the measured standard, taiko and catch maps | Slider end times and curve objects are eager; stacking and mods are follow-up calls | Superset for structural decode; comparable geometry outcome |
+| slider 0.8.4 | Eager Python beatmap objects; reliable on the measured standard, taiko and catch maps | Slider end times and curve objects are eager; stacking and mods are follow-up calls | Superset for document decode; comparable geometry outcome |
 | OsuPyParser 1.0.7 | Eager Python document, file hash and derived statistics | File-only public API | Different, with additional eager work |
-| rosu-map 0.2.1 | General-purpose legacy document | Ordinary decode only | Closest structural scope; representation differs |
+| rosu-map 0.2.1 | General-purpose legacy document | Ordinary decode only | Closest document-decode scope; representation differs |
 | osu!lazer 2026.730.0 | Official rich ruleset model | Defaults, samples, control points and stable object sorting are eager | Superset work |
 | OsuParsers 1.7.2 | Rich C# document | Storyboard decoding is eager | Superset work |
 | Coosu 2.5.1 | Typed C# document | Normal post-deserialization processing is eager | Different, with additional work |
@@ -45,7 +71,7 @@ misleading. Replay-only libraries are not beatmap decoders. `oppai-ng` is also
 omitted because its documented convenience API calculates PP; reaching into
 internal parsing would not be a public-API comparison.
 
-## Python structural decode: all modes
+## Python document decode: all modes
 
 Two isolated complete-process batch passes on the 1,004-entry common cohort:
 250 standard, 248 taiko, 254 catch and 252 mania entries; 44,321,288 bytes.
@@ -59,7 +85,7 @@ Microseconds per map; lower is better.
 
 OsuPyParser has no published resident-input API.
 
-## Python structural decode: standard
+## Python document decode: standard
 
 The 250-entry common standard cohort allows standard-only and standard-focused
 libraries to participate. slider's normal parse already performs the geometry
@@ -94,7 +120,7 @@ The same Python-dominated noise explains the near-equal FOSU backend timings in
 this scenario; native feature costs are reported separately in
 [the FOSU performance matrix](performance.md).
 
-## Native and cross-language structural decode
+## Native and cross-language document decode
 
 Resident-input API latency over the 1,023-entry common all-mode cohort. Every
 runtime is a persistent worker, but each timed call creates a fresh parser/result.
@@ -105,7 +131,7 @@ comparison and is not directly comparable to the isolated Python batches.
 |---|---|---:|---:|
 | FOSU C++ AVX2 | Exact | 46.1 | 46.4 / 45.9 |
 | FOSU C++ scalar | Exact | 103.5 | 103.8 / 103.2 |
-| rosu-map (Rust) | Closest structural scope | 576.4 | 575.9 / 577.0 |
+| rosu-map (Rust) | Closest document-decode scope | 576.4 | 575.9 / 577.0 |
 | Coosu (C#) | Different | 723.9 | 835.1 / 612.7 |
 | OsuParsers (C#) | Superset | 860.5 | 932.0 / 789.0 |
 | Official osu!lazer decoder (C#) | Superset | 2,957.1 | 3,162.8 / 2,751.4 |
@@ -149,6 +175,7 @@ JSON IPC are outside the timer. Managed runtimes keep normal GC behavior. A
 
 ## Reproduction
 
-See [the comparison harness](../bench/comparison/README.md) for pinned versions,
-commands, inclusion rules and timing boundaries. Generated evidence belongs in
-ignored `build/` directories; the corpus itself is not bundled.
+Materialize the exact [`performance-v1`](../bench/corpus/README.md#performance-v1)
+input before running the [comparison harness](../bench/comparison/README.md),
+which documents pinned versions, commands, inclusion rules and timing
+boundaries. Generated evidence belongs in ignored `build/` directories.
