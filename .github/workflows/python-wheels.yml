@@ -36,6 +36,8 @@ jobs:
       - uses: pypa/cibuildwheel@v4.2.1
         env:
           CIBW_ARCHS: native
+          CIBW_BEFORE_ALL_LINUX: sh {project}/.github/scripts/install-gcc-15.sh
+          CIBW_ENVIRONMENT_LINUX: CC=/usr/local/bin/gcc CXX=/usr/local/bin/g++
       - uses: actions/upload-artifact@v4
         with:
           name: fosu-wheel-${{ matrix.platform }}

@@ -54,8 +54,9 @@ pre-commit run --all-files
 Reinstall after native changes before testing the installed Python API.
 `FOSU_BACKEND=scalar` forces scalar selection before Python import.
 `python -m build` builds the source archive and wheel when packaging needs checking.
-Release Linux wheels bundle the C++ runtime; source installs can request this
-with `FOSU_BUNDLE_RUNTIME=1`.
+Release Linux wheels are built with the packaged GCC 15 toolchain and bundle the
+C++ runtime; source installs use the selected local compiler and can request
+runtime bundling with `FOSU_BUNDLE_RUNTIME=1`.
 
 Ordinary isolated pip builds obtain compatible CMake and Ninja versions through
 the build backend. Ninja is not a system prerequisite: scikit-build-core falls

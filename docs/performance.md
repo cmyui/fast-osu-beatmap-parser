@@ -44,22 +44,22 @@ is better.
 
 ### Intel Core i7-8700, Linux x86-64 under WSL2
 
-GCC 11.4, `-O3`; native AVX2 uses `x86-64-v3`, while the Python AVX2 engine
+GCC 15.2, `-O3`; native AVX2 uses `x86-64-v3`, while the Python AVX2 engine
 uses AVX2, BMI and BMI2 without host-specific tuning. Python is CPython 3.12.14.
 Runs used the WSL2 ext4 filesystem, were pinned to logical CPU 8 and temporarily
 selected the Windows High performance power plan.
 
 | Profile | C++ AVX2 | C++ scalar | Python AVX2 | Python scalar |
 |---|---:|---:|---:|---:|
-| Decode | 29.5 | 87.1 | 435.1 | 486.6 |
-| Hit objects only | 25.4 | 78.3 | 410.4 | 456.8 |
-| End times | 31.8 | 90.0 | 437.6 | 489.2 |
-| Paths | 55.3 | 113.0 | 614.9 | 665.5 |
-| Geometry | 56.7 | 114.1 | 614.1 | 664.6 |
-| Events | 64.1 | 121.3 | 876.8 | 928.3 |
-| Stacking | 52.7 | 110.4 | 594.4 | 644.5 |
-| Gameplay | 69.0 | 126.5 | 931.2 | 983.9 |
-| Double time | 31.4 | 88.8 | 440.6 | 491.8 |
+| Decode | 28.5 | 84.1 | 439.6 | 487.5 |
+| Hit objects only | 24.1 | 75.0 | 413.2 | 458.7 |
+| End times | 31.0 | 86.9 | 442.1 | 490.5 |
+| Paths | 54.5 | 109.4 | 618.3 | 666.9 |
+| Geometry | 55.8 | 110.4 | 617.1 | 665.4 |
+| Events | 62.6 | 117.5 | 877.2 | 925.1 |
+| Stacking | 51.5 | 106.9 | 598.0 | 646.2 |
+| Gameplay | 67.0 | 122.6 | 932.7 | 980.1 |
+| Double time | 30.2 | 85.6 | 445.1 | 492.3 |
 
 ### Apple M3 Max, macOS AArch64
 
@@ -94,15 +94,15 @@ that v128 parsing is faster than legacy parsing.
 
 | Profile | x86 C++ AVX2 | x86 C++ scalar | x86 Python AVX2 | x86 Python scalar | M3 C++ NEON | M3 C++ scalar | M3 Python NEON | M3 Python scalar |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Decode | 25.0 | 57.9 | 216.5 | 243.1 | 18.3 | 38.7 | 150.3 | 172.7 |
-| Hit objects only | 20.4 | 49.5 | 196.3 | 219.1 | 15.3 | 31.9 | 136.3 | 156.0 |
-| End times | 25.4 | 58.4 | 217.4 | 244.5 | 18.5 | 38.9 | 150.5 | 174.1 |
-| Paths | 28.1 | 61.0 | 240.1 | 265.9 | 19.8 | 40.0 | 165.3 | 188.6 |
-| Geometry | 28.4 | 61.2 | 240.4 | 265.8 | 19.7 | 40.0 | 165.0 | 188.0 |
-| Events | 29.5 | 62.2 | 265.0 | 290.2 | 20.1 | 40.4 | 179.7 | 204.0 |
-| Stacking | 28.6 | 61.6 | 244.1 | 269.9 | 19.9 | 40.0 | 167.8 | 191.2 |
-| Gameplay | 30.3 | 63.0 | 273.5 | 299.0 | 20.5 | 40.6 | 186.2 | 209.6 |
-| Double time | 25.8 | 58.7 | 218.2 | 245.2 | 18.6 | 38.9 | 151.2 | 173.2 |
+| Decode | 23.7 | 55.0 | 216.7 | 245.0 | 18.3 | 38.7 | 150.3 | 172.7 |
+| Hit objects only | 18.8 | 46.1 | 196.0 | 222.3 | 15.3 | 31.9 | 136.3 | 156.0 |
+| End times | 24.0 | 55.3 | 218.3 | 246.8 | 18.5 | 38.9 | 150.5 | 174.1 |
+| Paths | 26.6 | 57.9 | 238.9 | 268.6 | 19.8 | 40.0 | 165.3 | 188.6 |
+| Geometry | 26.8 | 58.2 | 239.0 | 268.3 | 19.7 | 40.0 | 165.0 | 188.0 |
+| Events | 27.8 | 59.1 | 263.1 | 293.0 | 20.1 | 40.4 | 179.7 | 204.0 |
+| Stacking | 27.1 | 58.5 | 243.2 | 273.3 | 19.9 | 40.0 | 167.8 | 191.2 |
+| Gameplay | 28.6 | 59.9 | 273.4 | 302.4 | 20.5 | 40.6 | 186.2 | 209.6 |
+| Double time | 24.4 | 55.7 | 218.3 | 247.5 | 18.6 | 38.9 | 151.2 | 173.2 |
 
 ## Standard gameplay and mods
 
@@ -112,10 +112,10 @@ reported on the 256-entry standard subset (255 unique beatmaps, 10,347,075 bytes
 
 | Profile | x86 C++ AVX2 | x86 Python AVX2 | ARM C++ NEON | ARM Python NEON |
 |---|---:|---:|---:|---:|
-| Decode | 31.4 | 492.9 | 19.4 | 336.0 |
-| DT | 30.1 | 486.2 | 19.6 | 333.9 |
-| HR+DT | 30.4 | 487.3 | 19.9 | 332.7 |
-| Full HR+DT | 136.7 | 1,696.4 | 63.4 | 1,144.6 |
+| Decode | 29.4 | 493.0 | 19.4 | 336.0 |
+| DT | 28.5 | 486.9 | 19.6 | 333.9 |
+| HR+DT | 28.8 | 485.2 | 19.9 | 332.7 |
+| Full HR+DT | 132.9 | 1,684.7 | 63.4 | 1,144.6 |
 
 ## Reproduce FOSU measurements
 
