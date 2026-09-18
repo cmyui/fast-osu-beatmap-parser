@@ -1,8 +1,11 @@
 # Public parser comparison
 
-Measured on 2026-09-12 from FOSU revision `164d691`. This comparison asks how
-long documented public APIs take to produce useful beatmap results. It does not
-pretend that every parser returns the same model.
+FOSU rows were measured on 2026-09-18 from revision `2d68f2a`. Competitor rows
+retain their 2026-09-12 measurements. The refresh keeps the same host, fixed
+cohorts and timing protocols; the native refresh also keeps the complete
+interleaved worker schedule. This comparison asks how long documented public
+APIs take to produce useful beatmap results. It does not pretend that every
+parser returns the same model.
 
 ## Result contracts
 
@@ -53,8 +56,8 @@ Microseconds per map; lower is better.
 
 | Python interface | Contract | Resident bytes | Warm file | Passes: bytes / file |
 |---|---|---:|---:|---|
-| FOSU AVX2 | Exact | 438.1 | 460.3 | 431.6 / 458.9; 444.6 / 461.8 |
-| FOSU scalar | Exact | 497.5 | 522.2 | 492.5 / 512.3; 502.5 / 532.0 |
+| FOSU AVX2 | Exact | 453.1 | 474.8 | 456.4 / 461.4; 449.7 / 488.3 |
+| FOSU scalar | Exact | 507.5 | 506.5 | 501.4 / 500.3; 513.6 / 512.8 |
 | OsuPyParser | Different | Unsupported | 4,817.2 | —; 4,820.1 / 4,814.3 |
 
 OsuPyParser has no published resident-input API.
@@ -67,8 +70,8 @@ work described in the next section.
 
 | Python interface | Contract | Resident bytes | Warm file |
 |---|---|---:|---:|
-| FOSU AVX2 | Exact | 407.6 | 419.9 |
-| FOSU scalar | Exact | 460.7 | 472.4 |
+| FOSU AVX2 | Exact | 430.7 | 430.1 |
+| FOSU scalar | Exact | 468.4 | 466.3 |
 | OsuPyParser | Different | Unsupported | 4,409.3 |
 | slider | Superset | 12,733.3 | 12,523.7 |
 
@@ -86,8 +89,8 @@ and slider is accessed with `hit_objects(stacking=False)`.
 
 | Python interface | Execution model | Resident bytes | Warm file | Passes: bytes / file |
 |---|---|---:|---:|---|
-| FOSU AVX2 | Explicit geometry options | 991.6 | 976.2 | 970.8 / 976.4; 1,012.4 / 976.1 |
-| FOSU scalar | Explicit geometry options | 1,001.4 | 1,060.8 | 1,009.3 / 1,048.5; 993.6 / 1,073.1 |
+| FOSU AVX2 | Explicit geometry options | 1,033.2 | 1,064.7 | 1,028.4 / 1,056.4; 1,037.9 / 1,073.1 |
+| FOSU scalar | Explicit geometry options | 1,020.1 | 1,033.7 | 1,029.1 / 1,024.1; 1,011.0 / 1,043.3 |
 | slider | Geometry built during parse | 13,855.4 | 14,411.9 | 13,633.0 / 14,421.0; 14,077.7 / 14,402.7 |
 
 The same Python-dominated noise explains the near-equal FOSU backend timings in
@@ -103,8 +106,8 @@ comparison and is not directly comparable to the isolated Python batches.
 
 | Library / interface | Contract | Mean | Pass 1 / pass 2 |
 |---|---|---:|---:|
-| FOSU C++ AVX2 | Exact | 46.1 | 46.4 / 45.9 |
-| FOSU C++ scalar | Exact | 103.5 | 103.8 / 103.2 |
+| FOSU C++ AVX2 | Exact | 45.8 | 46.0 / 45.6 |
+| FOSU C++ scalar | Exact | 91.4 | 91.9 / 90.9 |
 | rosu-map (Rust) | Closest structural scope | 576.4 | 575.9 / 577.0 |
 | Coosu (C#) | Different | 723.9 | 835.1 / 612.7 |
 | OsuParsers (C#) | Superset | 860.5 | 932.0 / 789.0 |
