@@ -50,14 +50,18 @@ internal parsing would not be a public-API comparison.
 
 ## Python structural decode: all modes
 
-Two isolated complete-process batch passes on the 1,004-entry common cohort:
+Isolated complete-process batch passes on the 1,004-entry common cohort:
 250 standard, 248 taiko, 254 catch and 252 mania entries; 44,321,288 bytes.
 Microseconds per map; lower is better.
 
-| Python interface | Contract | Resident bytes | Warm file | Passes: bytes / file |
+Refreshed FOSU values average six complete passes from three independent
+two-pass runs; their pass detail is the minimum–maximum range. Retained
+competitor values average their original two passes and list pass 1 / pass 2.
+
+| Python interface | Contract | Resident bytes | Warm file | Pass detail: bytes / file |
 |---|---|---:|---:|---|
-| FOSU AVX2 | Exact | 453.1 | 474.8 | 456.4 / 461.4; 449.7 / 488.3 |
-| FOSU scalar | Exact | 507.5 | 506.5 | 501.4 / 500.3; 513.6 / 512.8 |
+| FOSU AVX2 | Exact | 450.2 | 451.2 | 434.0–464.0 / 439.9–464.2 |
+| FOSU scalar | Exact | 497.0 | 513.6 | 481.4–516.3 / 494.1–527.4 |
 | OsuPyParser | Different | Unsupported | 4,817.2 | —; 4,820.1 / 4,814.3 |
 
 OsuPyParser has no published resident-input API.
@@ -70,8 +74,8 @@ work described in the next section.
 
 | Python interface | Contract | Resident bytes | Warm file |
 |---|---|---:|---:|
-| FOSU AVX2 | Exact | 430.7 | 430.1 |
-| FOSU scalar | Exact | 468.4 | 466.3 |
+| FOSU AVX2 | Exact | 418.1 | 433.2 |
+| FOSU scalar | Exact | 452.2 | 468.8 |
 | OsuPyParser | Different | Unsupported | 4,409.3 |
 | slider | Superset | 12,733.3 | 12,523.7 |
 
@@ -87,10 +91,10 @@ caller can inspect end times and query the slider path—but the representations
 are not identical. Stacking is excluded: FOSU leaves `apply_stacking` disabled,
 and slider is accessed with `hit_objects(stacking=False)`.
 
-| Python interface | Execution model | Resident bytes | Warm file | Passes: bytes / file |
+| Python interface | Execution model | Resident bytes | Warm file | Pass detail: bytes / file |
 |---|---|---:|---:|---|
-| FOSU AVX2 | Explicit geometry options | 1,033.2 | 1,064.7 | 1,028.4 / 1,056.4; 1,037.9 / 1,073.1 |
-| FOSU scalar | Explicit geometry options | 1,020.1 | 1,033.7 | 1,029.1 / 1,024.1; 1,011.0 / 1,043.3 |
+| FOSU AVX2 | Explicit geometry options | 999.2 | 1,020.0 | 965.0–1,039.7 / 974.2–1,070.1 |
+| FOSU scalar | Explicit geometry options | 1,047.8 | 1,039.8 | 999.2–1,103.7 / 1,014.3–1,094.3 |
 | slider | Geometry built during parse | 13,855.4 | 14,411.9 | 13,633.0 / 14,421.0; 14,077.7 / 14,402.7 |
 
 The same Python-dominated noise explains the near-equal FOSU backend timings in
@@ -139,11 +143,13 @@ Runs are pinned to logical CPU 3. C++ uses GCC 13.3 and `-O3`; AVX2 uses
 `-march=x86-64-v3 -mtune=znver4`, while scalar uses `-march=x86-64` and
 `FOSU_DISABLE_SIMD`. Python uses CPython 3.12.3.
 
-Python headline jobs each receive a fresh process, preload the common cohort,
-warm 64 evenly spaced entries three times, then time one complete pass. Pass two
-reverses job order. Parsing, required conversion, allocations, result inspection,
-normal GC and release are timed; imports, preload, warmup and shutdown are not.
-Warm-file calls open, read and close files already in the OS page cache.
+Refreshed FOSU Python headlines average three independent two-pass runs; retained
+competitor values use their original two passes. Each job receives a fresh
+process, preloads the common cohort, warms 64 evenly spaced entries three times,
+then times one complete pass. Pass two reverses job order. Parsing, required
+conversion, allocations, result inspection, normal GC and release are timed;
+imports, preload, warmup and shutdown are not. Warm-file calls open, read and
+close files already in the OS page cache.
 
 The cross-language sweep keeps independent workers alive, warms each worker,
 rotates job order per entry and reverses it in pass two. Input preparation and
