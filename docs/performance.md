@@ -36,28 +36,30 @@ complete detached Python result and its release.
 The corpus SHA-256 is
 `1f7e90f4ac0222f0a2b0890e6f07c70807e9cc5d5e6ac2b392b859b2fa042895`.
 
-Each cell is the arithmetic mean of the fastest sample for every corpus entry.
-Native uses five samples and Python three, with profile order rotated per entry.
-This is a lower-envelope feature-cost comparison, not a latency percentile.
-Microseconds per map; lower is better.
+Each run reports the arithmetic mean of the fastest sample for every corpus
+entry. Native uses five samples and Python three, with profile order rotated per
+entry. Each cell averages three independent runs. This is a lower-envelope
+feature-cost comparison, not a latency percentile. Microseconds per map; lower
+is better.
 
-### AMD EPYC Genoa, Linux x86-64
+### Intel Core i7-8700, Linux x86-64 under WSL2
 
-GCC 13.3, `-O3`; native AVX2 uses `x86-64-v3`, while the Python AVX2 engine
-uses AVX2, BMI and BMI2 without host-specific tuning. Python is CPython 3.12.3.
-Runs were pinned to one vCPU on the eight-vCPU shared-tenancy host.
+GCC 11.4, `-O3`; native AVX2 uses `x86-64-v3`, while the Python AVX2 engine
+uses AVX2, BMI and BMI2 without host-specific tuning. Python is CPython 3.12.14.
+Runs used the WSL2 ext4 filesystem, were pinned to logical CPU 8 and temporarily
+selected the Windows High performance power plan.
 
 | Profile | C++ AVX2 | C++ scalar | Python AVX2 | Python scalar |
 |---|---:|---:|---:|---:|
-| Decode | 19.8 | 68.2 | 416.5 | 474.0 |
-| Hit objects only | 16.4 | 60.4 | 394.0 | 447.6 |
-| End times | 22.0 | 70.3 | 419.2 | 476.6 |
-| Paths | 41.7 | 92.6 | 592.7 | 651.8 |
-| Geometry | 42.5 | 93.4 | 591.7 | 648.7 |
-| Events | 49.4 | 101.5 | 843.5 | 905.8 |
-| Stacking | 38.7 | 89.8 | 571.2 | 627.3 |
-| Gameplay | 52.6 | 105.3 | 894.1 | 955.2 |
-| Double time | 21.7 | 70.4 | 423.2 | 479.7 |
+| Decode | 29.5 | 87.1 | 435.1 | 486.6 |
+| Hit objects only | 25.4 | 78.3 | 410.4 | 456.8 |
+| End times | 31.8 | 90.0 | 437.6 | 489.2 |
+| Paths | 55.3 | 113.0 | 614.9 | 665.5 |
+| Geometry | 56.7 | 114.1 | 614.1 | 664.6 |
+| Events | 64.1 | 121.3 | 876.8 | 928.3 |
+| Stacking | 52.7 | 110.4 | 594.4 | 644.5 |
+| Gameplay | 69.0 | 126.5 | 931.2 | 983.9 |
+| Double time | 31.4 | 88.8 | 440.6 | 491.8 |
 
 ### Apple M3 Max, macOS AArch64
 
@@ -92,15 +94,15 @@ that v128 parsing is faster than legacy parsing.
 
 | Profile | x86 C++ AVX2 | x86 C++ scalar | x86 Python AVX2 | x86 Python scalar | M3 C++ NEON | M3 C++ scalar | M3 Python NEON | M3 Python scalar |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Decode | 17.1 | 45.6 | 201.1 | 229.8 | 18.3 | 38.7 | 150.3 | 172.7 |
-| Hit objects only | 13.4 | 38.1 | 182.2 | 207.6 | 15.3 | 31.9 | 136.3 | 156.0 |
-| End times | 17.5 | 46.0 | 202.1 | 230.4 | 18.5 | 38.9 | 150.5 | 174.1 |
-| Paths | 19.7 | 48.4 | 222.1 | 251.8 | 19.8 | 40.0 | 165.3 | 188.6 |
-| Geometry | 19.9 | 48.6 | 222.0 | 251.2 | 19.7 | 40.0 | 165.0 | 188.0 |
-| Events | 20.8 | 49.7 | 244.9 | 275.4 | 20.1 | 40.4 | 179.7 | 204.0 |
-| Stacking | 20.0 | 48.8 | 225.8 | 256.0 | 19.9 | 40.0 | 167.8 | 191.2 |
-| Gameplay | 21.3 | 50.3 | 252.4 | 283.2 | 20.5 | 40.6 | 186.2 | 209.6 |
-| Double time | 18.2 | 46.6 | 202.3 | 231.0 | 18.6 | 38.9 | 151.2 | 173.2 |
+| Decode | 25.0 | 57.9 | 216.5 | 243.1 | 18.3 | 38.7 | 150.3 | 172.7 |
+| Hit objects only | 20.4 | 49.5 | 196.3 | 219.1 | 15.3 | 31.9 | 136.3 | 156.0 |
+| End times | 25.4 | 58.4 | 217.4 | 244.5 | 18.5 | 38.9 | 150.5 | 174.1 |
+| Paths | 28.1 | 61.0 | 240.1 | 265.9 | 19.8 | 40.0 | 165.3 | 188.6 |
+| Geometry | 28.4 | 61.2 | 240.4 | 265.8 | 19.7 | 40.0 | 165.0 | 188.0 |
+| Events | 29.5 | 62.2 | 265.0 | 290.2 | 20.1 | 40.4 | 179.7 | 204.0 |
+| Stacking | 28.6 | 61.6 | 244.1 | 269.9 | 19.9 | 40.0 | 167.8 | 191.2 |
+| Gameplay | 30.3 | 63.0 | 273.5 | 299.0 | 20.5 | 40.6 | 186.2 | 209.6 |
+| Double time | 25.8 | 58.7 | 218.2 | 245.2 | 18.6 | 38.9 | 151.2 | 173.2 |
 
 ## Standard gameplay and mods
 
@@ -110,10 +112,10 @@ reported on the 256-entry standard subset (255 unique beatmaps, 10,347,075 bytes
 
 | Profile | x86 C++ AVX2 | x86 Python AVX2 | ARM C++ NEON | ARM Python NEON |
 |---|---:|---:|---:|---:|
-| Decode | 20.1 | 470.7 | 19.4 | 336.0 |
-| DT | 20.0 | 459.0 | 19.6 | 333.9 |
-| HR+DT | 20.5 | 458.9 | 19.9 | 332.7 |
-| Full HR+DT | 109.5 | 1,639.9 | 63.4 | 1,144.6 |
+| Decode | 31.4 | 492.9 | 19.4 | 336.0 |
+| DT | 30.1 | 486.2 | 19.6 | 333.9 |
+| HR+DT | 30.4 | 487.3 | 19.9 | 332.7 |
+| Full HR+DT | 136.7 | 1,696.4 | 63.4 | 1,144.6 |
 
 ## Reproduce FOSU measurements
 

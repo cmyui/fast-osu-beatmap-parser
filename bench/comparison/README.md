@@ -6,11 +6,12 @@ representation. Comparisons are organized by requested outcome; see the
 
 ## Reproduce on Linux/x86-64
 
-Requirements: CPython 3.12, GCC 13.3, Node 20/npm 10, Rust 1.98.1 and .NET SDK
-10.0.400; `curl`, `sha256sum`, `taskset`, and an AVX2-capable CPU. The benchmark
-dependencies are isolated from FOSU's runtime dependencies. Package versions
-and Cargo/npm/NuGet dependency graphs are pinned here. Use an isolated benchmark
-environment: some historical libraries bring old transitive dependencies.
+Published x86 results use CPython 3.12.14, GCC 11.4, Node 20.19.5/npm 10.8.2,
+Rust 1.98.1 and .NET SDK 10.0.400; `curl`, `sha256sum`, `taskset`, and an
+AVX2-capable CPU are also required. The benchmark dependencies are isolated from
+FOSU's runtime dependencies. Package versions and Cargo/npm/NuGet dependency
+graphs are pinned here. Use an isolated benchmark environment: some historical
+libraries bring old transitive dependencies.
 
 From the source revision being measured:
 
