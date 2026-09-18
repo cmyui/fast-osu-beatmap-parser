@@ -27,62 +27,7 @@ jobs:
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          import re
-          import subprocess
-          import tomllib
-          from pathlib import Path
-
-          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
-          match = re.search(
-              r"project\(fosu VERSION ([0-9]+\.[0-9]+\.[0-9]+) LANGUAGES",
-              Path("CMakeLists.txt").read_text(),
-          )
-          if not match or match.group(1) != version:
-              raise SystemExit("pyproject.toml and CMakeLists.txt versions differ")
-          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
-              raise SystemExit(f"unsupported release version: {version}")
-
-          current = tuple(map(int, version.split(".")))
-          tag = f"v{version}"
-          tags = subprocess.check_output(
-              ["git", "tag", "--list", "v[0-9]*.[0-9]*.[0-9]*"], text=True
-          ).splitlines()
-          releases = [
-              tuple(map(int, value[1:].split(".")))
-              for value in tags
-              if re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", value)
-          ]
-          latest = max(releases, default=(0, 0, 0))
-          tag_exists = tag in tags
-          if current < latest or (current == latest and not tag_exists):
-              raise SystemExit(f"version {version} is not newer than the latest tag")
-
-          release = subprocess.run(
-              ["gh", "release", "view", tag, "--json", "isDraft"],
-              text=True,
-              capture_output=True,
-          )
-          release_state = json.loads(release.stdout) if release.returncode == 0 else None
-          publish = (
-              os.environ["GITHUB_EVENT_NAME"] == "push"
-              and os.environ["GITHUB_REF"] == "refs/heads/master"
-              and (not tag_exists or release_state is None or release_state["isDraft"])
-          )
-          if tag_exists and publish:
-              tagged_commit = subprocess.check_output(
-                  ["git", "rev-list", "-n", "1", tag], text=True
-              ).strip()
-              if tagged_commit != os.environ["GITHUB_SHA"]:
-                  raise SystemExit(f"unfinished {tag} release belongs to another commit")
-
-          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              print(f"publish={str(publish).lower()}", file=output)
-              print(f"tag={tag}", file=output)
-          PY
+        run: python .github/scripts/select-release.py
 
   wheels:
     name: Wheel / ${{ matrix.platform }}
