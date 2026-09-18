@@ -54,7 +54,7 @@ pre-commit run --all-files
 Reinstall after native changes before testing the installed Python API.
 `FOSU_BACKEND=scalar` forces scalar selection before Python import.
 `python -m build` builds the source archive and wheel when packaging needs checking.
-Release Linux wheels are built with the pinned GCC 16.2 toolchain and bundle the
+Release Linux wheels are built with the packaged GCC 15 toolchain and bundle the
 C++ runtime; source installs use the selected local compiler and can request
 runtime bundling with `FOSU_BUNDLE_RUNTIME=1`.
 

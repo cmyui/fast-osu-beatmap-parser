@@ -6,7 +6,7 @@ representation. Comparisons are organized by requested outcome; see the
 
 ## Reproduce on Linux/x86-64
 
-Published x86 results use CPython 3.12.14, GCC 16.2, Node 20.19.5/npm 10.8.2,
+Published x86 results use CPython 3.12.14, GCC 15.2, Node 20.19.5/npm 10.8.2,
 Rust 1.98.1 and .NET SDK 10.0.400; `curl`, `sha256sum`, `taskset`, and an
 AVX2-capable CPU are also required. The benchmark dependencies are isolated from
 FOSU's runtime dependencies. Package versions and Cargo/npm/NuGet dependency
