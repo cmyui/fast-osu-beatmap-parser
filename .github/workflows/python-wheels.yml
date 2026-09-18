@@ -4,14 +4,31 @@ on:
   pull_request:
   push:
     branches: [master]
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  release-metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      publish: ${{ steps.release.outputs.publish }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Validate version and select release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/scripts/select-release.py
+
   wheels:
     name: Wheel / ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
@@ -100,7 +117,8 @@ jobs:
 
   sdist:
     name: Source distribution
-    if: github.event_name == 'release'
+    if: needs.release-metadata.outputs.publish == 'true'
+    needs: release-metadata
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -118,8 +136,8 @@ jobs:
 
   publish:
     name: Publish release artifacts
-    if: github.event_name == 'release'
-    needs: [wheels, sdist]
+    if: needs.release-metadata.outputs.publish == 'true'
+    needs: [release-metadata, wheels, installed, source-install, sdist]
     runs-on: ubuntu-24.04
     environment:
       name: pypi
@@ -133,7 +151,23 @@ jobs:
           pattern: fosu-*
           path: dist
           merge-multiple: true
-      - run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Create draft release and upload artifacts
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --draft --generate-notes \
+              --target "$GITHUB_SHA" --title "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+          gh release upload "$RELEASE_TAG" dist/* --clobber \
+            --repo "$GITHUB_REPOSITORY"
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest --repo "$GITHUB_REPOSITORY"
