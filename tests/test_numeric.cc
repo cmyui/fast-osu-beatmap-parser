@@ -93,6 +93,41 @@ static void test_fuzz_parse_double() {
   }
 }
 
+static void test_fuzz_parse_osu_float_integers() {
+  char buf[96];
+  for (int iter = 0; iter < 100000; ++iter) {
+    int len = 0;
+    if (rng() % 4 == 0)
+      buf[len++] = ' ';
+    if (rng() % 3 == 0)
+      buf[len++] = rng() % 2 ? '-' : '+';
+    const int digits = 1 + static_cast<int>(rng() % 10);
+    for (int i = 0; i < digits; ++i)
+      buf[len++] = static_cast<char>('0' + rng() % 10);
+    if (rng() % 4 == 0)
+      buf[len++] = ' ';
+    buf[len++] = ',';
+    memset(buf + len, 0, sizeof(buf) - static_cast<size_t>(len));
+
+    float got = 0;
+    const char* next = fosu::internal::parse_osu_float(buf, buf + len, got);
+    std::string bounded(buf, buf + len);
+    char* reference_end;
+    const float want = strtof(bounded.c_str(), &reference_end);
+    const char* want_next = buf + (reference_end - bounded.c_str());
+    while (want_next < buf + len && fosu::internal::is_numeric_space(*want_next))
+      ++want_next;
+    const bool valid = std::abs(want) <= float(INT32_MAX);
+    CHECK_EQ(next - buf, valid ? want_next - buf : 0);
+    if (valid)
+      CHECK_EQ(std::bit_cast<uint32_t>(got), std::bit_cast<uint32_t>(want));
+    if (g_failures) {
+      printf("  failing float integer: %.*s\n", len, buf);
+      return;
+    }
+  }
+}
+
 #if FOSU_SIMD
 // Every byte value at every lane: SIMD masks must preserve exact positions,
 // including NUL, high-bit bytes and the boundary between vector registers.
@@ -364,6 +399,7 @@ static void test_fuzz_hitobject_fields() {
 
 int main() {
   test_fuzz_parse_double();
+  test_fuzz_parse_osu_float_integers();
 #if FOSU_SIMD
   test_byte_masks();
   test_hitobject_field_shapes();

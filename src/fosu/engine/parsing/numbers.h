@@ -207,13 +207,29 @@ inline const char* parse_osu_float(const char* p,
                                    const char* end,
                                    float& out,
                                    float limit = float(INT32_MAX)) {
-  const char* first = skip_numeric_space(p, end);
-  if (first < end && *first == '+') {
-    ++first;
-    if (first < end && (*first == '+' || *first == '-'))
+  const char* number = skip_numeric_space(p, end);
+  if (number < end && *number == '+') {
+    ++number;
+    if (number < end && (*number == '+' || *number == '-'))
       return p;
   }
-  const auto r = fast_float::from_chars(first, end, out);
+
+  const bool negative = number < end && *number == '-';
+  const char* magnitude = number + negative;
+  const uint32_t digits = digit_run8(magnitude);
+  if (digits && digits <= static_cast<size_t>(end - magnitude) &&
+      (digits < 8 || !is_digit(magnitude[8])) && magnitude[digits] != '.' &&
+      magnitude[digits] != 'e' && magnitude[digits] != 'E') {
+    const uint64_t integer = digits <= 4 ? swar_parse_u32(magnitude, digits)
+                                         : swar_parse_u64(magnitude, digits);
+    const float value = static_cast<float>(integer);
+    out = negative ? -value : value;
+    if (!(std::abs(out) <= limit)) [[unlikely]]
+      return p;
+    return skip_numeric_space(magnitude + digits, end);
+  }
+
+  const auto r = fast_float::from_chars(number, end, out);
   if (r.ec != std::errc() && !(r.ec == std::errc::result_out_of_range && out == 0))
       [[unlikely]]
     return p;
