@@ -37,6 +37,11 @@ constexpr Profile kStandardProfiles[] = {
       .mods = fosu::Mods::HardRock | fosu::Mods::DoubleTime}},
 };
 
+#if defined(_MSC_VER)
+static const void* volatile result_sink;
+static volatile size_t object_count_sink;
+#endif
+
 uint64_t now() {
   return std::chrono::duration_cast<std::chrono::nanoseconds>(
              std::chrono::steady_clock::now().time_since_epoch())
@@ -50,7 +55,12 @@ void parse(fosu::Parser& parser,
   if (!parsed)
     std::abort();
   const auto& beatmap = *parsed.value();
+#if defined(_MSC_VER)
+  result_sink = &beatmap;
+  object_count_sink = beatmap.hit_objects.size();
+#else
   __asm__ volatile("" : : "g"(&beatmap), "g"(beatmap.hit_objects.size()) : "memory");
+#endif
 }
 
 int main(int argc, char** argv) {
@@ -84,7 +94,8 @@ int main(int argc, char** argv) {
   fosu::FileBuffer input;
   fosu::Parser reused_parser;
   for (size_t file_index = 0; file_index < files.size(); ++file_index) {
-    if (!fosu::read_into(files[file_index].c_str(), input))
+    const std::string filename = files[file_index].string();
+    if (!fosu::read_into(filename.c_str(), input))
       return 1;
     for (int rep = 0; rep < reps; ++rep) {
       for (size_t job_index = 0; job_index < profile_count * 2; ++job_index) {
@@ -100,8 +111,8 @@ int main(int argc, char** argv) {
           parse(parser, input, profile.options);
         }
         const uint64_t elapsed = now() - begin;
-        std::printf("%s,%zu,%d,%s,%s-%s,%llu\n", files[file_index].c_str(), input.size,
-                    rep, argv[3], profile.name, reuse ? "reused" : "fresh",
+        std::printf("%s,%zu,%d,%s,%s-%s,%llu\n", filename.c_str(), input.size, rep,
+                    argv[3], profile.name, reuse ? "reused" : "fresh",
                     static_cast<unsigned long long>(elapsed));
       }
     }
