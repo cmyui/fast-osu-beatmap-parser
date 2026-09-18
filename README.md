@@ -42,7 +42,7 @@ fosu::Beatmap& map = *parsed.value();
 ## Performance
 
 Benchmarks use public APIs and include result construction and release. Lower is
-better. Current FOSU measurements use parser source `164d691` and a representative
+better. Current FOSU measurements use parser source `2d68f2a` and a representative
 1,024-entry corpus: 256 entries per game mode and 46,029,610 bytes total.
 
 ### Python: structural decode
@@ -52,9 +52,9 @@ calculations. Every row uses the same 1,004 mutually accepted all-mode entries.
 
 | Python interface | Result contract | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---|---:|---:|
-| FOSU AVX2 | Full supported document | 438.1 | 460.3 |
-| FOSU scalar | Full supported document | 497.5 | 522.2 |
-| OsuPyParser 1.0.7 | Different eager model and derived statistics | Unsupported | 4,817.2 |
+| FOSU AVX2 | Full supported document | 464.1 | 472.0 |
+| FOSU scalar | Full supported document | 516.3 | 526.6 |
+| OsuPyParser 1.0.7 | Different eager model and derived statistics | Unsupported | 4,463.2 |
 
 Packages like rosu-pp and its Python bindings are intentionally excluded. They construct
 a significantly reduced PP-oriented model, not a general-purpose beatmap document.
@@ -69,26 +69,29 @@ for both parsers. All 256 entries are accepted by both parsers.
 
 | Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---:|---:|
-| FOSU AVX2 | 991.6 | 976.2 |
-| FOSU scalar | 1,001.4 | 1,060.8 |
-| slider 0.8.4 | 13,855.4 | 14,411.9 |
+| FOSU AVX2 | 1,011.4 | 1,014.4 |
+| FOSU scalar | 1,057.3 | 1,067.8 |
+| slider 0.8.4 | 17,373.7 | 17,579.3 |
 
 ### Native and other languages
 
-Resident-input public API latency on the same Zen 4 host. These two interleaved
-passes use 1,023 common all-mode entries and are not directly comparable to the
-isolated Python batch measurements above.
+Resident-input public API latency on the same Core i7-8700 WSL2 host. These two
+interleaved passes use 1,023 common all-mode entries and are not directly
+comparable to the isolated Python batch measurements above.
 
 | Library / interface | Result scope | Mean µs/map |
 |---|---|---:|
-| FOSU C++ AVX2 | Full supported document | 46.1 |
-| FOSU C++ scalar | Full supported document | 103.5 |
-| rosu-map 0.2.1 (Rust) | General-purpose document | 576.4 |
-| Coosu 2.5.1 (C#) | Typed document plus normal post-processing | 723.9 |
-| OsuParsers 1.7.2 (C#) | Rich document and storyboard decoding | 860.5 |
-| Official osu!lazer decoder (C#) | Rich ruleset model and processing | 2,957.1 |
-| osu-parsers 4.1.7 (TypeScript) | Rich document model | 3,009.8 |
-| osu-parser 0.3.3 (JavaScript) | Automatically derives slider/gameplay values | 13,190.3 |
+| FOSU C++ AVX2 | Full supported document | 49.0 |
+| FOSU C++ scalar | Full supported document | 107.5 |
+| rosu-map 0.2.1 (Rust) | General-purpose document | 652.4 |
+| Coosu 2.5.1 (C#) | Typed document plus normal post-processing | 760.9 |
+| OsuParsers 1.7.2 (C#) | Rich document and storyboard decoding | 1,076.9 |
+| osu-parsers 4.1.7 (TypeScript) | Rich document model | 3,368.1 |
+| Official osu!lazer decoder (C#) | Rich ruleset model and processing | 4,033.1 |
+| osu-parser 0.3.3 (JavaScript) | Automatically derives slider/gameplay values | 15,896.6 |
+
+All rows were measured on 2026-09-18 with the same host, corpus and scheduling
+harness.
 
 The official osu!lazer completely and rosu-map largely support lazer-specific
 v128 beatmap features. FOSU supports the v128 fields represented by its public
@@ -103,8 +106,8 @@ corpus.
 
 | Profile | x86 C++ AVX2 | x86 Python AVX2 | M3 C++ NEON | M3 Python NEON |
 |---|---:|---:|---:|---:|
-| Decode | 18.8 | 204.7 | 19.3 | 156.7 |
-| Gameplay | 22.8 | 256.8 | 21.6 | 194.9 |
+| Decode | 25.0 | 216.5 | 18.3 | 150.3 |
+| Gameplay | 30.3 | 273.5 | 20.5 | 186.2 |
 
 The [full comparison](docs/comparison.md) defines the result contracts, execution
 models, versions, per-pass variation and coverage. [Performance details](docs/performance.md)
