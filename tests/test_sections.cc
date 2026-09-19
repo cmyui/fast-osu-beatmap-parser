@@ -381,15 +381,15 @@ static void test_line_endings() {
       "[TimingPoints]\n100,500,4,1,0,100,1,0\n"
       "[Colours]\nCombo1:255,128,0\n"
       "[HitObjects]\n256,192,1000,1,0\n";
-  for (std::string_view ending : {"\n", "\r\n", "\r"}) {
-    std::string input;
-    for (char c : lines) {
-      if (c == '\n')
-        input.append(ending);
-      else
-        input.push_back(c);
-    }
-    for (bool simd : {false, true}) {
+  for (bool simd : {false, true}) {
+    for (std::string_view ending : {"\n", "\r\n", "\r"}) {
+      std::string input;
+      for (char c : lines) {
+        if (c == '\n')
+          input.append(ending);
+        else
+          input.push_back(c);
+      }
       const auto map = parse_str(input, simd);
       CHECK_EQ(map.grid_size, 32);
       CHECK(map.title == "sentinel");
