@@ -175,7 +175,7 @@ struct FileBuffer {
   size_t                  size = 0;
   size_t                  capacity = 0;  // allocated bytes, padding included
 
-  explicit         operator bool() const { return data != nullptr; }
+  explicit operator bool() const { return data != nullptr; }
   std::string_view view() const { return {data.get(), size}; }
 };
 

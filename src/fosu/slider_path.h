@@ -18,14 +18,14 @@ namespace fosu {
 
 // Subpixel coordinates relative to the slider head, in osu! playfield pixels.
 struct PathPoint {
-  f32       x, y;
-  bool      operator==(const PathPoint&) const = default;
+  f32 x, y;
+  bool operator==(const PathPoint&) const = default;
   PathPoint operator+(PathPoint b) const { return {x + b.x, y + b.y}; }
   PathPoint operator-(PathPoint b) const { return {x - b.x, y - b.y}; }
   PathPoint operator*(f32 scale) const { return {x * scale, y * scale}; }
   PathPoint operator/(f32 scale) const { return {x / scale, y / scale}; }
-  f32       squared_length() const { return x * x + y * y; }
-  f32       length() const { return std::sqrt(squared_length()); }
+  f32 squared_length() const { return x * x + y * y; }
+  f32 length() const { return std::sqrt(squared_length()); }
 };
 
 struct SliderPath {

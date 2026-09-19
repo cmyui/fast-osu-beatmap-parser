@@ -55,8 +55,8 @@ namespace fosu_dump {
 
 struct Out {
   std::string& s;
-  size_t       size() const { return s.size(); }
-  void         raw(const void* p, size_t n) {
+  size_t size() const { return s.size(); }
+  void raw(const void* p, size_t n) {
     s.append(static_cast<const char*>(p), n);
   }
   void u8(uint8_t v) { s.push_back(static_cast<char>(v)); }
