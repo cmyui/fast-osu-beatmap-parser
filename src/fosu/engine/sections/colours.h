@@ -6,14 +6,14 @@
 
 namespace fosu::internal {
 
-inline std::optional<uint32_t> parse_colour(std::string_view input) {
-  uint32_t rgb = 0;
+inline std::optional<u32> parse_colour(std::string_view input) {
+  u32 rgb = 0;
   for (int i = 0; i < 3; ++i) {
     const auto comma = input.find(',');
     const auto component = parse_field_integer(input.substr(0, comma));
     if (!component || *component < 0 || *component > 255)
       return std::nullopt;
-    rgb = (rgb << 8) | static_cast<uint32_t>(*component);
+    rgb = (rgb << 8) | static_cast<u32>(*component);
     if (i < 2) {
       if (comma == std::string_view::npos)
         return std::nullopt;

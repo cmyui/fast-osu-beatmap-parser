@@ -9,8 +9,8 @@ namespace fosu::internal {
 #if FOSU_SIMD_NEON
 // Four right-aligned groups of four decimal digits, independently converted.
 inline uint32x4_t decimal_groups(uint8x16_t digits) {
-  constexpr uint8_t pairs[16] = {10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1};
-  constexpr uint16_t words[8] = {100, 1, 100, 1, 100, 1, 100, 1};
+  constexpr u8 pairs[16] = {10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1};
+  constexpr u16 words[8] = {100, 1, 100, 1, 100, 1, 100, 1};
   return vpaddlq_u16(
       vmulq_u16(vpaddlq_u8(vmulq_u8(digits, vld1q_u8(pairs))), vld1q_u16(words)));
 }
@@ -18,7 +18,7 @@ inline uint32x4_t decimal_groups(uint8x16_t digits) {
 
 #if FOSU_SIMD_X86
 consteval auto make_digit_alignment() {
-  std::array<std::array<uint8_t, 8>, 9> masks{};
+  std::array<std::array<u8, 8>, 9> masks{};
   for (int digits = 0; digits <= 8; ++digits) {
     masks[digits].fill(0x80);
     for (int i = 0; i < digits; ++i)
@@ -29,17 +29,17 @@ consteval auto make_digit_alignment() {
 inline constexpr auto kDigitAlignment = make_digit_alignment();
 
 struct DecimalChunks {
-  uint32_t integer;
-  uint32_t fraction;
+  u32 integer;
+  u32 fraction;
 };
 
 // Decode two already-validated digit runs in parallel. Each has at most eight
 // digits; an absent fractional run decodes to zero. The caller supplies padded
 // input and assembles these integer chunks into the full decimal mantissa.
 inline DecimalChunks decode_decimal_chunks(const char* integer,
-                                           uint32_t integer_digits,
+                                           u32 integer_digits,
                                            const char* fraction,
-                                           uint32_t fraction_digits) {
+                                           u32 fraction_digits) {
   const auto text =
       _mm_unpacklo_epi64(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(integer)),
                          _mm_loadl_epi64(reinterpret_cast<const __m128i*>(fraction)));

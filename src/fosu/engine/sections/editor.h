@@ -12,13 +12,13 @@ inline size_t set_default_velocity_presets(Beatmap& beatmap) {
   return 3;
 }
 
-inline std::optional<double> parse_editor_scale(std::string_view input) {
-  if (const auto value = parse_field_double(input))
+inline std::optional<f64> parse_editor_scale(std::string_view input) {
+  if (const auto value = parse_field_f64(input))
     return std::max(0.0, *value);
   return std::nullopt;
 }
 
-inline std::optional<int32_t> parse_beat_divisor(std::string_view input) {
+inline std::optional<i32> parse_beat_divisor(std::string_view input) {
   if (const auto value = parse_field_integer(input))
     return std::clamp(*value, 1, 64);
   return std::nullopt;
@@ -43,7 +43,7 @@ inline bool parse_velocity_presets(Beatmap& beatmap,
   while (p < end) {
     const char* comma = find_byte<','>(p, end);
     const auto value =
-        parse_field_double(trim_field({p, static_cast<size_t>(comma - p)}));
+        parse_field_f64(trim_field({p, static_cast<size_t>(comma - p)}));
     if (value && parsed == beatmap.velocity_presets.size())
       return false;
     if (value)

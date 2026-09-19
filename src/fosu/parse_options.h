@@ -1,10 +1,11 @@
 #pragma once
+#include <fosu/mods.h>
+#include <fosu/types.h>
+
 #include <cstdint>
 
-#include <fosu/mods.h>
-
 namespace fosu {
-enum : uint32_t {
+enum : u32 {
   kSectionGeneral = 1u << 1,
   kSectionEditor = 1u << 2,
   kSectionMetadata = 1u << 3,
@@ -17,7 +18,7 @@ enum : uint32_t {
 };
 
 struct ParseOptions {
-  uint32_t sections = kAllSections;
+  u32  sections = kAllSections;
   bool calculate_slider_end_times = false;
   bool calculate_slider_paths = false;
   bool calculate_slider_events = false;

@@ -9,8 +9,8 @@
 namespace fosu::internal {
 
 // FNV-1a: constant keys are hashed during compilation; input keys at lookup.
-constexpr uint32_t string_hash(std::string_view key) {
-  uint32_t hash = 2166136261u;
+constexpr u32 string_hash(std::string_view key) {
+  u32 hash = 2166136261u;
   for (unsigned char byte : key) {
     hash ^= byte;
     hash *= 16777619u;
@@ -22,7 +22,7 @@ template <typename Value>
 struct StringEntry {
   std::string_view key;
   Value value;
-  uint32_t hash;
+  u32 hash;
 
   constexpr StringEntry(std::string_view key, Value value)
       : key(key), value(value), hash(string_hash(key)) {}

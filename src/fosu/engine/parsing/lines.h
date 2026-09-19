@@ -2,6 +2,7 @@
 
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/primitives/byte_scan.h>
+
 #include <string_view>
 
 namespace fosu::internal {

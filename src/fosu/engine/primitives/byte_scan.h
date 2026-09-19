@@ -9,7 +9,7 @@ namespace fosu::internal {
 template <char Delimiter>
 inline const char* find_byte(const char* p, const char* end) {
 #if FOSU_SIMD
-  const auto delimiter = broadcast_byte<static_cast<uint8_t>(Delimiter)>();
+  const auto delimiter = broadcast_byte<static_cast<u8>(Delimiter)>();
   while (p < end) {
     const auto mask = equal_mask32(load32(p), delimiter);
     const size_t remaining = static_cast<size_t>(end - p);

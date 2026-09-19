@@ -1,5 +1,7 @@
 #pragma once
 
+#include <fosu/types.h>
+
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
@@ -68,15 +70,18 @@ inline InputFile open_input_file(const char* path) {
     errno = ENOMEM;
     return kInvalidInputFile;
   }
-  if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide.get(), length)) {
+  if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide.get(),
+                           length)) {
     set_file_error(GetLastError());
     return kInvalidInputFile;
   }
-  InputFile file = CreateFileW(
-      wide.get(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-      nullptr, OPEN_EXISTING,
-      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_BACKUP_SEMANTICS,
-      nullptr);
+  InputFile file =
+      CreateFileW(wide.get(), GENERIC_READ,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                  nullptr, OPEN_EXISTING,
+                  FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN |
+                      FILE_FLAG_BACKUP_SEMANTICS,
+                  nullptr);
   if (file == kInvalidInputFile) {
     set_file_error(GetLastError());
     return file;
@@ -100,7 +105,7 @@ inline void close_input_file(InputFile file) {
   CloseHandle(file);
 }
 
-inline bool input_file_size(InputFile file, uint64_t& size) {
+inline bool input_file_size(InputFile file, u64& size) {
   LARGE_INTEGER value;
   if (!GetFileSizeEx(file, &value)) {
     set_file_error(GetLastError());
@@ -110,13 +115,13 @@ inline bool input_file_size(InputFile file, uint64_t& size) {
     errno = EIO;
     return false;
   }
-  size = static_cast<uint64_t>(value.QuadPart);
+  size = static_cast<u64>(value.QuadPart);
   return true;
 }
 
 inline ptrdiff_t read_input_file(InputFile file, char* data, size_t size) {
   const DWORD amount = static_cast<DWORD>(std::min<size_t>(size, UINT32_MAX));
-  DWORD read = 0;
+  DWORD       read = 0;
   if (!ReadFile(file, data, amount, &read, nullptr)) {
     set_file_error(GetLastError());
     return -1;
@@ -135,7 +140,7 @@ inline void close_input_file(InputFile file) {
   close(file);
 }
 
-inline bool input_file_size(InputFile file, uint64_t& size) {
+inline bool input_file_size(InputFile file, u64& size) {
   struct stat info;
   if (fstat(file, &info) != 0)
     return false;
@@ -143,7 +148,7 @@ inline bool input_file_size(InputFile file, uint64_t& size) {
     errno = EIO;
     return false;
   }
-  size = static_cast<uint64_t>(info.st_size);
+  size = static_cast<u64>(info.st_size);
   return true;
 }
 
@@ -167,10 +172,10 @@ inline constexpr bool can_pad_input(size_t size) {
 
 struct FileBuffer {
   std::unique_ptr<char[]> data;
-  size_t size = 0;
-  size_t capacity = 0;  // allocated bytes, padding included
+  size_t                  size = 0;
+  size_t                  capacity = 0;  // allocated bytes, padding included
 
-  explicit operator bool() const { return data != nullptr; }
+  explicit         operator bool() const { return data != nullptr; }
   std::string_view view() const { return {data.get(), size}; }
 };
 
@@ -189,7 +194,7 @@ inline bool read_into(const char* path, FileBuffer& buf) {
   const internal::InputFile file = internal::open_input_file(path);
   if (file == internal::kInvalidInputFile)
     return false;
-  uint64_t file_size;
+  u64 file_size;
   if (!internal::input_file_size(file, file_size)) {
     const int error = errno;
     internal::close_input_file(file);
@@ -203,7 +208,8 @@ inline bool read_into(const char* path, FileBuffer& buf) {
   }
   const size_t len = static_cast<size_t>(file_size);
   if (buf.capacity < len + kBufferPadding) {
-    auto data = std::unique_ptr<char[]>(new (std::nothrow) char[len + kBufferPadding]);
+    auto data =
+        std::unique_ptr<char[]>(new (std::nothrow) char[len + kBufferPadding]);
     if (!data) {
       internal::close_input_file(file);
       errno = ENOMEM;
@@ -214,7 +220,8 @@ inline bool read_into(const char* path, FileBuffer& buf) {
   }
   size_t got = 0;
   while (got < len) {
-    const ptrdiff_t r = internal::read_input_file(file, buf.data.get() + got, len - got);
+    const ptrdiff_t r =
+        internal::read_input_file(file, buf.data.get() + got, len - got);
     if (r < 0 && errno == EINTR)
       continue;
     if (r <= 0) {

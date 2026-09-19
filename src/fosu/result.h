@@ -1,13 +1,14 @@
 #pragma once
 
+#include <fosu/types.h>
+
 #include <cassert>
 #include <cstddef>
-#include <cstdint>
 #include <utility>
 
 namespace fosu {
 
-enum class ErrorCode : uint8_t {
+enum class ErrorCode : u8 {
   InvalidInput,
   IoFailure,
   InputTooLarge,
@@ -18,8 +19,8 @@ inline constexpr size_t kNoErrorOffset = static_cast<size_t>(-1);
 
 struct Error {
   ErrorCode code;
-  size_t input_offset = kNoErrorOffset;
-  int os_code = 0;
+  size_t    input_offset = kNoErrorOffset;
+  int       os_code = 0;
 };
 
 template <typename T>
@@ -30,7 +31,7 @@ class Result {
 
   explicit operator bool() const noexcept { return succeeded_; }
 
-  T& value() & noexcept {
+  T&       value() & noexcept {
     assert(succeeded_);
     return value_;
   }
@@ -51,9 +52,9 @@ class Result {
   }
 
  private:
-  T value_{};
+  T     value_{};
   Error error_{ErrorCode::InvalidInput};
-  bool succeeded_;
+  bool  succeeded_;
 };
 
 }  // namespace fosu

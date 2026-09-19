@@ -15,7 +15,8 @@ inline constexpr auto kMetadataFields = make_string_lookup<FieldParser>({
     {"Tags", assign_field_text<&BeatmapHeader::tags>},
     {"BeatmapSetID",
      assign_field_value<&BeatmapHeader::beatmap_set_id, parse_field_integer>},
-    {"BeatmapID", assign_field_value<&BeatmapHeader::beatmap_id, parse_field_integer>},
+    {"BeatmapID",
+     assign_field_value<&BeatmapHeader::beatmap_id, parse_field_integer>},
 });
 
 inline const char* parse_metadata_section(Beatmap& beatmap,

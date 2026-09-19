@@ -10,22 +10,27 @@
 #include <fosu/engine/sections/hit_objects.h>
 #include <fosu/engine/sections/metadata.h>
 #include <fosu/engine/sections/timing_points.h>
+#include <fosu/types.h>
 
 namespace fosu::internal {
 
 static_assert(kSectionGeneral == 1u << static_cast<int>(Section::General) &&
-                  kSectionDifficulty == 1u << static_cast<int>(Section::Difficulty) &&
-                  kSectionHitObjects == 1u << static_cast<int>(Section::HitObjects),
+                  kSectionDifficulty ==
+                      1u << static_cast<int>(Section::Difficulty) &&
+                  kSectionHitObjects ==
+                      1u << static_cast<int>(Section::HitObjects),
               "public section bits mirror the internal Section ordinals");
 
-inline const char* parse_preamble(Beatmap& beatmap, const char* p, const char* end) {
-  if (end - p >= 3 && static_cast<uint8_t>(p[0]) == 0xEF &&
-      static_cast<uint8_t>(p[1]) == 0xBB && static_cast<uint8_t>(p[2]) == 0xBF)
+inline const char* parse_preamble(Beatmap& beatmap,
+                                  const char* p,
+                                  const char* end) {
+  if (end - p >= 3 && static_cast<u8>(p[0]) == 0xEF &&
+      static_cast<u8>(p[1]) == 0xBB && static_cast<u8>(p[2]) == 0xBF)
     p += 3;
   return for_each_section_line(p, end, [&](std::string_view line) {
     const size_t version = line.find("osu file format v");
     if (version != std::string_view::npos) {
-      int64_t value;
+      i64 value;
       const char* number = line.data() + version + 17;
       if (parse_i64(number, line.data() + line.size(), value) != number)
         beatmap.format_version = clamp_i32(value);
@@ -42,7 +47,8 @@ inline void parse_document(std::span<const char> input,
   size_t velocity_preset_count = 0;
   bool velocity_presets_seen = false;
   if (input.empty()) {
-    if ((options.sections & kSectionEditor) && beatmap.velocity_presets.size() >= 3)
+    if ((options.sections & kSectionEditor) &&
+        beatmap.velocity_presets.size() >= 3)
       set_default_velocity_presets(beatmap);
     return;
   }
@@ -52,13 +58,13 @@ inline void parse_document(std::span<const char> input,
   size_t break_count = 0, colour_count = 0, timing_point_count = 0;
   size_t hit_object_count = 0, slider_count = 0, slider_point_count = 0;
   size_t slider_segment_count = 0;
-  std::optional<double> approach_rate;
-  uint32_t pending = options.sections & 0x1FEu;
+  std::optional<f64> approach_rate;
+  u32 pending = options.sections & 0x1FEu;
 
   while (p < end) {
     const auto header = read_line(p, end);
     const auto section = match_section(header.text);
-    const uint32_t bit = 1u << static_cast<int>(section);
+    const u32 bit = 1u << static_cast<int>(section);
     p = header.next;
     if (!(options.sections & bit)) {
       if (!pending)
@@ -73,8 +79,8 @@ inline void parse_document(std::span<const char> input,
         p = parse_general_section(beatmap, p, end);
         break;
       case Section::Editor:
-        p = parse_editor_section(beatmap, velocity_preset_count, velocity_presets_seen, p,
-                                 end);
+        p = parse_editor_section(beatmap, velocity_preset_count,
+                                 velocity_presets_seen, p, end);
         break;
       case Section::Metadata:
         p = parse_metadata_section(beatmap, p, end);
@@ -86,15 +92,16 @@ inline void parse_document(std::span<const char> input,
         p = parse_events_section(beatmap, break_count, p, end, time_offset);
         break;
       case Section::TimingPoints:
-        p = parse_timing_points_section(beatmap, timing_point_count, p, end, time_offset);
+        p = parse_timing_points_section(beatmap, timing_point_count, p, end,
+                                        time_offset);
         break;
       case Section::Colours:
         p = parse_colours_section(beatmap, colour_count, p, end);
         break;
       case Section::HitObjects:
         p = parse_hitobjects_section(beatmap, hit_object_count, slider_count,
-                                     slider_segment_count, slider_point_count, p, end,
-                                     time_offset);
+                                     slider_segment_count, slider_point_count,
+                                     p, end, time_offset);
         break;
       case Section::None:
       case Section::Unknown:
@@ -118,10 +125,12 @@ inline void parse_document(std::span<const char> input,
   beatmap.sliders = beatmap.sliders.first(slider_count);
   beatmap.slider_segments = beatmap.slider_segments.first(slider_segment_count);
   beatmap.slider_points = beatmap.slider_points.first(slider_point_count);
-  beatmap.velocity_presets = beatmap.velocity_presets.first(velocity_preset_count);
+  beatmap.velocity_presets =
+      beatmap.velocity_presets.first(velocity_preset_count);
 }
 
-// The ISA this code was compiled for, not a runtime choice based on the host CPU.
+// The ISA this code was compiled for, not a runtime choice based on the host
+// CPU.
 inline constexpr ParsingEngine compiled_engine{
 #if FOSU_SIMD_X86
     EngineKind::Avx2,

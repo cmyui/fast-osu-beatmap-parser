@@ -32,8 +32,8 @@ struct PythonRef {
 PythonRef integer(long long n) {
   return PythonRef(PyLong_FromLongLong(n));
 }
-PythonRef number(double n) {
-  return PythonRef(PyFloat_FromDouble(n));
+PythonRef number(f64 n) {
+  return PythonRef(Pyf32_Fromf64(n));
 }
 PythonRef boolean(bool n) {
   return PythonRef(PyBool_FromLong(n));
@@ -52,7 +52,7 @@ PythonRef retain(PyObject* p) {
 
 // NumberStyles.Integer uses ASCII digits, a sign/ASCII whitespace, and int32 range.
 // The .NET parser also accepts trailing NULs after whitespace.
-bool bookmark(const char* p, const char* end, int32_t& out) {
+bool bookmark(const char* p, const char* end, i32& out) {
   auto space = [](unsigned char c) {
     return c == ' ' || (c >= 9 && c <= 13);
   };
@@ -62,9 +62,9 @@ bool bookmark(const char* p, const char* end, int32_t& out) {
   if (p != end && (*p == '+' || *p == '-'))
     negative = *p++ == '-';
   const char* digits = p;
-  uint32_t value = 0, limit = negative ? 2147483648u : 2147483647u;
+  u32 value = 0, limit = negative ? 2147483648u : 2147483647u;
   while (p != end && *p >= '0' && *p <= '9') {
-    uint32_t digit = static_cast<unsigned>(*p++ - '0');
+    u32 digit = static_cast<unsigned>(*p++ - '0');
     if (value > (limit - digit) / 10)
       return false;
     value = value * 10 + digit;
@@ -77,7 +77,7 @@ bool bookmark(const char* p, const char* end, int32_t& out) {
     ++p;
   if (p != end)
     return false;
-  out = static_cast<int32_t>(negative ? -static_cast<int64_t>(value) : value);
+  out = static_cast<i32>(negative ? -static_cast<i64>(value) : value);
   return true;
 }
 
@@ -352,7 +352,7 @@ struct BeatmapConverter {
       assign(value);
     return out;
   }
-  PythonRef sound(uint32_t value) {
+  PythonRef sound(u32 value) {
     if (value < 16)
       return retain(state.sounds[value]);
     // Preserve unknown bits supported by HitSound's IntFlag contract.
@@ -362,7 +362,7 @@ struct BeatmapConverter {
     return PythonRef(
         PyUnicode_DecodeUTF8(s.empty() ? "" : s.data(), s.size(), "surrogateescape"));
   }
-  PythonRef point(float x, float y) {
+  PythonRef point(f32 x, f32 y) {
     return record(t_point, {{f_x, number(x)}, {f_y, number(y)}});
   }
   template <class F>
@@ -515,7 +515,7 @@ struct BeatmapConverter {
       const char* stop = begin;
       while (stop != end && *stop != ',')
         ++stop;
-      int32_t value;
+      i32 value;
       if (bookmark(begin, stop, value)) {
         PythonRef number = integer(value);
         if (PyList_Append(marks, number) < 0)
@@ -616,7 +616,7 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
     return nullptr;
   }
   const fosu::ParseOptions options{
-      .sections = static_cast<uint32_t>(sections),
+      .sections = static_cast<u32>(sections),
       .calculate_slider_end_times = calculate_slider_end_times != 0,
       .calculate_slider_paths = calculate_slider_paths != 0,
       .calculate_slider_events = calculate_slider_events != 0,

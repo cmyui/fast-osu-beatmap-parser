@@ -1,3 +1,25 @@
 BasedOnStyle: Chromium
 AllowShortLambdasOnASingleLine: Empty
-ColumnLimit: 90
+ColumnLimit: 80
+
+AlignConsecutiveDeclarations:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+
+IncludeBlocks: Regroup
+IncludeCategories:
+  # Relative Includes
+  - Regex: '^"(.*)\.h"'
+    Priority: 1
+    SortPriority: 1
+
+  # 1st Party Includes
+  - Regex: '^<fosu/'
+    Priority: 2
+    SortPriority: 2
+
+  # 3rd-Party or Stdlib Incldues
+  - Regex: '^<.*'
+    Priority: 3
+    SortPriority: 3

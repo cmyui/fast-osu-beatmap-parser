@@ -1,10 +1,4 @@
 #pragma once
-#include <algorithm>
-#include <atomic>
-#include <cerrno>
-#include <cstring>
-#include <limits>
-
 #include <fosu/beatmap.h>
 #include <fosu/engine/parse_document.h>
 #include <fosu/engine/parsing_engine.h>
@@ -14,13 +8,21 @@
 #include <fosu/slider_events.h>
 #include <fosu/slider_timing.h>
 #include <fosu/stacking.h>
+#include <fosu/types.h>
+
+#include <algorithm>
+#include <atomic>
+#include <cerrno>
+#include <cstring>
+#include <limits>
 
 namespace fosu {
 
 namespace internal {
 
 // Parser construction is common in convenience and Python APIs. Retain one
-// inactive result/scratch pair without ever sharing live arenas between parsers.
+// inactive result/scratch pair without ever sharing live arenas between
+// parsers.
 struct ParserArenaPool {
   std::atomic<Arena*> result{};
   std::atomic<Arena*> scratch{};
@@ -47,8 +49,10 @@ inline void recycle_parser_arena(std::atomic<Arena*>& pool, Arena* arena) {
 }
 
 inline void clear_parser_arena_pool() {
-  arena_release(parser_arena_pool.result.exchange(nullptr, std::memory_order_acquire));
-  arena_release(parser_arena_pool.scratch.exchange(nullptr, std::memory_order_acquire));
+  arena_release(
+      parser_arena_pool.result.exchange(nullptr, std::memory_order_acquire));
+  arena_release(
+      parser_arena_pool.scratch.exchange(nullptr, std::memory_order_acquire));
 }
 
 #ifndef FOSU_MANAGED_ARENA_CLEANUP
@@ -60,9 +64,9 @@ inline ParserArenaPoolCleanup parser_arena_pool_cleanup;
 
 inline size_t velocity_preset_capacity(std::span<const char> input) {
   constexpr std::string_view field = "VelocityPresets:";
-  const std::string_view document{input.data(), input.size()};
-  size_t capacity = 3;
-  size_t search_from = 0;
+  const std::string_view     document{input.data(), input.size()};
+  size_t                     capacity = 3;
+  size_t                     search_from = 0;
   for (;;) {
     const size_t field_begin = document.find(field, search_from);
     if (field_begin == std::string_view::npos)
@@ -80,10 +84,10 @@ inline size_t velocity_preset_capacity(std::span<const char> input) {
   return capacity;
 }
 
-inline bool allocate_beatmap_arrays(Arena* arena,
-                                    Beatmap& beatmap,
+inline bool allocate_beatmap_arrays(Arena*                arena,
+                                    Beatmap&              beatmap,
                                     std::span<const char> input,
-                                    uint32_t selected_sections,
+                                    u32                   selected_sections,
                                     bool lazer_format) noexcept {
   const size_t input_size = input.size();
   // Each capacity is a conservative bound derived from the shortest accepted
@@ -92,7 +96,7 @@ inline bool allocate_beatmap_arrays(Arena* arena,
   // only used where the parser writes accepted records.
   if (selected_sections & kSectionEvents) {
     const size_t capacity = input_size / (sizeof("2,0,0") - 1) + 1;
-    Break* values = arena_push_array<Break>(arena, capacity);
+    Break*       values = arena_push_array<Break>(arena, capacity);
     if (!values)
       return false;
     beatmap.breaks = {values, capacity};
@@ -100,7 +104,7 @@ inline bool allocate_beatmap_arrays(Arena* arena,
 
   if (selected_sections & kSectionColours) {
     const size_t capacity = input_size / (sizeof("Combo1:0,0,0") - 1) + 1;
-    uint32_t* values = arena_push_array<uint32_t>(arena, capacity);
+    u32*         values = arena_push_array<u32>(arena, capacity);
     if (!values)
       return false;
     beatmap.combo_colours = {values, capacity};
@@ -108,7 +112,7 @@ inline bool allocate_beatmap_arrays(Arena* arena,
 
   if (selected_sections & kSectionEditor) {
     const size_t capacity = lazer_format ? velocity_preset_capacity(input) : 3;
-    double* values = arena_push_array<double>(arena, capacity);
+    f64*         values = arena_push_array<f64>(arena, capacity);
     if (!values)
       return false;
     beatmap.velocity_presets = {values, capacity};
@@ -124,20 +128,22 @@ inline bool allocate_beatmap_arrays(Arena* arena,
 
   if (selected_sections & kSectionHitObjects) {
     const size_t object_capacity = input_size / (sizeof("0,0,0,1,0") - 1) + 1;
-    HitObject* objects = arena_push_array<HitObject>(arena, object_capacity);
+    HitObject*   objects = arena_push_array<HitObject>(arena, object_capacity);
     if (!objects)
       return false;
     beatmap.hit_objects = {objects, object_capacity};
 
-    const size_t slider_capacity = input_size / (sizeof("0,0,0,2,0,L,0") - 1) + 1;
+    const size_t slider_capacity =
+        input_size / (sizeof("0,0,0,2,0,L,0") - 1) + 1;
     Slider* sliders = arena_push_array<Slider>(arena, slider_capacity);
     if (!sliders)
       return false;
     beatmap.sliders = {sliders, slider_capacity};
 
     if (lazer_format) {
-      const size_t segment_capacity = input_size / (sizeof("|L|0:0") - 1) + 1;
-      CurveSegment* segments = arena_push_array<CurveSegment>(arena, segment_capacity);
+      const size_t  segment_capacity = input_size / (sizeof("|L|0:0") - 1) + 1;
+      CurveSegment* segments =
+          arena_push_array<CurveSegment>(arena, segment_capacity);
       if (!segments)
         return false;
       beatmap.slider_segments = {segments, segment_capacity};
@@ -159,11 +165,11 @@ class Parser;
 
 namespace internal {
 struct ParserStorage {
-  Arena* result_arena;
-  Arena* scratch_arena;
+  Arena*      result_arena;
+  Arena*      scratch_arena;
   const char* input;
-  size_t input_size;
-  size_t input_storage_size;
+  size_t      input_size;
+  size_t      input_storage_size;
 };
 
 ParserStorage parser_storage(Parser& parser);
@@ -171,10 +177,12 @@ ParserStorage parser_storage(Parser& parser);
 
 class Parser {
  public:
-  explicit Parser(const ParsingEngine& engine = internal::compiled_engine) noexcept
-      : result_arena_(internal::acquire_parser_arena(internal::parser_arena_pool.result)),
-        scratch_arena_(
-            internal::acquire_parser_arena(internal::parser_arena_pool.scratch)),
+  explicit Parser(
+      const ParsingEngine& engine = internal::compiled_engine) noexcept
+      : result_arena_(
+            internal::acquire_parser_arena(internal::parser_arena_pool.result)),
+        scratch_arena_(internal::acquire_parser_arena(
+            internal::parser_arena_pool.scratch)),
         engine_(&engine) {}
 
   Parser(const Parser&) = delete;
@@ -183,11 +191,15 @@ class Parser {
   Parser& operator=(Parser&&) = delete;
 
   ~Parser() {
-    internal::recycle_parser_arena(internal::parser_arena_pool.result, result_arena_);
-    internal::recycle_parser_arena(internal::parser_arena_pool.scratch, scratch_arena_);
+    internal::recycle_parser_arena(internal::parser_arena_pool.result,
+                                   result_arena_);
+    internal::recycle_parser_arena(internal::parser_arena_pool.scratch,
+                                   scratch_arena_);
   }
 
-  Result<Beatmap*> parse(const char* data, size_t size, ParseOptions opts = {}) noexcept {
+  Result<Beatmap*> parse(const char*  data,
+                         size_t       size,
+                         ParseOptions opts = {}) noexcept {
     reset_working_result();
     if ((!data && size) || invalid_options(opts))
       return Error{ErrorCode::InvalidInput};
@@ -200,15 +212,18 @@ class Parser {
     return finish_parse(opts);
   }
 
-  Result<Beatmap*> parse(std::span<const char> input, ParseOptions opts = {}) noexcept {
+  Result<Beatmap*> parse(std::span<const char> input,
+                         ParseOptions          opts = {}) noexcept {
     return parse(input.data(), input.size(), opts);
   }
 
-  Result<Beatmap*> parse(const FileBuffer& input, ParseOptions opts = {}) noexcept {
+  Result<Beatmap*> parse(const FileBuffer& input,
+                         ParseOptions      opts = {}) noexcept {
     return parse(input.data.get(), input.size, opts);
   }
 
-  Result<Beatmap*> parse_file(const char* path, ParseOptions opts = {}) noexcept {
+  Result<Beatmap*> parse_file(const char*  path,
+                              ParseOptions opts = {}) noexcept {
     reset_working_result();
     if (!path || invalid_options(opts))
       return Error{ErrorCode::InvalidInput};
@@ -217,7 +232,7 @@ class Parser {
     if (file == internal::kInvalidInputFile)
       return Error{ErrorCode::IoFailure, kNoErrorOffset, errno};
 
-    uint64_t file_size;
+    u64 file_size;
     if (!internal::input_file_size(file, file_size)) {
       const int error = errno;
       internal::close_input_file(file);
@@ -229,7 +244,7 @@ class Parser {
     }
 
     const size_t size = static_cast<size_t>(file_size);
-    auto prepared = prepare_input(size, nullptr);
+    auto         prepared = prepare_input(size, nullptr);
     if (!prepared) {
       const Error error = prepared.error();
       internal::close_input_file(file);
@@ -238,8 +253,8 @@ class Parser {
     }
     size_t bytes_read = 0;
     while (bytes_read < size) {
-      const ptrdiff_t count =
-          internal::read_input_file(file, input_ + bytes_read, size - bytes_read);
+      const ptrdiff_t count = internal::read_input_file(
+          file, input_ + bytes_read, size - bytes_read);
       if (count < 0 && errno == EINTR)
         continue;
       if (count <= 0) {
@@ -258,9 +273,9 @@ class Parser {
  private:
   friend internal::ParserStorage internal::parser_storage(Parser& parser);
 
-  static constexpr uint32_t kValidSections = 0x1FEu;
+  static constexpr u32 kValidSections = 0x1FEu;
 
-  static bool invalid_sections(uint32_t sections) noexcept {
+  static bool invalid_sections(u32 sections) noexcept {
     return sections & ~kValidSections;
   }
 
@@ -276,13 +291,15 @@ class Parser {
     if (!can_pad_input(size))
       return Error{ErrorCode::InputTooLarge};
     if (!result_arena_)
-      result_arena_ = internal::acquire_parser_arena(internal::parser_arena_pool.result);
+      result_arena_ =
+          internal::acquire_parser_arena(internal::parser_arena_pool.result);
     if (!scratch_arena_)
       scratch_arena_ =
           internal::acquire_parser_arena(internal::parser_arena_pool.scratch);
     if (!result_arena_ || !scratch_arena_)
       return Error{ErrorCode::AllocationFailure};
-    input_ = static_cast<char*>(arena_push(result_arena_, size + kBufferPadding, 1));
+    input_ =
+        static_cast<char*>(arena_push(result_arena_, size + kBufferPadding, 1));
     if (!input_)
       return Error{ErrorCode::AllocationFailure};
     if (data && size)
@@ -296,7 +313,8 @@ class Parser {
     const std::span<const char> input{input_, input_size_};
     if (input_size_ != 0) {
       Beatmap preamble;
-      internal::parse_preamble(preamble, input.data(), input.data() + input.size());
+      internal::parse_preamble(preamble, input.data(),
+                               input.data() + input.size());
       if (!internal::allocate_beatmap_arrays(result_arena_, beatmap_, input,
                                              opts.sections,
                                              preamble.format_version >= 128)) {
@@ -313,19 +331,21 @@ class Parser {
       reset_working_result();
       return Error{ErrorCode::InvalidInput};
     }
-    const bool stacking = opts.apply_stacking && beatmap_.mode == 0;
-    size_t stacking_scratch_pos = 0;
-    std::span<double> stacking_end_times;
+    const bool     stacking = opts.apply_stacking && beatmap_.mode == 0;
+    size_t         stacking_scratch_pos = 0;
+    std::span<f64> stacking_end_times;
     if (stacking && !beatmap_.sliders.empty()) {
       stacking_scratch_pos = arena_pos(scratch_arena_);
-      auto* end_times = arena_push_array<double>(scratch_arena_, beatmap_.sliders.size());
+      auto* end_times =
+          arena_push_array<f64>(scratch_arena_, beatmap_.sliders.size());
       if (!end_times) {
         reset_working_result();
         return Error{ErrorCode::AllocationFailure};
       }
       stacking_end_times = {end_times, beatmap_.sliders.size()};
     }
-    if ((opts.calculate_slider_paths || opts.calculate_slider_events || stacking) &&
+    if ((opts.calculate_slider_paths || opts.calculate_slider_events ||
+         stacking) &&
         !internal::set_slider_paths(beatmap_, result_arena_, scratch_arena_)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
@@ -336,14 +356,15 @@ class Parser {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
-    if ((opts.calculate_slider_end_times || stacking) && !opts.calculate_slider_events &&
+    if ((opts.calculate_slider_end_times || stacking) &&
+        !opts.calculate_slider_events &&
         !internal::set_slider_end_times(beatmap_, scratch_arena_, {},
                                         stacking_end_times)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
-    if (stacking &&
-        !internal::apply_stacking(beatmap_, result_arena_, stacking_end_times)) {
+    if (stacking && !internal::apply_stacking(beatmap_, result_arena_,
+                                              stacking_end_times)) {
       reset_working_result();
       return Error{ErrorCode::AllocationFailure};
     }
@@ -361,12 +382,12 @@ class Parser {
     beatmap_ = {};
   }
 
-  Arena* result_arena_;
-  Arena* scratch_arena_;
+  Arena*               result_arena_;
+  Arena*               scratch_arena_;
   const ParsingEngine* engine_;
-  char* input_ = nullptr;
-  size_t input_size_ = 0;
-  Beatmap beatmap_{};
+  char*                input_ = nullptr;
+  size_t               input_size_ = 0;
+  Beatmap              beatmap_{};
 };
 
 namespace internal {

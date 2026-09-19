@@ -64,13 +64,13 @@ inline void parse_break_event(Beatmap& bm,
                               const char* rest,
                               const char* end,
                               int time_offset) {
-  double start, stop;
-  const char* q = parse_osu_double(rest, end, start);
+  f64 start, stop;
+  const char* q = parse_osu_f64(rest, end, start);
   if (q == rest || q >= end || *q != ',') {
     ++bm.stats.malformed_lines;
     return;
   }
-  const char* r = parse_osu_double(q + 1, end, stop);
+  const char* r = parse_osu_f64(q + 1, end, stop);
   if (r == q + 1 || r != end) {
     ++bm.stats.malformed_lines;
     return;
@@ -120,7 +120,7 @@ inline const char* parse_events_section_simd(Beatmap& bm,
                                              int time_offset) {
   // Fused loop: skip indented storyboard commands on their first byte and
   // find line endings with two 32-byte vector compares.
-  uint32_t storyboard_lines = 0;
+  u32 storyboard_lines = 0;
   while (p < file_end) {
     const char c = *p;
     if (c == '\r' || c == '\n') {
@@ -132,8 +132,8 @@ inline const char* parse_events_section_simd(Beatmap& bm,
 
     const Bytes32 a = load32(p);
     const Bytes32 b = load32(p + 32);
-    const uint64_t nl = equal_mask32(a, broadcast_byte<'\n'>()) |
-                        (uint64_t(equal_mask32(b, broadcast_byte<'\n'>())) << 32);
+    const u64 nl = equal_mask32(a, broadcast_byte<'\n'>()) |
+                        (u64(equal_mask32(b, broadcast_byte<'\n'>())) << 32);
     const char* line = p;
     const char* next_line;
     const char* line_end;

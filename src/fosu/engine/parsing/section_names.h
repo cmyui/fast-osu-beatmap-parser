@@ -1,9 +1,13 @@
 #pragma once
+
 #include <fosu/engine/parsing/string_lookup.h>
+#include <fosu/types.h>
+
 #include <cstdint>
 #include <string_view>
+
 namespace fosu::internal {
-enum class Section : uint8_t {
+enum class Section : u8 {
   None,
   General,
   Editor,
