@@ -273,10 +273,8 @@ class Parser {
  private:
   friend internal::ParserStorage internal::parser_storage(Parser& parser);
 
-  static constexpr u32 kValidSections = 0x1FEu;
-
   static bool invalid_sections(u32 sections) noexcept {
-    return sections & ~kValidSections;
+    return sections & ~kAllSections;
   }
 
   static bool invalid_options(ParseOptions opts) noexcept {
