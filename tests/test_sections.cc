@@ -370,7 +370,7 @@ static void test_malformed_record_recovery() {
   }
 }
 
-static void check_sections_with_line_ending(std::string_view ending) {
+static void test_line_endings() {
   constexpr std::string_view lines =
       "osu file format v14\n"
       "[General]\nMode:0\n"
@@ -381,35 +381,25 @@ static void check_sections_with_line_ending(std::string_view ending) {
       "[TimingPoints]\n100,500,4,1,0,100,1,0\n"
       "[Colours]\nCombo1:255,128,0\n"
       "[HitObjects]\n256,192,1000,1,0\n";
-  std::string input;
-  for (char c : lines) {
-    if (c == '\n')
-      input.append(ending);
-    else
-      input.push_back(c);
+  for (std::string_view ending : {"\n", "\r\n", "\r"}) {
+    std::string input;
+    for (char c : lines) {
+      if (c == '\n')
+        input.append(ending);
+      else
+        input.push_back(c);
+    }
+    for (bool simd : {false, true}) {
+      const auto map = parse_str(input, simd);
+      CHECK_EQ(map.grid_size, 32);
+      CHECK(map.title == "sentinel");
+      CHECK_EQ(map.breaks.size(), 1u);
+      CHECK_EQ(map.timing_points.size(), 1u);
+      CHECK_EQ(map.combo_colours.size(), 1u);
+      CHECK_EQ(map.hit_objects.size(), 1u);
+      CHECK_EQ(map.stats.malformed_lines, 0u);
+    }
   }
-  for (bool simd : {false, true}) {
-    const auto map = parse_str(input, simd);
-    CHECK_EQ(map.grid_size, 32);
-    CHECK(map.title == "sentinel");
-    CHECK_EQ(map.breaks.size(), 1u);
-    CHECK_EQ(map.timing_points.size(), 1u);
-    CHECK_EQ(map.combo_colours.size(), 1u);
-    CHECK_EQ(map.hit_objects.size(), 1u);
-    CHECK_EQ(map.stats.malformed_lines, 0u);
-  }
-}
-
-static void test_lf_line_endings() {
-  check_sections_with_line_ending("\n");
-}
-
-static void test_crlf_line_endings() {
-  check_sections_with_line_ending("\r\n");
-}
-
-static void test_lone_cr_line_endings() {
-  check_sections_with_line_ending("\r");
 }
 
 static constexpr std::string_view kCrlfRecoveryInput =
@@ -1064,9 +1054,7 @@ int main() {
   test_modern_curve_segments();
   test_malformed();
   test_malformed_record_recovery();
-  test_lf_line_endings();
-  test_crlf_line_endings();
-  test_lone_cr_line_endings();
+  test_line_endings();
   test_invalid_byte_before_header_cr();
   test_invalid_byte_between_header_cr_lf();
   test_invalid_byte_after_header_lf();
