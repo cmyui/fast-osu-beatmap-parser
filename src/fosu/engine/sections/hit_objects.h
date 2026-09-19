@@ -134,7 +134,7 @@ inline std::optional<HitObject> parse_hitobject_line_scalar(
 inline HitObject normalize_hitobject(HitObject object,
                                      size_t    preceding_count,
                                      bool      preceding_was_spinner,
-                                     int       offset) {
+                                     i32       offset) {
   const bool explicit_combo = object.type & 4;
   object.time += offset;
   object.new_combo = false;
@@ -165,7 +165,7 @@ inline const char* parse_hitobjects_section_scalar(
     const char*                    p,
     const char*                    file_end,
     const HitObjectParseConstants& constants,
-    int                            time_offset) {
+    i32                            time_offset) {
   while (p < file_end) {
     const char c = *p;
     if (c == '\r' || c == '\n') {
@@ -214,7 +214,7 @@ inline const char* parse_hitobjects_section_simd(
     const char*                    p,
     const char*                    file_end,
     const HitObjectParseConstants& constants,
-    int                            time_offset) {
+    i32                            time_offset) {
   const ByteVector newline_value = constants.nl;
   const ByteVector comma_value = constants.comma;
   const ByteVector zero = constants.zero;
@@ -296,9 +296,9 @@ inline const char* parse_hitobjects_section_simd(
                           after_prefix == '\0')) [[likely]] {
       const u32 time_span = static_cast<u32>(p2 - p1);
 
-      u32  fields[4];
-      f64  time;
-      bool time_ok = true;
+      u32       fields[4];
+      f64       time;
+      bool      time_ok = true;
 #if FOSU_SIMD_X86
       const __m256i    digits = _mm256_sub_epi8(ascii, zero);
       const LaneMasks& masks = kLaneMasks[mask_index];
@@ -463,7 +463,7 @@ inline const char* parse_hitobjects_section(Beatmap&    beatmap,
                                             size_t&     slider_point_count,
                                             const char* p,
                                             const char* file_end,
-                                            int         time_offset = 0) {
+                                            i32         time_offset = 0) {
   const HitObjectParseConstants constants;
 #if FOSU_SIMD
   return parse_hitobjects_section_simd(beatmap, hit_object_count, slider_count,

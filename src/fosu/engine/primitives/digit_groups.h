@@ -21,9 +21,9 @@ inline uint32x4_t decimal_groups(uint8x16_t digits) {
 #if FOSU_SIMD_X86
 consteval auto make_digit_alignment() {
   std::array<std::array<u8, 8>, 9> masks{};
-  for (int digits = 0; digits <= 8; ++digits) {
+  for (i32 digits = 0; digits <= 8; ++digits) {
     masks[digits].fill(0x80);
-    for (int i = 0; i < digits; ++i)
+    for (i32 i = 0; i < digits; ++i)
       masks[digits][8 - digits + i] = i;
   }
   return masks;

@@ -28,7 +28,7 @@ int main(int argc, char** argv) {
             "usage: library_compare corpus reps module1 [module2...]\n");
     return 2;
   }
-  const int reps = atoi(argv[2]);
+  const fosu::i32 reps = atoi(argv[2]);
   if (reps < 1)
     return 2;
   std::vector<Module> modules;
@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
   for (size_t i = 0; i < files.size(); ++i) {
     if (!fosu::read_into(files[i].c_str(), input))
       return 1;
-    for (int r = 0; r < reps; ++r) {
+    for (fosu::i32 r = 0; r < reps; ++r) {
       for (size_t j = 0; j < modules.size() * 2; ++j) {
         const size_t slot = (j + r + i) % (modules.size() * 2);
         const int    reuse = slot % 2;

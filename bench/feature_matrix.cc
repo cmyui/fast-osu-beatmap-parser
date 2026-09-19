@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
         "usage: feature_matrix corpus reps variant all-modes|standard\n");
     return 2;
   }
-  const int reps = std::atoi(argv[2]);
+  const fosu::i32 reps = std::atoi(argv[2]);
   if (reps < 1)
     return 2;
 
@@ -103,7 +103,7 @@ int main(int argc, char** argv) {
     const std::string filename = files[file_index].string();
     if (!fosu::read_into(filename.c_str(), input))
       return 1;
-    for (int rep = 0; rep < reps; ++rep) {
+    for (fosu::i32 rep = 0; rep < reps; ++rep) {
       for (size_t job_index = 0; job_index < profile_count * 2; ++job_index) {
         const size_t job = (job_index + file_index + static_cast<size_t>(rep)) %
                            (profile_count * 2);

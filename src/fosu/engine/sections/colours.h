@@ -8,7 +8,7 @@ namespace fosu::internal {
 
 inline std::optional<u32> parse_colour(std::string_view input) {
   u32 rgb = 0;
-  for (int i = 0; i < 3; ++i) {
+  for (i32 i = 0; i < 3; ++i) {
     const auto comma = input.find(',');
     const auto component = parse_field_integer(input.substr(0, comma));
     if (!component || *component < 0 || *component > 255)

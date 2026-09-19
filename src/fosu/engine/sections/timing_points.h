@@ -15,7 +15,7 @@ inline const char* parse_timing_points_section_simd(Beatmap&    beatmap,
                                                     size_t&     point_count,
                                                     const char* p,
                                                     const char* file_end,
-                                                    int         time_offset) {
+                                                    i32         time_offset) {
   const ByteVector newline_value = broadcast_byte<'\n'>();
   const ByteVector comma_value = broadcast_byte<','>();
   u32              malformed = 0;
@@ -78,7 +78,7 @@ inline const char* parse_timing_points_section_scalar(Beatmap&    beatmap,
                                                       size_t&     point_count,
                                                       const char* p,
                                                       const char* file_end,
-                                                      int         time_offset) {
+                                                      i32         time_offset) {
   return for_each_section_line(p, file_end, [&](std::string_view line) {
     if (const auto point = parse_timing_point(
             line.data(), line.data() + line.size(), 0, time_offset)) {
@@ -92,7 +92,7 @@ inline const char* parse_timing_points_section(Beatmap&    beatmap,
                                                size_t&     point_count,
                                                const char* p,
                                                const char* file_end,
-                                               int         time_offset = 0) {
+                                               i32         time_offset = 0) {
 #if FOSU_SIMD
   return parse_timing_points_section_simd(beatmap, point_count, p, file_end,
                                           time_offset);

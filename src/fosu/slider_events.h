@@ -51,13 +51,13 @@ inline bool set_slider_events(Beatmap&       map,
       return false;
     }
     size_t next = 0;
-    auto   event = [&](SliderEventType type, f64 time, int span, f64 progress) {
+    auto   event = [&](SliderEventType type, f64 time, i32 span, f64 progress) {
       return SliderEvent{type,     time,
                          span,     object.time + span * timing.span_duration,
                          progress, slider_position_at(path, progress)};
     };
     events[next++] = event(SliderEventType::Head, object.time, 0, 0);
-    for (int span = 0; span < timing.spans; ++span) {
+    for (i32 span = 0; span < timing.spans; ++span) {
       const f64 start = object.time + span * timing.span_duration;
       f64       d = tick_distance;
       for (size_t tick = 0; tick < tick_count; ++tick, d += tick_distance) {
@@ -74,7 +74,7 @@ inline bool set_slider_events(Beatmap&       map,
             event(SliderEventType::Repeat, start + timing.span_duration, span,
                   (span + 1) % 2);
     }
-    const int final_span = timing.spans - 1;
+    const i32 final_span = timing.spans - 1;
     const f64 final_span_start =
         object.time + final_span * timing.span_duration;
     const f64 duration = timing.spans * timing.span_duration;

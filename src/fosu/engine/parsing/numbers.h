@@ -91,8 +91,8 @@ inline const char* parse_double_impl(const char* p, const char* end, f64& out) {
     ++p;
   }
   u64  mant = 0;
-  int  digits = 0;
-  int  frac = 0;
+  i32  digits = 0;
+  i32  frac = 0;
   bool any = false;
   for (;;) {
     u32 run = digit_run8(p);
@@ -101,11 +101,11 @@ inline const char* parse_double_impl(const char* p, const char* end, f64& out) {
     if (!run)
       break;
     any = true;
-    if (digits + static_cast<int>(run) > 18) {
+    if (digits + static_cast<i32>(run) > 18) {
       return Fallback(start, end, out);
     }
     mant = mant * kPow10u[run] + swar_parse_u64(p, run);
-    digits += static_cast<int>(run);
+    digits += static_cast<i32>(run);
     p += run;
     if (run < 8)
       break;
@@ -119,12 +119,12 @@ inline const char* parse_double_impl(const char* p, const char* end, f64& out) {
       if (!run)
         break;
       any = true;
-      if (digits + static_cast<int>(run) > 18) {
+      if (digits + static_cast<i32>(run) > 18) {
         return Fallback(start, end, out);
       }
       mant = mant * kPow10u[run] + swar_parse_u64(p, run);
-      digits += static_cast<int>(run);
-      frac += static_cast<int>(run);
+      digits += static_cast<i32>(run);
+      frac += static_cast<i32>(run);
       p += run;
       if (run < 8)
         break;

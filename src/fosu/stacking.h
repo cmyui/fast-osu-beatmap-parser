@@ -20,7 +20,7 @@ inline PathPoint slider_end_position(const Beatmap&   map,
     return position;
   const auto& path = map.slider_paths[object.slider];
   const auto& slider = map.sliders[object.slider];
-  const int   spans = path.distance() <= 1e-7 ? 1 : slider.slides;
+  const i32   spans = path.distance() <= 1e-7 ? 1 : slider.slides;
   return position + slider_position_at(path, include_repeats ? spans % 2 : 1);
 }
 
@@ -62,7 +62,7 @@ inline void calculate_modern_stacks(Beatmap&             map,
       if (circle && previous.is_slider() &&
           within_stack_distance(slider_end_position(map, previous),
                                 object_position(object))) {
-        const int offset = map.stacking[current].stack_height -
+        const i32 offset = map.stacking[current].stack_height -
                            map.stacking[n].stack_height + 1;
         for (size_t j = n + 1; j <= i; ++j)
           if (within_stack_distance(slider_end_position(map, previous),
@@ -88,7 +88,7 @@ inline void calculate_legacy_stacks(Beatmap&             map,
     if (map.stacking[i].stack_height != 0 && !object.is_slider())
       continue;
     f64        end = stacking_end_time(object, slider_end_times);
-    int        slider_stack = 0;
+    i32        slider_stack = 0;
     const auto tail = slider_end_position(map, object, false);
     for (size_t j = i + 1; j < map.hit_objects.size(); ++j) {
       const auto& next = map.hit_objects[j];
@@ -122,7 +122,7 @@ inline bool apply_stacking(Beatmap&             map,
   const f64 ar = static_cast<f32>(map.ar);
   const f64 preempt = 1200 + (ar > 5 ? -750 : -600) * ((ar - 5) / 5);
   const f32 threshold =
-      static_cast<int>(preempt) * static_cast<f32>(map.stack_leniency);
+      static_cast<i32>(preempt) * static_cast<f32>(map.stack_leniency);
   if (map.format_version >= 6)
     calculate_modern_stacks(map, threshold, slider_end_times);
   else

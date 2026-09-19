@@ -21,7 +21,7 @@ template <bool UseCommaMask = false>
 inline std::optional<TimingPoint> parse_timing_point(const char* p,
                                                      const char* end,
                                                      u64         commas = 0,
-                                                     int time_offset = 0) {
+                                                     i32 time_offset = 0) {
   [[maybe_unused]] const char* line = p;
   f64                          time, beat_length;
   const char*                  q = parse_osu_double(p, end, time);
@@ -33,7 +33,7 @@ inline std::optional<TimingPoint> parse_timing_point(const char* p,
     return std::nullopt;
   p = q;
   i64 rest[6] = {4, 0, 0, 100, 1, 0};
-  for (int i = 0; i < 6 && p < end; ++i) {
+  for (i32 i = 0; i < 6 && p < end; ++i) {
     if (*p++ != ',')
       return std::nullopt;
     const char* field_end;
@@ -82,15 +82,15 @@ inline std::optional<TimingPoint> parse_timing_point(const char* p,
 #if FOSU_SIMD_X86
 consteval auto make_timing_tail_masks() {
   std::array<std::array<u8, 16>, 6> masks{};
-  for (int index = 1; index <= 2; ++index)
-    for (int volume = 1; volume <= 3; ++volume) {
+  for (i32 index = 1; index <= 2; ++index)
+    for (i32 volume = 1; volume <= 3; ++volume) {
       auto& mask = masks[(index - 1) * 3 + volume - 1];
       mask.fill(0x80);
       mask[3] = 0;
       mask[7] = 2;
-      for (int i = 0; i < index; ++i)
+      for (i32 i = 0; i < index; ++i)
         mask[12 - index + i] = 4 + i;
-      for (int i = 0; i < volume; ++i)
+      for (i32 i = 0; i < volume; ++i)
         mask[16 - volume + i] = 5 + index + i;
     }
   return masks;
@@ -130,7 +130,7 @@ try_parse_timing_point_fast_masked(u64         commas,
                                    u64         nondig,
                                    const char* p,
                                    size_t      len,
-                                   int         time_offset = 0) {
+                                   i32         time_offset = 0) {
   if (std::popcount(commas) != 7)
     return std::nullopt;
 
@@ -149,12 +149,12 @@ try_parse_timing_point_fast_masked(u64         commas,
   const auto volume_end = static_cast<u32>(trailing_zeros(m5));
   const auto uninherited_end = static_cast<u32>(trailing_zeros(m6));
 
-  const u32 meter_digits = meter_end - beat_length_end - 1;
-  const u32 sample_set_digits = sample_set_end - meter_end - 1;
-  const u32 sample_index_digits = sample_index_end - sample_set_end - 1;
-  const u32 volume_digits = volume_end - sample_index_end - 1;
-  const u32 uninherited_digits = uninherited_end - volume_end - 1;
-  const u32 effects_digits = static_cast<u32>(len) - uninherited_end - 1;
+  const u32  meter_digits = meter_end - beat_length_end - 1;
+  const u32  sample_set_digits = sample_set_end - meter_end - 1;
+  const u32  sample_index_digits = sample_index_end - sample_set_end - 1;
+  const u32  volume_digits = volume_end - sample_index_end - 1;
+  const u32  uninherited_digits = uninherited_end - volume_end - 1;
+  const u32  effects_digits = static_cast<u32>(len) - uninherited_end - 1;
   // Subtracting one makes zero-length fields fail this unsigned range check.
   if (time_end - 1 > 7 || ((meter_digits - 1) | (sample_set_digits - 1) |
                            (sample_index_digits - 1) | (volume_digits - 1) |
@@ -172,7 +172,7 @@ try_parse_timing_point_fast_masked(u64         commas,
       integer_digits + fraction_digits > 18 ||
       (has_dot && magnitude[integer_digits] != '.') ||
       std::popcount(nondig) !=
-          7 + static_cast<int>(has_dot) + static_cast<int>(negative))
+          7 + static_cast<i32>(has_dot) + static_cast<i32>(negative))
     return std::nullopt;
 
   const auto parse_small_integer = [](const char* field, u32 digits) {

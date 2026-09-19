@@ -12,7 +12,7 @@ static void test_reparse_reuses_arena_memory() {
   const auto&  first = require_parse(parser.parse(input));
   const auto*  allocation = first.hit_objects.data();
 
-  const auto& second = require_parse(parser.parse(input));
+  const auto&  second = require_parse(parser.parse(input));
   CHECK_EQ(second.hit_objects.size(), 2u);
   CHECK(second.hit_objects.data() == allocation);
   fosu::Parser expected;
@@ -24,7 +24,7 @@ static void test_reparse_accepts_larger_arrays() {
   std::string text = "[HitObjects]\n";
   for (size_t i = 0; i < 5000; ++i)
     text += "72,144,600,1,4\n";
-  auto replacement = fosu::make_padded(text);
+  auto         replacement = fosu::make_padded(text);
 
   fosu::Parser parser;
   require_parse(parser.parse(initial));
@@ -91,7 +91,7 @@ static void test_large_arena_arrays() {
   std::string circles = "[HitObjects]\n";
   std::string sliders = "[HitObjects]\n";
   std::string timing = "[TimingPoints]\n";
-  for (int i = 0; i < 3000; ++i) {
+  for (fosu::i32 i = 0; i < 3000; ++i) {
     if (i == 1500) {
       circles += "[HitObjects]\n";
       sliders += "[HitObjects]\n";
@@ -240,7 +240,7 @@ static void test_failed_copy_rewinds_destination() {
   *existing = 0x12345678;
   const size_t checkpoint = fosu::arena_pos(destination);
 
-  auto copied = beatmap.copy(*destination);
+  auto         copied = beatmap.copy(*destination);
   CHECK(!copied);
   CHECK_EQ(copied.error().code, fosu::ErrorCode::AllocationFailure);
   CHECK_EQ(fosu::arena_pos(destination), checkpoint);
@@ -331,7 +331,7 @@ static void test_input_size_overflow() {
 }
 
 static void test_parser_prepares_engine_input_and_output() {
-  static int                calls = 0;
+  static fosu::i32          calls = 0;
   const fosu::ParsingEngine engine{
       fosu::EngineKind::Scalar,
       [](std::span<const char> input, fosu::Beatmap& beatmap,

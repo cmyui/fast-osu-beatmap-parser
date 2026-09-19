@@ -76,7 +76,7 @@ inline bool parse_preview_time(BeatmapHeader& header, std::string_view input) {
   const auto time = parse_field_integer(input);
   if (!time)
     return false;
-  const int offset = header.format_version < 5 && *time != -1 ? 24 : 0;
+  const i32 offset = header.format_version < 5 && *time != -1 ? 24 : 0;
   header.preview_time = static_cast<i32>(static_cast<u32>(*time) + offset);
   return true;
 }

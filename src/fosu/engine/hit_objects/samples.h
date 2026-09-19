@@ -45,7 +45,7 @@ inline bool valid_sample(std::string_view sample, bool banks_only = false) {
     return true;
   const char* p = sample.data();
   const char* end = p + sample.size();
-  for (int i = 0; i < (banks_only ? 2 : 4); ++i) {
+  for (i32 i = 0; i < (banks_only ? 2 : 4); ++i) {
     i64         value;
     const char* q = parse_osu_int(p, end, value);
     if (q == p || (q < end && *q != ':')) [[unlikely]]
@@ -78,8 +78,8 @@ inline bool valid_edge_sets(std::string_view sets, i32 slides) {
   }
   const char* p = sets.data();
   const char* end = p + sets.size();
-  const int   nodes = (slides > 0 ? slides : 1) + 1;
-  for (int i = 0; i < nodes; ++i) {
+  const i32   nodes = (slides > 0 ? slides : 1) + 1;
+  for (i32 i = 0; i < nodes; ++i) {
     // Editor bank pairs are single digits. Validate those directly;
     // additional sample fields and unusual integers use the same fallback.
     if (end - p >= 3 && p[1] == ':' && is_digit(p[0]) && is_digit(p[2])) {

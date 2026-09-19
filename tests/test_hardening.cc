@@ -47,7 +47,7 @@ int main() {
     }
   }
   // Circle precedence applies even when slider/spinner/hold bits are set.
-  for (int type : {1, 3, 9, 129, 255}) {
+  for (fosu::i32 type : {1, 3, 9, 129, 255}) {
     const std::string line =
         "[HitObjects]\n1,2,3," + std::to_string(type) + ",0,0:1:2:3:";
     for (const std::string ending : {"", "\n", "\r\n"})

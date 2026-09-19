@@ -19,7 +19,7 @@ struct SliderTiming {
   f64 velocity;
   f64 tick_distance;
   f64 span_duration;
-  int spans;
+  i32 spans;
 };
 
 inline bool set_slider_end_times(Beatmap&                map,
@@ -130,7 +130,7 @@ inline bool set_slider_end_times(Beatmap&                map,
         100 * map.slider_multiplier * velocity / beat_length;
     // osu! suppresses repeats on effectively zero-length paths. Keep the
     // encoded span count on Slider, but use the effective count for duration.
-    const int spans = distance.value() <= 1e-7 ? 1 : slider.slides;
+    const i32 spans = distance.value() <= 1e-7 ? 1 : slider.slides;
     object.end_time =
         object.time + spans * distance.value() / pixels_per_millisecond;
     if (!stacking_end_times.empty()) {

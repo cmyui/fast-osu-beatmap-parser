@@ -214,7 +214,7 @@ inline void catmull_distance(std::span<const CurvePoint> points,
   for (size_t i = 0; i + 1 < points.size(); ++i) {
     const auto a = points[i ? i - 1 : i], b = points[i], c = points[i + 1];
     const auto d = i + 2 < points.size() ? points[i + 2] : c * 2 - b;
-    for (int sample = 0; sample < 100; ++sample) {
+    for (i32 sample = 0; sample < 100; ++sample) {
       const f32 t = static_cast<f32>((sample + 1) / 2) / 50;
       distance.append(catmull_point(a, b, c, d, t));
     }
@@ -252,7 +252,7 @@ inline bool circular_arc_distance(std::span<const CurvePoint> points,
                                                      1 - 0.1f / radius)))));
   if (!std::isfinite(amount) || amount >= 1000)
     return false;
-  for (int i = 0; i < static_cast<int>(amount); ++i) {
+  for (i32 i = 0; i < static_cast<i32>(amount); ++i) {
     const f64 theta = start + direction * (i / (amount - 1)) * range;
     distance.append(centre + CurvePoint{static_cast<f32>(std::cos(theta)),
                                         static_cast<f32>(std::sin(theta))} *
@@ -433,9 +433,9 @@ inline Result<f64> slider_distance(const HitObject&              object,
 struct CurveVertexChunk {
   static constexpr size_t capacity = 64;
 
-  CurveVertexChunk* next = nullptr;
-  size_t            count = 0;
-  CurvePoint        points[capacity];
+  CurveVertexChunk*       next = nullptr;
+  size_t                  count = 0;
+  CurvePoint              points[capacity];
 };
 
 struct CurveVertices {

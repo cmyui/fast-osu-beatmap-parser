@@ -47,7 +47,7 @@ inline void parse_background_event(Beatmap& bm,
                                    size_t&,
                                    const char* rest,
                                    const char* end,
-                                   int) {
+                                   i32) {
   if (const auto filename = parse_event_filename(rest, end))
     bm.background = *filename;
 }
@@ -56,7 +56,7 @@ inline void parse_video_event(Beatmap& bm,
                               size_t&,
                               const char* rest,
                               const char* end,
-                              int) {
+                              i32) {
   if (const auto filename = parse_event_filename(rest, end))
     bm.video = *filename;
 }
@@ -65,7 +65,7 @@ inline void parse_break_event(Beatmap&    bm,
                               size_t&     break_count,
                               const char* rest,
                               const char* end,
-                              int         time_offset) {
+                              i32         time_offset) {
   f64         start, stop;
   const char* q = parse_osu_double(rest, end, start);
   if (q == rest || q >= end || *q != ',') {
@@ -81,7 +81,7 @@ inline void parse_break_event(Beatmap&    bm,
   bm.breaks[break_count++] = {start, std::max(start, stop + time_offset)};
 }
 
-using EventHandler = void (*)(Beatmap&, size_t&, const char*, const char*, int);
+using EventHandler = void (*)(Beatmap&, size_t&, const char*, const char*, i32);
 inline constexpr auto kEventHandlers = make_string_lookup<EventHandler>({
     {"0", parse_background_event},
     {"1", parse_video_event},
@@ -94,7 +94,7 @@ inline void parse_event_line(Beatmap&    bm,
                              size_t&     break_count,
                              const char* p,
                              size_t      len,
-                             int         time_offset) {
+                             i32         time_offset) {
   // Storyboard commands are indented; count and skip them.
   if (len == 0 || *p == ' ' || *p == '_') {
     ++bm.stats.storyboard_lines;
@@ -119,7 +119,7 @@ inline const char* parse_events_section_simd(Beatmap&    bm,
                                              size_t&     break_count,
                                              const char* p,
                                              const char* file_end,
-                                             int         time_offset) {
+                                             i32         time_offset) {
   // Fused loop: skip indented storyboard commands on their first byte and
   // find line endings with two 32-byte vector compares.
   u32 storyboard_lines = 0;
@@ -170,7 +170,7 @@ inline const char* parse_events_section_scalar(Beatmap&    bm,
                                                size_t&     break_count,
                                                const char* p,
                                                const char* file_end,
-                                               int         time_offset) {
+                                               i32         time_offset) {
   return for_each_section_line(p, file_end, [&](std::string_view line) {
     parse_event_line(bm, break_count, line.data(), line.size(), time_offset);
   });
@@ -180,7 +180,7 @@ inline const char* parse_events_section(Beatmap&    bm,
                                         size_t&     break_count,
                                         const char* p,
                                         const char* file_end,
-                                        int         time_offset = 0) {
+                                        i32         time_offset = 0) {
 #if FOSU_SIMD
   return parse_events_section_simd(bm, break_count, p, file_end, time_offset);
 #else

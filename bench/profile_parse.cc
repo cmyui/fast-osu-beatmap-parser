@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
   size_t limit = strtoul(argv[2], nullptr, 10);
   if (!limit || limit > files.size())
     limit = files.size();
-  const int rounds = atoi(argv[3]);
+  const fosu::i32 rounds = atoi(argv[3]);
   if (!limit || rounds < 1 ||
       (strcmp(argv[4], "fresh") && strcmp(argv[4], "reuse")))
     return 2;
@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
   size_t objects = 0;
   double best = 1e30, total = 0;
   long   fault_total = 0;
-  for (int r = 0; r < rounds; ++r) {
+  for (fosu::i32 r = 0; r < rounds; ++r) {
     const long f0 = faults();
     const auto t0 = std::chrono::steady_clock::now();
     for (const auto& in : inputs) {

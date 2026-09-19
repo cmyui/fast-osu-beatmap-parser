@@ -14,11 +14,11 @@
 
 namespace fosu::internal {
 
-static_assert(kSectionGeneral == 1u << static_cast<int>(Section::General) &&
+static_assert(kSectionGeneral == 1u << static_cast<i32>(Section::General) &&
                   kSectionDifficulty ==
-                      1u << static_cast<int>(Section::Difficulty) &&
+                      1u << static_cast<i32>(Section::Difficulty) &&
                   kSectionHitObjects ==
-                      1u << static_cast<int>(Section::HitObjects),
+                      1u << static_cast<i32>(Section::HitObjects),
               "public section bits mirror the internal Section ordinals");
 
 inline const char* parse_preamble(Beatmap&    beatmap,
@@ -54,7 +54,7 @@ inline void parse_document(std::span<const char> input,
   }
   const char* end = input.data() + input.size();
   const char* p = parse_preamble(beatmap, input.data(), end);
-  const int   time_offset = beatmap.format_version < 5 ? 24 : 0;
+  const i32   time_offset = beatmap.format_version < 5 ? 24 : 0;
   size_t      break_count = 0, colour_count = 0, timing_point_count = 0;
   size_t      hit_object_count = 0, slider_count = 0, slider_point_count = 0;
   size_t      slider_segment_count = 0;
@@ -64,7 +64,7 @@ inline void parse_document(std::span<const char> input,
   while (p < end) {
     const auto header = read_line(p, end);
     const auto section = match_section(header.text);
-    const u32  bit = 1u << static_cast<int>(section);
+    const u32  bit = 1u << static_cast<i32>(section);
     p = header.next;
     if (!(options.sections & bit)) {
       if (!pending)

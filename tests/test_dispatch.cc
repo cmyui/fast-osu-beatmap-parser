@@ -46,14 +46,14 @@ int main(int argc, char** argv) {
 #ifdef FOSU_TEST_neon
   neon = host_supports_neon();
 #endif
-  const bool available = !strcmp(requested, "auto") ||
-                         !strcmp(requested, "scalar") ||
-                         (!strcmp(requested, "avx2") && avx2) ||
-                         (!strcmp(requested, "neon") && neon);
+  const bool               available = !strcmp(requested, "auto") ||
+                                       !strcmp(requested, "scalar") ||
+                                       (!strcmp(requested, "avx2") && avx2) ||
+                                       (!strcmp(requested, "neon") && neon);
   // Race the first selection and allocation; all callers must retain one
   // engine.
   std::vector<std::thread> threads;
-  for (int i = 0; i < 8; ++i)
+  for (fosu::i32 i = 0; i < 8; ++i)
     threads.emplace_back([&] {
       const auto* engine = fosu::runtime_engine();
       assert(bool(engine) == available);

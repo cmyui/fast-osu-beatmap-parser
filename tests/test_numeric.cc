@@ -25,7 +25,7 @@ static uint64_t rng() {
 
 static void test_four_point_bezier_subdivision() {
   using fosu::internal::CurvePoint;
-  for (int sample = 0; sample < 1000; ++sample) {
+  for (fosu::i32 sample = 0; sample < 1000; ++sample) {
     CurvePoint points[4];
     for (auto& point : points) {
       auto coordinate = [] {
@@ -55,22 +55,22 @@ static void test_four_point_bezier_subdivision() {
 // require correct rounding rather than rounding an intermediate integer.
 static void test_fuzz_parse_double() {
   char buf[96];
-  for (int iter = 0; iter < 300000; ++iter) {
-    const int int_digits = 1 + (int)(rng() % 9);
-    const int frac_digits = (int)(rng() % 8);
-    int       len = 0;
+  for (fosu::i32 iter = 0; iter < 300000; ++iter) {
+    const fosu::i32 int_digits = 1 + (fosu::i32)(rng() % 9);
+    const fosu::i32 frac_digits = (fosu::i32)(rng() % 8);
+    fosu::i32       len = 0;
     if (rng() % 3 == 0)
       buf[len++] = '-';
-    for (int i = 0; i < int_digits; ++i)
+    for (fosu::i32 i = 0; i < int_digits; ++i)
       buf[len++] =
           char('0' + (i == 0 ? rng() % 9 + (int_digits > 1) : rng() % 10));
     if (frac_digits || rng() % 4 == 0) {
       buf[len++] = '.';
-      for (int i = 0; i < frac_digits; ++i)
+      for (fosu::i32 i = 0; i < frac_digits; ++i)
         buf[len++] = char('0' + rng() % 10);
     }
-    const char* tail = ",4,2\r\n";
-    const int   payload = len;
+    const char*     tail = ",4,2\r\n";
+    const fosu::i32 payload = len;
     for (const char* t = tail; *t; ++t)
       buf[len++] = *t;
     memset(buf + len, 0, sizeof(buf) - (size_t)len);
@@ -100,14 +100,14 @@ static void test_fuzz_parse_double() {
 
 static void test_fuzz_parse_osu_float_integers() {
   char buf[96];
-  for (int iter = 0; iter < 100000; ++iter) {
-    int len = 0;
+  for (fosu::i32 iter = 0; iter < 100000; ++iter) {
+    fosu::i32 len = 0;
     if (rng() % 4 == 0)
       buf[len++] = ' ';
     if (rng() % 3 == 0)
       buf[len++] = rng() % 2 ? '-' : '+';
-    const int digits = 1 + static_cast<int>(rng() % 10);
-    for (int i = 0; i < digits; ++i)
+    const fosu::i32 digits = 1 + static_cast<fosu::i32>(rng() % 10);
+    for (fosu::i32 i = 0; i < digits; ++i)
       buf[len++] = static_cast<char>('0' + rng() % 10);
     if (rng() % 4 == 0)
       buf[len++] = ' ';
@@ -204,14 +204,15 @@ static void check_same_slider(const fosu::Beatmap& fast,
 }
 
 static void test_fuzz_slider_points() {
-  for (int iter = 0; iter < 30000; ++iter) {
+  for (fosu::i32 iter = 0; iter < 30000; ++iter) {
     std::string    coordinate;
     const uint64_t kind = rng() % 16;
     if (kind == 0)
       coordinate += '-';
     if (kind != 1) {
-      const int digits = 1 + static_cast<int>(rng() % (kind < 12 ? 4 : 8));
-      for (int i = 0; i < digits; ++i)
+      const fosu::i32 digits =
+          1 + static_cast<fosu::i32>(rng() % (kind < 12 ? 4 : 8));
+      for (fosu::i32 i = 0; i < digits; ++i)
         coordinate += static_cast<char>('0' + rng() % 10);
     }
     const std::string document =
@@ -254,7 +255,7 @@ static void test_hitobject_timestamp_boundaries() {
 // Exercise both eight-digit chunks, the optional fraction, and a second
 // fractional chunk through the resulting Slider domain object.
 static void test_fuzz_slider_length() {
-  for (int iter = 0; iter < 30000; ++iter) {
+  for (fosu::i32 iter = 0; iter < 30000; ++iter) {
     std::string length = std::to_string(rng() % 131074);
     length.insert(0, rng() % (9 - length.size()), '0');
     if (rng() % 4 != 0) {
@@ -281,40 +282,40 @@ static void test_fuzz_slider_length() {
 static void test_fuzz_timing_point() {
   char   buf[256];
   size_t accepted = 0;
-  for (int iter = 0; iter < 400000; ++iter) {
-    int            len = 0;
+  for (fosu::i32 iter = 0; iter < 400000; ++iter) {
+    fosu::i32      len = 0;
     const uint64_t shape = rng() % 10;
     if (shape == 9)
       buf[len++] = '-';
-    const int od = 1 + (int)(rng() % 11);
-    for (int i = 0; i < od; ++i)
+    const fosu::i32 od = 1 + (fosu::i32)(rng() % 11);
+    for (fosu::i32 i = 0; i < od; ++i)
       buf[len++] = char('0' + rng() % 10);
     if (shape == 8) {
       buf[len++] = '.';
-      for (int i = 0; i < 3; ++i)
+      for (fosu::i32 i = 0; i < 3; ++i)
         buf[len++] = char('0' + rng() % 10);
     }
     buf[len++] = ',';
     if (rng() % 2)
       buf[len++] = '-';
-    const int bi = 1 + (int)(rng() % 4);
-    for (int i = 0; i < bi; ++i)
+    const fosu::i32 bi = 1 + (fosu::i32)(rng() % 4);
+    for (fosu::i32 i = 0; i < bi; ++i)
       buf[len++] = char('0' + rng() % 10);
     if (rng() % 2) {
       buf[len++] = '.';
-      const int bf = 1 + (int)(rng() % 15);
-      for (int i = 0; i < bf; ++i)
+      const fosu::i32 bf = 1 + (fosu::i32)(rng() % 15);
+      for (fosu::i32 i = 0; i < bf; ++i)
         buf[len++] = char('0' + rng() % 10);
     }
-    const int nf = shape == 7 ? (int)(rng() % 6) : 6;
-    for (int f = 0; f < nf; ++f) {
+    const fosu::i32 nf = shape == 7 ? (fosu::i32)(rng() % 6) : 6;
+    for (fosu::i32 f = 0; f < nf; ++f) {
       buf[len++] = ',';
       if (f == 1) {
         buf[len++] = char('0' + rng() % 4);
         continue;
       }
-      const int fd = 1 + (int)(rng() % 3);
-      for (int i = 0; i < fd; ++i)
+      const fosu::i32 fd = 1 + (fosu::i32)(rng() % 3);
+      for (fosu::i32 i = 0; i < fd; ++i)
         buf[len++] = char('0' + rng() % 10);
     }
     if (rng() % 3 == 0) {
@@ -354,7 +355,7 @@ static void test_fuzz_timing_point() {
 }
 
 // Generate a value that renders with exactly `digits` decimal digits.
-static uint64_t value_with_digits(int digits, uint64_t max) {
+static uint64_t value_with_digits(fosu::i32 digits, uint64_t max) {
   const uint64_t lo = digits == 1 ? 0
                       : fosu::internal::kPow10[digits - 1] < 1e19
                           ? (uint64_t)fosu::internal::kPow10[digits - 1]
@@ -368,29 +369,29 @@ static uint64_t value_with_digits(int digits, uint64_t max) {
 }
 
 static void test_fuzz_hitobject_fields() {
-  char buf[128];
-  int  fast_taken = 0;
-  for (int iter = 0; iter < 30000; ++iter) {
-    const int      lx = 1 + (int)(rng() % 3);
-    const int      ly = 1 + (int)(rng() % 3);
-    const int      lt = 1 + (int)(rng() % 10);
-    const int      lty = 1 + (int)(rng() % 3);
-    const uint64_t x = value_with_digits(lx, 999);
-    const uint64_t y = value_with_digits(ly, 999);
-    const uint64_t t = value_with_digits(lt, 9999999999ull);
-    const uint64_t ty = value_with_digits(lty, 255);
-    const uint64_t hs = rng() % 100;
-    int            len = snprintf(buf, sizeof buf,
-                                  "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64
-                                  ",%" PRIu64 ",0:0:0:0:",
-                                  x, y, t, ty, hs);
+  char      buf[128];
+  fosu::i32 fast_taken = 0;
+  for (fosu::i32 iter = 0; iter < 30000; ++iter) {
+    const fosu::i32 lx = 1 + (fosu::i32)(rng() % 3);
+    const fosu::i32 ly = 1 + (fosu::i32)(rng() % 3);
+    const fosu::i32 lt = 1 + (fosu::i32)(rng() % 10);
+    const fosu::i32 lty = 1 + (fosu::i32)(rng() % 3);
+    const uint64_t  x = value_with_digits(lx, 999);
+    const uint64_t  y = value_with_digits(ly, 999);
+    const uint64_t  t = value_with_digits(lt, 9999999999ull);
+    const uint64_t  ty = value_with_digits(lty, 255);
+    const uint64_t  hs = rng() % 100;
+    int len = snprintf(buf, sizeof buf,
+                       "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64
+                       ",%" PRIu64 ",0:0:0:0:",
+                       x, y, t, ty, hs);
     memset(buf + len, 0, sizeof(buf) - (size_t)len);
 
     // Randomly corrupt some lines; the invariant is that whenever the
     // fast path accepts, it must agree exactly with the scalar path.
     if (rng() % 4 == 0) {
-      const int  pos = (int)(rng() % (uint64_t)len);
-      const char junk[] = {'-', '.', ',', 'x', ' ', '|'};
+      const fosu::i32 pos = (fosu::i32)(rng() % (uint64_t)len);
+      const char      junk[] = {'-', '.', ',', 'x', ' ', '|'};
       buf[pos] = junk[rng() % sizeof junk];
     }
 

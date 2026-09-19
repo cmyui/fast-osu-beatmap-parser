@@ -44,10 +44,10 @@ static void test_slider_points() {
 static void test_slider_point_digit_widths() {
 #if FOSU_SIMD
   // Exercise every SIMD shuffle-table entry through the resulting path.
-  for (int first_x : {1, 12, 123, 1234})
-    for (int first_y : {5, 56, 567, 5678})
-      for (int second_x : {9, 98, 987, 9876})
-        for (int second_y : {4, 43, 432, 4321}) {
+  for (fosu::i32 first_x : {1, 12, 123, 1234})
+    for (fosu::i32 first_y : {5, 56, 567, 5678})
+      for (fosu::i32 second_x : {9, 98, 987, 9876})
+        for (fosu::i32 second_y : {4, 43, 432, 4321}) {
           const std::string points = "B|" + std::to_string(first_x) + ":" +
                                      std::to_string(first_y) + "|" +
                                      std::to_string(second_x) + ":" +

@@ -56,57 +56,57 @@ static_assert(sizeof(LaneMasks) == 64);
 
 consteval std::array<LaneMasks, kNPrefixVariants * 2> make_lane_masks() {
   std::array<LaneMasks, kNPrefixVariants * 2> out{};
-  for (int lx = 1; lx <= 3; ++lx)
-    for (int ly = 1; ly <= 3; ++ly)
-      for (int lt = 1; lt <= 10; ++lt)
-        for (int lty = 1; lty <= 3; ++lty)
-          for (int lhs = 1; lhs <= 2; ++lhs) {
-            const int p0 = lx;
-            const int p1 = p0 + 1 + ly;
-            const int p2 = p1 + 1 + lt;
-            const int p3 = p2 + 1 + lty;
-            const int index =
+  for (i32 lx = 1; lx <= 3; ++lx)
+    for (i32 ly = 1; ly <= 3; ++ly)
+      for (i32 lt = 1; lt <= 10; ++lt)
+        for (i32 lty = 1; lty <= 3; ++lty)
+          for (i32 lhs = 1; lhs <= 2; ++lhs) {
+            const i32 p0 = lx;
+            const i32 p1 = p0 + 1 + ly;
+            const i32 p2 = p1 + 1 + lt;
+            const i32 p3 = p2 + 1 + lty;
+            const i32 index =
                 ((((lx - 1) * 3 + (ly - 1)) * 10 + (lt - 1)) * 3 + (lty - 1)) *
                     2 +
                 lhs - 1;
 
-            int src[32];
+            i32 src[32];
             for (auto& s : src)
               s = -1;
-            for (int i = 0; i < lx; ++i)
+            for (i32 i = 0; i < lx; ++i)
               src[4 - lx + i] = i;
-            for (int i = 0; i < ly; ++i)
+            for (i32 i = 0; i < ly; ++i)
               src[8 - ly + i] = p0 + 1 + i;
-            for (int i = 0; i < lty; ++i)
+            for (i32 i = 0; i < lty; ++i)
               src[12 - lty + i] = p2 + 1 + i;
-            for (int i = 0; i < lt; ++i)
+            for (i32 i = 0; i < lt; ++i)
               src[32 - lt + i] = p1 + 1 + i;
 
             LaneMasks& lm = out[index];
             for (auto& word : lm.perm)
               word = -1;
-            int  used[2]{};
+            i32  used[2]{};
             // Each 128-bit lane can gather four source dwords before the byte
             // shuffle.
-            auto find_or_add_word = [&](int word, int lane) {
-              for (int i = 0; i < used[lane]; ++i)
+            auto find_or_add_word = [&](i32 word, i32 lane) {
+              for (i32 i = 0; i < used[lane]; ++i)
                 if (lm.perm[lane * 4 + i] == word)
                   return i;
               if (used[lane] == 4)
                 return -1;
-              const int slot = used[lane]++;
+              const i32 slot = used[lane]++;
               lm.perm[lane * 4 + slot] = word;
               return slot;
             };
-            for (int b = 0; b < 32; ++b)
+            for (i32 b = 0; b < 32; ++b)
               if (src[b] >= 0 && find_or_add_word(src[b] / 4, b / 16) < 0)
                 std::abort();
 
             // Put hitSound in the low lane where possible; use spare high-lane
             // space otherwise. Preserve each digit's decimal weight in either
             // lane.
-            for (int i = 0; i < lhs; ++i) {
-              const int source = p3 + 1 + i;
+            for (i32 i = 0; i < lhs; ++i) {
+              const i32 source = p3 + 1 + i;
               if (find_or_add_word(source / 4, 0) >= 0) {
                 src[16 - lhs + i] = source;
               } else {
@@ -116,14 +116,14 @@ consteval std::array<LaneMasks, kNPrefixVariants * 2> make_lane_masks() {
               }
             }
 
-            for (int b = 0; b < 32; ++b) {
+            for (i32 b = 0; b < 32; ++b) {
               if (src[b] < 0) {
                 lm.shuf[b] = static_cast<i8>(0x80);
                 continue;
               }
-              const int dw = src[b] / 4;
-              const int off = src[b] % 4;
-              const int slot = find_or_add_word(dw, b / 16);
+              const i32 dw = src[b] / 4;
+              const i32 off = src[b] % 4;
+              const i32 slot = find_or_add_word(dw, b / 16);
               lm.shuf[b] = static_cast<i8>(slot * 4 + off);
             }
             for (auto& word : lm.perm)
@@ -167,25 +167,25 @@ struct alignas(32) PrefixShuffle {
 };
 consteval auto make_prefix_shuffles() {
   std::array<PrefixShuffle, kNPrefixVariants * 2> out{};
-  for (int x = 1; x <= 3; ++x)
-    for (int y = 1; y <= 3; ++y)
-      for (int t = 1; t <= 10; ++t)
-        for (int type = 1; type <= 3; ++type)
-          for (int sound = 1; sound <= 2; ++sound) {
+  for (i32 x = 1; x <= 3; ++x)
+    for (i32 y = 1; y <= 3; ++y)
+      for (i32 t = 1; t <= 10; ++t)
+        for (i32 type = 1; type <= 3; ++type)
+          for (i32 sound = 1; sound <= 2; ++sound) {
             auto& m =
                 out[((((x - 1) * 3 + y - 1) * 10 + t - 1) * 3 + type - 1) * 2 +
                     sound - 1];
             for (auto& b : m.bytes)
               b = 255;
-            for (int i = 0; i < x; ++i)
+            for (i32 i = 0; i < x; ++i)
               m.bytes[4 - x + i] = i;
-            for (int i = 0; i < y; ++i)
+            for (i32 i = 0; i < y; ++i)
               m.bytes[8 - y + i] = x + 1 + i;
-            for (int i = 0; i < type; ++i)
+            for (i32 i = 0; i < type; ++i)
               m.bytes[12 - type + i] = x + y + t + 3 + i;
-            for (int i = 0; i < t; ++i)
+            for (i32 i = 0; i < t; ++i)
               m.bytes[32 - t + i] = x + y + 2 + i;
-            for (int i = 0; i < sound; ++i)
+            for (i32 i = 0; i < sound; ++i)
               m.bytes[16 - sound + i] = x + y + t + type + 4 + i;
           }
   return out;

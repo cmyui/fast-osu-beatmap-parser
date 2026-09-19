@@ -8,7 +8,7 @@
 namespace fosu {
 
 struct BeatmapHeader {
-  int format_version = 14;
+  i32              format_version = 14;
 
   // [General]
   std::string_view audio_filename;
@@ -49,12 +49,12 @@ struct BeatmapHeader {
   i64              beatmap_set_id = -1;
 
   // [Difficulty]
-  f64 hp = 5;
-  f64 cs = 5;
-  f64 od = 5;
-  f64 ar = 5;
-  f64 slider_multiplier = 1.4;
-  f64 slider_tick_rate = 1;
+  f64              hp = 5;
+  f64              cs = 5;
+  f64              od = 5;
+  f64              ar = 5;
+  f64              slider_multiplier = 1.4;
+  f64              slider_tick_rate = 1;
 
   // [Events]
   std::string_view background;

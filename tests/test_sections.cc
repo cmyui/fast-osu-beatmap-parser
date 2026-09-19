@@ -483,7 +483,7 @@ static void test_long_event_lines() {
 }
 
 static void test_timing_integer_widths() {
-  for (int value : {9, 99, 999, 9999, 10000, 99999999, INT32_MAX}) {
+  for (fosu::i32 value : {9, 99, 999, 9999, 10000, 99999999, INT32_MAX}) {
     const auto        field = std::to_string(value);
     const std::string input = "[TimingPoints]\n0,-100," + field + ",2," +
                               field + "," + field + ",0," + field;
@@ -603,7 +603,7 @@ static void test_section_skip_boundaries() {
 static void test_enum_contracts() {
   const std::string names[] = {"None", "Normal", "Soft", "Drum"};
   for (bool simd : {false, true}) {
-    for (int value = 0; value < 4; ++value) {
+    for (fosu::i32 value = 0; value < 4; ++value) {
       for (const auto& spelling :
            {names[value], std::to_string(value),
             " +" + std::to_string(value) + " ", "0" + std::to_string(value)}) {

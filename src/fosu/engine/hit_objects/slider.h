@@ -47,14 +47,14 @@ struct alignas(16) SliderPointShuffle {
 
 consteval std::array<SliderPointShuffle, 16> make_slider_point_shuffles() {
   std::array<SliderPointShuffle, 16> shuffles{};
-  for (int x_digits = 1; x_digits <= 4; ++x_digits) {
-    for (int y_digits = 1; y_digits <= 4; ++y_digits) {
+  for (i32 x_digits = 1; x_digits <= 4; ++x_digits) {
+    for (i32 y_digits = 1; y_digits <= 4; ++y_digits) {
       auto& shuffle = shuffles[(x_digits - 1) * 4 + y_digits - 1];
       for (auto& byte : shuffle.bytes)
         byte = static_cast<i8>(0x80);
-      for (int i = 0; i < x_digits; ++i)
+      for (i32 i = 0; i < x_digits; ++i)
         shuffle.bytes[4 - x_digits + i] = static_cast<i8>(1 + i);
-      for (int i = 0; i < y_digits; ++i)
+      for (i32 i = 0; i < y_digits; ++i)
         shuffle.bytes[8 - y_digits + i] = static_cast<i8>(x_digits + 2 + i);
     }
   }
@@ -245,7 +245,7 @@ FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
   boundaries &= boundaries - 1;
   const u32 second_colon = trailing_zeros(boundaries);
   boundaries &= boundaries - 1;
-  const u32 second_end = trailing_zeros(boundaries);
+  const u32  second_end = trailing_zeros(boundaries);
 
   const u32  first_x_digits = first_colon - 1;
   const u32  first_y_digits = first_end - first_colon - 1;
@@ -312,7 +312,7 @@ FOSU_NOINLINE inline bool parse_slider(
   const size_t slider_point_begin = slider_point_count;
   const size_t slider_segment_begin = slider_segment_count;
 
-  const auto first_curve_type = parse_curve_type(*p++);
+  const auto   first_curve_type = parse_curve_type(*p++);
   if (!first_curve_type)
     return false;
 
