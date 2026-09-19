@@ -8,6 +8,8 @@
 // parser-wide contract: kBufferPadding readable zero bytes past the end
 // of the input buffer.
 
+#include <fosu/types.h>
+
 #include <cstdint>
 #include <cstring>
 #if defined(_MSC_VER)
