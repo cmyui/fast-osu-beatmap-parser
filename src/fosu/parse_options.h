@@ -14,7 +14,9 @@ enum : u32 {
   kSectionTimingPoints = 1u << 6,
   kSectionColours = 1u << 7,
   kSectionHitObjects = 1u << 8,
-  kAllSections = 0x1FEu,
+  kAllSections = kSectionGeneral | kSectionEditor | kSectionMetadata |
+      kSectionDifficulty | kSectionEvents | kSectionTimingPoints |
+      kSectionColours | kSectionHitObjects,
 };
 
 struct ParseOptions {
