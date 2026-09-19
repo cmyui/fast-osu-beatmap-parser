@@ -1,4 +1,8 @@
 #pragma once
+#include "scalar_engine.h"
+
+#include <fosu/parser.h>
+
 #include <cinttypes>
 #include <cmath>
 #include <cstdio>
@@ -6,9 +10,6 @@
 #include <cstring>
 #include <string>
 #include <string_view>
-
-#include <fosu/parser.h>
-#include "scalar_engine.h"
 
 static int g_failures = 0;
 
@@ -42,6 +43,6 @@ inline int test_result() {
                                                 bool use_simd = true) {
   static fosu::Parser native_parser;
   static fosu::Parser scalar_parser(fosu_test::scalar_engine());
-  auto& parser = use_simd ? native_parser : scalar_parser;
+  auto&               parser = use_simd ? native_parser : scalar_parser;
   return require_parse(parser.parse(s.data(), s.size()));
 }

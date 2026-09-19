@@ -99,6 +99,7 @@ target_sources(fosu_headers INTERFACE FILE_SET HEADERS BASE_DIRS src FILES
   src/fosu/parser.h
   src/fosu/result.h
   src/fosu/runtime.h
+  src/fosu/types.h
   src/fosu/engine/hit_objects/common_fields.h
   src/fosu/engine/hit_objects/object_types.h
   src/fosu/engine/hit_objects/samples.h

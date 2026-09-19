@@ -1,8 +1,10 @@
 // Construct detached Python values using the CPython stable ABI.
-#include <Python.h>
 #include <fosu/compiler.h>
 #include <fosu/engine/runtime/loader.h>
 #include <fosu/parser.h>
+#include <fosu/types.h>
+
+#include <Python.h>
 #include <cerrno>
 #include <cstring>
 #include <initializer_list>
@@ -11,6 +13,12 @@
 #include <utility>
 
 namespace {
+using fosu::f32;
+using fosu::f64;
+using fosu::i32;
+using fosu::i64;
+using fosu::u32;
+
 struct PythonError {};
 struct PythonRef {
   PyObject* p;
@@ -32,7 +40,7 @@ struct PythonRef {
 PythonRef integer(long long n) {
   return PythonRef(PyLong_FromLongLong(n));
 }
-PythonRef number(double n) {
+PythonRef number(f64 n) {
   return PythonRef(PyFloat_FromDouble(n));
 }
 PythonRef boolean(bool n) {
@@ -50,9 +58,9 @@ PythonRef retain(PyObject* p) {
   return PythonRef(p);
 }
 
-// NumberStyles.Integer uses ASCII digits, a sign/ASCII whitespace, and int32 range.
-// The .NET parser also accepts trailing NULs after whitespace.
-bool bookmark(const char* p, const char* end, int32_t& out) {
+// NumberStyles.Integer uses ASCII digits, a sign/ASCII whitespace, and int32
+// range. The .NET parser also accepts trailing NULs after whitespace.
+bool bookmark(const char* p, const char* end, i32& out) {
   auto space = [](unsigned char c) {
     return c == ' ' || (c >= 9 && c <= 13);
   };
@@ -62,9 +70,9 @@ bool bookmark(const char* p, const char* end, int32_t& out) {
   if (p != end && (*p == '+' || *p == '-'))
     negative = *p++ == '-';
   const char* digits = p;
-  uint32_t value = 0, limit = negative ? 2147483648u : 2147483647u;
+  u32         value = 0, limit = negative ? 2147483648u : 2147483647u;
   while (p != end && *p >= '0' && *p <= '9') {
-    uint32_t digit = static_cast<unsigned>(*p++ - '0');
+    u32 digit = static_cast<unsigned>(*p++ - '0');
     if (value > (limit - digit) / 10)
       return false;
     value = value * 10 + digit;
@@ -77,7 +85,7 @@ bool bookmark(const char* p, const char* end, int32_t& out) {
     ++p;
   if (p != end)
     return false;
-  out = static_cast<int32_t>(negative ? -static_cast<int64_t>(value) : value);
+  out = static_cast<i32>(negative ? -static_cast<i64>(value) : value);
   return true;
 }
 
@@ -286,29 +294,30 @@ enum PythonType {
   t_curve,
   type_count
 };
-constexpr int record_type_count = t_curve_segment + 1;
+constexpr int         record_type_count = t_curve_segment + 1;
 constexpr const char* type_names[] = {
-    "Point",       "Circle",      "Slider",     "Spinner",      "HoldNote",
-    "TimingPoint", "Break",       "ParseStats", "PathPoint",    "SliderPath",
-    "Beatmap",     "SliderEvent", "Stacking",   "CurveSegment", "SliderEventType",
-    "HitSound",    "GameMode",    "SampleSet",  "CurveType"};
+    "Point",     "Circle",       "Slider",          "Spinner",
+    "HoldNote",  "TimingPoint",  "Break",           "ParseStats",
+    "PathPoint", "SliderPath",   "Beatmap",         "SliderEvent",
+    "Stacking",  "CurveSegment", "SliderEventType", "HitSound",
+    "GameMode",  "SampleSet",    "CurveType"};
 struct PythonSlot {
-  PyObject* descriptor;
+  PyObject*    descriptor;
   descrsetfunc assign;
 };
 struct State {
-  PyObject* model;
-  PyObject* types[type_count];
+  PyObject*  model;
+  PyObject*  types[type_count];
   PythonSlot slots[record_type_count][field_count];
-  PyObject* sounds[16];
-  PyObject* samples[4];
-  PyObject* curves[4];
-  PyObject* bookmark_whitespace;
+  PyObject*  sounds[16];
+  PyObject*  samples[4];
+  PyObject*  curves[4];
+  PyObject*  bookmark_whitespace;
 };
 
 struct BeatmapConverter {
   const fosu::Beatmap& map;
-  const State& state;
+  const State&         state;
   BeatmapConverter(const fosu::Beatmap& map, const State& state)
       : map(map), state(state) {}
 
@@ -331,17 +340,17 @@ struct BeatmapConverter {
   }
 
   struct Value {
-    Field field;
+    Field     field;
     PythonRef value;
   };
-  PythonRef record(PythonType kind,
+  PythonRef record(PythonType                   kind,
                    std::initializer_list<Value> values,
-                   std::span<const Value> common = {}) {
+                   std::span<const Value>       common = {}) {
     // The package owns these plain slotted dataclasses. Allocate once and use
     // their cached descriptor setters, without name lookup or Python __init__.
-    PythonRef out(
-        PyType_GenericAlloc(reinterpret_cast<PyTypeObject*>(state.types[kind]), 0));
-    auto assign = [&](const Value& value) {
+    PythonRef out(PyType_GenericAlloc(
+        reinterpret_cast<PyTypeObject*>(state.types[kind]), 0));
+    auto      assign = [&](const Value& value) {
       const auto& slot = state.slots[kind][value.field];
       if (slot.assign(slot.descriptor, out, value.value) < 0)
         throw PythonError{};
@@ -352,17 +361,17 @@ struct BeatmapConverter {
       assign(value);
     return out;
   }
-  PythonRef sound(uint32_t value) {
+  PythonRef sound(u32 value) {
     if (value < 16)
       return retain(state.sounds[value]);
     // Preserve unknown bits supported by HitSound's IntFlag contract.
     return PythonRef(PyObject_CallFunction(state.types[t_sound], "I", value));
   }
   PythonRef string(std::string_view s) {
-    return PythonRef(
-        PyUnicode_DecodeUTF8(s.empty() ? "" : s.data(), s.size(), "surrogateescape"));
+    return PythonRef(PyUnicode_DecodeUTF8(s.empty() ? "" : s.data(), s.size(),
+                                          "surrogateescape"));
   }
-  PythonRef point(float x, float y) {
+  PythonRef point(f32 x, f32 y) {
     return record(t_point, {{f_x, number(x)}, {f_y, number(y)}});
   }
   template <class F>
@@ -376,47 +385,53 @@ struct BeatmapConverter {
     return out;
   }
   PythonRef hit_object(const fosu::HitObject& h) {
-    const bool circle = h.type & 1, slider = !circle && (h.type & 2);
-    PythonRef time = number(h.time);
-    const Value common[] = {{f_time, retain(time)},
-                            {f_stacking, stacking(h)},
-                            {f_end_time, circle ? std::move(time) : number(h.end_time)},
-                            {f_x, number(h.x)},
-                            {f_y, number(h.y)},
-                            {f_hitsound, sound(h.hitsound)},
-                            {f_type, integer(h.type)},
-                            {f_new_combo, boolean(h.new_combo)},
-                            {f_combo_skip, integer(h.combo_skip)},
-                            {f_hit_sample, string(h.hit_sample)}};
+    const bool  circle = h.type & 1, slider = !circle && (h.type & 2);
+    PythonRef   time = number(h.time);
+    const Value common[] = {
+        {f_time, retain(time)},
+        {f_stacking, stacking(h)},
+        {f_end_time, circle ? std::move(time) : number(h.end_time)},
+        {f_x, number(h.x)},
+        {f_y, number(h.y)},
+        {f_hitsound, sound(h.hitsound)},
+        {f_type, integer(h.type)},
+        {f_new_combo, boolean(h.new_combo)},
+        {f_combo_skip, integer(h.combo_skip)},
+        {f_hit_sample, string(h.hit_sample)}};
     if (slider) {
       const auto& s = map.sliders[h.slider];
-      return record(
-          t_slider,
-          {{f_slides, integer(s.slides)},
-           {f_events, slider_events(h.slider)},
-           {f_path,
-            map.slider_paths.empty() ? none() : slider_path(map.slider_paths[h.slider])},
-           {f_length, number(s.length)},
-           {f_curve_type, curve(s.curve_type)},
-           {f_curve_segments, curve_segments(h, s)},
-           {f_edge_sounds, string(s.edge_sounds)},
-           {f_edge_sets, string(s.edge_sets)},
-           {f_control_points, list(s.point_count + 1,
-                                   [&](size_t j) {
-                                     if (j == 0)
-                                       return point(h.x, h.y);
-                                     const auto& p =
-                                         map.slider_points[s.point_begin + j - 1];
-                                     return point(p.x, p.y);
-                                   })}},
-          common);
+      return record(t_slider,
+                    {{f_slides, integer(s.slides)},
+                     {f_events, slider_events(h.slider)},
+                     {f_path, map.slider_paths.empty()
+                                  ? none()
+                                  : slider_path(map.slider_paths[h.slider])},
+                     {f_length, number(s.length)},
+                     {f_curve_type, curve(s.curve_type)},
+                     {f_curve_segments, curve_segments(h, s)},
+                     {f_edge_sounds, string(s.edge_sounds)},
+                     {f_edge_sets, string(s.edge_sets)},
+                     {f_control_points,
+                      list(s.point_count + 1,
+                           [&](size_t j) {
+                             if (j == 0)
+                               return point(h.x, h.y);
+                             const auto& p =
+                                 map.slider_points[s.point_begin + j - 1];
+                             return point(p.x, p.y);
+                           })}},
+                    common);
     }
-    return record(circle ? t_circle : h.type & 8 ? t_spinner : t_hold, {}, common);
+    return record(circle       ? t_circle
+                  : h.type & 8 ? t_spinner
+                               : t_hold,
+                  {}, common);
   }
-  PythonRef curve_segments(const fosu::HitObject& object, const fosu::Slider& slider) {
+  PythonRef curve_segments(const fosu::HitObject& object,
+                           const fosu::Slider&    slider) {
     return list(slider.segment_count, [&](size_t i) {
       const auto& segment = map.slider_segments[slider.segment_begin + i];
-      const bool head = i == 0;
+      const bool  head = i == 0;
       return record(
           t_curve_segment,
           {{f_type, curve(segment.type)},
@@ -425,7 +440,8 @@ struct BeatmapConverter {
               if (head && !j)
                 return point(object.x, object.y);
               const auto& value =
-                  map.slider_points[slider.point_begin + segment.point_begin + j - head];
+                  map.slider_points[slider.point_begin + segment.point_begin +
+                                    j - head];
               return point(value.x, value.y);
             })}});
     });
@@ -449,20 +465,23 @@ struct BeatmapConverter {
         t_stacking,
         {
             {f_stack_height, integer(value.stack_height)},
-            {f_stack_offset, record(t_path_point, {{f_x, number(value.stack_offset.x)},
-                                                   {f_y, number(value.stack_offset.y)}})},
+            {f_stack_offset,
+             record(t_path_point, {{f_x, number(value.stack_offset.x)},
+                                   {f_y, number(value.stack_offset.y)}})},
         });
   }
   PythonRef slider_events(size_t index) {
-    const auto events = map.slider_events.empty() ? std::span<fosu::SliderEvent>{}
-                                                  : map.slider_events[index];
+    const auto events = map.slider_events.empty()
+                            ? std::span<fosu::SliderEvent>{}
+                            : map.slider_events[index];
     return list(events.size(), [&](size_t i) {
       const auto& e = events[i];
       return record(
           t_event,
           {
-              {f_type, PythonRef(PyObject_CallFunction(state.types[t_event_type], "i",
-                                                       static_cast<int>(e.type)))},
+              {f_type,
+               PythonRef(PyObject_CallFunction(state.types[t_event_type], "i",
+                                               static_cast<int>(e.type)))},
               {f_time, number(e.time)},
               {f_span_index, integer(e.span_index)},
               {f_span_start_time, number(e.span_start_time)},
@@ -484,28 +503,32 @@ struct BeatmapConverter {
                             })},
             {f_cumulative_lengths, list(path.cumulative_lengths.size(),
                                         [&](size_t i) {
-                                          return number(path.cumulative_lengths[i]);
+                                          return number(
+                                              path.cumulative_lengths[i]);
                                         })},
         });
   }
   PythonRef break_period(const fosu::Break& period) {
-    return record(t_break,
-                  {{f_start, number(period.start)}, {f_end, number(period.end)}});
+    return record(t_break, {{f_start, number(period.start)},
+                            {f_end, number(period.end)}});
   }
   PythonRef stats() {
-    return record(t_stats, {{f_fast_path_lines, integer(map.stats.fast_path_lines)},
-                            {f_slow_path_lines, integer(map.stats.slow_path_lines)},
-                            {f_malformed_lines, integer(map.stats.malformed_lines)},
-                            {f_storyboard_lines, integer(map.stats.storyboard_lines)}});
+    return record(t_stats,
+                  {{f_fast_path_lines, integer(map.stats.fast_path_lines)},
+                   {f_slow_path_lines, integer(map.stats.slow_path_lines)},
+                   {f_malformed_lines, integer(map.stats.malformed_lines)},
+                   {f_storyboard_lines, integer(map.stats.storyboard_lines)}});
   }
   PythonRef bookmark_list(PyObject* bookmarks) {
     PythonRef marks(PyList_New(0));
-    // osu's legacy decoder uses invariant int.TryParse and skips invalid tokens.
-    // SplitKeyVal trims .NET whitespace around the complete field first.
-    PythonRef trimmed(
-        PyObject_CallMethod(bookmarks, "strip", "O", state.bookmark_whitespace));
-    PythonRef encoded(PyUnicode_AsEncodedString(trimmed, "utf-8", "surrogateescape"));
-    char* bookmark_data;
+    // osu's legacy decoder uses invariant int.TryParse and skips invalid
+    // tokens. SplitKeyVal trims .NET whitespace around the complete field
+    // first.
+    PythonRef trimmed(PyObject_CallMethod(bookmarks, "strip", "O",
+                                          state.bookmark_whitespace));
+    PythonRef encoded(
+        PyUnicode_AsEncodedString(trimmed, "utf-8", "surrogateescape"));
+    char*      bookmark_data;
     Py_ssize_t bookmark_size;
     if (PyBytes_AsStringAndSize(encoded, &bookmark_data, &bookmark_size) < 0)
       throw PythonError{};
@@ -515,7 +538,7 @@ struct BeatmapConverter {
       const char* stop = begin;
       while (stop != end && *stop != ',')
         ++stop;
-      int32_t value;
+      i32 value;
       if (bookmark(begin, stop, value)) {
         PythonRef number = integer(value);
         if (PyList_Append(marks, number) < 0)
@@ -527,7 +550,7 @@ struct BeatmapConverter {
   }
   PythonRef beatmap() {
     const auto& m = map;
-    PythonRef tags = string(m.tags), bookmarks = string(m.bookmarks);
+    PythonRef   tags = string(m.tags), bookmarks = string(m.bookmarks);
     return record(
         t_beatmap,
         {{f_format_version, integer(m.format_version)},
@@ -538,14 +561,15 @@ struct BeatmapConverter {
          {f_sample_set, sample_set(m.sample_set)},
          {f_sample_volume, integer(m.sample_volume)},
          {f_stack_leniency, number(m.stack_leniency)},
-         {f_mode, PythonRef(PyObject_CallFunctionObjArgs(state.types[t_mode],
-                                                         integer(m.mode).p, nullptr))},
+         {f_mode, PythonRef(PyObject_CallFunctionObjArgs(
+                      state.types[t_mode], integer(m.mode).p, nullptr))},
          {f_letterbox_in_breaks, boolean(m.letterbox_in_breaks)},
          {f_widescreen_storyboard, boolean(m.widescreen_storyboard)},
          {f_epilepsy_warning, boolean(m.epilepsy_warning)},
          {f_special_style, boolean(m.special_style)},
          {f_use_skin_sprites, boolean(m.use_skin_sprites)},
-         {f_samples_match_playback_rate, boolean(m.samples_match_playback_rate)},
+         {f_samples_match_playback_rate,
+          boolean(m.samples_match_playback_rate)},
          {f_countdown_offset, integer(m.countdown_offset)},
          {f_overlay_position, string(m.overlay_position)},
          {f_skin_preference, string(m.skin_preference)},
@@ -597,16 +621,16 @@ struct BeatmapConverter {
   }
 };
 PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
-  PyObject* arg;
-  long sections;
-  int calculate_slider_end_times;
-  int calculate_slider_paths;
-  int calculate_slider_events;
-  int apply_stacking;
+  PyObject*     arg;
+  long          sections;
+  int           calculate_slider_end_times;
+  int           calculate_slider_paths;
+  int           calculate_slider_events;
+  int           apply_stacking;
   unsigned long mods;
-  if (!PyArg_ParseTuple(args, "Olppppk", &arg, &sections, &calculate_slider_end_times,
-                        &calculate_slider_paths, &calculate_slider_events,
-                        &apply_stacking, &mods))
+  if (!PyArg_ParseTuple(args, "Olppppk", &arg, &sections,
+                        &calculate_slider_end_times, &calculate_slider_paths,
+                        &calculate_slider_events, &apply_stacking, &mods))
     return nullptr;
   if (sections < 0 ||
       (static_cast<unsigned long>(sections) &
@@ -616,7 +640,7 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
     return nullptr;
   }
   const fosu::ParseOptions options{
-      .sections = static_cast<uint32_t>(sections),
+      .sections = static_cast<u32>(sections),
       .calculate_slider_end_times = calculate_slider_end_times != 0,
       .calculate_slider_paths = calculate_slider_paths != 0,
       .calculate_slider_events = calculate_slider_events != 0,
@@ -627,7 +651,7 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
     PythonRef input = file ? PythonRef(PyOS_FSPath(arg)) : retain(arg);
     if (file && PyUnicode_Check(input))
       input = PythonRef(PyUnicode_EncodeFSDefault(input));
-    char* bytes;
+    char*      bytes;
     Py_ssize_t size;
     if (PyBytes_AsStringAndSize(input, &bytes, &size) < 0)
       throw PythonError{};
@@ -635,13 +659,14 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
       PyErr_SetString(PyExc_ValueError, "embedded null byte");
       throw PythonError{};
     }
-    const auto* engine = fosu::internal::selected_engine();
+    const auto*    engine = fosu::internal::selected_engine();
     // Backend selection was checked when the module was imported.
-    fosu::Parser parser(*engine);
-    // Both native entry points are noexcept, including allocation and I/O failures.
+    fosu::Parser   parser(*engine);
+    // Both native entry points are noexcept, including allocation and I/O
+    // failures.
     PyThreadState* thread = PyEval_SaveThread();
-    auto result =
-        file ? parser.parse_file(bytes, options) : parser.parse(bytes, size, options);
+    auto           result = file ? parser.parse_file(bytes, options)
+                                 : parser.parse(bytes, size, options);
     PyEval_RestoreThread(thread);
     if (!result) {
       const auto error = result.error();
@@ -654,8 +679,9 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
           PyErr_SetFromErrnoWithFilenameObject(PyExc_OSError, arg);
           break;
         case fosu::ErrorCode::InputTooLarge:
-          PyErr_SetString(PyExc_ValueError,
-                          "beatmap input cannot fit in the process address space");
+          PyErr_SetString(
+              PyExc_ValueError,
+              "beatmap input cannot fit in the process address space");
           break;
         case fosu::ErrorCode::InvalidInput:
           PyErr_SetString(PyExc_ValueError, "invalid input");
@@ -663,7 +689,7 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
       }
       throw PythonError{};
     }
-    auto* state = static_cast<State*>(PyModule_GetState(module));
+    auto*            state = static_cast<State*>(PyModule_GetState(module));
     BeatmapConverter converter(*result.value(), *state);
     return converter.beatmap().release();
     // Parser destruction releases native storage before the result escapes.
@@ -680,7 +706,8 @@ PyObject* parse_file(PyObject* m, PyObject* arg) {
   return parse_impl(m, arg, true);
 }
 PyMethodDef methods[] = {
-    {"parse", parse, METH_VARARGS, "Parse bytes into a detached dataclass graph."},
+    {"parse", parse, METH_VARARGS,
+     "Parse bytes into a detached dataclass graph."},
     {"parse_file", parse_file, METH_VARARGS,
      "Read and parse a file into a detached dataclass graph."},
     {nullptr, nullptr, 0, nullptr}};
@@ -739,13 +766,14 @@ int exec_module(PyObject* m) {
   try {
     const auto* engine = fosu::internal::selected_engine();
     if (!engine) {
-      PyErr_SetString(PyExc_ImportError, "FOSU_BACKEND requests an unavailable backend");
+      PyErr_SetString(PyExc_ImportError,
+                      "FOSU_BACKEND requests an unavailable backend");
       return -1;
     }
-    if (PyModule_AddStringConstant(m, "backend",
-                                   fosu::internal::engine_name(engine->kind)) < 0)
+    if (PyModule_AddStringConstant(
+            m, "backend", fosu::internal::engine_name(engine->kind)) < 0)
       return -1;
-    auto* s = static_cast<State*>(PyModule_GetState(m));
+    auto*     s = static_cast<State*>(PyModule_GetState(m));
     PythonRef package(PyObject_GetAttrString(m, "__package__"));
     PythonRef name(PyUnicode_FromFormat("%U._model", package.p));
     s->model = PyImport_Import(name);
@@ -759,7 +787,8 @@ int exec_module(PyObject* m) {
     for (int type = 0; type < record_type_count; ++type) {
       for (int field = 0; field < field_count; ++field) {
         auto& slot = s->slots[type][field];
-        slot.descriptor = PyObject_GetAttrString(s->types[type], field_names[field]);
+        slot.descriptor =
+            PyObject_GetAttrString(s->types[type], field_names[field]);
         if (!slot.descriptor) {
           // This field belongs to a different record type.
           if (!PyErr_ExceptionMatches(PyExc_AttributeError))
@@ -770,8 +799,8 @@ int exec_module(PyObject* m) {
         slot.assign = reinterpret_cast<descrsetfunc>(
             PyType_GetSlot(Py_TYPE(slot.descriptor), Py_tp_descr_set));
         if (!slot.assign) {
-          PyErr_Format(PyExc_TypeError, "%s.%s must be a writable slot", type_names[type],
-                       field_names[field]);
+          PyErr_Format(PyExc_TypeError, "%s.%s must be a writable slot",
+                       type_names[type], field_names[field]);
           return -1;
         }
       }
@@ -786,7 +815,8 @@ int exec_module(PyObject* m) {
       if (!s->samples[i])
         return -1;
     }
-    constexpr const char* curves[] = {"BEZIER", "CATMULL", "LINEAR", "PERFECT_CURVE"};
+    constexpr const char* curves[] = {"BEZIER", "CATMULL", "LINEAR",
+                                      "PERFECT_CURVE"};
     for (int i = 0; i < 4; ++i) {
       s->curves[i] = PyObject_GetAttrString(s->types[t_curve], curves[i]);
       if (!s->curves[i])
@@ -797,7 +827,8 @@ int exec_module(PyObject* m) {
         L"\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000";
     s->bookmark_whitespace = PyUnicode_FromWideChar(
         bookmark_whitespace,
-        static_cast<Py_ssize_t>(sizeof(bookmark_whitespace) / sizeof(wchar_t) - 1));
+        static_cast<Py_ssize_t>(sizeof(bookmark_whitespace) / sizeof(wchar_t) -
+                                1));
     if (!s->bookmark_whitespace)
       return -1;
     return 0;
@@ -811,15 +842,15 @@ int exec_module(PyObject* m) {
 
 PyModuleDef_Slot slots[] = {{Py_mod_exec, reinterpret_cast<void*>(exec_module)},
                             {0, nullptr}};
-PyModuleDef definition = {PyModuleDef_HEAD_INIT,
-                          "_core",
-                          nullptr,
-                          sizeof(State),
-                          methods,
-                          slots,
-                          traverse,
-                          clear,
-                          free_module};
+PyModuleDef      definition = {PyModuleDef_HEAD_INIT,
+                               "_core",
+                               nullptr,
+                               sizeof(State),
+                               methods,
+                               slots,
+                               traverse,
+                               clear,
+                               free_module};
 // Release cached arenas and the selected engine when the extension is unloaded,
 // not when an individual interpreter releases its module.
 struct Cleanup {

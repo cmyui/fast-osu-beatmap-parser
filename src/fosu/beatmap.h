@@ -1,36 +1,36 @@
 #pragma once
 
-#include <cstdint>
+#include <fosu/arena.h>
+#include <fosu/beatmap_header.h>
+#include <fosu/result.h>
+#include <fosu/slider_event.h>
+#include <fosu/slider_path.h>
+#include <fosu/types.h>
+
 #include <cstring>
 #include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
 
-#include <fosu/arena.h>
-#include <fosu/beatmap_header.h>
-#include <fosu/result.h>
-#include <fosu/slider_event.h>
-#include <fosu/slider_path.h>
-
 namespace fosu {
 
 struct HitObject {
-  float x;
-  float y;
-  uint32_t type;
-  uint32_t hitsound;
-  double time;
-  double end_time;  // milliseconds; 0 for sliders unless calculation is requested
-  uint32_t slider;  // index into Beatmap::sliders, or kNoSlider
-  bool new_combo;
-  uint8_t combo_skip;
+  f32              x;
+  f32              y;
+  u32              type;
+  u32              hitsound;
+  f64              time;
+  f64              end_time;  // ms; 0 for sliders if no calc requested
+  u32              slider;    // index into Beatmap::sliders, or kNoSlider
+  bool             new_combo;
+  u8               combo_skip;
   std::string_view hit_sample;
-  std::pair<float, float> raw_position(PathPoint stack_offset = {}) const {
+  std::pair<f32, f32> raw_position(PathPoint stack_offset = {}) const {
     return {x - stack_offset.x, y - stack_offset.y};
   }
 
-  static constexpr uint32_t kNoSlider = 0xFFFFFFFF;
+  static constexpr u32 kNoSlider = 0xFFFFFFFF;
 
   bool is_circle() const { return type & 1; }
   bool is_slider() const { return type & 2; }
@@ -40,82 +40,82 @@ struct HitObject {
 };
 
 struct SliderPoint {
-  float x;
-  float y;
+  f32 x;
+  f32 y;
 };
 
 struct CurveSegment {
-  CurveType type;
-  // Present only for an explicit lazer B-spline degree (for example, B2).
-  // An absent degree on Bezier means an ordinary Bezier segment.
-  std::optional<uint32_t> degree;
-  // Range relative to the owning Slider's control-point range.
-  uint32_t point_begin;
-  uint32_t point_count;
+  CurveType          type;
+  std::optional<u32> degree;  // Present only for lazer B-spline degree
+  u32                point_begin;
+  u32                point_count;
 };
 
 struct Slider {
-  uint32_t point_begin;  // range into Beatmap::slider_points
-  uint32_t point_count;
-  uint32_t segment_begin;  // range into Beatmap::slider_segments
-  uint32_t segment_count;
-  int32_t slides;  // 1 = no repeats
+  u32              point_begin;  // range into Beatmap::slider_points
+  u32              point_count;
+  u32              segment_begin;  // range into Beatmap::slider_segments
+  u32              segment_count;
+  i32              slides;  // 1 = no repeats
   // The only path type for legacy sliders, and the first type for a modern
   // multi-segment path.
-  CurveType curve_type;
-  double length;  // declared pixel length; zero uses the natural path for duration
+  CurveType        curve_type;
+  f64              length;  // declared pixel length; zero uses the natural path
   std::string_view edge_sounds;
   std::string_view edge_sets;
 };
 
 struct TimingPoint {
-  double time;
-  double beat_length;
-  int32_t meter;
+  f64       time;
+  f64       beat_length;
+  i32       meter;
   SampleSet sample_set;
-  int32_t sample_index;
-  int32_t volume;
-  bool uninherited;
-  uint32_t effects;
+  i32       sample_index;
+  i32       volume;
+  bool      uninherited;
+  u32       effects;
 };
 
 struct Break {
-  double start;
-  double end;
+  f64 start;
+  f64 end;
 };
 
 struct ParseStats {
-  uint32_t fast_path_lines = 0;
-  uint32_t slow_path_lines = 0;
-  uint32_t malformed_lines = 0;
-  uint32_t storyboard_lines = 0;
+  u32 fast_path_lines = 0;
+  u32 slow_path_lines = 0;
+  u32 malformed_lines = 0;
+  u32 storyboard_lines = 0;
 };
 
 struct Stacking {
-  int32_t stack_height;
+  i32       stack_height;
   PathPoint stack_offset;
 };
 
 struct Beatmap : BeatmapHeader {
-  std::span<Break> breaks;
-  std::span<uint32_t> combo_colours;
-  std::span<TimingPoint> timing_points;
-  std::span<HitObject> hit_objects;
-  std::span<Slider> sliders;
-  std::span<CurveSegment> slider_segments;
-  std::span<SliderPoint> slider_points;
-  std::span<double> velocity_presets;
+  std::span<Break>                  breaks;
+  std::span<u32>                    combo_colours;
+  std::span<TimingPoint>            timing_points;
+  std::span<HitObject>              hit_objects;
+  std::span<Slider>                 sliders;
+  std::span<CurveSegment>           slider_segments;
+  std::span<SliderPoint>            slider_points;
+  std::span<f64>                    velocity_presets;
+
   // Empty unless requested; otherwise indexed identically to sliders.
-  std::span<SliderPath> slider_paths;
+  std::span<SliderPath>             slider_paths;
   std::span<std::span<SliderEvent>> slider_events;
+
   // Empty unless osu!standard stacking was requested; indexed by hit object.
-  std::span<Stacking> stacking;
-  ParseStats stats;
+  std::span<Stacking>               stacking;
+  ParseStats                        stats;
 
   Result<Beatmap> copy(Arena& destination) const noexcept {
     const size_t checkpoint = arena_pos(&destination);
-    Beatmap result{};
-    static_cast<BeatmapHeader&>(result) = static_cast<const BeatmapHeader&>(*this);
+    Beatmap      result{};
+    static_cast<BeatmapHeader&>(result) =
+        static_cast<const BeatmapHeader&>(*this);
     result.stats = stats;
 
     auto copied_breaks = copy_array(destination, breaks);
@@ -150,10 +150,11 @@ struct Beatmap : BeatmapHeader {
     auto tags_copy = copy_string(destination, tags);
     auto background_copy = copy_string(destination, background);
     auto video_copy = copy_string(destination, video);
-    if (!audio_filename_copy || !overlay_position_copy || !skin_preference_copy ||
-        !bookmarks_copy || !title_copy || !title_unicode_copy || !artist_copy ||
-        !artist_unicode_copy || !creator_copy || !version_copy || !source_copy ||
-        !tags_copy || !background_copy || !video_copy) {
+    if (!audio_filename_copy || !overlay_position_copy ||
+        !skin_preference_copy || !bookmarks_copy || !title_copy ||
+        !title_unicode_copy || !artist_copy || !artist_unicode_copy ||
+        !creator_copy || !version_copy || !source_copy || !tags_copy ||
+        !background_copy || !video_copy) {
       return rewind_failed_copy(destination, checkpoint);
     }
 
@@ -218,7 +219,7 @@ struct Beatmap : BeatmapHeader {
 
  private:
   template <typename T>
-  static Result<std::span<T>> copy_array(Arena& destination,
+  static Result<std::span<T>> copy_array(Arena&       destination,
                                          std::span<T> source) noexcept {
     if (source.empty())
       return std::span<T>{};
@@ -229,11 +230,13 @@ struct Beatmap : BeatmapHeader {
     return std::span<T>{values, source.size()};
   }
 
-  static Result<std::string_view> copy_string(Arena& destination,
-                                              std::string_view source) noexcept {
+  static Result<std::string_view> copy_string(
+      Arena&           destination,
+      std::string_view source) noexcept {
     if (source.empty())
       return std::string_view{};
-    auto* bytes = static_cast<char*>(arena_push(&destination, source.size(), 1));
+    auto* bytes =
+        static_cast<char*>(arena_push(&destination, source.size(), 1));
     if (!bytes)
       return Error{ErrorCode::AllocationFailure};
     std::memcpy(bytes, source.data(), source.size());

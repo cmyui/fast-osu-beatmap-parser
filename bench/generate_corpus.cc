@@ -1,4 +1,6 @@
 // Fixed-seed synthetic smoke corpus; not representative performance data.
+#include <fosu/types.h>
+
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -14,7 +16,7 @@ uint64_t rng() {
   return z ^ (z >> 31);
 }
 
-std::string generate_map(int n_objects) {
+std::string generate_map(fosu::i32 n_objects) {
   std::string out;
   out.reserve(static_cast<size_t>(n_objects) * 48 + 4096);
   out +=
@@ -33,53 +35,54 @@ std::string generate_map(int n_objects) {
       "SliderTickRate:1\r\n\r\n"
       "[Events]\r\n0,0,\"bg.jpg\",0,0\r\n\r\n[TimingPoints]\r\n";
 
-  char line[512];
-  int t = 800 + static_cast<int>(rng() % 2000);
-  const int tp_count = 20 + static_cast<int>(rng() % 60);
-  int tp_time = t;
-  for (int i = 0; i < tp_count; ++i) {
+  char            line[512];
+  fosu::i32       t = 800 + static_cast<fosu::i32>(rng() % 2000);
+  const fosu::i32 tp_count = 20 + static_cast<fosu::i32>(rng() % 60);
+  fosu::i32       tp_time = t;
+  for (fosu::i32 i = 0; i < tp_count; ++i) {
     if (i % 5 == 0) {
       snprintf(line, sizeof line, "%d,%.13f,4,2,1,%d,1,0\r\n", tp_time,
-               280.0 + double(rng() % 2000) / 7.0, 40 + int(rng() % 60));
+               280.0 + double(rng() % 2000) / 7.0, 40 + fosu::i32(rng() % 60));
     } else {
       snprintf(line, sizeof line, "%d,-%.10f,4,2,1,%d,0,%d\r\n", tp_time,
-               50.0 + double(rng() % 1500) / 10.0, 40 + int(rng() % 60), int(rng() % 2));
+               50.0 + double(rng() % 1500) / 10.0, 40 + fosu::i32(rng() % 60),
+               fosu::i32(rng() % 2));
     }
     out += line;
-    tp_time += 4000 + static_cast<int>(rng() % 20000);
+    tp_time += 4000 + static_cast<fosu::i32>(rng() % 20000);
   }
 
   out += "\r\n[HitObjects]\r\n";
   const char* samples[] = {"", ",0:0:0:0:", ",0:0:0:0:", ",2:0:0:0:"};
-  for (int i = 0; i < n_objects; ++i) {
-    const int x = static_cast<int>(rng() % 512);
-    const int y = static_cast<int>(rng() % 384);
-    const int hs_pool[] = {0, 0, 0, 2, 4, 8, 12, 6};
-    const int hs = hs_pool[rng() % 8];
-    const bool combo = rng() % 4 == 0;
-    const uint64_t kind = rng() % 100;
+  for (fosu::i32 i = 0; i < n_objects; ++i) {
+    const fosu::i32 x = static_cast<fosu::i32>(rng() % 512);
+    const fosu::i32 y = static_cast<fosu::i32>(rng() % 384);
+    const fosu::i32 hs_pool[] = {0, 0, 0, 2, 4, 8, 12, 6};
+    const fosu::i32 hs = hs_pool[rng() % 8];
+    const bool      combo = rng() % 4 == 0;
+    const uint64_t  kind = rng() % 100;
     if (kind < 60) {
-      snprintf(line, sizeof line, "%d,%d,%d,%d,%d%s\r\n", x, y, t, combo ? 5 : 1, hs,
-               samples[rng() % 4]);
+      snprintf(line, sizeof line, "%d,%d,%d,%d,%d%s\r\n", x, y, t,
+               combo ? 5 : 1, hs, samples[rng() % 4]);
       out += line;
     } else if (kind < 96) {
-      const char curves[] = {'B', 'P', 'L', 'B'};
-      const int n_pts = 1 + static_cast<int>(rng() % 6);
-      int off = snprintf(line, sizeof line, "%d,%d,%d,%d,%d,%c", x, y, t, combo ? 6 : 2,
-                         hs, curves[rng() % 4]);
-      for (int p = 0; p < n_pts; ++p)
-        off += snprintf(line + off, sizeof line - off, "|%d:%d", int(rng() % 640),
-                        int(rng() % 480));
-      off +=
-          snprintf(line + off, sizeof line - off, ",%d,%.2f,,%s\r\n", 1 + int(rng() % 3),
-                   30.0 + double(rng() % 12000) / 20.0, samples[rng() % 4]);
+      const char      curves[] = {'B', 'P', 'L', 'B'};
+      const fosu::i32 n_pts = 1 + static_cast<fosu::i32>(rng() % 6);
+      int off = snprintf(line, sizeof line, "%d,%d,%d,%d,%d,%c", x, y, t,
+                         combo ? 6 : 2, hs, curves[rng() % 4]);
+      for (fosu::i32 p = 0; p < n_pts; ++p)
+        off += snprintf(line + off, sizeof line - off, "|%d:%d",
+                        fosu::i32(rng() % 640), fosu::i32(rng() % 480));
+      off += snprintf(line + off, sizeof line - off, ",%d,%.2f,,%s\r\n",
+                      1 + fosu::i32(rng() % 3),
+                      30.0 + double(rng() % 12000) / 20.0, samples[rng() % 4]);
       out += line;
     } else {
       snprintf(line, sizeof line, "256,192,%d,12,%d,%d%s\r\n", t, hs,
-               t + 800 + int(rng() % 3000), samples[rng() % 4]);
+               t + 800 + fosu::i32(rng() % 3000), samples[rng() % 4]);
       out += line;
     }
-    t += 120 + static_cast<int>(rng() % 500);
+    t += 120 + static_cast<fosu::i32>(rng() % 500);
   }
   return out;
 }
@@ -95,8 +98,8 @@ int main(int argc, char** argv) {
     return 1;
   }
   std::filesystem::create_directories(dir);
-  const int sizes[] = {400, 900, 1600, 2600, 5200};
-  for (int i = 0; i < 40; ++i) {
+  const fosu::i32 sizes[] = {400, 900, 1600, 2600, 5200};
+  for (fosu::i32 i = 0; i < 40; ++i) {
     char name[20];
     snprintf(name, sizeof name, "%03d.osu", i);
     std::ofstream out(dir / name, std::ios::binary);

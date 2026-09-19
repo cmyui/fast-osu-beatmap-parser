@@ -1,13 +1,13 @@
 #pragma once
 
+#include <fosu/os.h>
+#include <fosu/types.h>
+
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <limits>
 #include <new>
 #include <type_traits>
-
-#include <fosu/os.h>
 
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
@@ -34,7 +34,7 @@ inline constexpr size_t kDefaultArenaCommit = size_t{64} << 10;
 inline constexpr size_t kMaxArenaPush = size_t{1} << 46;
 inline constexpr size_t kMaxArenaAlignment = size_t{1} << 12;
 
-enum ArenaFlags : uint32_t {
+enum ArenaFlags : u32 {
   ArenaFlagChain = 1u << 0,
 };
 
@@ -57,7 +57,7 @@ struct Arena {
   size_t commit_size;
   size_t pos;
   size_t committed;
-  uint32_t flags;
+  u32    flags;
 #if defined(FOSU_ARENA_TELEMETRY)
   ArenaMetrics metrics;
 #endif
@@ -66,7 +66,7 @@ struct Arena {
 struct ArenaParams {
   size_t reserve_size;
   size_t commit_size;
-  uint32_t flags;
+  u32    flags;
 };
 
 constexpr size_t align_up(size_t value, size_t alignment) {
@@ -77,7 +77,8 @@ constexpr size_t round_up(size_t value, size_t multiple) {
   return ((value + multiple - 1) / multiple) * multiple;
 }
 
-inline constexpr size_t kArenaHeaderSize = align_up(sizeof(Arena), kCacheLineSize);
+inline constexpr size_t kArenaHeaderSize =
+    align_up(sizeof(Arena), kCacheLineSize);
 
 namespace internal {
 
@@ -108,7 +109,7 @@ inline bool arena_commit_to(Arena* block, size_t new_pos) {
   const size_t target =
       std::min(round_up(new_pos, block->commit_size), block->reserve_size);
   const size_t amount = target - block->committed;
-  auto* start = reinterpret_cast<uint8_t*>(block) + block->committed;
+  auto*        start = reinterpret_cast<u8*>(block) + block->committed;
   if (!internal::os_commit(start, amount))
     return false;
   internal::arena_poison(start, amount);
@@ -124,9 +125,10 @@ inline Arena* arena_alloc(ArenaParams params) {
     return nullptr;
   }
   const size_t minimum = round_up(kArenaHeaderSize, page_size);
-  const size_t reserve_size = round_up(std::max(params.reserve_size, minimum), page_size);
-  const size_t commit_size =
-      std::min(round_up(std::max(params.commit_size, minimum), page_size), reserve_size);
+  const size_t reserve_size =
+      round_up(std::max(params.reserve_size, minimum), page_size);
+  const size_t commit_size = std::min(
+      round_up(std::max(params.commit_size, minimum), page_size), reserve_size);
   void* memory = internal::os_reserve(reserve_size);
   if (!memory || !internal::os_commit(memory, commit_size)) {
     if (memory)
@@ -214,8 +216,8 @@ inline void* arena_push(Arena* arena, size_t size, size_t alignment) {
       return nullptr;
 
     Arena* block = arena_alloc({
-        .reserve_size =
-            std::max(current->reserve_size, kArenaHeaderSize + alignment + size),
+        .reserve_size = std::max(current->reserve_size,
+                                 kArenaHeaderSize + alignment + size),
         .commit_size = current->commit_size,
         .flags = current->flags,
     });
@@ -227,8 +229,9 @@ inline void* arena_push(Arena* arena, size_t size, size_t alignment) {
     pos = align_up(current->pos, alignment);
 #if defined(FOSU_ARENA_TELEMETRY)
     arena->metrics.current_committed_bytes += current->committed;
-    arena->metrics.peak_committed_bytes = std::max(
-        arena->metrics.peak_committed_bytes, arena->metrics.current_committed_bytes);
+    arena->metrics.peak_committed_bytes =
+        std::max(arena->metrics.peak_committed_bytes,
+                 arena->metrics.current_committed_bytes);
     ++arena->metrics.commit_calls;
     ++arena->metrics.chained_blocks;
 #endif
@@ -242,16 +245,18 @@ inline void* arena_push(Arena* arena, size_t size, size_t alignment) {
     return nullptr;
 #if defined(FOSU_ARENA_TELEMETRY)
   if (current->committed != committed_before) {
-    arena->metrics.current_committed_bytes += current->committed - committed_before;
-    arena->metrics.peak_committed_bytes = std::max(
-        arena->metrics.peak_committed_bytes, arena->metrics.current_committed_bytes);
+    arena->metrics.current_committed_bytes +=
+        current->committed - committed_before;
+    arena->metrics.peak_committed_bytes =
+        std::max(arena->metrics.peak_committed_bytes,
+                 arena->metrics.current_committed_bytes);
     ++arena->metrics.commit_calls;
   }
   arena->metrics.current_used_bytes += new_pos - current->pos;
-  arena->metrics.peak_used_bytes =
-      std::max(arena->metrics.peak_used_bytes, arena->metrics.current_used_bytes);
+  arena->metrics.peak_used_bytes = std::max(arena->metrics.peak_used_bytes,
+                                            arena->metrics.current_used_bytes);
 #endif
-  void* result = reinterpret_cast<uint8_t*>(current) + pos;
+  void* result = reinterpret_cast<u8*>(current) + pos;
   internal::arena_unpoison(result, size);
   current->pos = new_pos;
   return result;
@@ -270,7 +275,7 @@ inline void arena_release(Arena* arena) {
   if (!arena)
     return;
   for (Arena* block = arena->current; block;) {
-    Arena* prev = block->prev;
+    Arena*       prev = block->prev;
     const size_t reserve_size = block->reserve_size;
     internal::arena_unpoison(block, block->committed);
     block->~Arena();
@@ -283,9 +288,9 @@ inline void arena_pop_to(Arena* arena, size_t pos) {
   if (!arena)
     return;
   const size_t target = std::max(kArenaHeaderSize, pos);
-  Arena* current = arena->current;
+  Arena*       current = arena->current;
   while (current->prev && current->base_pos >= target) {
-    Arena* prev = current->prev;
+    Arena*       prev = current->prev;
     const size_t reserve_size = current->reserve_size;
 #if defined(FOSU_ARENA_TELEMETRY)
     arena->metrics.current_used_bytes -= current->pos - kArenaHeaderSize;
@@ -302,7 +307,7 @@ inline void arena_pop_to(Arena* arena, size_t pos) {
 #if defined(FOSU_ARENA_TELEMETRY)
   arena->metrics.current_used_bytes -= current->pos - new_pos;
 #endif
-  internal::arena_poison(reinterpret_cast<uint8_t*>(current) + new_pos,
+  internal::arena_poison(reinterpret_cast<u8*>(current) + new_pos,
                          current->pos - new_pos);
   current->pos = new_pos;
 }
@@ -313,7 +318,8 @@ inline void arena_clear(Arena* arena) {
 
 class TempArena {
  public:
-  explicit TempArena(Arena* arena) noexcept : arena_(arena), pos_(arena_pos(arena)) {}
+  explicit TempArena(Arena* arena) noexcept
+      : arena_(arena), pos_(arena_pos(arena)) {}
 
   TempArena(const TempArena&) = delete;
   TempArena& operator=(const TempArena&) = delete;

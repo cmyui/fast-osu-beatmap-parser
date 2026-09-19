@@ -1,18 +1,19 @@
-#include <dlfcn.h>
 #include <fosu/io.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <dlfcn.h>
 #include <filesystem>
 #include <string>
 #include <vector>
 
 struct Module {
   const char* name;
-  void* dso;
-  void* ctx;
+  void*       dso;
+  void*       ctx;
   void (*parse)(void*, const char*, size_t, int);
   void (*free)(void*);
 };
@@ -23,10 +24,11 @@ uint64_t now() {
 }
 int main(int argc, char** argv) {
   if (argc < 4) {
-    fprintf(stderr, "usage: library_compare corpus reps module1 [module2...]\n");
+    fprintf(stderr,
+            "usage: library_compare corpus reps module1 [module2...]\n");
     return 2;
   }
-  const int reps = atoi(argv[2]);
+  const fosu::i32 reps = atoi(argv[2]);
   if (reps < 1)
     return 2;
   std::vector<Module> modules;
@@ -39,7 +41,8 @@ int main(int argc, char** argv) {
     auto create = reinterpret_cast<void* (*)()>(dlsym(dso, "fosu_bench_new"));
     auto parse = reinterpret_cast<void (*)(void*, const char*, size_t, int)>(
         dlsym(dso, "fosu_bench_parse"));
-    auto free = reinterpret_cast<void (*)(void*)>(dlsym(dso, "fosu_bench_free"));
+    auto free =
+        reinterpret_cast<void (*)(void*)>(dlsym(dso, "fosu_bench_free"));
     if (!create || !parse || !free)
       return 1;
     modules.push_back({argv[i], dso, create(), parse, free});
@@ -66,16 +69,16 @@ int main(int argc, char** argv) {
   for (size_t i = 0; i < files.size(); ++i) {
     if (!fosu::read_into(files[i].c_str(), input))
       return 1;
-    for (int r = 0; r < reps; ++r) {
+    for (fosu::i32 r = 0; r < reps; ++r) {
       for (size_t j = 0; j < modules.size() * 2; ++j) {
         const size_t slot = (j + r + i) % (modules.size() * 2);
-        const int reuse = slot % 2;
-        auto& m = modules[slot / 2];
-        const auto begin = now();
+        const int    reuse = slot % 2;
+        auto&        m = modules[slot / 2];
+        const auto   begin = now();
         m.parse(m.ctx, input.data.get(), input.size, reuse);
         const auto ns = now() - begin;
-        printf("%s,%zu,%d,%s,%d,%llu\n", files[i].c_str(), input.size, r, m.name, reuse,
-               static_cast<unsigned long long>(ns));
+        printf("%s,%zu,%d,%s,%d,%llu\n", files[i].c_str(), input.size, r,
+               m.name, reuse, static_cast<unsigned long long>(ns));
       }
     }
   }

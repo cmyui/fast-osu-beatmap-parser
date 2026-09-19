@@ -1,6 +1,7 @@
 #include <fosu/engine/runtime/cpu_features.h>
 #include <fosu/parser.h>
 #include <fosu/runtime.h>
+
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
@@ -45,12 +46,14 @@ int main(int argc, char** argv) {
 #ifdef FOSU_TEST_neon
   neon = host_supports_neon();
 #endif
-  const bool available = !strcmp(requested, "auto") || !strcmp(requested, "scalar") ||
-                         (!strcmp(requested, "avx2") && avx2) ||
-                         (!strcmp(requested, "neon") && neon);
-  // Race the first selection and allocation; all callers must retain one engine.
+  const bool               available = !strcmp(requested, "auto") ||
+                                       !strcmp(requested, "scalar") ||
+                                       (!strcmp(requested, "avx2") && avx2) ||
+                                       (!strcmp(requested, "neon") && neon);
+  // Race the first selection and allocation; all callers must retain one
+  // engine.
   std::vector<std::thread> threads;
-  for (int i = 0; i < 8; ++i)
+  for (fosu::i32 i = 0; i < 8; ++i)
     threads.emplace_back([&] {
       const auto* engine = fosu::runtime_engine();
       assert(bool(engine) == available);
@@ -67,8 +70,9 @@ int main(int argc, char** argv) {
         assert(engine->kind == fosu::EngineKind::Avx2);
       if (!strcmp(requested, "neon"))
         assert(engine->kind == fosu::EngineKind::Neon);
-      fosu::Parser parser(*engine);
-      constexpr char input[] = "[Metadata]\nTitle:dispatch\n[HitObjects]\n1,2,3,1,0\n";
+      fosu::Parser   parser(*engine);
+      constexpr char input[] =
+          "[Metadata]\nTitle:dispatch\n[HitObjects]\n1,2,3,1,0\n";
       auto result = parser.parse(input, sizeof(input) - 1);
       assert(result && result.value()->hit_objects.size() == 1);
       assert(result.value()->hit_objects[0].x == 1);

@@ -1,13 +1,14 @@
 #pragma once
 
+#include <fosu/beatmap.h>
+#include <fosu/types.h>
+
 #include <algorithm>
 #include <cstdint>
 
-#include <fosu/beatmap.h>
-
 namespace fosu {
 
-enum class Mods : uint32_t {
+enum class Mods : u32 {
   None = 0,
   Easy = 1u << 1,
   HardRock = 1u << 4,
@@ -17,23 +18,24 @@ enum class Mods : uint32_t {
 };
 
 constexpr Mods operator|(Mods left, Mods right) {
-  return static_cast<Mods>(static_cast<uint32_t>(left) | static_cast<uint32_t>(right));
+  return static_cast<Mods>(static_cast<u32>(left) | static_cast<u32>(right));
 }
 
 constexpr bool has_mod(Mods mods, Mods mod) {
-  return (static_cast<uint32_t>(mods) & static_cast<uint32_t>(mod)) != 0;
+  return (static_cast<u32>(mods) & static_cast<u32>(mod)) != 0;
 }
 
 namespace internal {
 
-inline constexpr uint32_t kKnownMods =
-    static_cast<uint32_t>(Mods::Easy) | static_cast<uint32_t>(Mods::HardRock) |
-    static_cast<uint32_t>(Mods::DoubleTime) | static_cast<uint32_t>(Mods::HalfTime) |
-    static_cast<uint32_t>(Mods::Nightcore);
+inline constexpr u32 kKnownMods =
+    static_cast<u32>(Mods::Easy) | static_cast<u32>(Mods::HardRock) |
+    static_cast<u32>(Mods::DoubleTime) | static_cast<u32>(Mods::HalfTime) |
+    static_cast<u32>(Mods::Nightcore);
 
 constexpr bool invalid_mods(Mods mods) {
-  const uint32_t value = static_cast<uint32_t>(mods);
-  const bool speed_up = has_mod(mods, Mods::DoubleTime) || has_mod(mods, Mods::Nightcore);
+  const u32  value = static_cast<u32>(mods);
+  const bool speed_up =
+      has_mod(mods, Mods::DoubleTime) || has_mod(mods, Mods::Nightcore);
   return (value & ~kKnownMods) ||
          (has_mod(mods, Mods::Easy) && has_mod(mods, Mods::HardRock)) ||
          (speed_up && has_mod(mods, Mods::HalfTime));
@@ -43,7 +45,7 @@ constexpr bool has_difficulty_mod(Mods mods) {
   return has_mod(mods, Mods::Easy) || has_mod(mods, Mods::HardRock);
 }
 
-constexpr double clock_rate(Mods mods) {
+constexpr f64 clock_rate(Mods mods) {
   if (has_mod(mods, Mods::DoubleTime) || has_mod(mods, Mods::Nightcore))
     return 1.5;
   if (has_mod(mods, Mods::HalfTime))
@@ -85,7 +87,7 @@ inline bool apply_mods_before_calculations(Beatmap& map, Mods mods) {
 }
 
 inline void apply_clock_rate(Beatmap& map, Mods mods) {
-  const double rate = clock_rate(mods);
+  const f64 rate = clock_rate(mods);
   if (rate == 1)
     return;
   for (auto& object : map.hit_objects) {

@@ -40,68 +40,69 @@ using Bytes32 = __m256i;
 inline Bytes32 load32(const char* p) {
   return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
 }
-template <uint8_t Value>
+template <u8 Value>
 inline ByteVector broadcast_byte() {
 #if defined(_MSC_VER)
   return _mm256_set1_epi8(static_cast<char>(Value));
 #else
   // A memory broadcast prevents GCC rebuilding constants through a general
   // register inside loops containing calls. Keep that detail out of parsers.
-  static constexpr uint8_t value = Value;
-  ByteVector result;
+  static constexpr u8 value = Value;
+  ByteVector          result;
   __asm__("vpbroadcastb %1, %0" : "=x"(result) : "m"(value));
   return result;
 #endif
 }
-inline uint32_t equal_mask32(Bytes32 v, ByteVector c) {
-  return static_cast<uint32_t>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, c)));
+inline u32 equal_mask32(Bytes32 v, ByteVector c) {
+  return static_cast<u32>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, c)));
 }
 // AVX2 has no unsigned byte comparison: adding 80 maps ASCII digits to
 // [-128, -119], below every other byte under a signed comparison.
-inline uint32_t nondigit_mask32(Bytes32 v) {
-  return static_cast<uint32_t>(_mm256_movemask_epi8(_mm256_cmpgt_epi8(
+inline u32 nondigit_mask32(Bytes32 v) {
+  return static_cast<u32>(_mm256_movemask_epi8(_mm256_cmpgt_epi8(
       _mm256_add_epi8(v, broadcast_byte<80>()), broadcast_byte<137>())));
 }
-inline uint32_t nondigit_mask16(__m128i v) {
-  return static_cast<uint32_t>(_mm_movemask_epi8(
-      _mm_cmpgt_epi8(_mm_add_epi8(v, _mm256_castsi256_si128(broadcast_byte<80>())),
-                     _mm256_castsi256_si128(broadcast_byte<137>()))));
+inline u32 nondigit_mask16(__m128i v) {
+  return static_cast<u32>(_mm_movemask_epi8(_mm_cmpgt_epi8(
+      _mm_add_epi8(v, _mm256_castsi256_si128(broadcast_byte<80>())),
+      _mm256_castsi256_si128(broadcast_byte<137>()))));
 }
 #elif FOSU_SIMD_NEON
 using ByteVector = uint8x16_t;
 using Bytes32 = uint8x16x2_t;
 inline Bytes32 load32(const char* p) {
-  return {{vld1q_u8(reinterpret_cast<const uint8_t*>(p)),
-           vld1q_u8(reinterpret_cast<const uint8_t*>(p + 16))}};
+  return {{vld1q_u8(reinterpret_cast<const u8*>(p)),
+           vld1q_u8(reinterpret_cast<const u8*>(p + 16))}};
 }
-template <uint8_t Value>
+template <u8 Value>
 inline ByteVector broadcast_byte() {
   return vdupq_n_u8(Value);
 }
 // Comparisons have all-zero or all-one lanes. Weight each true lane and
 // pairwise-add until the first two bytes hold the masks of the two halves.
 // One scalar extraction then gives the same byte-position mask as AVX2.
-inline uint32_t byte_mask16(uint8x16_t v) {
-  constexpr uint8_t weights[16] = {1, 2, 4, 8, 16, 32, 64, 128,
-                                   1, 2, 4, 8, 16, 32, 64, 128};
-  const auto bits = vandq_u8(v, vld1q_u8(weights));
-  const auto pairs = vpaddq_u8(bits, bits);
-  const auto fours = vpaddq_u8(pairs, pairs);
-  const auto eights = vpaddq_u8(fours, fours);
+inline u32 byte_mask16(uint8x16_t v) {
+  constexpr u8 weights[16] = {1, 2, 4, 8, 16, 32, 64, 128,
+                              1, 2, 4, 8, 16, 32, 64, 128};
+  const auto   bits = vandq_u8(v, vld1q_u8(weights));
+  const auto   pairs = vpaddq_u8(bits, bits);
+  const auto   fours = vpaddq_u8(pairs, pairs);
+  const auto   eights = vpaddq_u8(fours, fours);
   return vgetq_lane_u16(vreinterpretq_u16_u8(eights), 0);
 }
-inline uint32_t equal_mask32(Bytes32 v, ByteVector c) {
-  return byte_mask16(vceqq_u8(v.val[0], c)) | (byte_mask16(vceqq_u8(v.val[1], c)) << 16);
+inline u32 equal_mask32(Bytes32 v, ByteVector c) {
+  return byte_mask16(vceqq_u8(v.val[0], c)) |
+         (byte_mask16(vceqq_u8(v.val[1], c)) << 16);
 }
-inline uint32_t nondigit_mask16(uint8x16_t v) {
+inline u32 nondigit_mask16(uint8x16_t v) {
   return byte_mask16(vcgtq_u8(vsubq_u8(v, vdupq_n_u8('0')), vdupq_n_u8(9)));
 }
-inline uint32_t nondigit_mask32(Bytes32 v) {
+inline u32 nondigit_mask32(Bytes32 v) {
   return nondigit_mask16(v.val[0]) | (nondigit_mask16(v.val[1]) << 16);
 }
 #endif
 #if FOSU_SIMD
-inline uint32_t comma_mask32(Bytes32 bytes) {
+inline u32 comma_mask32(Bytes32 bytes) {
   return equal_mask32(bytes, broadcast_byte<','>());
 }
 #endif

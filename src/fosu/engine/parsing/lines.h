@@ -2,6 +2,7 @@
 
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/primitives/byte_scan.h>
+
 #include <string_view>
 
 namespace fosu::internal {
@@ -21,7 +22,7 @@ inline std::string_view trim(const char* p, const char* end) {
 
 struct Line {
   std::string_view text;
-  const char* next;
+  const char*      next;
 };
 
 inline Line read_line(const char* p, const char* end) {
@@ -37,7 +38,7 @@ inline Line read_line(const char* p, const char* end) {
 template <typename ParseLine>
 inline const char* for_each_section_line(const char* p,
                                          const char* end,
-                                         ParseLine parse_line) {
+                                         ParseLine   parse_line) {
   while (p < end) {
     if (*p == '\r' || *p == '\n') {
       ++p;
@@ -56,7 +57,8 @@ inline const char* for_each_section_line(const char* p,
 inline const char* skip_section(const char* p, const char* end) {
   const char* header = find_byte<'['>(p, end);
   // A bracket inside a value or comment is not a section header.
-  while (header < end && header != p && header[-1] != '\n' && header[-1] != '\r')
+  while (header < end && header != p && header[-1] != '\n' &&
+         header[-1] != '\r')
     header = find_byte<'['>(header + 1, end);
   return header;
 }

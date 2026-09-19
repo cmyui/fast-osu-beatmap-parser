@@ -2,11 +2,13 @@
 
 #include <fosu/beatmap.h>
 #include <fosu/parse_options.h>
+#include <fosu/types.h>
+
 #include <span>
 
 namespace fosu {
 
-enum class EngineKind : uint8_t {
+enum class EngineKind : u8 {
   Scalar,
   Avx2,
   Neon,
@@ -18,8 +20,8 @@ enum class EngineKind : uint8_t {
 struct ParsingEngine {
   EngineKind kind;
   void (*parse_document)(std::span<const char> input,
-                         Beatmap& beatmap,
-                         ParseOptions options) noexcept;
+                         Beatmap&              beatmap,
+                         ParseOptions          options) noexcept;
 };
 
 }  // namespace fosu

@@ -6,14 +6,14 @@
 
 namespace fosu::internal {
 
-inline std::optional<uint32_t> parse_colour(std::string_view input) {
-  uint32_t rgb = 0;
-  for (int i = 0; i < 3; ++i) {
+inline std::optional<u32> parse_colour(std::string_view input) {
+  u32 rgb = 0;
+  for (i32 i = 0; i < 3; ++i) {
     const auto comma = input.find(',');
     const auto component = parse_field_integer(input.substr(0, comma));
     if (!component || *component < 0 || *component > 255)
       return std::nullopt;
-    rgb = (rgb << 8) | static_cast<uint32_t>(*component);
+    rgb = (rgb << 8) | static_cast<u32>(*component);
     if (i < 2) {
       if (comma == std::string_view::npos)
         return std::nullopt;
@@ -27,8 +27,8 @@ inline std::optional<uint32_t> parse_colour(std::string_view input) {
   return rgb;
 }
 
-inline const char* parse_colours_section(Beatmap& beatmap,
-                                         size_t& colour_count,
+inline const char* parse_colours_section(Beatmap&    beatmap,
+                                         size_t&     colour_count,
                                          const char* p,
                                          const char* end) {
   return for_each_section_line(p, end, [&](std::string_view line) {
@@ -36,8 +36,9 @@ inline const char* parse_colours_section(Beatmap& beatmap,
       line = line.substr(0, comment);
     const char* line_end = line.data() + line.size();
     const char* colon = find_byte<':'>(line.data(), line_end);
-    const auto colour =
-        colon == line_end ? std::nullopt : parse_colour(trim(colon + 1, line_end));
+    const auto  colour = colon == line_end
+                             ? std::nullopt
+                             : parse_colour(trim(colon + 1, line_end));
     if (!colour) {
       ++beatmap.stats.malformed_lines;
       return;

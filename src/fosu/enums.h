@@ -1,10 +1,10 @@
 #pragma once
 
-#include <cstdint>
+#include <fosu/types.h>
 
 namespace fosu {
 
-enum class CurveType : uint8_t {
+enum class CurveType : u8 {
   Bezier = 'B',
   Catmull = 'C',
   Linear = 'L',
@@ -13,7 +13,7 @@ enum class CurveType : uint8_t {
 
 // None is the legacy zero value: a timing point uses the beatmap default;
 // at the beatmap level it denotes the default normal sample bank.
-enum class SampleSet : int32_t {
+enum class SampleSet : i32 {
   None = 0,
   Normal = 1,
   Soft = 2,

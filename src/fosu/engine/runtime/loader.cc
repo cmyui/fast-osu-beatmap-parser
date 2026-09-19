@@ -14,8 +14,8 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <windows.h>
 #include <cwchar>
+#include <windows.h>
 #else
 #include <dlfcn.h>
 #include <limits.h>
@@ -31,7 +31,7 @@ static_assert(embedded_scalar_engine.kind == EngineKind::Scalar);
 // Trivial lifetime permits a host's late exit callback to initialize again
 // after library cleanup. No parser or arena lives in an engine library.
 constinit std::atomic<const ParsingEngine*> selected{nullptr};
-constinit std::atomic_flag selecting = ATOMIC_FLAG_INIT;
+constinit std::atomic_flag                  selecting = ATOMIC_FLAG_INIT;
 #if defined(_WIN32)
 using EngineLibrary = HMODULE;
 #else
@@ -39,7 +39,7 @@ using EngineLibrary = void*;
 #endif
 constinit EngineLibrary library = nullptr;
 constexpr ParsingEngine unavailable{};
-constexpr auto kEngineKinds = make_string_lookup<EngineKind>({
+constexpr auto          kEngineKinds = make_string_lookup<EngineKind>({
     {"scalar", EngineKind::Scalar},
     {"avx2", EngineKind::Avx2},
     {"neon", EngineKind::Neon},
@@ -47,13 +47,14 @@ constexpr auto kEngineKinds = make_string_lookup<EngineKind>({
 
 #if defined(_WIN32)
 inline constexpr size_t kPathCapacity = 32768;
-int module_anchor;
+int                     module_anchor;
 
 bool engine_path(const char* name, wchar_t (&path)[kPathCapacity]) {
   HMODULE module;
   if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                          reinterpret_cast<const wchar_t*>(&module_anchor), &module)) {
+                          reinterpret_cast<const wchar_t*>(&module_anchor),
+                          &module)) {
     return false;
   }
   const DWORD length = GetModuleFileNameW(module, path, kPathCapacity);
@@ -62,10 +63,11 @@ bool engine_path(const char* name, wchar_t (&path)[kPathCapacity]) {
   wchar_t* slash = std::wcsrchr(path, L'\\');
   if (!slash)
     return false;
-  const wchar_t* filename =
-      std::strcmp(name, "avx2") == 0 ? L"fosu_engine_avx2.dll" : L"fosu_engine_neon.dll";
-  const size_t directory_length = static_cast<size_t>(slash - path) + 1;
-  const size_t filename_length = std::wcslen(filename) + 1;
+  const wchar_t* filename = std::strcmp(name, "avx2") == 0
+                                ? L"fosu_engine_avx2.dll"
+                                : L"fosu_engine_neon.dll";
+  const size_t   directory_length = static_cast<size_t>(slash - path) + 1;
+  const size_t   filename_length = std::wcslen(filename) + 1;
   if (directory_length + filename_length > kPathCapacity)
     return false;
   std::wmemcpy(path + directory_length, filename, filename_length);
@@ -79,9 +81,9 @@ bool engine_path(const char* name, char (&path)[PATH_MAX]) {
   const char* slash = std::strrchr(info.dli_fname, '/');
   if (!slash)
     return false;
-  const int length =
-      std::snprintf(path, sizeof(path), "%.*s/libfosu_engine_%s" FOSU_ENGINE_SUFFIX,
-                    static_cast<int>(slash - info.dli_fname), info.dli_fname, name);
+  const int length = std::snprintf(
+      path, sizeof(path), "%.*s/libfosu_engine_%s" FOSU_ENGINE_SUFFIX,
+      static_cast<int>(slash - info.dli_fname), info.dli_fname, name);
   return length > 0 && static_cast<size_t>(length) < sizeof(path);
 }
 #endif
@@ -107,8 +109,8 @@ const ParsingEngine* load_engine_library(const char* name) {
   void* loaded = dlopen(path, RTLD_NOW | RTLD_LOCAL);
   if (!loaded)
     return nullptr;
-  const auto entry =
-      reinterpret_cast<const ParsingEngine* (*)()>(dlsym(loaded, "fosu_engine_v2"));
+  const auto entry = reinterpret_cast<const ParsingEngine* (*)()>(
+      dlsym(loaded, "fosu_engine_v2"));
   if (!entry) {
     dlclose(loaded);
     return nullptr;
@@ -120,9 +122,9 @@ const ParsingEngine* load_engine_library(const char* name) {
 
 const ParsingEngine* select_engine_from_environment() {
 #if defined(_WIN32)
-  char request_buffer[16];
-  const DWORD request_length =
-      GetEnvironmentVariableA("FOSU_BACKEND", request_buffer, sizeof(request_buffer));
+  char        request_buffer[16];
+  const DWORD request_length = GetEnvironmentVariableA(
+      "FOSU_BACKEND", request_buffer, sizeof(request_buffer));
   if (request_length >= sizeof(request_buffer))
     return nullptr;
   const char* request = request_length ? request_buffer : FOSU_DEFAULT_BACKEND;
@@ -186,7 +188,8 @@ bool engine_available(EngineKind kind) {
          GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES;
 #else
   char path[PATH_MAX];
-  return supported && engine_path(engine_name(kind), path) && access(path, R_OK) == 0;
+  return supported && engine_path(engine_name(kind), path) &&
+         access(path, R_OK) == 0;
 #endif
 }
 
