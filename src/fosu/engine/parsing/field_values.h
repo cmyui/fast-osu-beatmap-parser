@@ -28,8 +28,8 @@ inline std::optional<i32> parse_field_integer(std::string_view input) {
   return static_cast<i32>(value);
 }
 
-// Decode directly to f3232, as osu! does, then widen for the public storage.
-inline std::optional<f64> parse_field_f32(std::string_view input) {
+// Decode directly to float32, as osu! does, then widen for the public storage.
+inline std::optional<f64> parse_field_float(std::string_view input) {
   if (input.empty())
     return std::nullopt;
   f32 value;
@@ -40,12 +40,13 @@ inline std::optional<f64> parse_field_f32(std::string_view input) {
   return value;
 }
 
-inline std::optional<f64> parse_field_f64(std::string_view input) {
+inline std::optional<f64> parse_field_double(std::string_view input) {
   if (input.empty())
     return std::nullopt;
   f64 value;
   if (!consumed_field_value(
-          input, parse_f64(input.data(), input.data() + input.size(), value)) ||
+          input,
+          parse_double(input.data(), input.data() + input.size(), value)) ||
       value < -INT32_MAX || value > INT32_MAX)
     return std::nullopt;
   return value;

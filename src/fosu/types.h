@@ -1,4 +1,6 @@
-#include <stdint.h>
+#pragma once
+
+#include <cstdint>
 
 namespace fosu {
 

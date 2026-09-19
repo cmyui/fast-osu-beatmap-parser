@@ -6,6 +6,7 @@
 #include <fosu/engine/primitives/byte_scan.h>
 #include <fosu/engine/primitives/digit_groups.h>
 #include <fosu/engine/timing_points/beat_length.h>
+
 #include <algorithm>
 #include <bit>
 #include <optional>
@@ -19,11 +20,11 @@ namespace fosu::internal {
 template <bool UseCommaMask = false>
 inline std::optional<TimingPoint> parse_timing_point(const char* p,
                                                      const char* end,
-                                                     u64 commas = 0,
+                                                     u64         commas = 0,
                                                      int time_offset = 0) {
   [[maybe_unused]] const char* line = p;
-  f64 time, beat_length;
-  const char* q = parse_osu_f64(p, end, time);
+  f64                          time, beat_length;
+  const char*                  q = parse_osu_double(p, end, time);
   if (q == p || q >= end || *q != ',')
     return std::nullopt;
   p = q + 1;
@@ -99,16 +100,17 @@ inline constexpr auto kTimingTailMasks = make_timing_tail_masks();
 // Already-validated "meter,set,index,volume": one digit each for meter/set,
 // one or two for index, and one to three for volume. Return all four together.
 inline std::array<i32, 4> decode_timing_tail(const char* p,
-                                                 u32 index_digits,
-                                                 u32 volume_digits) {
-  const auto& mask = kTimingTailMasks[(index_digits - 1) * 3 + volume_digits - 1];
-  const auto digits =
-      _mm_shuffle_epi8(_mm_sub_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(p)),
-                                    _mm_set1_epi8('0')),
-                       _mm_loadu_si128(reinterpret_cast<const __m128i*>(mask.data())));
+                                             u32         index_digits,
+                                             u32         volume_digits) {
+  const auto& mask =
+      kTimingTailMasks[(index_digits - 1) * 3 + volume_digits - 1];
+  const auto digits = _mm_shuffle_epi8(
+      _mm_sub_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(p)),
+                   _mm_set1_epi8('0')),
+      _mm_loadu_si128(reinterpret_cast<const __m128i*>(mask.data())));
   const auto values = _mm_madd_epi16(
-      _mm_maddubs_epi16(
-          digits, _mm_setr_epi8(10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1)),
+      _mm_maddubs_epi16(digits, _mm_setr_epi8(10, 1, 10, 1, 10, 1, 10, 1, 10, 1,
+                                              10, 1, 10, 1, 10, 1)),
       _mm_setr_epi16(100, 1, 100, 1, 100, 1, 100, 1));
   std::array<i32, 4> fields;
   _mm_storeu_si128(reinterpret_cast<__m128i*>(fields.data()), values);
@@ -123,22 +125,22 @@ inline std::array<i32, 4> decode_timing_tail(const char* p,
 // general parser; these limits constrain only the fast path. A nullopt
 // result requests general parsing rather than declaring the line malformed.
 // Keep this inlined in the section loop so accepted records need no call.
-FOSU_ALWAYS_INLINE std::optional<TimingPoint> try_parse_timing_point_fast_masked(
-    u64 commas,
-    u64 nondig,
-    const char* p,
-    size_t len,
-    int time_offset = 0) {
+FOSU_ALWAYS_INLINE std::optional<TimingPoint>
+try_parse_timing_point_fast_masked(u64         commas,
+                                   u64         nondig,
+                                   const char* p,
+                                   size_t      len,
+                                   int         time_offset = 0) {
   if (std::popcount(commas) != 7)
     return std::nullopt;
 
   // Seven comma positions -> eight fields.
-  const u64 m1 = (commas & (commas - 1));
-  const u64 m2 = (m1 & (m1 - 1));
-  const u64 m3 = (m2 & (m2 - 1));
-  const u64 m4 = (m3 & (m3 - 1));
-  const u64 m5 = (m4 & (m4 - 1));
-  const u64 m6 = (m5 & (m5 - 1));
+  const u64  m1 = (commas & (commas - 1));
+  const u64  m2 = (m1 & (m1 - 1));
+  const u64  m3 = (m2 & (m2 - 1));
+  const u64  m4 = (m3 & (m3 - 1));
+  const u64  m5 = (m4 & (m4 - 1));
+  const u64  m6 = (m5 & (m5 - 1));
   const auto time_end = static_cast<u32>(trailing_zeros(commas));
   const auto beat_length_end = static_cast<u32>(trailing_zeros(m1));
   const auto meter_end = static_cast<u32>(trailing_zeros(m2));
@@ -154,22 +156,23 @@ FOSU_ALWAYS_INLINE std::optional<TimingPoint> try_parse_timing_point_fast_masked
   const u32 uninherited_digits = uninherited_end - volume_end - 1;
   const u32 effects_digits = static_cast<u32>(len) - uninherited_end - 1;
   // Subtracting one makes zero-length fields fail this unsigned range check.
-  if (time_end - 1 > 7 ||
-      ((meter_digits - 1) | (sample_set_digits - 1) | (sample_index_digits - 1) |
-       (volume_digits - 1) | (uninherited_digits - 1) | (effects_digits - 1)) > 3)
+  if (time_end - 1 > 7 || ((meter_digits - 1) | (sample_set_digits - 1) |
+                           (sample_index_digits - 1) | (volume_digits - 1) |
+                           (uninherited_digits - 1) | (effects_digits - 1)) > 3)
     return std::nullopt;
 
   const char* magnitude = p + time_end + 1;
-  const bool negative = *magnitude == '-';
+  const bool  negative = *magnitude == '-';
   magnitude += negative;
-  const u32 magnitude_length = beat_length_end - time_end - 1 - negative;
-  const u32 integer_digits = trailing_zeros(nondig >> (magnitude - p));
+  const u32  magnitude_length = beat_length_end - time_end - 1 - negative;
+  const u32  integer_digits = trailing_zeros(nondig >> (magnitude - p));
   const bool has_dot = integer_digits < magnitude_length;
-  const u32 fraction_digits = magnitude_length - integer_digits - has_dot;
+  const u32  fraction_digits = magnitude_length - integer_digits - has_dot;
   if (integer_digits - 1 > 7 || fraction_digits > 13 ||
       integer_digits + fraction_digits > 18 ||
       (has_dot && magnitude[integer_digits] != '.') ||
-      std::popcount(nondig) != 7 + static_cast<int>(has_dot) + static_cast<int>(negative))
+      std::popcount(nondig) !=
+          7 + static_cast<int>(has_dot) + static_cast<int>(negative))
     return std::nullopt;
 
   const auto parse_small_integer = [](const char* field, u32 digits) {
@@ -179,16 +182,16 @@ FOSU_ALWAYS_INLINE std::optional<TimingPoint> try_parse_timing_point_fast_masked
   };
 
 #if FOSU_SIMD_X86
-  const auto chunks =
-      decode_decimal_chunks(magnitude, integer_digits, magnitude + integer_digits + 1,
-                            std::min(fraction_digits, 8u));
-  u64 mantissa = chunks.integer;
+  const auto chunks = decode_decimal_chunks(magnitude, integer_digits,
+                                            magnitude + integer_digits + 1,
+                                            std::min(fraction_digits, 8u));
+  u64        mantissa = chunks.integer;
 #else
   u64 mantissa = swar_parse_u64(magnitude, integer_digits);
 #endif
   if (fraction_digits) {
-    const u32 first_digits = std::min(fraction_digits, 8u);
-    const u32 second_digits = fraction_digits - first_digits;
+    const u32   first_digits = std::min(fraction_digits, 8u);
+    const u32   second_digits = fraction_digits - first_digits;
     const char* fraction = magnitude + integer_digits + 1;
     mantissa = mantissa * kPow10u[first_digits] +
 #if FOSU_SIMD_X86
@@ -197,13 +200,13 @@ FOSU_ALWAYS_INLINE std::optional<TimingPoint> try_parse_timing_point_fast_masked
                swar_parse_u64(fraction, first_digits);
 #endif
     if (second_digits)
-      mantissa =
-          mantissa * kPow10u[second_digits] + swar_parse_u64(fraction + 8, second_digits);
+      mantissa = mantissa * kPow10u[second_digits] +
+                 swar_parse_u64(fraction + 8, second_digits);
   }
   f64 beat_length;
-  if (mantissa > kMaxExactf64Integer) {
+  if (mantissa > kMaxExactDoubleInteger) {
     // Preserve correct rounding when the integer mantissa is not exact.
-    if (bounded_f64(p + time_end + 1, p + beat_length_end, beat_length) !=
+    if (bounded_double(p + time_end + 1, p + beat_length_end, beat_length) !=
         p + beat_length_end)
       return std::nullopt;
   } else {
@@ -217,8 +220,8 @@ FOSU_ALWAYS_INLINE std::optional<TimingPoint> try_parse_timing_point_fast_masked
 #if FOSU_SIMD_X86
   if (meter_digits == 1 && sample_set_digits == 1 && sample_index_digits <= 2 &&
       volume_digits <= 3) {
-    fields =
-        decode_timing_tail(p + beat_length_end + 1, sample_index_digits, volume_digits);
+    fields = decode_timing_tail(p + beat_length_end + 1, sample_index_digits,
+                                volume_digits);
   } else
 #endif
   {
@@ -246,17 +249,16 @@ FOSU_ALWAYS_INLINE std::optional<TimingPoint> try_parse_timing_point_fast_masked
 }
 
 // Compute masks from the input vectors before attempting fast parsing.
-FOSU_ALWAYS_INLINE std::optional<TimingPoint> try_parse_timing_point_fast(Bytes32 a,
-                                                                          Bytes32 b,
-                                                                          const char* p,
-                                                                          size_t len) {
+FOSU_ALWAYS_INLINE std::optional<TimingPoint>
+try_parse_timing_point_fast(Bytes32 a, Bytes32 b, const char* p, size_t len) {
   if (len > 64 || len < 15)
     return std::nullopt;
   const u64 line_mask = len == 64 ? ~0ull : ((1ull << len) - 1);
   const u64 commas =
       (comma_mask32(a) | static_cast<u64>(comma_mask32(b)) << 32) & line_mask;
   const u64 nondig =
-      (nondigit_mask32(a) | static_cast<u64>(nondigit_mask32(b)) << 32) & line_mask;
+      (nondigit_mask32(a) | static_cast<u64>(nondigit_mask32(b)) << 32) &
+      line_mask;
   return try_parse_timing_point_fast_masked(commas, nondig, p, len);
 }
 

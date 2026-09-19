@@ -65,9 +65,9 @@ inline constexpr auto kSliderPointShuffles = make_slider_point_shuffles();
 
 #if FOSU_SIMD_X86
 inline SliderPoint decode_slider_point(
-    __m128i input,
-    u32 x_digits,
-    u32 y_digits,
+    __m128i                        input,
+    u32                            x_digits,
+    u32                            y_digits,
     const HitObjectParseConstants& constants) {
   static_assert(sizeof(SliderPoint) == 8 && offsetof(SliderPoint, x) == 0 &&
                 offsetof(SliderPoint, y) == 4);
@@ -84,14 +84,14 @@ inline SliderPoint decode_slider_point(
 }
 #else
 inline SliderPoint decode_slider_point(
-    uint8x16_t input,
-    u32 x_digits,
-    u32 y_digits,
+    uint8x16_t                     input,
+    u32                            x_digits,
+    u32                            y_digits,
     const HitObjectParseConstants& constants) {
   static_assert(sizeof(SliderPoint) == 8 && offsetof(SliderPoint, x) == 0 &&
                 offsetof(SliderPoint, y) == 4);
   const auto& shuffle = kSliderPointShuffles[(x_digits - 1) * 4 + y_digits - 1];
-  const auto coordinates = decimal_groups(
+  const auto  coordinates = decimal_groups(
       vqtbl1q_u8(vsubq_u8(input, constants.zero),
                  vld1q_u8(reinterpret_cast<const u8*>(shuffle.bytes))));
   const auto positions = vcvtq_f32_u32(coordinates);
@@ -107,20 +107,20 @@ struct ParsedSliderPoint {
 };
 
 FOSU_ALWAYS_INLINE std::optional<ParsedSliderPoint> parse_slider_point(
-    const char* p,
-    const char* end,
-    bool lazer,
+    const char*                                     p,
+    const char*                                     end,
+    bool                                            lazer,
     [[maybe_unused]] const HitObjectParseConstants& constants) {
 #if FOSU_SIMD
 #if FOSU_SIMD_X86
   const __m128i input = _mm_loadu_si128(reinterpret_cast<const __m128i*>(p));
-  const u32 non_digits = nondigit_mask16(input);
-  const u32 colons = static_cast<u32>(_mm_movemask_epi8(
+  const u32     non_digits = nondigit_mask16(input);
+  const u32     colons = static_cast<u32>(_mm_movemask_epi8(
       _mm_cmpeq_epi8(input, _mm256_castsi256_si128(constants.colon))));
 #else
   const auto input = vld1q_u8(reinterpret_cast<const u8*>(p));
-  const u32 non_digits = nondigit_mask16(input);
-  const u32 colons = byte_mask16(vceqq_u8(input, constants.colon));
+  const u32  non_digits = nondigit_mask16(input);
+  const u32  colons = byte_mask16(vceqq_u8(input, constants.colon));
 #endif
   const u32 x_digits = trailing_zeros(non_digits >> 1);
   const u32 colon = x_digits & 7;
@@ -135,8 +135,8 @@ FOSU_ALWAYS_INLINE std::optional<ParsedSliderPoint> parse_slider_point(
 #endif
 
   const char* coordinate = p + 1;
-  f32 x;
-  u32 digits = digit_run8(coordinate);
+  f32         x;
+  u32         digits = digit_run8(coordinate);
   if (digits - 1 <= 3 && digits <= static_cast<size_t>(end - coordinate) &&
       coordinate[digits] == ':') {
     x = static_cast<f32>(swar_parse_u32(coordinate, digits));
@@ -172,12 +172,12 @@ FOSU_ALWAYS_INLINE std::optional<ParsedSliderPoint> parse_slider_point(
 
 #if FOSU_SIMD
 FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
-    Beatmap& beatmap,
-    size_t& slider_point_count,
-    const char* p,
+    Beatmap&                       beatmap,
+    size_t&                        slider_point_count,
+    const char*                    p,
     const HitObjectParseConstants& constants) {
   const Bytes32 input = load32(p);
-  const u32 non_digits = nondigit_mask32(input);
+  const u32     non_digits = nondigit_mask32(input);
 #if FOSU_SIMD_X86
   // Common fixed-width points need no delimiter scan or shuffle-table index.
   if ((non_digits & 0xffu) == 0x11u && p[0] == '|' && p[4] == ':' &&
@@ -238,7 +238,7 @@ FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
                             vceqq_u8(input.val[1], constants.comma)))
        << 16);
 #endif
-  u32 boundaries = non_digits & ~1u;
+  u32       boundaries = non_digits & ~1u;
   const u32 first_colon = trailing_zeros(boundaries);
   boundaries &= boundaries - 1;
   const u32 first_end = trailing_zeros(boundaries);
@@ -247,8 +247,8 @@ FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
   boundaries &= boundaries - 1;
   const u32 second_end = trailing_zeros(boundaries);
 
-  const u32 first_x_digits = first_colon - 1;
-  const u32 first_y_digits = first_end - first_colon - 1;
+  const u32  first_x_digits = first_colon - 1;
+  const u32  first_y_digits = first_end - first_colon - 1;
   const bool first_point_is_simple =
       (pipes & 1) & (((first_x_digits - 1) | (first_y_digits - 1)) <= 3) &
       ((static_cast<u64>(colons) >> first_colon) & 1) &
@@ -265,8 +265,8 @@ FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
 #endif
   p += first_end;
 
-  const u32 second_x_digits = second_colon - first_end - 1;
-  const u32 second_y_digits = second_end - second_colon - 1;
+  const u32  second_x_digits = second_colon - first_end - 1;
+  const u32  second_y_digits = second_end - second_colon - 1;
   const bool second_point_is_simple =
       ((static_cast<u64>(pipes) >> first_end) & 1) &
       (((second_x_digits - 1) | (second_y_digits - 1)) <= 3) &
@@ -297,18 +297,18 @@ FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
 // parsing the path roll those arrays back. A malformed later field may leave
 // parsed points unused, matching the official decoder's behavior.
 FOSU_NOINLINE inline bool parse_slider(
-    Beatmap& beatmap,
-    size_t& slider_count,
-    size_t& slider_segment_count,
-    size_t& slider_point_count,
-    HitObject& object,
-    const char* p,
-    const char* end,
+    Beatmap&                                        beatmap,
+    size_t&                                         slider_count,
+    size_t&                                         slider_segment_count,
+    size_t&                                         slider_point_count,
+    HitObject&                                      object,
+    const char*                                     p,
+    const char*                                     end,
     [[maybe_unused]] const HitObjectParseConstants& constants) {
   if (p >= end)
     return false;
 
-  const bool lazer = beatmap.format_version >= 128;
+  const bool   lazer = beatmap.format_version >= 128;
   const size_t slider_point_begin = slider_point_count;
   const size_t slider_segment_begin = slider_segment_count;
 
@@ -318,7 +318,7 @@ FOSU_NOINLINE inline bool parse_slider(
 
   std::optional<u32> first_curve_degree;
   if (*first_curve_type == CurveType::Bezier && p < end && is_digit(*p)) {
-    i64 degree;
+    i64         degree;
     const char* next = parse_osu_int(p, end, degree);
     if (next == p || degree <= 0 || degree > UINT32_MAX)
       return false;
@@ -326,10 +326,10 @@ FOSU_NOINLINE inline bool parse_slider(
     p = next;
   }
 
-  CurveType current_curve_type = *first_curve_type;
+  CurveType          current_curve_type = *first_curve_type;
   std::optional<u32> current_curve_degree = first_curve_degree;
-  size_t segment_point_begin = slider_point_count;
-  bool has_explicit_segments = false;
+  size_t             segment_point_begin = slider_point_count;
+  bool               has_explicit_segments = false;
 
   while (p < end && *p == '|') {
 #if FOSU_SIMD
@@ -345,7 +345,7 @@ FOSU_NOINLINE inline bool parse_slider(
         lazer && p + 1 < end &&
         (p[1] == 'B' || p[1] == 'C' || p[1] == 'L' || p[1] == 'P');
 
-    CurveType next_curve_type = current_curve_type;
+    CurveType          next_curve_type = current_curve_type;
     std::optional<u32> next_curve_degree = current_curve_degree;
     if (starts_segment) {
       ++p;
@@ -358,7 +358,7 @@ FOSU_NOINLINE inline bool parse_slider(
       next_curve_type = *type;
       next_curve_degree.reset();
       if (next_curve_type == CurveType::Bezier && p < end && is_digit(*p)) {
-        i64 degree;
+        i64         degree;
         const char* next = parse_osu_int(p, end, degree);
         if (next == p || degree <= 0 || degree > UINT32_MAX) {
           slider_point_count = slider_point_begin;
@@ -413,7 +413,7 @@ FOSU_NOINLINE inline bool parse_slider(
   }
   ++p;
 
-  i32 slides;
+  i32       slides;
   const u32 first_slide_digit = static_cast<u8>(p[0] - '0');
   const u32 second_slide_digit = static_cast<u8>(p[1] - '0');
   if (first_slide_digit <= 9 && p[1] == ',') {
@@ -428,7 +428,7 @@ FOSU_NOINLINE inline bool parse_slider(
       slides = static_cast<i32>(swar_parse_u64(p, digits));
       p = skip_numeric_space(p + digits, end);
     } else {
-      i64 parsed_slides;
+      i64         parsed_slides;
       const char* next = parse_osu_int(p, end, parsed_slides);
       if (next == p) {
         slider_segment_count = slider_segment_begin;
@@ -450,11 +450,11 @@ FOSU_NOINLINE inline bool parse_slider(
 
 #if FOSU_SIMD
     const Bytes32 input = load32(length_begin);
-    const u64 non_digits = nondigit_mask32(input);
-    const u32 integer_digits = static_cast<u32>(trailing_zeros(non_digits));
+    const u64     non_digits = nondigit_mask32(input);
+    const u32     integer_digits = static_cast<u32>(trailing_zeros(non_digits));
     if (integer_digits - 1 <= 7) {
       const bool has_dot = length_begin[integer_digits] == '.';
-      const u32 fraction_digits =
+      const u32  fraction_digits =
           has_dot ? static_cast<u32>(
                         trailing_zeros(non_digits >> (integer_digits + 1)))
                   : 0;
@@ -482,7 +482,7 @@ FOSU_NOINLINE inline bool parse_slider(
           mantissa = mantissa * kPow10u[second_fraction_digits] +
                      swar_parse_u64(fraction + 8, second_fraction_digits);
         }
-        if (mantissa <= kMaxExactf64Integer) {
+        if (mantissa <= kMaxExactDoubleInteger) {
           f64 parsed_length = static_cast<f64>(mantissa);
           if (fraction_digits)
             parsed_length /= kPow10[fraction_digits];
@@ -499,7 +499,7 @@ FOSU_NOINLINE inline bool parse_slider(
 #endif
 
     if (!next)
-      next = parse_osu_f64(length_begin, end, length, 131072);
+      next = parse_osu_double(length_begin, end, length, 131072);
     if (next != length_begin)
       next = skip_numeric_space(next, end);
     if (next == length_begin || (next < end && *next != ',')) {
@@ -533,7 +533,7 @@ FOSU_NOINLINE inline bool parse_slider(
         sound_fields[2] = {sound_begin + second + 1, sample_end - second - 1};
       }
     } else {
-      size_t field = 0;
+      size_t      field = 0;
       const char* field_begin = sound_begin;
       while (sound_begin < end) {
         const size_t remaining = static_cast<size_t>(end - sound_begin);

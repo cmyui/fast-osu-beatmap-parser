@@ -21,7 +21,7 @@ static_assert(kSectionGeneral == 1u << static_cast<int>(Section::General) &&
                       1u << static_cast<int>(Section::HitObjects),
               "public section bits mirror the internal Section ordinals");
 
-inline const char* parse_preamble(Beatmap& beatmap,
+inline const char* parse_preamble(Beatmap&    beatmap,
                                   const char* p,
                                   const char* end) {
   if (end - p >= 3 && static_cast<u8>(p[0]) == 0xEF &&
@@ -30,7 +30,7 @@ inline const char* parse_preamble(Beatmap& beatmap,
   return for_each_section_line(p, end, [&](std::string_view line) {
     const size_t version = line.find("osu file format v");
     if (version != std::string_view::npos) {
-      i64 value;
+      i64         value;
       const char* number = line.data() + version + 17;
       if (parse_i64(number, line.data() + line.size(), value) != number)
         beatmap.format_version = clamp_i32(value);
@@ -42,10 +42,10 @@ inline const char* parse_preamble(Beatmap& beatmap,
 // the next header or EOF; framing and scalar fallbacks stay inside the section.
 // Input has kBufferPadding readable zero bytes; string views refer into it.
 inline void parse_document(std::span<const char> input,
-                           Beatmap& beatmap,
-                           ParseOptions options) noexcept {
+                           Beatmap&              beatmap,
+                           ParseOptions          options) noexcept {
   size_t velocity_preset_count = 0;
-  bool velocity_presets_seen = false;
+  bool   velocity_presets_seen = false;
   if (input.empty()) {
     if ((options.sections & kSectionEditor) &&
         beatmap.velocity_presets.size() >= 3)
@@ -54,17 +54,17 @@ inline void parse_document(std::span<const char> input,
   }
   const char* end = input.data() + input.size();
   const char* p = parse_preamble(beatmap, input.data(), end);
-  const int time_offset = beatmap.format_version < 5 ? 24 : 0;
-  size_t break_count = 0, colour_count = 0, timing_point_count = 0;
-  size_t hit_object_count = 0, slider_count = 0, slider_point_count = 0;
-  size_t slider_segment_count = 0;
+  const int   time_offset = beatmap.format_version < 5 ? 24 : 0;
+  size_t      break_count = 0, colour_count = 0, timing_point_count = 0;
+  size_t      hit_object_count = 0, slider_count = 0, slider_point_count = 0;
+  size_t      slider_segment_count = 0;
   std::optional<f64> approach_rate;
-  u32 pending = options.sections & 0x1FEu;
+  u32                pending = options.sections & 0x1FEu;
 
   while (p < end) {
     const auto header = read_line(p, end);
     const auto section = match_section(header.text);
-    const u32 bit = 1u << static_cast<int>(section);
+    const u32  bit = 1u << static_cast<int>(section);
     p = header.next;
     if (!(options.sections & bit)) {
       if (!pending)

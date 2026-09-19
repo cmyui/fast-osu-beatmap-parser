@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fosu/engine/primitives/vector_ops.h>
+
 #include <array>
 #include <cstddef>
 
@@ -9,10 +10,11 @@ namespace fosu::internal {
 #if FOSU_SIMD_NEON
 // Four right-aligned groups of four decimal digits, independently converted.
 inline uint32x4_t decimal_groups(uint8x16_t digits) {
-  constexpr u8 pairs[16] = {10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1};
+  constexpr u8  pairs[16] = {10, 1, 10, 1, 10, 1, 10, 1,
+                             10, 1, 10, 1, 10, 1, 10, 1};
   constexpr u16 words[8] = {100, 1, 100, 1, 100, 1, 100, 1};
-  return vpaddlq_u16(
-      vmulq_u16(vpaddlq_u8(vmulq_u8(digits, vld1q_u8(pairs))), vld1q_u16(words)));
+  return vpaddlq_u16(vmulq_u16(vpaddlq_u8(vmulq_u8(digits, vld1q_u8(pairs))),
+                               vld1q_u16(words)));
 }
 #endif
 
@@ -37,23 +39,24 @@ struct DecimalChunks {
 // digits; an absent fractional run decodes to zero. The caller supplies padded
 // input and assembles these integer chunks into the full decimal mantissa.
 inline DecimalChunks decode_decimal_chunks(const char* integer,
-                                           u32 integer_digits,
+                                           u32         integer_digits,
                                            const char* fraction,
-                                           u32 fraction_digits) {
-  const auto text =
-      _mm_unpacklo_epi64(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(integer)),
-                         _mm_loadl_epi64(reinterpret_cast<const __m128i*>(fraction)));
+                                           u32         fraction_digits) {
+  const auto text = _mm_unpacklo_epi64(
+      _mm_loadl_epi64(reinterpret_cast<const __m128i*>(integer)),
+      _mm_loadl_epi64(reinterpret_cast<const __m128i*>(fraction)));
   const auto integer_mask = _mm_loadl_epi64(
       reinterpret_cast<const __m128i*>(kDigitAlignment[integer_digits].data()));
-  const auto fraction_mask = _mm_add_epi8(
-      _mm_loadl_epi64(
-          reinterpret_cast<const __m128i*>(kDigitAlignment[fraction_digits].data())),
-      _mm_set1_epi8(8));
-  const auto digits = _mm_shuffle_epi8(_mm_sub_epi8(text, _mm_set1_epi8('0')),
-                                       _mm_unpacklo_epi64(integer_mask, fraction_mask));
+  const auto fraction_mask =
+      _mm_add_epi8(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(
+                       kDigitAlignment[fraction_digits].data())),
+                   _mm_set1_epi8(8));
+  const auto digits =
+      _mm_shuffle_epi8(_mm_sub_epi8(text, _mm_set1_epi8('0')),
+                       _mm_unpacklo_epi64(integer_mask, fraction_mask));
   const auto groups = _mm_madd_epi16(
-      _mm_maddubs_epi16(
-          digits, _mm_setr_epi8(10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1)),
+      _mm_maddubs_epi16(digits, _mm_setr_epi8(10, 1, 10, 1, 10, 1, 10, 1, 10, 1,
+                                              10, 1, 10, 1, 10, 1)),
       _mm_setr_epi16(100, 1, 100, 1, 100, 1, 100, 1));
   const auto values =
       _mm_madd_epi16(_mm_packus_epi32(groups, groups),

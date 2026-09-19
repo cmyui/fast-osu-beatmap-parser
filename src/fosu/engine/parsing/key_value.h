@@ -39,7 +39,8 @@ inline std::string_view trim_field(std::string_view text) {
     size_t last = text.size() - 1;
     while (last && (static_cast<unsigned char>(text[last]) & 0xC0) == 0x80)
       --last;
-    if (field_space_width({text.data() + last, text.size() - last}) != text.size() - last)
+    if (field_space_width({text.data() + last, text.size() - last}) !=
+        text.size() - last)
       break;
     text = {text.data(), last};
   }
@@ -52,8 +53,9 @@ inline std::optional<KeyValue> split_key_value(std::string_view line) {
   const char* colon = find_byte<':'>(p, end);
   if (colon == end)
     return std::nullopt;
-  return KeyValue{trim_field({p, static_cast<size_t>(colon - p)}),
-                  trim_field({colon + 1, static_cast<size_t>(end - colon - 1)})};
+  return KeyValue{
+      trim_field({p, static_cast<size_t>(colon - p)}),
+      trim_field({colon + 1, static_cast<size_t>(end - colon - 1)})};
 }
 
 using FieldParser = bool (*)(BeatmapHeader&, std::string_view);
@@ -74,19 +76,20 @@ inline bool assign_field_text(BeatmapHeader& header, std::string_view input) {
 }
 
 template <size_t N>
-inline void parse_key_value(Beatmap& beatmap,
+inline void parse_key_value(Beatmap&                            beatmap,
                             const StringLookup<FieldParser, N>& fields,
-                            const KeyValue& field) {
+                            const KeyValue&                     field) {
   if (const auto* parse = fields.find(field.key))
     if (!(*parse)(beatmap, field.value))
       ++beatmap.stats.malformed_lines;
 }
 
 template <size_t N>
-inline const char* parse_key_value_section(Beatmap& beatmap,
-                                           const StringLookup<FieldParser, N>& fields,
-                                           const char* p,
-                                           const char* end) {
+inline const char* parse_key_value_section(
+    Beatmap&                            beatmap,
+    const StringLookup<FieldParser, N>& fields,
+    const char*                         p,
+    const char*                         end) {
   return for_each_section_line(p, end, [&](std::string_view line) {
     if (const auto field = split_key_value(line))
       parse_key_value(beatmap, fields, *field);

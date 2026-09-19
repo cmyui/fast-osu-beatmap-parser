@@ -14,10 +14,10 @@
 //     i32 x, y; u32 type, hitsound; f64 time, end_time; u32 slider
 //     (kNoSlider or the original slider-pool index); u8 new_combo, combo_skip;
 //     u32 hit_sample length;
-//     if a slider was parsed (slider != kNoSlider): u32 point_begin, point_count;
-//     {i32 x, y} x point_count; i32 slides; f64 length; u8 curve_type;
-//     str edge_sounds, edge_sets;
-//     then the hit_sample bytes (slider records may appear out of pool order)
+//     if a slider was parsed (slider != kNoSlider): u32 point_begin,
+//     point_count; {i32 x, y} x point_count; i32 slides; f64 length; u8
+//     curve_type; str edge_sounds, edge_sets; then the hit_sample bytes (slider
+//     records may appear out of pool order)
 //   trailer:
 //     "TRLR" u32 n_hitobjects, n_sliders, n_points (pool size)
 //     i32 format_version
@@ -39,23 +39,26 @@
 //                 sample_index, volume; u8 uninherited; u32 effects} x n
 //     stats       u32 malformed_lines, storyboard_lines, fast_path_lines,
 //                 slow_path_lines
-//     orphans     u32 n; {u32 pool_index; i32 x, y} x n  (pool points no slider covers,
+//     orphans     u32 n; {u32 pool_index; i32 x, y} x n  (pool points no slider
+//     covers,
 //                 in pool order)
 //     footer      u64 trailer byte length (excluding this footer)
+
+#include <fosu/beatmap.h>
 
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <string_view>
 
-#include <fosu/beatmap.h>
-
 namespace fosu_dump {
 
 struct Out {
   std::string& s;
-  size_t size() const { return s.size(); }
-  void raw(const void* p, size_t n) { s.append(static_cast<const char*>(p), n); }
+  size_t       size() const { return s.size(); }
+  void         raw(const void* p, size_t n) {
+    s.append(static_cast<const char*>(p), n);
+  }
   void u8(uint8_t v) { s.push_back(static_cast<char>(v)); }
   void i32(int32_t v) { raw(&v, 4); }
   void u32(uint32_t v) { raw(&v, 4); }
@@ -117,7 +120,8 @@ inline void dump_to(const Map& bm, Output& o) {
   o.i32(bm.audio_lead_in);
   o.i32(bm.preview_time);
   o.i32(bm.countdown);
-  constexpr std::string_view sample_names[] = {"None", "Normal", "Soft", "Drum"};
+  constexpr std::string_view sample_names[] = {"None", "Normal", "Soft",
+                                               "Drum"};
   o.str(sample_names[static_cast<int>(bm.sample_set)]);
   o.f64(bm.stack_leniency);
   o.i32(bm.mode);
@@ -181,7 +185,7 @@ inline void dump_to(const Map& bm, Output& o) {
   for (const auto& slider : bm.sliders)
     covered += slider.point_count;
   o.u32(static_cast<uint32_t>(bm.slider_points.size() - covered));
-  size_t point = 0;
+  size_t     point = 0;
   const auto orphan = [&] {
     o.u32(static_cast<uint32_t>(point));
     o.i32(bm.slider_points[point].x);

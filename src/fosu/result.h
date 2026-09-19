@@ -31,7 +31,7 @@ class Result {
 
   explicit operator bool() const noexcept { return succeeded_; }
 
-  T&       value() & noexcept {
+  T& value() & noexcept {
     assert(succeeded_);
     return value_;
   }

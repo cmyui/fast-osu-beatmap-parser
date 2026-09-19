@@ -27,8 +27,8 @@ inline std::optional<u32> parse_colour(std::string_view input) {
   return rgb;
 }
 
-inline const char* parse_colours_section(Beatmap& beatmap,
-                                         size_t& colour_count,
+inline const char* parse_colours_section(Beatmap&    beatmap,
+                                         size_t&     colour_count,
                                          const char* p,
                                          const char* end) {
   return for_each_section_line(p, end, [&](std::string_view line) {
@@ -36,8 +36,9 @@ inline const char* parse_colours_section(Beatmap& beatmap,
       line = line.substr(0, comment);
     const char* line_end = line.data() + line.size();
     const char* colon = find_byte<':'>(line.data(), line_end);
-    const auto colour =
-        colon == line_end ? std::nullopt : parse_colour(trim(colon + 1, line_end));
+    const auto  colour = colon == line_end
+                             ? std::nullopt
+                             : parse_colour(trim(colon + 1, line_end));
     if (!colour) {
       ++beatmap.stats.malformed_lines;
       return;

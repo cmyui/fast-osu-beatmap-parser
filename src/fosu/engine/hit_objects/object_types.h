@@ -44,7 +44,7 @@ inline std::optional<CircleDetails> parse_circle_details(const char* p,
 }
 
 struct TimedHitObjectDetails {
-  f64 end_time;
+  f64              end_time;
   std::string_view hit_sample;
 };
 
@@ -54,8 +54,8 @@ inline std::optional<TimedHitObjectDetails> parse_spinner_details(
     const char* end) {
   if (p == end || *p != ',')
     return std::nullopt;
-  f64 end_time;
-  const char* next = parse_osu_f64(p + 1, end, end_time);
+  f64         end_time;
+  const char* next = parse_osu_double(p + 1, end, end_time);
   if (next == p + 1 || (next < end && *next != ','))
     return std::nullopt;
   const auto sample = parse_hit_sample(next < end ? next + 1 : end, end);
@@ -71,10 +71,10 @@ parse_hold_details(f64 start_time, const char* p, const char* end) {
     return TimedHitObjectDetails{start_time, {}};
   if (*p != ',')
     return std::nullopt;
-  f64 end_time;
+  f64         end_time;
   const char* field = p + 1;
   const char* next = field;
-  const u32 digits = digit_run8(field);
+  const u32   digits = digit_run8(field);
   if (digits && digits <= static_cast<size_t>(end - field) &&
       (field + digits == end || field[digits] == ',' || field[digits] == ':')) {
     const u64 value = swar_parse_u64(field, digits);
@@ -84,7 +84,7 @@ parse_hold_details(f64 start_time, const char* p, const char* end) {
     }
   }
   if (next == field)
-    next = parse_osu_f64(field, end, end_time);
+    next = parse_osu_double(field, end, end_time);
   if (next == p + 1 || (next < end && *next != ',' && *next != ':'))
     return std::nullopt;
   // The official decoder ignores a comma-separated value here; a hold's

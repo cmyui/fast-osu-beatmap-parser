@@ -20,8 +20,8 @@ enum class EngineKind : u8 {
 struct ParsingEngine {
   EngineKind kind;
   void (*parse_document)(std::span<const char> input,
-                         Beatmap& beatmap,
-                         ParseOptions options) noexcept;
+                         Beatmap&              beatmap,
+                         ParseOptions          options) noexcept;
 };
 
 }  // namespace fosu

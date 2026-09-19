@@ -1,4 +1,5 @@
 #include <fosu/engine/parsing/string_lookup.h>
+
 #include <cassert>
 
 using fosu::internal::make_string_lookup;

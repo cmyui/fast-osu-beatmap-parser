@@ -19,7 +19,7 @@ IncludeCategories:
     Priority: 2
     SortPriority: 2
 
-  # 3rd-Party or Stdlib Incldues
+  # 3rd-Party or Stdlib Includes
   - Regex: '^<.*'
     Priority: 3
     SortPriority: 3

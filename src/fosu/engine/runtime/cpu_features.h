@@ -1,4 +1,6 @@
 #pragma once
+#include <fosu/types.h>
+
 #include <cstdint>
 #if defined(_MSC_VER) && defined(_M_X64)
 #include <intrin.h>
@@ -12,6 +14,9 @@
 #endif
 
 namespace fosu_dispatch {
+using fosu::u32;
+using fosu::u64;
+
 inline bool host_supports_neon() {
 #if defined(__aarch64__) && defined(__APPLE__)
   return true;  // Required by the Apple arm64 platform.
@@ -32,15 +37,16 @@ inline constexpr u32 required_leaf1 =
     (1u << 22) | (1u << 23) | (1u << 26) | (1u << 27) | (1u << 28) | (1u << 29);
 inline constexpr u32 required_leaf7 = (1u << 3) | (1u << 5) | (1u << 8);
 inline constexpr u32 required_extended = (1u << 0) | (1u << 5);
-constexpr bool supports_avx2(CpuFeatures f) {
+constexpr bool       supports_avx2(CpuFeatures f) {
   return (f.leaf1 & required_leaf1) == required_leaf1 &&
          (f.leaf7 & required_leaf7) == required_leaf7 &&
-         (f.extended & required_extended) == required_extended && (f.xcr0 & 6) == 6;
+         (f.extended & required_extended) == required_extended &&
+         (f.xcr0 & 6) == 6;
 }
 inline bool host_supports_avx2() {
 #if defined(_MSC_VER) && defined(_M_X64)
   CpuFeatures f;
-  int registers[4];
+  int         registers[4];
   __cpuid(registers, 0);
   if (registers[0] < 7)
     return false;
@@ -63,7 +69,7 @@ inline bool host_supports_avx2() {
   return supports_avx2(f);
 #elif defined(__x86_64__)
   CpuFeatures f;
-  unsigned a, b, c, d;
+  unsigned    a, b, c, d;
   // Query the maximum basic leaf once: CPUID can cause a costly VM exit.
   if (__get_cpuid_max(0, nullptr) < 7)
     return false;

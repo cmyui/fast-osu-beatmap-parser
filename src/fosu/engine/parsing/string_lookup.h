@@ -1,5 +1,7 @@
 #pragma once
 
+#include <fosu/types.h>
+
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -21,8 +23,8 @@ constexpr u32 string_hash(std::string_view key) {
 template <typename Value>
 struct StringEntry {
   std::string_view key;
-  Value value;
-  u32 hash;
+  Value            value;
+  u32              hash;
 
   constexpr StringEntry(std::string_view key, Value value)
       : key(key), value(value), hash(string_hash(key)) {}
@@ -49,7 +51,7 @@ class StringLookup {
     if (key.size() > max_key_size_)
       return nullptr;
     const auto hash = string_hash(key);
-    size_t slot = hash & kMask;
+    size_t     slot = hash & kMask;
     while (slots_[slot]) {
       const auto& entry = entries_[slots_[slot] - 1];
       // Full equality is required even when the entire hash matches.
@@ -61,11 +63,11 @@ class StringLookup {
   }
 
  private:
-  static constexpr size_t kCapacity = std::bit_ceil(N * 2);
-  static constexpr size_t kMask = kCapacity - 1;
+  static constexpr size_t           kCapacity = std::bit_ceil(N * 2);
+  static constexpr size_t           kMask = kCapacity - 1;
   std::array<StringEntry<Value>, N> entries_;
-  std::array<size_t, kCapacity> slots_{};
-  size_t max_key_size_ = 0;
+  std::array<size_t, kCapacity>     slots_{};
+  size_t                            max_key_size_ = 0;
 };
 
 template <typename Value, size_t N>

@@ -50,7 +50,7 @@ inline constexpr u32 kNPrefixVariants = 3 * 3 * 10 * 3;
 //   bytes 20-31  time right-aligned -> dwords 5,6,7 = top2/mid4/low4 digits
 struct alignas(64) LaneMasks {
   i32 perm[8];
-  i8 shuf[32];
+  i8  shuf[32];
 };
 static_assert(sizeof(LaneMasks) == 64);
 

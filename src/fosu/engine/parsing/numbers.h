@@ -21,7 +21,7 @@ inline bool is_digit(char c) {
 
 inline const char* parse_u64(const char* p, const char* end, u64& out) {
   const char* start = p;
-  u64 v = 0;
+  u64         v = 0;
   while (p < end && is_digit(*p)) {
     const u64 digit = static_cast<unsigned>(*p - '0');
     if (v > UINT64_MAX / 10 ||
@@ -43,12 +43,12 @@ inline const char* parse_u64(const char* p, const char* end, u64& out) {
 
 inline const char* parse_i64(const char* p, const char* end, i64& out) {
   const char* start = p;
-  bool neg = false;
+  bool        neg = false;
   if (p < end && (*p == '-' || *p == '+')) {
     neg = *p == '-';
     ++p;
   }
-  u64 mag;
+  u64         mag;
   const char* q = parse_u64(p, end, mag);
   if (q == p)
     return start;
@@ -76,23 +76,23 @@ inline constexpr f64 kPow10[20] = {
 inline constexpr u64 kPow10u[9] = {
     1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000,
 };
-inline constexpr u64 kMaxExactf64Integer = 1ull << 53;
+inline constexpr u64 kMaxExactDoubleInteger = 1ull << 53;
 
 // Fast decimal parse for the values that appear in .osu files. Digit runs
 // are consumed 8 at a time with SWAR conversion instead of byte loops.
 // Values with exponents or more than 18 significant digits fall back to
 // a bounded, locale-independent conversion.
 template <auto Fallback>
-inline const char* parse_f64_impl(const char* p, const char* end, f64& out) {
+inline const char* parse_double_impl(const char* p, const char* end, f64& out) {
   const char* start = p;
-  bool neg = false;
+  bool        neg = false;
   if (p < end && (*p == '-' || *p == '+')) {
     neg = *p == '-';
     ++p;
   }
-  u64 mant = 0;
-  int digits = 0;
-  int frac = 0;
+  u64  mant = 0;
+  int  digits = 0;
+  int  frac = 0;
   bool any = false;
   for (;;) {
     u32 run = digit_run8(p);
@@ -137,7 +137,7 @@ inline const char* parse_f64_impl(const char* p, const char* end, f64& out) {
   }
   // Rounding an inexact integer mantissa before division can move the
   // result by one ULP. The fallback rounds the original decimal once.
-  if (mant > kMaxExactf64Integer)
+  if (mant > kMaxExactDoubleInteger)
     return Fallback(start, end, out);
   f64 v = static_cast<f64>(mant);
   if (frac)
@@ -146,7 +146,9 @@ inline const char* parse_f64_impl(const char* p, const char* end, f64& out) {
   return p;
 }
 
-inline const char* bounded_f64(const char* start, const char* end, f64& value) {
+inline const char* bounded_double(const char* start,
+                                  const char* end,
+                                  f64&        value) {
   const char* p = start;
   while (p < end && (*p == ' ' || *p == '\t'))
     ++p;
@@ -163,8 +165,8 @@ inline const char* bounded_f64(const char* start, const char* end, f64& value) {
              : start;
 }
 
-inline const char* parse_f64(const char* p, const char* end, f64& out) {
-  const char* q = parse_f64_impl<bounded_f64>(p, end, out);
+inline const char* parse_double(const char* p, const char* end, f64& out) {
+  const char* q = parse_double_impl<bounded_double>(p, end, out);
   return q != p && std::isfinite(out) ? q : p;
 }
 
@@ -193,12 +195,12 @@ inline const char* parse_osu_int(const char* p, const char* end, i64& out) {
   return skip_numeric_space(q, end);
 }
 
-inline const char* parse_osu_f64(const char* p,
-                                 const char* end,
-                                 f64& out,
-                                 f64 limit = INT32_MAX) {
+inline const char* parse_osu_double(const char* p,
+                                    const char* end,
+                                    f64&        out,
+                                    f64         limit = INT32_MAX) {
   const char* first = skip_numeric_space(p, end);
-  const char* q = parse_f64_impl<bounded_f64>(first, end, out);
+  const char* q = parse_double_impl<bounded_double>(first, end, out);
   // One absolute-value bound also rejects infinities and NaN.
   if (q == first || !(std::abs(out) <= limit)) [[unlikely]]
     return p;
@@ -207,8 +209,8 @@ inline const char* parse_osu_f64(const char* p,
 
 inline const char* parse_osu_float(const char* p,
                                    const char* end,
-                                   f32& out,
-                                   f32 limit = f32(INT32_MAX)) {
+                                   f32&        out,
+                                   f32         limit = f32(INT32_MAX)) {
   const char* number = skip_numeric_space(p, end);
   if (number < end && *number == '+') {
     ++number;
@@ -216,9 +218,9 @@ inline const char* parse_osu_float(const char* p,
       return p;
   }
 
-  const bool negative = number < end && *number == '-';
+  const bool  negative = number < end && *number == '-';
   const char* magnitude = number + negative;
-  const u32 digits = digit_run8(magnitude);
+  const u32   digits = digit_run8(magnitude);
   if (digits && digits <= static_cast<size_t>(end - magnitude) &&
       (digits < 8 || !is_digit(magnitude[8])) && magnitude[digits] != '.' &&
       magnitude[digits] != 'e' && magnitude[digits] != 'E') {

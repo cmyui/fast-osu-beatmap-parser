@@ -1,16 +1,19 @@
 // libFuzzer + ASan/UBSan: exercise full files and force arbitrary bytes through
 // the hit-object and timing-point parsers, comparing all materialized fields.
-#include <fosu/parser.h>
-#include <cassert>
-#include <string>
 #include "support/canonical_dump.h"
 #include "support/scalar_engine.h"
 
+#include <fosu/parser.h>
+
+#include <cassert>
+#include <string>
+
 static void check(std::string_view data) {
-  auto input = fosu::make_padded(data);
+  auto         input = fosu::make_padded(data);
   fosu::Parser scalar_parser(fosu_test::scalar_engine());
   fosu::Parser simd_parser;
-  auto scalar = scalar_parser.parse(input, {.calculate_slider_end_times = true});
+  auto         scalar =
+      scalar_parser.parse(input, {.calculate_slider_end_times = true});
   auto simd = simd_parser.parse(input, {.calculate_slider_end_times = true});
   assert(scalar && simd);
   auto a = *scalar.value();

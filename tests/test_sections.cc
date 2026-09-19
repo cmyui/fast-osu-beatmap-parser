@@ -259,9 +259,12 @@ static void test_modern_curve_segments() {
     CHECK_EQ(second.type, fosu::CurveType::Linear);
     CHECK(!second.degree);
     CHECK_EQ(second.point_count, 1u);
-    CHECK_EQ(modern.slider_points[slider.point_begin + first.point_begin].x, 30.5f);
-    CHECK_EQ(modern.slider_points[slider.point_begin + first.point_begin].y, 40.25f);
-    CHECK_EQ(modern.slider_points[slider.point_begin + second.point_begin].x, 70.75f);
+    CHECK_EQ(modern.slider_points[slider.point_begin + first.point_begin].x,
+             30.5f);
+    CHECK_EQ(modern.slider_points[slider.point_begin + first.point_begin].y,
+             40.25f);
+    CHECK_EQ(modern.slider_points[slider.point_begin + second.point_begin].x,
+             70.75f);
 
     const auto degree = parse_str(
         "osu file format v128\n[HitObjects]\n"
@@ -269,7 +272,8 @@ static void test_modern_curve_segments() {
         simd);
     const auto& degree_slider = degree.sliders[degree.hit_objects[0].slider];
     CHECK_EQ(degree_slider.segment_count, 1u);
-    const auto degree_segment = degree.slider_segments[degree_slider.segment_begin];
+    const auto degree_segment =
+        degree.slider_segments[degree_slider.segment_begin];
     CHECK_EQ(degree_segment.type, fosu::CurveType::Bezier);
     CHECK_EQ(degree_segment.degree, 2u);
     CHECK_EQ(degree_segment.point_count, 3u);
@@ -335,15 +339,16 @@ static void test_omitted_sections_use_defaults() {
 static void test_difficulty_selection_skips_other_sections() {
   auto input = fosu::make_padded(
       "[Metadata]\nTitle:Unrequested\n"
-      "[Difficulty]\nHPDrainRate:3\nCircleSize:4\nOverallDifficulty:7\nApproachRate:8\n"
+      "[Difficulty]\nHPDrainRate:3\nCircleSize:4\nOverallDifficulty:"
+      "7\nApproachRate:8\n"
       "[TimingPoints]\n0,500\n"
       "[Colours]\nCombo1:255,0,0\n"
       "[HitObjects]\n64,96,1000,1,0\n");
   for (bool simd : {false, true}) {
     fosu::Parser parser(simd ? fosu::internal::compiled_engine
                              : fosu_test::scalar_engine());
-    const auto& bm =
-        require_parse(parser.parse(input, {.sections = fosu::kSectionDifficulty}));
+    const auto&  bm = require_parse(
+        parser.parse(input, {.sections = fosu::kSectionDifficulty}));
     CHECK_EQ(bm.hp, 3);
     CHECK_EQ(bm.cs, 4);
     CHECK_EQ(bm.od, 7);
@@ -363,8 +368,9 @@ static void test_metadata_and_difficulty_selection() {
   for (bool simd : {false, true}) {
     fosu::Parser parser(simd ? fosu::internal::compiled_engine
                              : fosu_test::scalar_engine());
-    const auto& bm = require_parse(parser.parse(
-        input, {.sections = fosu::kSectionMetadata | fosu::kSectionDifficulty}));
+    const auto&  bm = require_parse(parser.parse(
+        input,
+        {.sections = fosu::kSectionMetadata | fosu::kSectionDifficulty}));
     CHECK(bm.title == "Selected metadata");
     CHECK_EQ(bm.beatmap_id, 42);
     CHECK_EQ(bm.od, 6);
@@ -382,8 +388,8 @@ static void test_hitobject_selection_skips_preceding_sections() {
   for (bool simd : {false, true}) {
     fosu::Parser parser(simd ? fosu::internal::compiled_engine
                              : fosu_test::scalar_engine());
-    const auto& bm =
-        require_parse(parser.parse(input, {.sections = fosu::kSectionHitObjects}));
+    const auto&  bm = require_parse(
+        parser.parse(input, {.sections = fosu::kSectionHitObjects}));
     CHECK(bm.title.empty() && bm.timing_points.empty());
     CHECK_EQ(bm.hit_objects.size(), 2u);
     CHECK_EQ(bm.hit_objects[0].x, 32);
@@ -401,8 +407,8 @@ static void test_selected_missing_section_uses_defaults() {
   for (bool simd : {false, true}) {
     fosu::Parser parser(simd ? fosu::internal::compiled_engine
                              : fosu_test::scalar_engine());
-    const auto& bm =
-        require_parse(parser.parse(input, {.sections = fosu::kSectionDifficulty}));
+    const auto&  bm = require_parse(
+        parser.parse(input, {.sections = fosu::kSectionDifficulty}));
     CHECK_EQ(bm.hp, 5);
     CHECK_EQ(bm.cs, 5);
     CHECK_EQ(bm.od, 5);
@@ -424,14 +430,15 @@ static void test_all_section_mask_matches_default() {
         simd ? fosu::internal::compiled_engine : fosu_test::scalar_engine();
     fosu::Parser explicit_parser(engine);
     fosu::Parser default_parser(engine);
-    const auto& explicit_mask =
-        require_parse(explicit_parser.parse(input, {.sections = fosu::kAllSections}));
+    const auto&  explicit_mask = require_parse(
+        explicit_parser.parse(input, {.sections = fosu::kAllSections}));
     const auto& default_mask = require_parse(default_parser.parse(input));
     CHECK_EQ(canonical(explicit_mask), canonical(default_mask));
   }
 }
 
 static void test_exact_keys_and_event_aliases() {
+  CHECK_EQ(parse_str("[General]\nCountdown:DoubleSpeed\n").countdown, 3);
   const auto map = parse_str(
       "[General]\nCountdown:Normal,HalfSpeed\nSampleSet:Soft\n"
       "[Metadata]\nTitle:\tkept \nTitleUnicode : unicode\n"
@@ -477,9 +484,9 @@ static void test_long_event_lines() {
 
 static void test_timing_integer_widths() {
   for (int value : {9, 99, 999, 9999, 10000, 99999999, INT32_MAX}) {
-    const auto field = std::to_string(value);
-    const std::string input =
-        "[TimingPoints]\n0,-100," + field + ",2," + field + "," + field + ",0," + field;
+    const auto        field = std::to_string(value);
+    const std::string input = "[TimingPoints]\n0,-100," + field + ",2," +
+                              field + "," + field + ",0," + field;
     for (bool simd : {false, true}) {
       fosu::Parser parser(simd ? fosu::internal::compiled_engine
                                : fosu_test::scalar_engine());
@@ -510,13 +517,14 @@ static void test_masked_timing_fallback() {
         "0,NaN,4,0,0,100,1,0", "bad,500", "0,500,"}) {
     for (size_t length : {line.size(), size_t(63), size_t(64)}) {
       const std::string text = line + std::string(length - line.size(), ' ');
-      const auto input = fosu::make_padded(text + ",outside\n");
-      const char* p = input.data.get();
-      uint64_t commas = 0;
+      const auto        input = fosu::make_padded(text + ",outside\n");
+      const char*       p = input.data.get();
+      uint64_t          commas = 0;
       for (size_t i = 0; i < text.size(); ++i)
         if (p[i] == ',')
           commas |= 1ull << i;
-      const auto expected = fosu::internal::parse_timing_point(p, p + text.size());
+      const auto expected =
+          fosu::internal::parse_timing_point(p, p + text.size());
       const auto actual =
           fosu::internal::parse_timing_point<true>(p, p + text.size(), commas);
       CHECK_EQ(actual.has_value(), expected.has_value());
@@ -524,8 +532,9 @@ static void test_masked_timing_fallback() {
         const auto& masked = *actual;
         const auto& scalar = *expected;
         CHECK_EQ(masked.time, scalar.time);
-        CHECK(masked.beat_length == scalar.beat_length ||
-              (std::isnan(masked.beat_length) && std::isnan(scalar.beat_length)));
+        CHECK(
+            masked.beat_length == scalar.beat_length ||
+            (std::isnan(masked.beat_length) && std::isnan(scalar.beat_length)));
         CHECK_EQ(masked.meter, scalar.meter);
         CHECK_EQ(masked.sample_set, scalar.sample_set);
         CHECK_EQ(masked.sample_index, scalar.sample_index);
@@ -542,14 +551,16 @@ static void test_byte_scan_boundaries() {
   // Include non-vector-aligned inputs and a matching byte just outside end.
   for (size_t alignment = 0; alignment < 32; ++alignment) {
     for (size_t length = 0; length <= 97; ++length) {
-      for (size_t position : {size_t(0), length / 2, length ? length - 1 : 0, length}) {
+      for (size_t position :
+           {size_t(0), length / 2, length ? length - 1 : 0, length}) {
         std::string text(alignment + length + 1, 'x');
         text[alignment + length] = Delimiter;
         if (position < length)
           text[alignment + position] = Delimiter;
-        const auto input = fosu::make_padded(text);
+        const auto  input = fosu::make_padded(text);
         const char* p = input.data.get() + alignment;
-        CHECK_EQ(fosu::internal::find_byte<Delimiter>(p, p + length), p + position);
+        CHECK_EQ(fosu::internal::find_byte<Delimiter>(p, p + length),
+                 p + position);
       }
     }
   }
@@ -559,8 +570,8 @@ static void test_event_filename_boundaries() {
   for (size_t timestamp_length : {0u, 30u, 31u, 32u, 64u}) {
     for (size_t filename_length : {0u, 1u, 30u, 31u, 32u, 63u, 64u, 96u}) {
       const std::string filename(filename_length, 'x');
-      const std::string event =
-          "Video," + std::string(timestamp_length, '0') + ",\"" + filename + "\"";
+      const std::string event = "Video," + std::string(timestamp_length, '0') +
+                                ",\"" + filename + "\"";
       for (const auto suffix : {"", ",0,0", "\nVideo,0"}) {
         const auto map = parse_str("[Events]\n" + event + suffix);
         CHECK_EQ(map.video, filename);
@@ -572,16 +583,18 @@ static void test_event_filename_boundaries() {
 static void test_section_skip_boundaries() {
   for (size_t padding : {0u, 30u, 31u, 32u, 63u, 64u, 95u}) {
     for (bool simd : {false, true}) {
-      fosu::Parser parser(simd ? fosu::internal::compiled_engine
-                               : fosu_test::scalar_engine());
-      const std::string text = "[Unknown]\nvalue:" + std::string(padding, 'x') +
-                               "[Metadata]\nTitle:ignored\n[Metadata]\nTitle:retained";
-      auto& map = require_parse(
-          parser.parse(text.data(), text.size(), {.sections = fosu::kSectionMetadata}));
+      fosu::Parser      parser(simd ? fosu::internal::compiled_engine
+                                    : fosu_test::scalar_engine());
+      const std::string text =
+          "[Unknown]\nvalue:" + std::string(padding, 'x') +
+          "[Metadata]\nTitle:ignored\n[Metadata]\nTitle:retained";
+      auto& map = require_parse(parser.parse(
+          text.data(), text.size(), {.sections = fosu::kSectionMetadata}));
       CHECK_EQ(map.title, "retained");
       const std::string missing = "[Unknown]\nvalue:[Metadata]";
-      auto& empty = require_parse(parser.parse(missing.data(), missing.size(),
-                                               {.sections = fosu::kSectionMetadata}));
+      auto&             empty =
+          require_parse(parser.parse(missing.data(), missing.size(),
+                                     {.sections = fosu::kSectionMetadata}));
       CHECK(empty.title.empty());
     }
   }
@@ -592,32 +605,35 @@ static void test_enum_contracts() {
   for (bool simd : {false, true}) {
     for (int value = 0; value < 4; ++value) {
       for (const auto& spelling :
-           {names[value], std::to_string(value), " +" + std::to_string(value) + " ",
-            "0" + std::to_string(value)}) {
-        const auto map = parse_str("[General]\nSampleSet:" + spelling + "\n", simd);
+           {names[value], std::to_string(value),
+            " +" + std::to_string(value) + " ", "0" + std::to_string(value)}) {
+        const auto map =
+            parse_str("[General]\nSampleSet:" + spelling + "\n", simd);
         CHECK_EQ(map.stats.malformed_lines, 0u);
         CHECK_EQ(map.sample_set, static_cast<fosu::SampleSet>(value));
       }
     }
     for (const std::string value :
          {"-1", "4", "99", "2147483647", "Unknown", "Normal,Soft"}) {
-      const auto map =
-          parse_str("[General]\nSampleSet:Soft\nSampleSet:" + value + "\n", simd);
+      const auto map = parse_str(
+          "[General]\nSampleSet:Soft\nSampleSet:" + value + "\n", simd);
       CHECK_EQ(map.sample_set, fosu::SampleSet::Soft);
       CHECK_EQ(map.stats.malformed_lines, 1u);
     }
     for (const std::string value : {"-1", "4", "9", "99", "2147483647"}) {
-      const auto map = parse_str(
-          "[TimingPoints]\n0,500,4," + value + ",0,100,1,0\n1,500,4,2,0,100,1,0\n", simd);
+      const auto map = parse_str("[TimingPoints]\n0,500,4," + value +
+                                     ",0,100,1,0\n1,500,4,2,0,100,1,0\n",
+                                 simd);
       CHECK_EQ(map.stats.malformed_lines, 1u);
       CHECK_EQ(map.timing_points.size(), 1u);
       CHECK_EQ(map.timing_points[0].sample_set, fosu::SampleSet::Soft);
     }
     for (char value : {'B', 'C', 'L', 'P', 'X', 'b', '0'}) {
-      const auto map = parse_str(
-          std::string("[HitObjects]\n0,0,1,2,0,") + value + "|1:2,1,30\n0,0,2,1,0\n",
-          simd);
-      const bool valid = value == 'B' || value == 'C' || value == 'L' || value == 'P';
+      const auto map = parse_str(std::string("[HitObjects]\n0,0,1,2,0,") +
+                                     value + "|1:2,1,30\n0,0,2,1,0\n",
+                                 simd);
+      const bool valid =
+          value == 'B' || value == 'C' || value == 'L' || value == 'P';
       CHECK_EQ(map.stats.malformed_lines, valid ? 0u : 1u);
       CHECK_EQ(map.hit_objects.size(), valid ? 2u : 1u);
       CHECK_EQ(map.sliders.size(), valid ? 1u : 0u);
@@ -666,7 +682,8 @@ static void test_repeated_section_bodies() {
   const std::string text =
       "osu file format v14\n"
       "[General]\nAudioFilename:first.mp3\n[Editor]\nGridSize:8\n"
-      "[Metadata]\nTitle:literal [Difficulty]\n[Difficulty]\nOverallDifficulty:7\n"
+      "[Metadata]\nTitle:literal "
+      "[Difficulty]\n[Difficulty]\nOverallDifficulty:7\n"
       "[Events]\n2,1,2\n[TimingPoints]\n0,500\n[Colours]\nCombo1:1,2,3\n"
       "[Future]\nTitle:ignored\n[HitObjects]\n1,2,3,1,0\n"
       "[General]\n[Editor]\n[Metadata]\nArtist:final\n[Difficulty]\n"
@@ -801,7 +818,8 @@ static void test_legacy_rules() {
         simd);
     CHECK(breaks.hit_objects[0].new_combo);
     CHECK(!breaks.hit_objects[1].new_combo);  // Break ends are exclusive.
-    CHECK(breaks.hit_objects[2].new_combo);   // Earlier breaks cannot move backward.
+    CHECK(breaks.hit_objects[2]
+              .new_combo);  // Earlier breaks cannot move backward.
     CHECK(breaks.hit_objects[3].new_combo);
   }
 }

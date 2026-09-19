@@ -4,6 +4,8 @@
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/parsing/string_lookup.h>
 #include <fosu/engine/primitives/byte_scan.h>
+#include <fosu/types.h>
+
 #include <algorithm>
 #include <optional>
 
@@ -25,7 +27,7 @@ inline std::optional<std::string_view> parse_event_filename(const char* rest,
     const auto first = trailing_zeros(commas);
     if (first < 32 && first < static_cast<size_t>(end - rest)) {
       const char* filename = rest + first + 1;
-      const auto second = trailing_zeros(commas & (commas - 1));
+      const auto  second = trailing_zeros(commas & (commas - 1));
       const char* next = second < 32 && second < static_cast<size_t>(end - rest)
                              ? rest + second
                              : find_byte<','>(filename, end);
@@ -59,18 +61,18 @@ inline void parse_video_event(Beatmap& bm,
     bm.video = *filename;
 }
 
-inline void parse_break_event(Beatmap& bm,
-                              size_t& break_count,
+inline void parse_break_event(Beatmap&    bm,
+                              size_t&     break_count,
                               const char* rest,
                               const char* end,
-                              int time_offset) {
-  f64 start, stop;
-  const char* q = parse_osu_f64(rest, end, start);
+                              int         time_offset) {
+  f64         start, stop;
+  const char* q = parse_osu_double(rest, end, start);
   if (q == rest || q >= end || *q != ',') {
     ++bm.stats.malformed_lines;
     return;
   }
-  const char* r = parse_osu_f64(q + 1, end, stop);
+  const char* r = parse_osu_double(q + 1, end, stop);
   if (r == q + 1 || r != end) {
     ++bm.stats.malformed_lines;
     return;
@@ -88,11 +90,11 @@ inline constexpr auto kEventHandlers = make_string_lookup<EventHandler>({
     {"Break", parse_break_event},
 });
 
-inline void parse_event_line(Beatmap& bm,
-                             size_t& break_count,
+inline void parse_event_line(Beatmap&    bm,
+                             size_t&     break_count,
                              const char* p,
-                             size_t len,
-                             int time_offset) {
+                             size_t      len,
+                             int         time_offset) {
   // Storyboard commands are indented; count and skip them.
   if (len == 0 || *p == ' ' || *p == '_') {
     ++bm.stats.storyboard_lines;
@@ -105,7 +107,7 @@ inline void parse_event_line(Beatmap& bm,
     return;
   }
   const std::string_view f0{p, static_cast<size_t>(c1 - p)};
-  const char* rest = c1 + 1;
+  const char*            rest = c1 + 1;
   if (const auto* handler = kEventHandlers.find(f0))
     (*handler)(bm, break_count, rest, end, time_offset);
   else
@@ -113,11 +115,11 @@ inline void parse_event_line(Beatmap& bm,
 }
 
 #if FOSU_SIMD
-inline const char* parse_events_section_simd(Beatmap& bm,
-                                             size_t& break_count,
+inline const char* parse_events_section_simd(Beatmap&    bm,
+                                             size_t&     break_count,
                                              const char* p,
                                              const char* file_end,
-                                             int time_offset) {
+                                             int         time_offset) {
   // Fused loop: skip indented storyboard commands on their first byte and
   // find line endings with two 32-byte vector compares.
   u32 storyboard_lines = 0;
@@ -132,11 +134,11 @@ inline const char* parse_events_section_simd(Beatmap& bm,
 
     const Bytes32 a = load32(p);
     const Bytes32 b = load32(p + 32);
-    const u64 nl = equal_mask32(a, broadcast_byte<'\n'>()) |
-                        (u64(equal_mask32(b, broadcast_byte<'\n'>())) << 32);
-    const char* line = p;
-    const char* next_line;
-    const char* line_end;
+    const u64     nl = equal_mask32(a, broadcast_byte<'\n'>()) |
+                       (u64(equal_mask32(b, broadcast_byte<'\n'>())) << 32);
+    const char*   line = p;
+    const char*   next_line;
+    const char*   line_end;
     if (nl) {
       line_end = p + trailing_zeros(nl);
       next_line = line_end + 1;
@@ -164,21 +166,21 @@ inline const char* parse_events_section_simd(Beatmap& bm,
 }
 #endif
 
-inline const char* parse_events_section_scalar(Beatmap& bm,
-                                               size_t& break_count,
+inline const char* parse_events_section_scalar(Beatmap&    bm,
+                                               size_t&     break_count,
                                                const char* p,
                                                const char* file_end,
-                                               int time_offset) {
+                                               int         time_offset) {
   return for_each_section_line(p, file_end, [&](std::string_view line) {
     parse_event_line(bm, break_count, line.data(), line.size(), time_offset);
   });
 }
 
-inline const char* parse_events_section(Beatmap& bm,
-                                        size_t& break_count,
+inline const char* parse_events_section(Beatmap&    bm,
+                                        size_t&     break_count,
                                         const char* p,
                                         const char* file_end,
-                                        int time_offset = 0) {
+                                        int         time_offset = 0) {
 #if FOSU_SIMD
   return parse_events_section_simd(bm, break_count, p, file_end, time_offset);
 #else

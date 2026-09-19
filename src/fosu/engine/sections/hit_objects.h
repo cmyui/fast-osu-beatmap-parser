@@ -20,13 +20,13 @@ namespace fosu::internal {
 // Everything after the "x,y,time,type,hitSound" prefix: slider params,
 // spinner/hold end times, or a trailing hit sample.
 FOSU_NOINLINE inline bool parse_hitobject_details(
-    Beatmap& beatmap,
-    size_t& slider_count,
-    size_t& slider_segment_count,
-    size_t& slider_point_count,
-    HitObject& object,
-    const char* p,
-    const char* end,
+    Beatmap&                       beatmap,
+    size_t&                        slider_count,
+    size_t&                        slider_segment_count,
+    size_t&                        slider_point_count,
+    HitObject&                     object,
+    const char*                    p,
+    const char*                    end,
     const HitObjectParseConstants& constants) {
   switch (classify_hitobject_kind(object.type)) {
     case HitObjectKind::Circle: {
@@ -66,14 +66,14 @@ FOSU_NOINLINE inline bool parse_hitobject_details(
 // Lines the fast prefix does not accept: the scalar prefix parser handles
 // signed, decimal, spaced or wide fields; anything else is malformed.
 inline std::optional<HitObject> parse_hitobject_line_scalar(
-    Beatmap& beatmap,
-    size_t& slider_count,
-    size_t& slider_segment_count,
-    size_t& slider_point_count,
-    const char* p,
-    const char* line_end,
+    Beatmap&                       beatmap,
+    size_t&                        slider_count,
+    size_t&                        slider_segment_count,
+    size_t&                        slider_point_count,
+    const char*                    p,
+    const char*                    line_end,
     const HitObjectParseConstants& constants) {
-  f32 x;
+  f32         x;
   const char* next = parse_osu_float(p, line_end, x, 131072);
   if (next == p || next >= line_end || *next != ',')
     return std::nullopt;
@@ -132,9 +132,9 @@ inline std::optional<HitObject> parse_hitobject_line_scalar(
 // The preceding accepted object is still in source order, including across
 // repeated HitObjects sections. No separate state crosses the engine boundary.
 inline HitObject normalize_hitobject(HitObject object,
-                                     size_t preceding_count,
-                                     bool preceding_was_spinner,
-                                     int offset) {
+                                     size_t    preceding_count,
+                                     bool      preceding_was_spinner,
+                                     int       offset) {
   const bool explicit_combo = object.type & 4;
   object.time += offset;
   object.new_combo = false;
@@ -157,15 +157,15 @@ inline HitObject normalize_hitobject(HitObject object,
 }
 
 inline const char* parse_hitobjects_section_scalar(
-    Beatmap& beatmap,
-    size_t& hit_object_count,
-    size_t& slider_count,
-    size_t& slider_segment_count,
-    size_t& slider_point_count,
-    const char* p,
-    const char* file_end,
+    Beatmap&                       beatmap,
+    size_t&                        hit_object_count,
+    size_t&                        slider_count,
+    size_t&                        slider_segment_count,
+    size_t&                        slider_point_count,
+    const char*                    p,
+    const char*                    file_end,
     const HitObjectParseConstants& constants,
-    int time_offset) {
+    int                            time_offset) {
   while (p < file_end) {
     const char c = *p;
     if (c == '\r' || c == '\n') {
@@ -206,37 +206,37 @@ inline const char* parse_hitobjects_section_scalar(
 // SIMD section loop. One 32-byte load per line yields the newline, comma and
 // non-digit masks. Lines outside the common editor shape take the scalar path.
 inline const char* parse_hitobjects_section_simd(
-    Beatmap& beatmap,
-    size_t& hit_object_count,
-    size_t& slider_count,
-    size_t& slider_segment_count,
-    size_t& slider_point_count,
-    const char* p,
-    const char* file_end,
+    Beatmap&                       beatmap,
+    size_t&                        hit_object_count,
+    size_t&                        slider_count,
+    size_t&                        slider_segment_count,
+    size_t&                        slider_point_count,
+    const char*                    p,
+    const char*                    file_end,
     const HitObjectParseConstants& constants,
-    int time_offset) {
+    int                            time_offset) {
   const ByteVector newline_value = constants.nl;
   const ByteVector comma_value = constants.comma;
   const ByteVector zero = constants.zero;
-  u32 fast_lines = 0;
-  u32 malformed = 0;
-  bool preceding_was_spinner =
+  u32              fast_lines = 0;
+  u32              malformed = 0;
+  bool             preceding_was_spinner =
       hit_object_count &&
       classify_hitobject_kind(beatmap.hit_objects[hit_object_count - 1].type) ==
           HitObjectKind::Spinner;
 
   while (p < file_end) {
     const Bytes32 ascii = load32(p);
-    const auto newline_mask = equal_mask32(ascii, newline_value);
-    const auto commas = equal_mask32(ascii, comma_value);
-    const u32 nondigits = nondigit_mask32(ascii);
-    const char* newline = newline_mask ? p + trailing_zeros(newline_mask)
-                                       : find_byte<'\n'>(p + 32, file_end);
-    const char* next_line = newline + (newline < file_end);
-    const char* line_end = newline - (newline > p && newline[-1] == '\r');
-    const auto length = static_cast<size_t>(line_end - p);
-    u32 p1, p2, prefix_end, hitsound_length, mask_index;
-    bool common_layout;
+    const auto    newline_mask = equal_mask32(ascii, newline_value);
+    const auto    commas = equal_mask32(ascii, comma_value);
+    const u32     nondigits = nondigit_mask32(ascii);
+    const char*   newline = newline_mask ? p + trailing_zeros(newline_mask)
+                                         : find_byte<'\n'>(p + 32, file_end);
+    const char*   next_line = newline + (newline < file_end);
+    const char*   line_end = newline - (newline > p && newline[-1] == '\r');
+    const auto    length = static_cast<size_t>(line_end - p);
+    u32           p1, p2, prefix_end, hitsound_length, mask_index;
+    bool          common_layout;
 #if FOSU_SIMD_X86
     // Common editor prefixes: ddd,ddd,ddddd,d,d and ddd,ddd,dddddd,d,d.
     // Match every digit boundary and comma before using fixed shuffle masks.
@@ -275,10 +275,10 @@ inline const char* parse_hitobjects_section_simd(
       const u64 field_lengths =
           (delimiter_positions - (delimiter_positions << 16)) -
           0x0002000200020001ull;
-      const u64 overlong_fields = field_lengths + 0x7FFD7FF67FFD7FFDull;
+      const u64  overlong_fields = field_lengths + 0x7FFD7FF67FFD7FFDull;
       const bool field_lengths_ok =
           ((field_lengths | overlong_fields) & 0x8000800080008000ull) == 0;
-      const u32 through_type = static_cast<u32>((2ull << p3) - 1);
+      const u32  through_type = static_cast<u32>((2ull << p3) - 1);
       const bool delimiters_are_commas =
           ((nondigits ^ commas) & through_type) == 0;
       hitsound_length = prefix_end - static_cast<u32>(p3) - 1;
@@ -296,13 +296,13 @@ inline const char* parse_hitobjects_section_simd(
                           after_prefix == '\0')) [[likely]] {
       const u32 time_span = static_cast<u32>(p2 - p1);
 
-      u32 fields[4];
-      f64 time;
+      u32  fields[4];
+      f64  time;
       bool time_ok = true;
 #if FOSU_SIMD_X86
-      const __m256i digits = _mm256_sub_epi8(ascii, zero);
+      const __m256i    digits = _mm256_sub_epi8(ascii, zero);
       const LaneMasks& masks = kLaneMasks[mask_index];
-      const __m256i perm =
+      const __m256i    perm =
           _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.perm));
       const __m256i shuf =
           _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.shuf));
@@ -339,13 +339,13 @@ inline const char* parse_hitobjects_section_simd(
       const Bytes32 digits{
           {vsubq_u8(ascii.val[0], zero), vsubq_u8(ascii.val[1], zero)}};
       const PrefixShuffle& masks = kPrefixShuffles[mask_index];
-      const auto field_values =
+      const auto           field_values =
           decimal_groups(vqtbl2q_u8(digits, vld1q_u8(masks.bytes)));
       const auto time_groups =
           decimal_groups(vqtbl2q_u8(digits, vld1q_u8(masks.bytes + 16)));
       vst1q_u32(fields, field_values);
       if (time_span <= 9) [[likely]] {
-        const u32 weights[2] = {10000, 1};
+        const u32  weights[2] = {10000, 1};
         const auto terms =
             vmul_u32(vget_high_u32(time_groups), vld1_u32(weights));
         const auto sum = vpadd_u32(terms, terms);
@@ -456,14 +456,14 @@ inline const char* parse_hitobjects_section_simd(
 }
 #endif
 
-inline const char* parse_hitobjects_section(Beatmap& beatmap,
-                                            size_t& hit_object_count,
-                                            size_t& slider_count,
-                                            size_t& slider_segment_count,
-                                            size_t& slider_point_count,
+inline const char* parse_hitobjects_section(Beatmap&    beatmap,
+                                            size_t&     hit_object_count,
+                                            size_t&     slider_count,
+                                            size_t&     slider_segment_count,
+                                            size_t&     slider_point_count,
                                             const char* p,
                                             const char* file_end,
-                                            int time_offset = 0) {
+                                            int         time_offset = 0) {
   const HitObjectParseConstants constants;
 #if FOSU_SIMD
   return parse_hitobjects_section_simd(beatmap, hit_object_count, slider_count,

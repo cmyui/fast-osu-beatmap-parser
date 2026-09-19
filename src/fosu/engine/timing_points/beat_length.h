@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fosu/engine/parsing/numbers.h>
+#include <fosu/types.h>
 
 namespace fosu::internal {
 
@@ -14,7 +15,7 @@ inline const char* parse_beat_length(const char* p, const char* end, f64& out) {
     out = std::numeric_limits<f64>::quiet_NaN();
     return skip_numeric_space(first + 3, end);
   }
-  return parse_osu_f64(p, end, out);
+  return parse_osu_double(p, end, out);
 }
 
 }  // namespace fosu::internal

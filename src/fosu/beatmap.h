@@ -16,16 +16,16 @@
 namespace fosu {
 
 struct HitObject {
-  f32 x;
-  f32 y;
-  u32 type;
-  u32 hitsound;
-  f64 time;
-  f64 end_time;  // milliseconds; 0 for sliders unless calculation is requested
-  u32 slider;    // index into Beatmap::sliders, or kNoSlider
+  f32  x;
+  f32  y;
+  u32  type;
+  u32  hitsound;
+  f64  time;
+  f64  end_time;  // milliseconds; 0 for sliders unless calculation is requested
+  u32  slider;    // index into Beatmap::sliders, or kNoSlider
   bool new_combo;
-  u8 combo_skip;
-  std::string_view hit_sample;
+  u8   combo_skip;
+  std::string_view    hit_sample;
   std::pair<f32, f32> raw_position(PathPoint stack_offset = {}) const {
     return {x - stack_offset.x, y - stack_offset.y};
   }
@@ -69,14 +69,14 @@ struct Slider {
 };
 
 struct TimingPoint {
-  f64 time;
-  f64 beat_length;
-  i32 meter;
+  f64       time;
+  f64       beat_length;
+  i32       meter;
   SampleSet sample_set;
-  i32 sample_index;
-  i32 volume;
-  bool uninherited;
-  u32 effects;
+  i32       sample_index;
+  i32       volume;
+  bool      uninherited;
+  u32       effects;
 };
 
 struct Break {
@@ -92,29 +92,29 @@ struct ParseStats {
 };
 
 struct Stacking {
-  i32 stack_height;
+  i32       stack_height;
   PathPoint stack_offset;
 };
 
 struct Beatmap : BeatmapHeader {
-  std::span<Break> breaks;
-  std::span<u32> combo_colours;
-  std::span<TimingPoint> timing_points;
-  std::span<HitObject> hit_objects;
-  std::span<Slider> sliders;
+  std::span<Break>        breaks;
+  std::span<u32>          combo_colours;
+  std::span<TimingPoint>  timing_points;
+  std::span<HitObject>    hit_objects;
+  std::span<Slider>       sliders;
   std::span<CurveSegment> slider_segments;
-  std::span<SliderPoint> slider_points;
-  std::span<f64> velocity_presets;
+  std::span<SliderPoint>  slider_points;
+  std::span<f64>          velocity_presets;
   // Empty unless requested; otherwise indexed identically to sliders.
-  std::span<SliderPath> slider_paths;
+  std::span<SliderPath>             slider_paths;
   std::span<std::span<SliderEvent>> slider_events;
   // Empty unless osu!standard stacking was requested; indexed by hit object.
   std::span<Stacking> stacking;
-  ParseStats stats;
+  ParseStats          stats;
 
   Result<Beatmap> copy(Arena& destination) const noexcept {
     const size_t checkpoint = arena_pos(&destination);
-    Beatmap result{};
+    Beatmap      result{};
     static_cast<BeatmapHeader&>(result) =
         static_cast<const BeatmapHeader&>(*this);
     result.stats = stats;
@@ -220,7 +220,7 @@ struct Beatmap : BeatmapHeader {
 
  private:
   template <typename T>
-  static Result<std::span<T>> copy_array(Arena& destination,
+  static Result<std::span<T>> copy_array(Arena&       destination,
                                          std::span<T> source) noexcept {
     if (source.empty())
       return std::span<T>{};
@@ -232,7 +232,7 @@ struct Beatmap : BeatmapHeader {
   }
 
   static Result<std::string_view> copy_string(
-      Arena& destination,
+      Arena&           destination,
       std::string_view source) noexcept {
     if (source.empty())
       return std::string_view{};

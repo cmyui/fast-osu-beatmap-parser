@@ -1,27 +1,31 @@
 // Complete scalar/SIMD/record-layout equivalence on an existing local corpus.
 // Run with sanitizers; map contents and identifiers never leave the host.
-#include <dlfcn.h>
-#include <fosu/parser.h>
-#include <cassert>
-#include <filesystem>
-#include <iostream>
 #include "support/canonical_dump.h"
 #include "support/scalar_engine.h"
+
+#include <fosu/parser.h>
+
+#include <cassert>
+#include <dlfcn.h>
+#include <filesystem>
+#include <iostream>
 int main(int argc, char** argv) {
   if (argc < 2 || argc > 3)
     return 2;
   using Oracle = void (*)(const char*, size_t, std::string&);
   void* library = argc == 3 ? dlopen(argv[2], RTLD_NOW | RTLD_LOCAL) : nullptr;
-  auto oracle =
-      library ? reinterpret_cast<Oracle>(dlsym(library, "fosu_numeric_oracle")) : nullptr;
+  auto  oracle =
+      library ? reinterpret_cast<Oracle>(dlsym(library, "fosu_numeric_oracle"))
+              : nullptr;
   if (argc == 3 && !oracle) {
     std::cerr << "numeric oracle load failed\n";
     return 1;
   }
-  size_t files = 0, bytes = 0, objects = 0, malformed = 0;
+  size_t       files = 0, bytes = 0, objects = 0, malformed = 0;
   fosu::Parser scalar_parser(fosu_test::scalar_engine());
   fosu::Parser simd_parser;
-  for (const auto& entry : std::filesystem::recursive_directory_iterator(argv[1])) {
+  for (const auto& entry :
+       std::filesystem::recursive_directory_iterator(argv[1])) {
     if (entry.path().extension() != ".osu")
       continue;
     auto input = fosu::read_file_padded(entry.path().c_str());
@@ -29,7 +33,8 @@ int main(int argc, char** argv) {
       std::cerr << "input read failed at file " << files << '\n';
       return 1;
     }
-    auto scalar = scalar_parser.parse(input, {.calculate_slider_end_times = true});
+    auto scalar =
+        scalar_parser.parse(input, {.calculate_slider_end_times = true});
     auto simd = simd_parser.parse(input, {.calculate_slider_end_times = true});
     if (!scalar || !simd) {
       std::cerr << "parse failed at file " << files << '\n';

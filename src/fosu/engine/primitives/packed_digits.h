@@ -33,11 +33,11 @@ inline u64 load_u64_le(const char* p) {
 // rules out ':'..'?'). The +6 carry can only corrupt classification of
 // bytes *after* a non-digit byte, which tzcnt never reaches.
 inline u32 digit_run8(const char* p) {
-  const u64 chunk = load_u64_le(p);
+  const u64     chunk = load_u64_le(p);
   constexpr u64 kHi = 0xF0F0F0F0F0F0F0F0ull;
   constexpr u64 kThrees = 0x3030303030303030ull;
-  const u64 nondigit =
-      (((chunk & kHi) ^ kThrees) | (((chunk + 0x0606060606060606ull) & kHi) ^ kThrees));
+  const u64 nondigit = (((chunk & kHi) ^ kThrees) |
+                        (((chunk + 0x0606060606060606ull) & kHi) ^ kThrees));
   if (nondigit == 0)
     return 8;
 #if defined(_MSC_VER)
@@ -76,7 +76,8 @@ inline u64 swar_parse_u64(const char* p, u32 len) {
   c <<= 8 * (8 - len);
   c = (c * 2561ull) >> 8;
   c = ((c & 0x00FF00FF00FF00FFull) * 6553601ull) >> 16;
-  return ((c & 0x0000FFFF0000FFFFull) * 42949672960001ull) >> 32;  // 1e4*2^32 + 1
+  return ((c & 0x0000FFFF0000FFFFull) * 42949672960001ull) >>
+         32;  // 1e4*2^32 + 1
 }
 
 }  // namespace fosu::internal

@@ -11,28 +11,28 @@ namespace fosu::internal {
 #if FOSU_SIMD
 // Each point is parsed into a local value and then copied into the beatmap
 // arena.
-inline const char* parse_timing_points_section_simd(Beatmap& beatmap,
-                                                    size_t& point_count,
+inline const char* parse_timing_points_section_simd(Beatmap&    beatmap,
+                                                    size_t&     point_count,
                                                     const char* p,
                                                     const char* file_end,
-                                                    int time_offset) {
+                                                    int         time_offset) {
   const ByteVector newline_value = broadcast_byte<'\n'>();
   const ByteVector comma_value = broadcast_byte<','>();
-  u32 malformed = 0;
+  u32              malformed = 0;
 
   while (p < file_end) {
     const Bytes32 first = load32(p);
     const Bytes32 second = load32(p + 32);
-    const u64 newline_mask =
+    const u64     newline_mask =
         equal_mask32(first, newline_value) |
         static_cast<u64>(equal_mask32(second, newline_value)) << 32;
     const char* newline = newline_mask ? p + trailing_zeros(newline_mask)
                                        : find_byte<'\n'>(p + 64, file_end);
     const char* next_line = newline + (newline < file_end);
     const char* line_end = newline - (newline > p && newline[-1] == '\r');
-    const auto length = static_cast<size_t>(line_end - p);
-    const u64 line_mask = length >= 64 ? ~0ull : ((1ull << length) - 1);
-    const u64 commas =
+    const auto  length = static_cast<size_t>(line_end - p);
+    const u64   line_mask = length >= 64 ? ~0ull : ((1ull << length) - 1);
+    const u64   commas =
         (equal_mask32(first, comma_value) |
          static_cast<u64>(equal_mask32(second, comma_value)) << 32) &
         line_mask;
@@ -74,11 +74,11 @@ inline const char* parse_timing_points_section_simd(Beatmap& beatmap,
 }
 #endif
 
-inline const char* parse_timing_points_section_scalar(Beatmap& beatmap,
-                                                      size_t& point_count,
+inline const char* parse_timing_points_section_scalar(Beatmap&    beatmap,
+                                                      size_t&     point_count,
                                                       const char* p,
                                                       const char* file_end,
-                                                      int time_offset) {
+                                                      int         time_offset) {
   return for_each_section_line(p, file_end, [&](std::string_view line) {
     if (const auto point = parse_timing_point(
             line.data(), line.data() + line.size(), 0, time_offset)) {
@@ -88,11 +88,11 @@ inline const char* parse_timing_points_section_scalar(Beatmap& beatmap,
   });
 }
 
-inline const char* parse_timing_points_section(Beatmap& beatmap,
-                                               size_t& point_count,
+inline const char* parse_timing_points_section(Beatmap&    beatmap,
+                                               size_t&     point_count,
                                                const char* p,
                                                const char* file_end,
-                                               int time_offset = 0) {
+                                               int         time_offset = 0) {
 #if FOSU_SIMD
   return parse_timing_points_section_simd(beatmap, point_count, p, file_end,
                                           time_offset);

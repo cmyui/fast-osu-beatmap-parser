@@ -12,7 +12,7 @@ enum class Mods : u32 {
   None = 0,
   Easy = 1u << 1,
   HardRock = 1u << 4,
-  f64Time = 1u << 6,
+  DoubleTime = 1u << 6,
   HalfTime = 1u << 8,
   Nightcore = 1u << 9,
 };
@@ -29,13 +29,13 @@ namespace internal {
 
 inline constexpr u32 kKnownMods =
     static_cast<u32>(Mods::Easy) | static_cast<u32>(Mods::HardRock) |
-    static_cast<u32>(Mods::f64Time) | static_cast<u32>(Mods::HalfTime) |
+    static_cast<u32>(Mods::DoubleTime) | static_cast<u32>(Mods::HalfTime) |
     static_cast<u32>(Mods::Nightcore);
 
 constexpr bool invalid_mods(Mods mods) {
   const u32  value = static_cast<u32>(mods);
   const bool speed_up =
-      has_mod(mods, Mods::f64Time) || has_mod(mods, Mods::Nightcore);
+      has_mod(mods, Mods::DoubleTime) || has_mod(mods, Mods::Nightcore);
   return (value & ~kKnownMods) ||
          (has_mod(mods, Mods::Easy) && has_mod(mods, Mods::HardRock)) ||
          (speed_up && has_mod(mods, Mods::HalfTime));
@@ -46,7 +46,7 @@ constexpr bool has_difficulty_mod(Mods mods) {
 }
 
 constexpr f64 clock_rate(Mods mods) {
-  if (has_mod(mods, Mods::f64Time) || has_mod(mods, Mods::Nightcore))
+  if (has_mod(mods, Mods::DoubleTime) || has_mod(mods, Mods::Nightcore))
     return 1.5;
   if (has_mod(mods, Mods::HalfTime))
     return 0.75;

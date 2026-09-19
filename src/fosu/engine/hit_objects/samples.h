@@ -3,6 +3,7 @@
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/primitives/byte_scan.h>
 #include <fosu/types.h>
+
 #include <optional>
 #include <string_view>
 
@@ -12,9 +13,9 @@ namespace fosu::internal {
 // bytes keep these additions independent; bit 8 tests both bounds per lane.
 inline bool four_sample_digits(u64 text) {
   constexpr u64 lanes = 0x0100010001000100ull;
-  const u64 digits = text & 0x00ff00ff00ff00ffull;
-  return ((digits + 0x00d000d000d000d0ull) & ~(digits + 0x00c600c600c600c6ull) & lanes) ==
-         lanes;
+  const u64     digits = text & 0x00ff00ff00ff00ffull;
+  return ((digits + 0x00d000d000d000d0ull) & ~(digits + 0x00c600c600c600c6ull) &
+          lanes) == lanes;
 }
 inline bool short_sample(const char* p) {
 #if FOSU_SIMD_X86
@@ -45,7 +46,7 @@ inline bool valid_sample(std::string_view sample, bool banks_only = false) {
   const char* p = sample.data();
   const char* end = p + sample.size();
   for (int i = 0; i < (banks_only ? 2 : 4); ++i) {
-    i64 value;
+    i64         value;
     const char* q = parse_osu_int(p, end, value);
     if (q == p || (q < end && *q != ':')) [[unlikely]]
       return false;
@@ -61,8 +62,10 @@ inline bool valid_edge_sets(std::string_view sets, i32 slides) {
     return true;
   if (sets.size() == 7) {
 #if FOSU_SIMD_X86
-    const __m128i text = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(sets.data()));
-    const __m128i biased = _mm_add_epi8(text, _mm_set_epi64x(0, 0x0050465004504650ull));
+    const __m128i text =
+        _mm_loadl_epi64(reinterpret_cast<const __m128i*>(sets.data()));
+    const __m128i biased =
+        _mm_add_epi8(text, _mm_set_epi64x(0, 0x0050465004504650ull));
     const __m128i invalid = _mm_cmpgt_epi8(biased, _mm_set1_epi16(-32631));
     if ((_mm_movemask_epi8(invalid) & 0x7f) == 0)
       return true;
@@ -75,7 +78,7 @@ inline bool valid_edge_sets(std::string_view sets, i32 slides) {
   }
   const char* p = sets.data();
   const char* end = p + sets.size();
-  const int nodes = (slides > 0 ? slides : 1) + 1;
+  const int   nodes = (slides > 0 ? slides : 1) + 1;
   for (int i = 0; i < nodes; ++i) {
     // Editor bank pairs are single digits. Validate those directly;
     // additional sample fields and unusual integers use the same fallback.
@@ -97,12 +100,11 @@ inline bool valid_edge_sets(std::string_view sets, i32 slides) {
   return true;
 }
 
-inline std::optional<std::string_view> parse_hit_sample(const char* p,
-                                                        const char* end,
-                                                        bool banks_only = false) {
+inline std::optional<std::string_view>
+parse_hit_sample(const char* p, const char* end, bool banks_only = false) {
   if (end - p == 8 && short_sample(p))
     return std::string_view{p, 8};
-  const char* sample_end = find_byte<','>(p, end);
+  const char*            sample_end = find_byte<','>(p, end);
   const std::string_view sample{p, static_cast<size_t>(sample_end - p)};
   if (!valid_sample(sample, banks_only))
     return std::nullopt;

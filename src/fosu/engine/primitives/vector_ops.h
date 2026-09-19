@@ -48,7 +48,7 @@ inline ByteVector broadcast_byte() {
   // A memory broadcast prevents GCC rebuilding constants through a general
   // register inside loops containing calls. Keep that detail out of parsers.
   static constexpr u8 value = Value;
-  ByteVector result;
+  ByteVector          result;
   __asm__("vpbroadcastb %1, %0" : "=x"(result) : "m"(value));
   return result;
 #endif
@@ -63,9 +63,9 @@ inline u32 nondigit_mask32(Bytes32 v) {
       _mm256_add_epi8(v, broadcast_byte<80>()), broadcast_byte<137>())));
 }
 inline u32 nondigit_mask16(__m128i v) {
-  return static_cast<u32>(_mm_movemask_epi8(
-      _mm_cmpgt_epi8(_mm_add_epi8(v, _mm256_castsi256_si128(broadcast_byte<80>())),
-                     _mm256_castsi256_si128(broadcast_byte<137>()))));
+  return static_cast<u32>(_mm_movemask_epi8(_mm_cmpgt_epi8(
+      _mm_add_epi8(v, _mm256_castsi256_si128(broadcast_byte<80>())),
+      _mm256_castsi256_si128(broadcast_byte<137>()))));
 }
 #elif FOSU_SIMD_NEON
 using ByteVector = uint8x16_t;
@@ -83,15 +83,16 @@ inline ByteVector broadcast_byte() {
 // One scalar extraction then gives the same byte-position mask as AVX2.
 inline u32 byte_mask16(uint8x16_t v) {
   constexpr u8 weights[16] = {1, 2, 4, 8, 16, 32, 64, 128,
-                                   1, 2, 4, 8, 16, 32, 64, 128};
-  const auto bits = vandq_u8(v, vld1q_u8(weights));
-  const auto pairs = vpaddq_u8(bits, bits);
-  const auto fours = vpaddq_u8(pairs, pairs);
-  const auto eights = vpaddq_u8(fours, fours);
+                              1, 2, 4, 8, 16, 32, 64, 128};
+  const auto   bits = vandq_u8(v, vld1q_u8(weights));
+  const auto   pairs = vpaddq_u8(bits, bits);
+  const auto   fours = vpaddq_u8(pairs, pairs);
+  const auto   eights = vpaddq_u8(fours, fours);
   return vgetq_lane_u16(vreinterpretq_u16_u8(eights), 0);
 }
 inline u32 equal_mask32(Bytes32 v, ByteVector c) {
-  return byte_mask16(vceqq_u8(v.val[0], c)) | (byte_mask16(vceqq_u8(v.val[1], c)) << 16);
+  return byte_mask16(vceqq_u8(v.val[0], c)) |
+         (byte_mask16(vceqq_u8(v.val[1], c)) << 16);
 }
 inline u32 nondigit_mask16(uint8x16_t v) {
   return byte_mask16(vcgtq_u8(vsubq_u8(v, vdupq_n_u8('0')), vdupq_n_u8(9)));
