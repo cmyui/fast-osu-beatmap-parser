@@ -141,9 +141,8 @@ static void test_large_arena_arrays() {
 
 static void test_rejected_slider_points() {
   const char* cases[] = {
-      "B|7:8|bad,1,10",       "B|7:8|9:10",
-      "B|7:8|9:10,bad,10",    "B|7:8|9:10,1,131073",
-      "B|7:8|9:10,1,10,,/:0", "B|7:8|9:10,1,10,,,/:0",
+      "B|7:8|bad,1,10",      "B|7:8|9:10",           "B|7:8|9:10,bad,10",
+      "B|7:8|9:10,1,131073", "B|7:8|9:10,1,10,,/:0", "B|7:8|9:10,1,10,,,/:0",
   };
   for (const char* tail : cases) {
     auto input = fosu::make_padded(std::string("[HitObjects]\n1,2,3,2,0,") +

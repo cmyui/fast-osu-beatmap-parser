@@ -323,10 +323,10 @@ static void test_malformed_record_recovery() {
       for (size_t position = 0; position <= record.size(); ++position) {
         std::string damaged(record);
         damaged.insert(position, 1, '\x01');
-        const auto map = parse_str(
-            "osu file format v14\n[HitObjects]\n" + damaged +
-                "\n300,100,300,1,0\n[Metadata]\nTitle:sentinel\n",
-            simd);
+        const auto map =
+            parse_str("osu file format v14\n[HitObjects]\n" + damaged +
+                          "\n300,100,300,1,0\n[Metadata]\nTitle:sentinel\n",
+                      simd);
         CHECK(!map.hit_objects.empty());
         if (!map.hit_objects.empty())
           CHECK_EQ(map.hit_objects.back().time, 300);
@@ -339,10 +339,10 @@ static void test_malformed_record_recovery() {
     for (size_t position = 0; position <= timing.size(); ++position) {
       std::string damaged(timing);
       damaged.insert(position, 1, '\x01');
-      const auto map = parse_str(
-          "osu file format v14\n[TimingPoints]\n" + damaged +
-              "\n200,500,4,2,1,60,1,0\n[Metadata]\nTitle:sentinel\n",
-          simd);
+      const auto map =
+          parse_str("osu file format v14\n[TimingPoints]\n" + damaged +
+                        "\n200,500,4,2,1,60,1,0\n[Metadata]\nTitle:sentinel\n",
+                    simd);
       CHECK(!map.timing_points.empty());
       if (!map.timing_points.empty())
         CHECK_EQ(map.timing_points.back().time, 200);
