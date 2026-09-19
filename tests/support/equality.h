@@ -1,5 +1,5 @@
 #pragma once
-#include "canonical_dump.h"
+#include <tests/support/canonical_dump.h>
 
 template <typename Map>
 std::string canonical(const Map& bm) {

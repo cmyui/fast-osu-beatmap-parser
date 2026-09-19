@@ -62,7 +62,7 @@ inline const char* libc_osu_float(const char* p,
 #undef parse_osu_double
 #undef parse_beat_length
 #undef parse_double
-#include "../support/canonical_dump.h"
+#include <tests/support/canonical_dump.h>
 static_assert(!FOSU_SIMD,
               "the independent numeric oracle must use scalar parsing");
 

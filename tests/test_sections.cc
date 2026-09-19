@@ -1,5 +1,5 @@
-#include "support/equality.h"
-#include "support/test.h"
+#include <tests/support/equality.h>
+#include <tests/support/test.h>
 
 static void test_all_sections() {
   const char* input =

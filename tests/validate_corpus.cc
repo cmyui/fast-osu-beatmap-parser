@@ -1,9 +1,8 @@
 // Complete scalar/SIMD/record-layout equivalence on an existing local corpus.
 // Run with sanitizers; map contents and identifiers never leave the host.
-#include "support/canonical_dump.h"
-#include "support/scalar_engine.h"
-
 #include <fosu/parser.h>
+#include <tests/support/canonical_dump.h>
+#include <tests/support/scalar_engine.h>
 
 #include <cassert>
 #include <dlfcn.h>

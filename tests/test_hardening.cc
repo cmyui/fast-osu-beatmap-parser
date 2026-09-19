@@ -1,7 +1,6 @@
-#include "support/canonical_dump.h"
-#include "support/scalar_engine.h"
-
 #include <fosu/parser.h>
+#include <tests/support/canonical_dump.h>
+#include <tests/support/scalar_engine.h>
 
 #include <cassert>
 #include <cmath>

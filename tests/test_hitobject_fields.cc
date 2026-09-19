@@ -1,4 +1,4 @@
-#include "support/test.h"
+#include <tests/support/test.h>
 
 static std::string slider_document(std::string_view slider) {
   return "osu file format v14\n[HitObjects]\n0,0,0,2,0," + std::string(slider) +

@@ -1,9 +1,8 @@
 // libFuzzer + ASan/UBSan: exercise full files and force arbitrary bytes through
 // the hit-object and timing-point parsers, comparing all materialized fields.
-#include "support/canonical_dump.h"
-#include "support/scalar_engine.h"
-
 #include <fosu/parser.h>
+#include <tests/support/canonical_dump.h>
+#include <tests/support/scalar_engine.h>
 
 #include <cassert>
 #include <string>
