@@ -312,7 +312,7 @@ static void test_malformed() {
   CHECK_EQ(bm.stats.malformed_lines, 5u);
 }
 
-static void test_malformed_record_recovery() {
+static void test_invalid_byte_in_hitobjects() {
   for (bool simd : {false, true}) {
     for (const std::string_view record : {
              "256,192,100,1,0,0:0:0:0:",
@@ -335,6 +335,11 @@ static void test_malformed_record_recovery() {
           CHECK_EQ(map.stats.malformed_lines, 1u);
       }
     }
+  }
+}
+
+static void test_invalid_byte_in_timing_points() {
+  for (bool simd : {false, true}) {
     constexpr std::string_view timing = "100,500,4,2,1,60,1,0";
     for (size_t position = 0; position <= timing.size(); ++position) {
       std::string damaged(timing);
@@ -350,7 +355,11 @@ static void test_malformed_record_recovery() {
       if (map.timing_points.size() == 1)
         CHECK_EQ(map.stats.malformed_lines, 1u);
     }
+  }
+}
 
+static void test_bracketed_records_do_not_change_section() {
+  for (bool simd : {false, true}) {
     const auto bracketed = parse_str(
         "osu file format v14\n[HitObjects]\n[256,192,100,1,0\n"
         "300,100,300,1,0\n[TimingPoints]\n[100,500,4,2,1,60,1,0\n"
@@ -360,7 +369,11 @@ static void test_malformed_record_recovery() {
     CHECK_EQ(bracketed.timing_points.size(), 1u);
     CHECK_EQ(bracketed.stats.malformed_lines, 2u);
     CHECK(bracketed.title == "sentinel");
+  }
+}
 
+static void test_unknown_section_does_not_resume_hitobjects() {
+  for (bool simd : {false, true}) {
     const auto unknown = parse_str(
         "[HitObjects]\n1,2,100,1,0\n[Unknown] \n1,2,200,1,0\n"
         "[HitObjects]\n1,2,300,1,0\n",
@@ -402,20 +415,6 @@ static void test_line_endings() {
   }
 }
 
-static constexpr std::string_view kCrlfRecoveryInput =
-    "osu file format v14\r\n"
-    "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
-    "200,500,4,1,0,100,1,0\r\n"
-    "[HitObjects]\r\n256,192,1000,1,0\r\n"
-    "300,100,2000,1,0\r\n"
-    "[Metadata]\r\nTitle:after\r\n";
-static constexpr std::string_view kHitObjectsHeader = "[HitObjects]\r\n";
-static constexpr std::string_view kFirstHitObject = "256,192,1000,1,0\r\n";
-static constexpr size_t           kHeaderCr =
-    kCrlfRecoveryInput.find(kHitObjectsHeader) + kHitObjectsHeader.size() - 2;
-static constexpr size_t kObjectCr =
-    kCrlfRecoveryInput.find(kFirstHitObject) + kFirstHitObject.size() - 2;
-
 static void check_crlf_recovery(const std::string& input,
                                 size_t             hit_objects,
                                 size_t             timing_points) {
@@ -429,63 +428,123 @@ static void check_crlf_recovery(const std::string& input,
 }
 
 static void test_invalid_byte_before_header_cr() {
-  std::string input(kCrlfRecoveryInput);
-  input.insert(kHeaderCr, 1, '\x01');
-  check_crlf_recovery(input, 0, 4);
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\x01\r\n"
+      "256,192,1000,1,0\r\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      0, 4);
 }
 
 static void test_invalid_byte_between_header_cr_lf() {
-  std::string input(kCrlfRecoveryInput);
-  input.insert(kHeaderCr + 1, 1, '\x01');
-  check_crlf_recovery(input, 2, 2);
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\x01\n"
+      "256,192,1000,1,0\r\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      2, 2);
 }
 
 static void test_invalid_byte_after_header_lf() {
-  std::string input(kCrlfRecoveryInput);
-  input.insert(kHeaderCr + 2, 1, '\x01');
-  check_crlf_recovery(input, 1, 2);
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\n\x01"
+      "256,192,1000,1,0\r\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      1, 2);
 }
 
 static void test_invalid_byte_replaces_header_cr() {
-  std::string input(kCrlfRecoveryInput);
-  input[kHeaderCr] = '\x01';
-  check_crlf_recovery(input, 0, 4);
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\x01\n"
+      "256,192,1000,1,0\r\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      0, 4);
 }
 
 static void test_invalid_byte_replaces_header_lf() {
-  std::string input(kCrlfRecoveryInput);
-  input[kHeaderCr + 1] = '\x01';
-  check_crlf_recovery(input, 1, 2);
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\x01"
+      "256,192,1000,1,0\r\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      1, 2);
 }
 
 static void test_invalid_byte_before_hitobject_cr() {
-  std::string input(kCrlfRecoveryInput);
-  input.insert(kObjectCr, 1, '\x01');
-  check_crlf_recovery(input, 1, 2);
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\n"
+      "256,192,1000,1,0\x01\r\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      1, 2);
 }
 
 static void test_invalid_byte_between_hitobject_cr_lf() {
-  std::string input(kCrlfRecoveryInput);
-  input.insert(kObjectCr + 1, 1, '\x01');
-  check_crlf_recovery(input, 2, 2);
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\n"
+      "256,192,1000,1,0\r\x01\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      2, 2);
 }
 
 static void test_invalid_byte_after_hitobject_lf() {
-  std::string input(kCrlfRecoveryInput);
-  input.insert(kObjectCr + 2, 1, '\x01');
-  check_crlf_recovery(input, 1, 2);
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\n"
+      "256,192,1000,1,0\r\n\x01"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      1, 2);
 }
 
 static void test_invalid_byte_replaces_hitobject_cr() {
-  std::string input(kCrlfRecoveryInput);
-  input[kObjectCr] = '\x01';
-  check_crlf_recovery(input, 1, 2);
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\n"
+      "256,192,1000,1,0\x01\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      1, 2);
 }
 
 static void test_invalid_byte_replaces_hitobject_lf() {
-  std::string input(kCrlfRecoveryInput);
-  input[kObjectCr + 1] = '\x01';
-  check_crlf_recovery(input, 1, 2);
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\n"
+      "256,192,1000,1,0\r\x01"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      1, 2);
 }
 
 static void test_omitted_sections_use_defaults() {
@@ -1053,7 +1112,10 @@ int main() {
   test_aspire_edge_cases();
   test_modern_curve_segments();
   test_malformed();
-  test_malformed_record_recovery();
+  test_invalid_byte_in_hitobjects();
+  test_invalid_byte_in_timing_points();
+  test_bracketed_records_do_not_change_section();
+  test_unknown_section_does_not_resume_hitobjects();
   test_line_endings();
   test_invalid_byte_before_header_cr();
   test_invalid_byte_between_header_cr_lf();
