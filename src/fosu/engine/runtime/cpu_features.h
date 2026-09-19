@@ -29,7 +29,9 @@ inline bool host_supports_neon() {
 
 // x86-64-v3, including OS support for saving XMM/YMM state.
 struct CpuFeatures {
-  u32 leaf1 = 0, leaf7 = 0, extended = 0;
+  u32 leaf1 = 0;
+  u32 leaf7 = 0;
+  u32 extended = 0;
   u64 xcr0 = 0;
 };
 inline constexpr u32 required_leaf1 =
@@ -37,7 +39,7 @@ inline constexpr u32 required_leaf1 =
     (1u << 22) | (1u << 23) | (1u << 26) | (1u << 27) | (1u << 28) | (1u << 29);
 inline constexpr u32 required_leaf7 = (1u << 3) | (1u << 5) | (1u << 8);
 inline constexpr u32 required_extended = (1u << 0) | (1u << 5);
-constexpr bool       supports_avx2(CpuFeatures f) {
+constexpr bool supports_avx2(CpuFeatures f) {
   return (f.leaf1 & required_leaf1) == required_leaf1 &&
          (f.leaf7 & required_leaf7) == required_leaf7 &&
          (f.extended & required_extended) == required_extended &&
