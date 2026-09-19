@@ -26,13 +26,10 @@ namespace fosu::internal {
 inline std::optional<CurveType> parse_curve_type(char value) {
   switch (value) {
     case 'B':
-      return CurveType::Bezier;
     case 'C':
-      return CurveType::Catmull;
     case 'L':
-      return CurveType::Linear;
     case 'P':
-      return CurveType::PerfectCurve;
+      return static_cast<CurveType>(value);
     default:
       return std::nullopt;
   }
