@@ -57,9 +57,8 @@ retained separately from effective combo flags.
   are rejected. Duration uses velocity 1 for inherited NaN; consumers generating
   ticks must also respect its tick-suppression meaning.
 - Invalid hitobjects and timing points are skipped and counted in
-  `stats.malformed_lines`. A rejected slider can retain unreferenced points in
-  the native pool; use each slider's explicit point range. Python exposes only
-  the points of accepted sliders. Invalid known numeric or enum
+  `stats.malformed_lines`. A rejected slider leaves no points or segments in
+  the native pools. Invalid known numeric or enum
   metadata retains its previous/default value and increments the same counter.
 - Combo colours accept indices 1–8 and three integer RGB components in 0–255.
   Like the official legacy decoder, a fourth component is accepted but ignored.
