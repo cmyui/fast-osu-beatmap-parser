@@ -370,7 +370,7 @@ static void test_malformed_record_recovery() {
   }
 }
 
-static void test_line_endings() {
+static void check_sections_with_line_ending(std::string_view ending) {
   constexpr std::string_view lines =
       "osu file format v14\n"
       "[General]\nMode:0\n"
@@ -381,58 +381,121 @@ static void test_line_endings() {
       "[TimingPoints]\n100,500,4,1,0,100,1,0\n"
       "[Colours]\nCombo1:255,128,0\n"
       "[HitObjects]\n256,192,1000,1,0\n";
-  for (bool simd : {false, true}) {
-    for (std::string_view ending : {"\n", "\r\n", "\r"}) {
-      std::string input;
-      for (char c : lines) {
-        if (c == '\n')
-          input.append(ending);
-        else
-          input.push_back(c);
-      }
-      const auto map = parse_str(input, simd);
-      CHECK_EQ(map.grid_size, 32);
-      CHECK(map.title == "sentinel");
-      CHECK_EQ(map.breaks.size(), 1u);
-      CHECK_EQ(map.timing_points.size(), 1u);
-      CHECK_EQ(map.combo_colours.size(), 1u);
-      CHECK_EQ(map.hit_objects.size(), 1u);
-      CHECK_EQ(map.stats.malformed_lines, 0u);
-    }
-
-    const std::string input =
-        "osu file format v14\r\n"
-        "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
-        "200,500,4,1,0,100,1,0\r\n"
-        "[HitObjects]\r\n256,192,1000,1,0\r\n"
-        "300,100,2000,1,0\r\n"
-        "[Metadata]\r\nTitle:after\r\n";
-    for (std::string_view line : {"[HitObjects]\r\n", "256,192,1000,1,0\r\n"}) {
-      const bool   header = line.front() == '[';
-      const size_t cr = input.find(line) + line.size() - 2;
-      for (size_t offset = 0; offset < 3; ++offset) {
-        std::string damaged = input;
-        damaged.insert(cr + offset, 1, '\x01');
-        const auto map = parse_str(damaged, simd);
-        CHECK_EQ(map.hit_objects.size(), header ? (offset == 1   ? 2u
-                                                   : offset == 2 ? 1u
-                                                                 : 0u)
-                                                : (offset == 1 ? 2u : 1u));
-        CHECK_EQ(map.timing_points.size(), header && offset == 0 ? 4u : 2u);
-        CHECK(map.title == "after");
-        CHECK_EQ(map.stats.malformed_lines, 1u);
-      }
-      for (size_t offset = 0; offset < 2; ++offset) {
-        std::string damaged = input;
-        damaged[cr + offset] = '\x01';
-        const auto map = parse_str(damaged, simd);
-        CHECK_EQ(map.hit_objects.size(), header && offset == 0 ? 0u : 1u);
-        CHECK_EQ(map.timing_points.size(), header && offset == 0 ? 4u : 2u);
-        CHECK(map.title == "after");
-        CHECK_EQ(map.stats.malformed_lines, 1u);
-      }
-    }
+  std::string input;
+  for (char c : lines) {
+    if (c == '\n')
+      input.append(ending);
+    else
+      input.push_back(c);
   }
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(input, simd);
+    CHECK_EQ(map.grid_size, 32);
+    CHECK(map.title == "sentinel");
+    CHECK_EQ(map.breaks.size(), 1u);
+    CHECK_EQ(map.timing_points.size(), 1u);
+    CHECK_EQ(map.combo_colours.size(), 1u);
+    CHECK_EQ(map.hit_objects.size(), 1u);
+    CHECK_EQ(map.stats.malformed_lines, 0u);
+  }
+}
+
+static void test_lf_line_endings() {
+  check_sections_with_line_ending("\n");
+}
+
+static void test_crlf_line_endings() {
+  check_sections_with_line_ending("\r\n");
+}
+
+static void test_lone_cr_line_endings() {
+  check_sections_with_line_ending("\r");
+}
+
+static constexpr std::string_view kCrlfRecoveryInput =
+    "osu file format v14\r\n"
+    "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+    "200,500,4,1,0,100,1,0\r\n"
+    "[HitObjects]\r\n256,192,1000,1,0\r\n"
+    "300,100,2000,1,0\r\n"
+    "[Metadata]\r\nTitle:after\r\n";
+static constexpr std::string_view kHitObjectsHeader = "[HitObjects]\r\n";
+static constexpr std::string_view kFirstHitObject = "256,192,1000,1,0\r\n";
+static constexpr size_t           kHeaderCr =
+    kCrlfRecoveryInput.find(kHitObjectsHeader) + kHitObjectsHeader.size() - 2;
+static constexpr size_t kObjectCr =
+    kCrlfRecoveryInput.find(kFirstHitObject) + kFirstHitObject.size() - 2;
+
+static void check_crlf_recovery(const std::string& input,
+                                size_t             hit_objects,
+                                size_t             timing_points) {
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(input, simd);
+    CHECK_EQ(map.hit_objects.size(), hit_objects);
+    CHECK_EQ(map.timing_points.size(), timing_points);
+    CHECK(map.title == "after");
+    CHECK_EQ(map.stats.malformed_lines, 1u);
+  }
+}
+
+static void test_invalid_byte_before_header_cr() {
+  std::string input(kCrlfRecoveryInput);
+  input.insert(kHeaderCr, 1, '\x01');
+  check_crlf_recovery(input, 0, 4);
+}
+
+static void test_invalid_byte_between_header_cr_lf() {
+  std::string input(kCrlfRecoveryInput);
+  input.insert(kHeaderCr + 1, 1, '\x01');
+  check_crlf_recovery(input, 2, 2);
+}
+
+static void test_invalid_byte_after_header_lf() {
+  std::string input(kCrlfRecoveryInput);
+  input.insert(kHeaderCr + 2, 1, '\x01');
+  check_crlf_recovery(input, 1, 2);
+}
+
+static void test_invalid_byte_replaces_header_cr() {
+  std::string input(kCrlfRecoveryInput);
+  input[kHeaderCr] = '\x01';
+  check_crlf_recovery(input, 0, 4);
+}
+
+static void test_invalid_byte_replaces_header_lf() {
+  std::string input(kCrlfRecoveryInput);
+  input[kHeaderCr + 1] = '\x01';
+  check_crlf_recovery(input, 1, 2);
+}
+
+static void test_invalid_byte_before_hitobject_cr() {
+  std::string input(kCrlfRecoveryInput);
+  input.insert(kObjectCr, 1, '\x01');
+  check_crlf_recovery(input, 1, 2);
+}
+
+static void test_invalid_byte_between_hitobject_cr_lf() {
+  std::string input(kCrlfRecoveryInput);
+  input.insert(kObjectCr + 1, 1, '\x01');
+  check_crlf_recovery(input, 2, 2);
+}
+
+static void test_invalid_byte_after_hitobject_lf() {
+  std::string input(kCrlfRecoveryInput);
+  input.insert(kObjectCr + 2, 1, '\x01');
+  check_crlf_recovery(input, 1, 2);
+}
+
+static void test_invalid_byte_replaces_hitobject_cr() {
+  std::string input(kCrlfRecoveryInput);
+  input[kObjectCr] = '\x01';
+  check_crlf_recovery(input, 1, 2);
+}
+
+static void test_invalid_byte_replaces_hitobject_lf() {
+  std::string input(kCrlfRecoveryInput);
+  input[kObjectCr + 1] = '\x01';
+  check_crlf_recovery(input, 1, 2);
 }
 
 static void test_omitted_sections_use_defaults() {
@@ -689,24 +752,31 @@ static void test_byte_scan_boundaries() {
   }
 }
 
-static void test_line_end_scan_boundaries() {
+template <char Ending>
+static void check_line_end_scan_boundaries() {
   for (size_t alignment : {0u, 1u, 15u, 31u}) {
     for (size_t length :
          {0u, 1u, 31u, 32u, 33u, 63u, 64u, 65u, 127u, 128u, 129u, 257u}) {
-      for (char ending : {'\r', '\n'}) {
-        for (size_t position :
-             {size_t(0), length / 2, length ? length - 1 : 0, length}) {
-          std::string text(alignment + length + 1, 'x');
-          text[alignment + length] = ending;
-          if (position < length)
-            text[alignment + position] = ending;
-          const auto  input = fosu::make_padded(text);
-          const char* p = input.data.get() + alignment;
-          CHECK_EQ(fosu::internal::find_line_end(p, p + length), p + position);
-        }
+      for (size_t position :
+           {size_t(0), length / 2, length ? length - 1 : 0, length}) {
+        std::string text(alignment + length + 1, 'x');
+        text[alignment + length] = Ending;
+        if (position < length)
+          text[alignment + position] = Ending;
+        const auto  input = fosu::make_padded(text);
+        const char* p = input.data.get() + alignment;
+        CHECK_EQ(fosu::internal::find_line_end(p, p + length), p + position);
       }
     }
   }
+}
+
+static void test_cr_scan_boundaries() {
+  check_line_end_scan_boundaries<'\r'>();
+}
+
+static void test_lf_scan_boundaries() {
+  check_line_end_scan_boundaries<'\n'>();
 }
 
 static void test_event_filename_boundaries() {
@@ -978,7 +1048,8 @@ int main() {
   test_byte_scan_boundaries<':'>();
   test_byte_scan_boundaries<'\n'>();
   test_byte_scan_boundaries<'\0'>();
-  test_line_end_scan_boundaries();
+  test_cr_scan_boundaries();
+  test_lf_scan_boundaries();
   test_event_filename_boundaries();
   test_section_skip_boundaries();
   test_long_event_lines();
@@ -993,7 +1064,19 @@ int main() {
   test_modern_curve_segments();
   test_malformed();
   test_malformed_record_recovery();
-  test_line_endings();
+  test_lf_line_endings();
+  test_crlf_line_endings();
+  test_lone_cr_line_endings();
+  test_invalid_byte_before_header_cr();
+  test_invalid_byte_between_header_cr_lf();
+  test_invalid_byte_after_header_lf();
+  test_invalid_byte_replaces_header_cr();
+  test_invalid_byte_replaces_header_lf();
+  test_invalid_byte_before_hitobject_cr();
+  test_invalid_byte_between_hitobject_cr_lf();
+  test_invalid_byte_after_hitobject_lf();
+  test_invalid_byte_replaces_hitobject_cr();
+  test_invalid_byte_replaces_hitobject_lf();
   test_long_timing_offsets();
   test_omitted_sections_use_defaults();
   test_difficulty_selection_skips_other_sections();
