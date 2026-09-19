@@ -375,7 +375,7 @@ static void test_bracketed_records_do_not_change_section() {
 static void test_unknown_section_does_not_resume_hitobjects() {
   for (bool simd : {false, true}) {
     const auto unknown = parse_str(
-        "[HitObjects]\n1,2,100,1,0\n[Unknown] \n1,2,200,1,0\n"
+        "[HitObjects]\n1,2,100,1,0\n[Unknown]\n1,2,200,1,0\n"
         "[HitObjects]\n1,2,300,1,0\n",
         simd);
     CHECK_EQ(unknown.hit_objects.size(), 2u);
