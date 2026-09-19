@@ -121,7 +121,7 @@ inline const char* parse_events_section_simd(Beatmap&    bm,
                                              const char* file_end,
                                              i32         time_offset) {
   // Fused loop: skip indented storyboard commands on their first byte and
-  // find line endings with two 32-byte vector compares.
+  // find line endings with two 32-byte vector loads.
   u32 storyboard_lines = 0;
   while (p < file_end) {
     const char c = *p;
@@ -129,25 +129,20 @@ inline const char* parse_events_section_simd(Beatmap&    bm,
       ++p;
       continue;
     }
-    if (c == '[')
-      break;
-
     const Bytes32 a = load32(p);
     const Bytes32 b = load32(p + 32);
-    const u64     nl = equal_mask32(a, broadcast_byte<'\n'>()) |
-                       (u64(equal_mask32(b, broadcast_byte<'\n'>())) << 32);
-    const char*   line = p;
-    const char*   next_line;
-    const char*   line_end;
-    if (nl) {
-      line_end = p + trailing_zeros(nl);
-      next_line = line_end + 1;
+    const u64   endings = line_end_mask32(a) | (u64(line_end_mask32(b)) << 32);
+    const char* line = p;
+    const char* next_line;
+    const char* line_end;
+    if (endings) {
+      line_end = p + trailing_zeros(endings);
     } else {
-      line_end = find_byte<'\n'>(p + 64, file_end);
-      next_line = line_end + (line_end < file_end);
+      line_end = find_line_end(p + 64, file_end);
     }
-    if (line_end[-1] == '\r')
-      --line_end;  // line_end > line: c is not CR
+    next_line = after_line_ending(line_end, file_end);
+    if (c == '[' && section_header_line(line, line_end))
+      break;
     p = next_line;
 
     if (fosu::internal::ignored_line(line, line_end))

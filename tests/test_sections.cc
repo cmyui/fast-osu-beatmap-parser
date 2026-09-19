@@ -312,6 +312,241 @@ static void test_malformed() {
   CHECK_EQ(bm.stats.malformed_lines, 5u);
 }
 
+static void test_invalid_byte_in_hitobjects() {
+  for (bool simd : {false, true}) {
+    for (const std::string_view record : {
+             "256,192,100,1,0,0:0:0:0:",
+             "256,192,100,2,0,B|100:100|200:200,1,100",
+             "256,192,100,8,0,200",
+             "256,192,100,128,0,200:0:0:0:0:",
+         }) {
+      for (size_t position = 0; position <= record.size(); ++position) {
+        std::string damaged(record);
+        damaged.insert(position, 1, '\x01');
+        const auto map =
+            parse_str("osu file format v14\n[HitObjects]\n" + damaged +
+                          "\n300,100,300,1,0\n[Metadata]\nTitle:sentinel\n",
+                      simd);
+        CHECK(!map.hit_objects.empty());
+        if (!map.hit_objects.empty())
+          CHECK_EQ(map.hit_objects.back().time, 300);
+        CHECK(map.title == "sentinel");
+        if (map.hit_objects.size() == 1)
+          CHECK_EQ(map.stats.malformed_lines, 1u);
+      }
+    }
+  }
+}
+
+static void test_invalid_byte_in_timing_points() {
+  for (bool simd : {false, true}) {
+    constexpr std::string_view timing = "100,500,4,2,1,60,1,0";
+    for (size_t position = 0; position <= timing.size(); ++position) {
+      std::string damaged(timing);
+      damaged.insert(position, 1, '\x01');
+      const auto map =
+          parse_str("osu file format v14\n[TimingPoints]\n" + damaged +
+                        "\n200,500,4,2,1,60,1,0\n[Metadata]\nTitle:sentinel\n",
+                    simd);
+      CHECK(!map.timing_points.empty());
+      if (!map.timing_points.empty())
+        CHECK_EQ(map.timing_points.back().time, 200);
+      CHECK(map.title == "sentinel");
+      if (map.timing_points.size() == 1)
+        CHECK_EQ(map.stats.malformed_lines, 1u);
+    }
+  }
+}
+
+static void test_bracketed_records_do_not_change_section() {
+  for (bool simd : {false, true}) {
+    const auto bracketed = parse_str(
+        "osu file format v14\n[HitObjects]\n[256,192,100,1,0\n"
+        "300,100,300,1,0\n[TimingPoints]\n[100,500,4,2,1,60,1,0\n"
+        "200,500,4,2,1,60,1,0\n[Metadata]\nTitle:sentinel\n",
+        simd);
+    CHECK_EQ(bracketed.hit_objects.size(), 1u);
+    CHECK_EQ(bracketed.timing_points.size(), 1u);
+    CHECK_EQ(bracketed.stats.malformed_lines, 2u);
+    CHECK(bracketed.title == "sentinel");
+  }
+}
+
+static void test_unknown_section_does_not_resume_hitobjects() {
+  for (bool simd : {false, true}) {
+    const auto unknown = parse_str(
+        "[HitObjects]\n1,2,100,1,0\n[Unknown]\n1,2,200,1,0\n"
+        "[HitObjects]\n1,2,300,1,0\n",
+        simd);
+    CHECK_EQ(unknown.hit_objects.size(), 2u);
+    CHECK_EQ(unknown.stats.malformed_lines, 0u);
+  }
+}
+
+static void test_line_endings() {
+  constexpr std::string_view lines =
+      "osu file format v14\n"
+      "[General]\nMode:0\n"
+      "[Editor]\nGridSize:32\n"
+      "[Metadata]\nTitle:sentinel\n"
+      "[Difficulty]\nSliderMultiplier:1.4\n"
+      "[Events]\n2,100,200\n"
+      "[TimingPoints]\n100,500,4,1,0,100,1,0\n"
+      "[Colours]\nCombo1:255,128,0\n"
+      "[HitObjects]\n256,192,1000,1,0\n";
+  for (bool simd : {false, true}) {
+    for (std::string_view ending : {"\n", "\r\n", "\r"}) {
+      std::string input;
+      for (char c : lines) {
+        if (c == '\n')
+          input.append(ending);
+        else
+          input.push_back(c);
+      }
+      const auto map = parse_str(input, simd);
+      CHECK_EQ(map.grid_size, 32);
+      CHECK(map.title == "sentinel");
+      CHECK_EQ(map.breaks.size(), 1u);
+      CHECK_EQ(map.timing_points.size(), 1u);
+      CHECK_EQ(map.combo_colours.size(), 1u);
+      CHECK_EQ(map.hit_objects.size(), 1u);
+      CHECK_EQ(map.stats.malformed_lines, 0u);
+    }
+  }
+}
+
+static void check_crlf_recovery(const std::string& input,
+                                size_t             hit_objects,
+                                size_t             timing_points) {
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(input, simd);
+    CHECK_EQ(map.hit_objects.size(), hit_objects);
+    CHECK_EQ(map.timing_points.size(), timing_points);
+    CHECK(map.title == "after");
+    CHECK_EQ(map.stats.malformed_lines, 1u);
+  }
+}
+
+static void test_invalid_byte_before_header_cr() {
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\x01\r\n"
+      "256,192,1000,1,0\r\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      0, 4);
+}
+
+static void test_invalid_byte_between_header_cr_lf() {
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\x01\n"
+      "256,192,1000,1,0\r\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      2, 2);
+}
+
+static void test_invalid_byte_after_header_lf() {
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\n\x01"
+      "256,192,1000,1,0\r\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      1, 2);
+}
+
+static void test_invalid_byte_replaces_header_cr() {
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\x01\n"
+      "256,192,1000,1,0\r\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      0, 4);
+}
+
+static void test_invalid_byte_replaces_header_lf() {
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\x01"
+      "256,192,1000,1,0\r\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      1, 2);
+}
+
+static void test_invalid_byte_before_hitobject_cr() {
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\n"
+      "256,192,1000,1,0\x01\r\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      1, 2);
+}
+
+static void test_invalid_byte_between_hitobject_cr_lf() {
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\n"
+      "256,192,1000,1,0\r\x01\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      2, 2);
+}
+
+static void test_invalid_byte_after_hitobject_lf() {
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\n"
+      "256,192,1000,1,0\r\n\x01"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      1, 2);
+}
+
+static void test_invalid_byte_replaces_hitobject_cr() {
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\n"
+      "256,192,1000,1,0\x01\n"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      1, 2);
+}
+
+static void test_invalid_byte_replaces_hitobject_lf() {
+  check_crlf_recovery(
+      "osu file format v14\r\n"
+      "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+      "200,500,4,1,0,100,1,0\r\n"
+      "[HitObjects]\r\n"
+      "256,192,1000,1,0\r\x01"
+      "300,100,2000,1,0\r\n"
+      "[Metadata]\r\nTitle:after\r\n",
+      1, 2);
+}
+
 static void test_omitted_sections_use_defaults() {
   for (bool simd : {false, true}) {
     auto bm = parse_str("[Metadata]\nTitle:Only metadata\n", simd);
@@ -564,6 +799,33 @@ static void test_byte_scan_boundaries() {
       }
     }
   }
+}
+
+template <char Ending>
+static void check_line_end_scan_boundaries() {
+  for (size_t alignment : {0u, 1u, 15u, 31u}) {
+    for (size_t length :
+         {0u, 1u, 31u, 32u, 33u, 63u, 64u, 65u, 127u, 128u, 129u, 257u}) {
+      for (size_t position :
+           {size_t(0), length / 2, length ? length - 1 : 0, length}) {
+        std::string text(alignment + length + 1, 'x');
+        text[alignment + length] = Ending;
+        if (position < length)
+          text[alignment + position] = Ending;
+        const auto  input = fosu::make_padded(text);
+        const char* p = input.data.get() + alignment;
+        CHECK_EQ(fosu::internal::find_line_end(p, p + length), p + position);
+      }
+    }
+  }
+}
+
+static void test_cr_scan_boundaries() {
+  check_line_end_scan_boundaries<'\r'>();
+}
+
+static void test_lf_scan_boundaries() {
+  check_line_end_scan_boundaries<'\n'>();
 }
 
 static void test_event_filename_boundaries() {
@@ -835,6 +1097,8 @@ int main() {
   test_byte_scan_boundaries<':'>();
   test_byte_scan_boundaries<'\n'>();
   test_byte_scan_boundaries<'\0'>();
+  test_cr_scan_boundaries();
+  test_lf_scan_boundaries();
   test_event_filename_boundaries();
   test_section_skip_boundaries();
   test_long_event_lines();
@@ -848,6 +1112,21 @@ int main() {
   test_aspire_edge_cases();
   test_modern_curve_segments();
   test_malformed();
+  test_invalid_byte_in_hitobjects();
+  test_invalid_byte_in_timing_points();
+  test_bracketed_records_do_not_change_section();
+  test_unknown_section_does_not_resume_hitobjects();
+  test_line_endings();
+  test_invalid_byte_before_header_cr();
+  test_invalid_byte_between_header_cr_lf();
+  test_invalid_byte_after_header_lf();
+  test_invalid_byte_replaces_header_cr();
+  test_invalid_byte_replaces_header_lf();
+  test_invalid_byte_before_hitobject_cr();
+  test_invalid_byte_between_hitobject_cr_lf();
+  test_invalid_byte_after_hitobject_lf();
+  test_invalid_byte_replaces_hitobject_cr();
+  test_invalid_byte_replaces_hitobject_lf();
   test_long_timing_offsets();
   test_omitted_sections_use_defaults();
   test_difficulty_selection_skips_other_sections();

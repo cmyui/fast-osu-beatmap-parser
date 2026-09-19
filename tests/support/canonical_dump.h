@@ -3,8 +3,7 @@
 // Little-endian fixed-width
 // fields, strings by value (u32 length + bytes), doubles as raw bit
 // patterns, so equality means bit-identical parsing, plus the parser's
-// own path counters and the pool points no slider references (left
-// behind by slider lines that failed after their point loop), so nothing
+// own path counters and any pool points no slider references, so nothing
 // the library's Beatmap holds is outside the comparison. Pool offsets
 // are explicit, including each orphan's position. Slider points follow
 // their record inline, so the finished beatmap can be serialized in one pass.

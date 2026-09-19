@@ -25,12 +25,26 @@ struct Line {
   const char*      next;
 };
 
+inline const char* after_line_ending(const char* line_end, const char* end) {
+  if (line_end == end)
+    return end;
+  const char* next = line_end + 1;
+  return *line_end == '\r' && next < end && *next == '\n' ? next + 1 : next;
+}
+
 inline Line read_line(const char* p, const char* end) {
-  const char* newline = find_byte<'\n'>(p, end);
-  const char* line_end = newline;
-  if (line_end > p && line_end[-1] == '\r')
-    --line_end;
-  return {{p, static_cast<size_t>(line_end - p)}, newline + (newline < end)};
+  const char* line_end = find_line_end(p, end);
+  return {{p, static_cast<size_t>(line_end - p)},
+          after_line_ending(line_end, end)};
+}
+
+// A stray '[' at the start of a malformed record must not end its section.
+inline bool section_header_line(const char* p, const char* end) {
+  if (p == end || *p != '[')
+    return false;
+  while (end > p && (end[-1] == ' ' || end[-1] == '\t'))
+    --end;
+  return end - p >= 2 && end[-1] == ']';
 }
 
 // Consume a section body, leaving its next header for the document parser.
@@ -44,9 +58,9 @@ inline const char* for_each_section_line(const char* p,
       ++p;
       continue;
     }
-    if (*p == '[')
-      break;
     const auto line = read_line(p, end);
+    if (section_header_line(p, p + line.text.size()))
+      break;
     if (!ignored_line(p, p + line.text.size()))
       parse_line(line.text);
     p = line.next;
@@ -56,11 +70,16 @@ inline const char* for_each_section_line(const char* p,
 
 inline const char* skip_section(const char* p, const char* end) {
   const char* header = find_byte<'['>(p, end);
-  // A bracket inside a value or comment is not a section header.
-  while (header < end && header != p && header[-1] != '\n' &&
-         header[-1] != '\r')
+  // A bracket inside a value or an incomplete header is not a section.
+  while (header < end) {
+    if (header == p || header[-1] == '\n' || header[-1] == '\r') {
+      const auto line = read_line(header, end);
+      if (section_header_line(header, header + line.text.size()))
+        return header;
+    }
     header = find_byte<'['>(header + 1, end);
-  return header;
+  }
+  return end;
 }
 
 }  // namespace fosu::internal
