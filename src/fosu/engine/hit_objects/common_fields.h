@@ -85,7 +85,7 @@ consteval std::array<LaneMasks, kNPrefixVariants * 2> make_lane_masks() {
             LaneMasks& lm = out[index];
             for (auto& word : lm.perm)
               word = -1;
-            int used[2]{};
+            int  used[2]{};
             // Each 128-bit lane can gather four source dwords before the byte
             // shuffle.
             auto find_or_add_word = [&](int word, int lane) {

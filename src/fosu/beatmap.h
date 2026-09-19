@@ -16,16 +16,16 @@
 namespace fosu {
 
 struct HitObject {
-  f32  x;
-  f32  y;
-  u32  type;
-  u32  hitsound;
-  f64  time;
-  f64  end_time;  // milliseconds; 0 for sliders unless calculation is requested
-  u32  slider;    // index into Beatmap::sliders, or kNoSlider
-  bool new_combo;
-  u8   combo_skip;
-  std::string_view    hit_sample;
+  f32              x;
+  f32              y;
+  u32              type;
+  u32              hitsound;
+  f64              time;
+  f64              end_time;  // ms; 0 for sliders if no calc requested
+  u32              slider;    // index into Beatmap::sliders, or kNoSlider
+  bool             new_combo;
+  u8               combo_skip;
+  std::string_view hit_sample;
   std::pair<f32, f32> raw_position(PathPoint stack_offset = {}) const {
     return {x - stack_offset.x, y - stack_offset.y};
   }
@@ -45,25 +45,22 @@ struct SliderPoint {
 };
 
 struct CurveSegment {
-  CurveType type;
-  // Present only for an explicit lazer B-spline degree (for example, B2).
-  // An absent degree on Bezier means an ordinary Bezier segment.
-  std::optional<u32> degree;
-  // Range relative to the owning Slider's control-point range.
-  u32 point_begin;
-  u32 point_count;
+  CurveType          type;
+  std::optional<u32> degree;  // Present only for lazer B-spline degree
+  u32                point_begin;
+  u32                point_count;
 };
 
 struct Slider {
-  u32 point_begin;  // range into Beatmap::slider_points
-  u32 point_count;
-  u32 segment_begin;  // range into Beatmap::slider_segments
-  u32 segment_count;
-  i32 slides;  // 1 = no repeats
+  u32              point_begin;  // range into Beatmap::slider_points
+  u32              point_count;
+  u32              segment_begin;  // range into Beatmap::slider_segments
+  u32              segment_count;
+  i32              slides;  // 1 = no repeats
   // The only path type for legacy sliders, and the first type for a modern
   // multi-segment path.
-  CurveType curve_type;
-  f64 length;  // declared pixel length; zero uses the natural path for duration
+  CurveType        curve_type;
+  f64              length;  // declared pixel length; zero uses the natural path
   std::string_view edge_sounds;
   std::string_view edge_sets;
 };
@@ -97,20 +94,22 @@ struct Stacking {
 };
 
 struct Beatmap : BeatmapHeader {
-  std::span<Break>        breaks;
-  std::span<u32>          combo_colours;
-  std::span<TimingPoint>  timing_points;
-  std::span<HitObject>    hit_objects;
-  std::span<Slider>       sliders;
-  std::span<CurveSegment> slider_segments;
-  std::span<SliderPoint>  slider_points;
-  std::span<f64>          velocity_presets;
+  std::span<Break>                  breaks;
+  std::span<u32>                    combo_colours;
+  std::span<TimingPoint>            timing_points;
+  std::span<HitObject>              hit_objects;
+  std::span<Slider>                 sliders;
+  std::span<CurveSegment>           slider_segments;
+  std::span<SliderPoint>            slider_points;
+  std::span<f64>                    velocity_presets;
+
   // Empty unless requested; otherwise indexed identically to sliders.
   std::span<SliderPath>             slider_paths;
   std::span<std::span<SliderEvent>> slider_events;
+
   // Empty unless osu!standard stacking was requested; indexed by hit object.
-  std::span<Stacking> stacking;
-  ParseStats          stats;
+  std::span<Stacking>               stacking;
+  ParseStats                        stats;
 
   Result<Beatmap> copy(Arena& destination) const noexcept {
     const size_t checkpoint = arena_pos(&destination);

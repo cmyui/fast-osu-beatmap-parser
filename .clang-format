@@ -4,8 +4,9 @@ ColumnLimit: 80
 
 AlignConsecutiveDeclarations:
   Enabled: true
-  AcrossEmptyLines: false
-  AcrossComments: false
+  AcrossEmptyLines: true
+  AcrossComments: true
+  AlignFunctionDeclarations: false
 
 IncludeBlocks: Regroup
 IncludeCategories:

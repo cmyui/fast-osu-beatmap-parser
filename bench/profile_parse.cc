@@ -132,8 +132,7 @@ int main(int argc, char** argv) {
   }
   printf(
       "files %zu bytes %zu rounds %d mode %s sections 0x%x: best round %.1f us "
-      "(%.3f "
-      "us/file, %.1f MB/s), mean round %.1f us, objects %zu, minor "
+      "(%.3f us/file, %.1f MB/s), mean round %.1f us, objects %zu, minor "
       "faults/round %.1f\n",
       limit, bytes, rounds, reuse ? "reuse" : "fresh", sections, best,
       best / limit, bytes / best, total / rounds, objects,

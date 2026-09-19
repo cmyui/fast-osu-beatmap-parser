@@ -35,7 +35,7 @@ struct PythonRef {
     return *this;
   }
   PyObject* release() { return std::exchange(p, nullptr); }
-            operator PyObject*() const { return p; }
+  operator PyObject*() const { return p; }
 };
 PythonRef integer(long long n) {
   return PythonRef(PyLong_FromLongLong(n));
@@ -659,9 +659,9 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
       PyErr_SetString(PyExc_ValueError, "embedded null byte");
       throw PythonError{};
     }
-    const auto* engine = fosu::internal::selected_engine();
+    const auto*    engine = fosu::internal::selected_engine();
     // Backend selection was checked when the module was imported.
-    fosu::Parser parser(*engine);
+    fosu::Parser   parser(*engine);
     // Both native entry points are noexcept, including allocation and I/O
     // failures.
     PyThreadState* thread = PyEval_SaveThread();
