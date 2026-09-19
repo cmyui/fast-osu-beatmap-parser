@@ -16,20 +16,17 @@ inline const char* parse_timing_points_section_simd(Beatmap&    beatmap,
                                                     const char* p,
                                                     const char* file_end,
                                                     i32         time_offset) {
-  const ByteVector newline_value = broadcast_byte<'\n'>();
   const ByteVector comma_value = broadcast_byte<','>();
   u32              malformed = 0;
 
   while (p < file_end) {
     const Bytes32 first = load32(p);
     const Bytes32 second = load32(p + 32);
-    const u64     newline_mask =
-        equal_mask32(first, newline_value) |
-        static_cast<u64>(equal_mask32(second, newline_value)) << 32;
-    const char* newline = newline_mask ? p + trailing_zeros(newline_mask)
-                                       : find_byte<'\n'>(p + 64, file_end);
-    const char* next_line = newline + (newline < file_end);
-    const char* line_end = newline - (newline > p && newline[-1] == '\r');
+    const u64     endings = line_end_mask32(first) |
+                            static_cast<u64>(line_end_mask32(second)) << 32;
+    const char*   line_end =
+        endings ? p + trailing_zeros(endings) : find_line_end(p + 64, file_end);
+    const char* next_line = after_line_ending(line_end, file_end);
     const auto  length = static_cast<size_t>(line_end - p);
     const u64   line_mask = length >= 64 ? ~0ull : ((1ull << length) - 1);
     const u64   commas =

@@ -370,6 +370,71 @@ static void test_malformed_record_recovery() {
   }
 }
 
+static void test_line_endings() {
+  constexpr std::string_view lines =
+      "osu file format v14\n"
+      "[General]\nMode:0\n"
+      "[Editor]\nGridSize:32\n"
+      "[Metadata]\nTitle:sentinel\n"
+      "[Difficulty]\nSliderMultiplier:1.4\n"
+      "[Events]\n2,100,200\n"
+      "[TimingPoints]\n100,500,4,1,0,100,1,0\n"
+      "[Colours]\nCombo1:255,128,0\n"
+      "[HitObjects]\n256,192,1000,1,0\n";
+  for (bool simd : {false, true}) {
+    for (std::string_view ending : {"\n", "\r\n", "\r"}) {
+      std::string input;
+      for (char c : lines) {
+        if (c == '\n')
+          input.append(ending);
+        else
+          input.push_back(c);
+      }
+      const auto map = parse_str(input, simd);
+      CHECK_EQ(map.grid_size, 32);
+      CHECK(map.title == "sentinel");
+      CHECK_EQ(map.breaks.size(), 1u);
+      CHECK_EQ(map.timing_points.size(), 1u);
+      CHECK_EQ(map.combo_colours.size(), 1u);
+      CHECK_EQ(map.hit_objects.size(), 1u);
+      CHECK_EQ(map.stats.malformed_lines, 0u);
+    }
+
+    const std::string input =
+        "osu file format v14\r\n"
+        "[TimingPoints]\r\n100,500,4,1,0,100,1,0\r\n"
+        "200,500,4,1,0,100,1,0\r\n"
+        "[HitObjects]\r\n256,192,1000,1,0\r\n"
+        "300,100,2000,1,0\r\n"
+        "[Metadata]\r\nTitle:after\r\n";
+    for (std::string_view line : {"[HitObjects]\r\n", "256,192,1000,1,0\r\n"}) {
+      const bool   header = line.front() == '[';
+      const size_t cr = input.find(line) + line.size() - 2;
+      for (size_t offset = 0; offset < 3; ++offset) {
+        std::string damaged = input;
+        damaged.insert(cr + offset, 1, '\x01');
+        const auto map = parse_str(damaged, simd);
+        CHECK_EQ(map.hit_objects.size(), header ? (offset == 1   ? 2u
+                                                   : offset == 2 ? 1u
+                                                                 : 0u)
+                                                : (offset == 1 ? 2u : 1u));
+        CHECK_EQ(map.timing_points.size(), header && offset == 0 ? 4u : 2u);
+        CHECK(map.title == "after");
+        CHECK_EQ(map.stats.malformed_lines, 1u);
+      }
+      for (size_t offset = 0; offset < 2; ++offset) {
+        std::string damaged = input;
+        damaged[cr + offset] = '\x01';
+        const auto map = parse_str(damaged, simd);
+        CHECK_EQ(map.hit_objects.size(), header && offset == 0 ? 0u : 1u);
+        CHECK_EQ(map.timing_points.size(), header && offset == 0 ? 4u : 2u);
+        CHECK(map.title == "after");
+        CHECK_EQ(map.stats.malformed_lines, 1u);
+      }
+    }
+  }
+}
+
 static void test_omitted_sections_use_defaults() {
   for (bool simd : {false, true}) {
     auto bm = parse_str("[Metadata]\nTitle:Only metadata\n", simd);
@@ -619,6 +684,26 @@ static void test_byte_scan_boundaries() {
         const char* p = input.data.get() + alignment;
         CHECK_EQ(fosu::internal::find_byte<Delimiter>(p, p + length),
                  p + position);
+      }
+    }
+  }
+}
+
+static void test_line_end_scan_boundaries() {
+  for (size_t alignment : {0u, 1u, 15u, 31u}) {
+    for (size_t length :
+         {0u, 1u, 31u, 32u, 33u, 63u, 64u, 65u, 127u, 128u, 129u, 257u}) {
+      for (char ending : {'\r', '\n'}) {
+        for (size_t position :
+             {size_t(0), length / 2, length ? length - 1 : 0, length}) {
+          std::string text(alignment + length + 1, 'x');
+          text[alignment + length] = ending;
+          if (position < length)
+            text[alignment + position] = ending;
+          const auto  input = fosu::make_padded(text);
+          const char* p = input.data.get() + alignment;
+          CHECK_EQ(fosu::internal::find_line_end(p, p + length), p + position);
+        }
       }
     }
   }
@@ -893,6 +978,7 @@ int main() {
   test_byte_scan_boundaries<':'>();
   test_byte_scan_boundaries<'\n'>();
   test_byte_scan_boundaries<'\0'>();
+  test_line_end_scan_boundaries();
   test_event_filename_boundaries();
   test_section_skip_boundaries();
   test_long_event_lines();
@@ -907,6 +993,7 @@ int main() {
   test_modern_curve_segments();
   test_malformed();
   test_malformed_record_recovery();
+  test_line_endings();
   test_long_timing_offsets();
   test_omitted_sections_use_defaults();
   test_difficulty_selection_skips_other_sections();

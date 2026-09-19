@@ -25,12 +25,17 @@ struct Line {
   const char*      next;
 };
 
+inline const char* after_line_ending(const char* line_end, const char* end) {
+  if (line_end == end)
+    return end;
+  const char* next = line_end + 1;
+  return *line_end == '\r' && next < end && *next == '\n' ? next + 1 : next;
+}
+
 inline Line read_line(const char* p, const char* end) {
-  const char* newline = find_byte<'\n'>(p, end);
-  const char* line_end = newline;
-  if (line_end > p && line_end[-1] == '\r')
-    --line_end;
-  return {{p, static_cast<size_t>(line_end - p)}, newline + (newline < end)};
+  const char* line_end = find_line_end(p, end);
+  return {{p, static_cast<size_t>(line_end - p)},
+          after_line_ending(line_end, end)};
 }
 
 // A stray '[' at the start of a malformed record must not end its section.

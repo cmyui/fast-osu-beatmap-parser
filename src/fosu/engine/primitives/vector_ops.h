@@ -56,6 +56,11 @@ inline ByteVector broadcast_byte() {
 inline u32 equal_mask32(Bytes32 v, ByteVector c) {
   return static_cast<u32>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, c)));
 }
+inline u32 line_end_mask32(Bytes32 v) {
+  const auto cr = _mm256_cmpeq_epi8(v, broadcast_byte<'\r'>());
+  const auto lf = _mm256_cmpeq_epi8(v, broadcast_byte<'\n'>());
+  return static_cast<u32>(_mm256_movemask_epi8(_mm256_or_si256(cr, lf)));
+}
 // AVX2 has no unsigned byte comparison: adding 80 maps ASCII digits to
 // [-128, -119], below every other byte under a signed comparison.
 inline u32 nondigit_mask32(Bytes32 v) {
@@ -93,6 +98,13 @@ inline u32 byte_mask16(uint8x16_t v) {
 inline u32 equal_mask32(Bytes32 v, ByteVector c) {
   return byte_mask16(vceqq_u8(v.val[0], c)) |
          (byte_mask16(vceqq_u8(v.val[1], c)) << 16);
+}
+inline u32 line_end_mask32(Bytes32 v) {
+  const auto cr = broadcast_byte<'\r'>();
+  const auto lf = broadcast_byte<'\n'>();
+  const auto low = vorrq_u8(vceqq_u8(v.val[0], cr), vceqq_u8(v.val[0], lf));
+  const auto high = vorrq_u8(vceqq_u8(v.val[1], cr), vceqq_u8(v.val[1], lf));
+  return byte_mask16(low) | (byte_mask16(high) << 16);
 }
 inline u32 nondigit_mask16(uint8x16_t v) {
   return byte_mask16(vcgtq_u8(vsubq_u8(v, vdupq_n_u8('0')), vdupq_n_u8(9)));

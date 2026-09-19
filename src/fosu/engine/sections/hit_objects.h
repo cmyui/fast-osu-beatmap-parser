@@ -172,14 +172,10 @@ inline const char* parse_hitobjects_section_scalar(
       ++p;
       continue;
     }
-    const auto* newline = static_cast<const char*>(
-        memchr(p, '\n', static_cast<size_t>(file_end - p)));
-    const char* line_end = newline ? newline : file_end;
-    if (line_end > p && line_end[-1] == '\r')
-      --line_end;
+    const char* line_end = find_line_end(p, file_end);
     if (c == '[' && section_header_line(p, line_end))
       break;
-    const char* next_line = newline ? newline + 1 : file_end;
+    const char* following_line = after_line_ending(line_end, file_end);
     if (!ignored_line(p, line_end)) {
       if (const auto object = parse_hitobject_line_scalar(
               beatmap, slider_count, slider_segment_count, slider_point_count,
@@ -197,7 +193,7 @@ inline const char* parse_hitobjects_section_scalar(
         ++beatmap.stats.malformed_lines;
       }
     }
-    p = next_line;
+    p = following_line;
   }
   return p;
 }
@@ -215,7 +211,6 @@ inline const char* parse_hitobjects_section_simd(
     const char*                    file_end,
     const HitObjectParseConstants& constants,
     i32                            time_offset) {
-  const ByteVector newline_value = constants.nl;
   const ByteVector comma_value = constants.comma;
   const ByteVector zero = constants.zero;
   u32              fast_lines = 0;
@@ -227,16 +222,15 @@ inline const char* parse_hitobjects_section_simd(
 
   while (p < file_end) {
     const Bytes32 ascii = load32(p);
-    const auto    newline_mask = equal_mask32(ascii, newline_value);
+    const auto    endings = line_end_mask32(ascii);
     const auto    commas = equal_mask32(ascii, comma_value);
     const u32     nondigits = nondigit_mask32(ascii);
-    const char*   newline = newline_mask ? p + trailing_zeros(newline_mask)
-                                         : find_byte<'\n'>(p + 32, file_end);
-    const char*   next_line = newline + (newline < file_end);
-    const char*   line_end = newline - (newline > p && newline[-1] == '\r');
-    const auto    length = static_cast<size_t>(line_end - p);
-    u32           p1, p2, prefix_end, hitsound_length, mask_index;
-    bool          common_layout;
+    const char*   line_end =
+        endings ? p + trailing_zeros(endings) : find_line_end(p + 32, file_end);
+    const char* next_line = after_line_ending(line_end, file_end);
+    const auto  length = static_cast<size_t>(line_end - p);
+    u32         p1, p2, prefix_end, hitsound_length, mask_index;
+    bool        common_layout;
 #if FOSU_SIMD_X86
     // Common editor prefixes: ddd,ddd,ddddd,d,d and ddd,ddd,dddddd,d,d.
     // Match every digit boundary and comma before using fixed shuffle masks.
