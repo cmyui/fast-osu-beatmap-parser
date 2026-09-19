@@ -1,7 +1,6 @@
 // Canonical serialization of the native result for cross-interface equality.
-#include "../support/canonical_dump.h"
-
 #include <fosu/parser.h>
+#include <tests/support/canonical_dump.h>
 
 #include <string>
 #include <unistd.h>
