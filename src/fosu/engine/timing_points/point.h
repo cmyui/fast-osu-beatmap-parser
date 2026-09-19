@@ -6,6 +6,7 @@
 #include <fosu/engine/primitives/byte_scan.h>
 #include <fosu/engine/primitives/digit_groups.h>
 #include <fosu/engine/timing_points/beat_length.h>
+#include <fosu/types.h>
 
 #include <algorithm>
 #include <bit>
