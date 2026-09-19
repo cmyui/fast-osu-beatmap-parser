@@ -312,6 +312,64 @@ static void test_malformed() {
   CHECK_EQ(bm.stats.malformed_lines, 5u);
 }
 
+static void test_malformed_record_recovery() {
+  for (bool simd : {false, true}) {
+    for (const std::string_view record : {
+             "256,192,100,1,0,0:0:0:0:",
+             "256,192,100,2,0,B|100:100|200:200,1,100",
+             "256,192,100,8,0,200",
+             "256,192,100,128,0,200:0:0:0:0:",
+         }) {
+      for (size_t position = 0; position <= record.size(); ++position) {
+        std::string damaged(record);
+        damaged.insert(position, 1, '\x01');
+        const auto map = parse_str(
+            "osu file format v14\n[HitObjects]\n" + damaged +
+                "\n300,100,300,1,0\n[Metadata]\nTitle:sentinel\n",
+            simd);
+        CHECK(!map.hit_objects.empty());
+        if (!map.hit_objects.empty())
+          CHECK_EQ(map.hit_objects.back().time, 300);
+        CHECK(map.title == "sentinel");
+        if (map.hit_objects.size() == 1)
+          CHECK_EQ(map.stats.malformed_lines, 1u);
+      }
+    }
+    constexpr std::string_view timing = "100,500,4,2,1,60,1,0";
+    for (size_t position = 0; position <= timing.size(); ++position) {
+      std::string damaged(timing);
+      damaged.insert(position, 1, '\x01');
+      const auto map = parse_str(
+          "osu file format v14\n[TimingPoints]\n" + damaged +
+              "\n200,500,4,2,1,60,1,0\n[Metadata]\nTitle:sentinel\n",
+          simd);
+      CHECK(!map.timing_points.empty());
+      if (!map.timing_points.empty())
+        CHECK_EQ(map.timing_points.back().time, 200);
+      CHECK(map.title == "sentinel");
+      if (map.timing_points.size() == 1)
+        CHECK_EQ(map.stats.malformed_lines, 1u);
+    }
+
+    const auto bracketed = parse_str(
+        "osu file format v14\n[HitObjects]\n[256,192,100,1,0\n"
+        "300,100,300,1,0\n[TimingPoints]\n[100,500,4,2,1,60,1,0\n"
+        "200,500,4,2,1,60,1,0\n[Metadata]\nTitle:sentinel\n",
+        simd);
+    CHECK_EQ(bracketed.hit_objects.size(), 1u);
+    CHECK_EQ(bracketed.timing_points.size(), 1u);
+    CHECK_EQ(bracketed.stats.malformed_lines, 2u);
+    CHECK(bracketed.title == "sentinel");
+
+    const auto unknown = parse_str(
+        "[HitObjects]\n1,2,100,1,0\n[Unknown] \n1,2,200,1,0\n"
+        "[HitObjects]\n1,2,300,1,0\n",
+        simd);
+    CHECK_EQ(unknown.hit_objects.size(), 2u);
+    CHECK_EQ(unknown.stats.malformed_lines, 0u);
+  }
+}
+
 static void test_omitted_sections_use_defaults() {
   for (bool simd : {false, true}) {
     auto bm = parse_str("[Metadata]\nTitle:Only metadata\n", simd);
@@ -848,6 +906,7 @@ int main() {
   test_aspire_edge_cases();
   test_modern_curve_segments();
   test_malformed();
+  test_malformed_record_recovery();
   test_long_timing_offsets();
   test_omitted_sections_use_defaults();
   test_difficulty_selection_skips_other_sections();

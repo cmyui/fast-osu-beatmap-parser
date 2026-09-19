@@ -172,13 +172,13 @@ inline const char* parse_hitobjects_section_scalar(
       ++p;
       continue;
     }
-    if (c == '[')
-      break;
     const auto* newline = static_cast<const char*>(
         memchr(p, '\n', static_cast<size_t>(file_end - p)));
     const char* line_end = newline ? newline : file_end;
     if (line_end > p && line_end[-1] == '\r')
       --line_end;
+    if (c == '[' && section_header_line(p, line_end))
+      break;
     const char* next_line = newline ? newline + 1 : file_end;
     if (!ignored_line(p, line_end)) {
       if (const auto object = parse_hitobject_line_scalar(
@@ -431,7 +431,7 @@ inline const char* parse_hitobjects_section_simd(
         ++p;
         continue;
       }
-      if (c == '[')
+      if (c == '[' && section_header_line(p, line_end))
         break;
       if (!ignored_line(p, line_end)) {
         if (const auto object = parse_hitobject_line_scalar(

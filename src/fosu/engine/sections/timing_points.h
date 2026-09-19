@@ -54,7 +54,7 @@ inline const char* parse_timing_points_section_simd(Beatmap&    beatmap,
       ++p;
       continue;
     }
-    if (c == '[')
+    if (c == '[' && section_header_line(p, line_end))
       break;
     if (!ignored_line(p, line_end)) {
       const auto point =

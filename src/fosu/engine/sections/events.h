@@ -129,9 +129,6 @@ inline const char* parse_events_section_simd(Beatmap&    bm,
       ++p;
       continue;
     }
-    if (c == '[')
-      break;
-
     const Bytes32 a = load32(p);
     const Bytes32 b = load32(p + 32);
     const u64     nl = equal_mask32(a, broadcast_byte<'\n'>()) |
@@ -148,6 +145,8 @@ inline const char* parse_events_section_simd(Beatmap&    bm,
     }
     if (line_end[-1] == '\r')
       --line_end;  // line_end > line: c is not CR
+    if (c == '[' && section_header_line(line, line_end))
+      break;
     p = next_line;
 
     if (fosu::internal::ignored_line(line, line_end))

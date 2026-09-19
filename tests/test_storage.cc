@@ -121,12 +121,12 @@ static void test_large_arena_arrays() {
     const auto& sliders_map = require_parse(parser.parse(slider_input));
     CHECK_EQ(sliders_map.hit_objects.size(), 3000u);
     CHECK_EQ(sliders_map.sliders.size(), 3000u);
-    CHECK_EQ(sliders_map.slider_points.size(), 9004u);
+    CHECK_EQ(sliders_map.slider_points.size(), 9000u);
     CHECK_EQ(sliders_map.stats.malformed_lines, 4u);
     for (size_t i = 0; i < 3000; ++i) {
       const auto& slider = sliders_map.sliders[i];
       CHECK_EQ(sliders_map.hit_objects[i].slider, i);
-      CHECK_EQ(slider.point_begin, 3 * i + (i < 1500 ? 2 : 4));
+      CHECK_EQ(slider.point_begin, 3 * i);
       CHECK_EQ(slider.point_count, 3u);
       CHECK_EQ(sliders_map.slider_points[slider.point_begin].x, 1);
       CHECK_EQ(sliders_map.slider_points[slider.point_begin + 2].y, 6);
@@ -140,18 +140,14 @@ static void test_large_arena_arrays() {
 }
 
 static void test_rejected_slider_points() {
-  struct Case {
-    const char* tail;
-    size_t      retained_points;
+  const char* cases[] = {
+      "B|7:8|bad,1,10",       "B|7:8|9:10",
+      "B|7:8|9:10,bad,10",    "B|7:8|9:10,1,131073",
+      "B|7:8|9:10,1,10,,/:0", "B|7:8|9:10,1,10,,,/:0",
   };
-  const Case cases[] = {
-      {"B|7:8|bad,1,10", 0},       {"B|7:8|9:10", 2},
-      {"B|7:8|9:10,bad,10", 2},    {"B|7:8|9:10,1,131073", 2},
-      {"B|7:8|9:10,1,10,,/:0", 2}, {"B|7:8|9:10,1,10,,,/:0", 2},
-  };
-  for (const auto& test : cases) {
+  for (const char* tail : cases) {
     auto input = fosu::make_padded(std::string("[HitObjects]\n1,2,3,2,0,") +
-                                   test.tail + "\n1,2,4,2,0,L|11:12,1,10\n");
+                                   tail + "\n1,2,4,2,0,L|11:12,1,10\n");
     for (bool simd : {false, true}) {
       fosu::Parser parser(simd ? fosu::internal::compiled_engine
                                : fosu_test::scalar_engine());
@@ -159,10 +155,22 @@ static void test_rejected_slider_points() {
       CHECK_EQ(beatmap.stats.malformed_lines, 1u);
       CHECK_EQ(beatmap.hit_objects.size(), 1u);
       CHECK_EQ(beatmap.sliders.size(), 1u);
-      CHECK_EQ(beatmap.slider_points.size(), test.retained_points + 1);
-      CHECK_EQ(beatmap.sliders[0].point_begin, test.retained_points);
-      CHECK_EQ(beatmap.slider_points[test.retained_points].x, 11);
+      CHECK_EQ(beatmap.slider_points.size(), 1u);
+      CHECK_EQ(beatmap.sliders[0].point_begin, 0u);
+      CHECK_EQ(beatmap.slider_points[0].x, 11);
     }
+  }
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(
+        "osu file format v128\n[HitObjects]\n"
+        "1,2,3,2,0,B|7:8|L|9:10,1,bad\n"
+        "1,2,4,2,0,L|11:12,1,10\n",
+        simd);
+    CHECK_EQ(map.stats.malformed_lines, 1u);
+    CHECK_EQ(map.hit_objects.size(), 1u);
+    CHECK_EQ(map.sliders.size(), 1u);
+    CHECK_EQ(map.slider_points.size(), 1u);
+    CHECK(map.slider_segments.empty());
   }
 }
 

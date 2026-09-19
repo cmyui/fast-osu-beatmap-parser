@@ -290,9 +290,8 @@ FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
 //   curveType|x:y|x:y...,slides,length[,edgeSounds,edgeSets][,hitSample]
 //
 // This is one parse transaction. Control points and completed lazer segments
-// are written into their arena arrays as they are accepted. Failures while
-// parsing the path roll those arrays back. A malformed later field may leave
-// parsed points unused, matching the official decoder's behavior.
+// are written into their arena arrays as they are accepted. Failures roll both
+// arrays back so rejected sliders leave no published data behind.
 FOSU_NOINLINE inline bool parse_slider(
     Beatmap&                                        beatmap,
     size_t&                                         slider_count,
@@ -405,6 +404,7 @@ FOSU_NOINLINE inline bool parse_slider(
 
   // Everything after the point list is positional.
   if (p >= end || *p != ',') {
+    slider_point_count = slider_point_begin;
     slider_segment_count = slider_segment_begin;
     return false;
   }
@@ -428,6 +428,7 @@ FOSU_NOINLINE inline bool parse_slider(
       i64         parsed_slides;
       const char* next = parse_osu_int(p, end, parsed_slides);
       if (next == p) {
+        slider_point_count = slider_point_begin;
         slider_segment_count = slider_segment_begin;
         return false;
       }
@@ -436,6 +437,7 @@ FOSU_NOINLINE inline bool parse_slider(
     }
   }
   if (slides > 9000 || (p < end && *p != ',')) {
+    slider_point_count = slider_point_begin;
     slider_segment_count = slider_segment_begin;
     return false;
   }
@@ -500,6 +502,7 @@ FOSU_NOINLINE inline bool parse_slider(
     if (next != length_begin)
       next = skip_numeric_space(next, end);
     if (next == length_begin || (next < end && *next != ',')) {
+      slider_point_count = slider_point_begin;
       slider_segment_count = slider_segment_begin;
       return false;
     }
@@ -572,6 +575,7 @@ FOSU_NOINLINE inline bool parse_slider(
   const std::string_view edge_sets = sound_fields[1];
   const std::string_view hit_sample = sound_fields[2];
   if (!valid_sample(hit_sample, true) || !valid_edge_sets(edge_sets, slides)) {
+    slider_point_count = slider_point_begin;
     slider_segment_count = slider_segment_begin;
     return false;
   }
