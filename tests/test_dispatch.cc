@@ -3,7 +3,7 @@
 #include <fosu/runtime.h>
 
 #include <cassert>
-#include <cstdlib>
+#include <cstdlib>  // IWYU pragma: keep (_putenv_s and setenv)
 #include <cstring>
 #include <thread>
 #include <vector>

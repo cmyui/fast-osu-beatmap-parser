@@ -125,6 +125,19 @@ def main() -> int:
     if args.files:
         files = [path.resolve() for path in args.files]
     else:
+        # These command-line tools use POSIX APIs and are not built on Windows.
+        windows_only_exclusions = {
+            b"bench/library_compare.cc",
+            b"bench/profile_parse.cc",
+            b"tests/reference/native.cc",
+            b"tests/validate_corpus.cc",
+            b"tests/fuzz_parser.cc",
+            # Standalone support headers otherwise inherit the fuzz target's
+            # sanitizer flags, which clangd cannot combine with the MSVC CRT.
+            b"tests/support/canonical_dump.h",
+            b"tests/support/equality.h",
+            b"tests/support/scalar_engine.h",
+        }
         tracked = subprocess.check_output(
             ["git", "ls-files", "-z", "--", "*.h", "*.cc", "*.cpp"], cwd=root
         )
@@ -137,11 +150,12 @@ def main() -> int:
             and path != b"bench/comparison/native_worker.cc"
             # These headers are intentionally included in a specific source context.
             and path not in (b"src/fosu/bindings/records.h", b"tests/support/test.h")
+            and (sys.platform != "win32" or path not in windows_only_exclusions)
         ]
     client = Clangd(args.clangd, args.compile_commands.resolve(), root)
     failures = 0
     try:
-        for path in files:
+        for index, path in enumerate(files, 1):
             for diagnostic in client.diagnostics(path):
                 if diagnostic.get("severity", 1) > 2:
                     continue
@@ -151,6 +165,8 @@ def main() -> int:
                     f"{path.relative_to(root)}:{line}: {code}: {diagnostic['message']}"
                 )
                 failures += 1
+            if index % 10 == 0:
+                print(f"clangd checked {index}/{len(files)} files", flush=True)
     finally:
         client.close()
     print(f"clangd checked {len(files)} files; {failures} diagnostics")

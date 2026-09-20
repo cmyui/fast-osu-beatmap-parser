@@ -26,7 +26,6 @@
 #include <fosu/types.h>
 
 #include <array>
-#include <cstddef>
 #include <cstdlib>
 
 namespace fosu::internal {
