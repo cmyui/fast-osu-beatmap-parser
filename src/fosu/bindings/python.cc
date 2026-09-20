@@ -10,6 +10,7 @@
 #include <initializer_list>
 #include <new>
 #include <span>
+#include <structmember.h>
 #include <utility>
 
 namespace {
@@ -20,6 +21,92 @@ using fosu::i64;
 using fosu::u32;
 
 struct PythonError {};
+struct PointObject {
+  // clang-format off
+  PyObject_HEAD
+  PyObject* x;
+  PyObject* y;
+  // clang-format on
+};
+void point_dealloc(PyObject* object) {
+  auto* point = reinterpret_cast<PointObject*>(object);
+  Py_XDECREF(point->x);
+  Py_XDECREF(point->y);
+  PyTypeObject* type = Py_TYPE(object);
+  PyObject_Free(object);
+  Py_DECREF(type);
+}
+PyObject* point_new(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
+  static char* names[] = {const_cast<char*>("x"), const_cast<char*>("y"),
+                          nullptr};
+  PyObject *   x, *y;
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO:Point", names, &x, &y))
+    return nullptr;
+  PyObject* x_float = PyNumber_Float(x);
+  if (!x_float)
+    return nullptr;
+  PyObject* y_float = PyNumber_Float(y);
+  if (!y_float) {
+    Py_DECREF(x_float);
+    return nullptr;
+  }
+  auto* point = reinterpret_cast<PointObject*>(PyType_GenericAlloc(type, 0));
+  if (!point) {
+    Py_DECREF(x_float);
+    Py_DECREF(y_float);
+    return nullptr;
+  }
+  point->x = x_float;
+  point->y = y_float;
+  return reinterpret_cast<PyObject*>(point);
+}
+PyObject* point_repr(PyObject* object) {
+  auto* point = reinterpret_cast<PointObject*>(object);
+  return PyUnicode_FromFormat("Point(x=%R, y=%R)", point->x, point->y);
+}
+PyObject* point_richcompare(PyObject* left, PyObject* right, int op) {
+  if (Py_TYPE(left) != Py_TYPE(right) || (op != Py_EQ && op != Py_NE)) {
+    Py_INCREF(Py_NotImplemented);
+    return Py_NotImplemented;
+  }
+  auto* a = reinterpret_cast<PointObject*>(left);
+  auto* b = reinterpret_cast<PointObject*>(right);
+  int   x_equal = PyObject_RichCompareBool(a->x, b->x, Py_EQ);
+  if (x_equal < 0)
+    return nullptr;
+  int y_equal = x_equal ? PyObject_RichCompareBool(a->y, b->y, Py_EQ) : 0;
+  if (y_equal < 0)
+    return nullptr;
+  return PyBool_FromLong(op == Py_EQ ? y_equal : !y_equal);
+}
+PyObject* point_reduce(PyObject* object, PyObject*) {
+  auto*     point = reinterpret_cast<PointObject*>(object);
+  PyObject* args = PyTuple_Pack(2, point->x, point->y);
+  if (!args)
+    return nullptr;
+  PyObject* result =
+      PyTuple_Pack(2, reinterpret_cast<PyObject*>(Py_TYPE(object)), args);
+  Py_DECREF(args);
+  return result;
+}
+PyMethodDef point_methods[] = {
+    {"__reduce__", point_reduce, METH_NOARGS, nullptr},
+    {nullptr, nullptr, 0, nullptr}};
+PyMemberDef point_members[] = {
+    {"x", T_OBJECT_EX, offsetof(PointObject, x), READONLY, nullptr},
+    {"y", T_OBJECT_EX, offsetof(PointObject, y), READONLY, nullptr},
+    {nullptr, 0, 0, 0, nullptr}};
+PyType_Slot point_slots[] = {
+    {Py_tp_dealloc, reinterpret_cast<void*>(point_dealloc)},
+    {Py_tp_new, reinterpret_cast<void*>(point_new)},
+    {Py_tp_repr, reinterpret_cast<void*>(point_repr)},
+    {Py_tp_richcompare, reinterpret_cast<void*>(point_richcompare)},
+    {Py_tp_hash, reinterpret_cast<void*>(PyObject_HashNotImplemented)},
+    {Py_tp_methods, point_methods},
+    {Py_tp_members, point_members},
+    {0, nullptr}};
+PyType_Spec point_spec = {"fosu._core.Point", sizeof(PointObject), 0,
+                          Py_TPFLAGS_DEFAULT, point_slots};
 struct PythonRef {
   PyObject* p;
   explicit PythonRef(PyObject* p) : p(p) {
@@ -383,7 +470,12 @@ struct BeatmapConverter {
                                           "surrogateescape"));
   }
   PythonRef point(f32 x, f32 y) {
-    return record(t_point, {{f_x, number(x)}, {f_y, number(y)}});
+    PythonRef out(PyType_GenericAlloc(
+        reinterpret_cast<PyTypeObject*>(state.types[t_point]), 0));
+    auto*     point = reinterpret_cast<PointObject*>(out.p);
+    point->x = number(x).release();
+    point->y = number(y).release();
+    return out;
   }
   template <class F>
   PythonRef list(size_t count, F item) {
@@ -786,18 +878,26 @@ int exec_module(PyObject* m) {
     if (PyModule_AddStringConstant(
             m, "backend", fosu::internal::engine_name(engine->kind)) < 0)
       return -1;
-    auto*     s = static_cast<State*>(PyModule_GetState(m));
+    auto* s = static_cast<State*>(PyModule_GetState(m));
+    s->types[t_point] = PyType_FromSpec(&point_spec);
+    if (!s->types[t_point] ||
+        PyObject_SetAttrString(m, "Point", s->types[t_point]) < 0)
+      return -1;
     PythonRef package(PyObject_GetAttrString(m, "__package__"));
     PythonRef name(PyUnicode_FromFormat("%U._model", package.p));
     s->model = PyImport_Import(name);
     if (!s->model)
       return -1;
     for (int i = 0; i < type_count; ++i) {
+      if (i == t_point)
+        continue;
       s->types[i] = PyObject_GetAttrString(s->model, type_names[i]);
       if (!s->types[i])
         return -1;
     }
     for (int type = 0; type < record_type_count; ++type) {
+      if (type == t_point)
+        continue;
       for (int field = 0; field < field_count; ++field) {
         auto& slot = s->slots[type][field];
         slot.descriptor =
