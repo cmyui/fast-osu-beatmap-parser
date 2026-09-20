@@ -22,6 +22,7 @@
 
 #include <fosu/arena.h>
 #include <fosu/beatmap.h>
+#include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/enums.h>
 #include <fosu/result.h>
 #include <fosu/slider_path.h>
@@ -98,8 +99,24 @@ inline void subdivide_bezier(std::span<const CurvePoint> points,
   for (size_t i = 0; i < count; ++i) {
     left[i] = midpoints[0];
     right[count - i - 1] = midpoints[count - i - 1];
+#if FOSU_SIMD_NEON
+    static_assert(sizeof(CurvePoint) == 2 * sizeof(f32));
+    const size_t remaining = count - i - 1;
+    size_t       j = 0;
+    // Read both neighboring pairs before replacing either midpoint.
+    for (; j + 1 < remaining; j += 2) {
+      float32x4_t current, next;
+      std::memcpy(&current, midpoints + j, sizeof(current));
+      std::memcpy(&next, midpoints + j + 1, sizeof(next));
+      const auto averaged = vmulq_n_f32(vaddq_f32(current, next), 0.5f);
+      std::memcpy(midpoints + j, &averaged, sizeof(averaged));
+    }
+    for (; j < remaining; ++j)
+      midpoints[j] = (midpoints[j] + midpoints[j + 1]) * 0.5f;
+#else
     for (size_t j = 0; j < count - i - 1; ++j)
       midpoints[j] = (midpoints[j] + midpoints[j + 1]) * 0.5f;
+#endif
   }
 }
 
