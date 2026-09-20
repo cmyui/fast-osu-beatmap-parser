@@ -84,27 +84,31 @@ class Clangd:
             if predicate(message):
                 return message
 
-    def diagnostics(self, path: Path) -> list[dict]:
-        uri = path.as_uri()
-        self.send(
-            "textDocument/didOpen",
-            {
-                "textDocument": {
-                    "uri": uri,
-                    "languageId": "cpp",
-                    "version": 1,
-                    "text": path.read_text(encoding="utf-8"),
-                }
-            },
-        )
-        message = self.until(
-            lambda m: (
-                m.get("method") == "textDocument/publishDiagnostics"
-                and m["params"]["uri"] == uri
+    def diagnostics_batch(self, paths: list[Path]) -> dict[str, list[dict]]:
+        uris = {path.as_uri() for path in paths}
+        for path in paths:
+            self.send(
+                "textDocument/didOpen",
+                {
+                    "textDocument": {
+                        "uri": path.as_uri(),
+                        "languageId": "cpp",
+                        "version": 1,
+                        "text": path.read_text(encoding="utf-8"),
+                    }
+                },
             )
-        )
-        self.send("textDocument/didClose", {"textDocument": {"uri": uri}})
-        return message["params"]["diagnostics"]
+        diagnostics = {}
+        while len(diagnostics) < len(uris):
+            message = self.receive()
+            if message.get("method") != "textDocument/publishDiagnostics":
+                continue
+            uri = message["params"]["uri"]
+            if uri in uris:
+                diagnostics[uri] = message["params"]["diagnostics"]
+        for path in paths:
+            self.send("textDocument/didClose", {"textDocument": {"uri": path.as_uri()}})
+        return diagnostics
 
     def close(self):
         self.send("shutdown", {}, request_id=self.next_id)
@@ -119,8 +123,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--clangd", default="clangd")
     parser.add_argument("--compile-commands", type=Path, required=True)
+    parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("files", nargs="*", type=Path)
     args = parser.parse_args()
+    if args.batch_size < 1:
+        parser.error("--batch-size must be positive")
     root = Path(__file__).resolve().parent.parent
     if args.files:
         files = [path.resolve() for path in args.files]
@@ -155,18 +162,20 @@ def main() -> int:
     client = Clangd(args.clangd, args.compile_commands.resolve(), root)
     failures = 0
     try:
-        for index, path in enumerate(files, 1):
-            for diagnostic in client.diagnostics(path):
-                if diagnostic.get("severity", 1) > 2:
-                    continue
-                line = diagnostic["range"]["start"]["line"] + 1
-                code = diagnostic.get("code", "unknown")
-                print(
-                    f"{path.relative_to(root)}:{line}: {code}: {diagnostic['message']}"
-                )
-                failures += 1
-            if index % 10 == 0:
-                print(f"clangd checked {index}/{len(files)} files", flush=True)
+        for start in range(0, len(files), args.batch_size):
+            batch = files[start : start + args.batch_size]
+            diagnostics = client.diagnostics_batch(batch)
+            for path in batch:
+                for diagnostic in diagnostics[path.as_uri()]:
+                    if diagnostic.get("severity", 1) > 2:
+                        continue
+                    line = diagnostic["range"]["start"]["line"] + 1
+                    code = diagnostic.get("code", "unknown")
+                    print(
+                        f"{path.relative_to(root)}:{line}: {code}: {diagnostic['message']}"
+                    )
+                    failures += 1
+            print(f"clangd checked {start + len(batch)}/{len(files)} files", flush=True)
     finally:
         client.close()
     print(f"clangd checked {len(files)} files; {failures} diagnostics")
