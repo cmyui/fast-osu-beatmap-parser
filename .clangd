@@ -1,5 +1,8 @@
 InlayHints:
-  Enabled: false
+  BlockEnd: true
+  DefaultArguments: true
+Style: { AngledHeaders: ['^(fosu|tests)/'] }
+Diagnostics: { MissingIncludes: Strict }
 
 ---
 If:
