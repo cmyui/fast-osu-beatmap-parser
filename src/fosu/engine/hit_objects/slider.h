@@ -70,6 +70,31 @@ consteval std::array<SliderPointShuffle, 16> make_slider_point_shuffles() {
 
 inline constexpr auto kSliderPointShuffles = make_slider_point_shuffles();
 
+consteval std::array<SliderPointShuffle, 3> make_slider_point_pair_shuffles() {
+  std::array<SliderPointShuffle, 3> shuffles{};
+  constexpr u32                     x_digits[3] = {3, 3, 1};
+  constexpr u32                     y_digits[3] = {3, 2, 1};
+  for (u32 shape = 0; shape < 3; ++shape) {
+    auto& shuffle = shuffles[shape];
+    for (auto& byte : shuffle.bytes)
+      byte = static_cast<i8>(0x80);
+    const u32 point_width = x_digits[shape] + y_digits[shape] + 2;
+    for (u32 point = 0; point < 2; ++point) {
+      const u32 begin = point * point_width;
+      for (u32 digit = 0; digit < x_digits[shape]; ++digit)
+        shuffle.bytes[point * 8 + 4 - x_digits[shape] + digit] =
+            static_cast<i8>(begin + 1 + digit);
+      for (u32 digit = 0; digit < y_digits[shape]; ++digit)
+        shuffle.bytes[point * 8 + 8 - y_digits[shape] + digit] =
+            static_cast<i8>(begin + x_digits[shape] + 2 + digit);
+    }
+  }
+  return shuffles;
+}
+
+inline constexpr auto kSliderPointPairShuffles =
+    make_slider_point_pair_shuffles();
+
 #if FOSU_SIMD_X86
 inline SliderPoint decode_slider_point(
     __m128i                        input,
@@ -104,6 +129,35 @@ inline SliderPoint decode_slider_point(
   const auto positions = vcvtq_f32_u32(coordinates);
   return std::bit_cast<SliderPoint>(
       vgetq_lane_u64(vreinterpretq_u64_f32(positions), 0));
+}
+#endif
+
+#if FOSU_SIMD_X86
+inline void decode_slider_point_pair(__m128i                        input,
+                                     u32                            shape,
+                                     SliderPoint*                   output,
+                                     const HitObjectParseConstants& constants) {
+  const auto&   shuffle = kSliderPointPairShuffles[shape];
+  const __m128i placed = _mm_shuffle_epi8(
+      _mm_sub_epi8(input, _mm256_castsi256_si128(constants.zero)),
+      _mm_load_si128(reinterpret_cast<const __m128i*>(shuffle.bytes)));
+  const __m128i values = _mm_madd_epi16(
+      _mm_maddubs_epi16(placed, _mm_setr_epi8(10, 1, 10, 1, 10, 1, 10, 1, 10, 1,
+                                              10, 1, 10, 1, 10, 1)),
+      _mm_setr_epi16(100, 1, 100, 1, 100, 1, 100, 1));
+  const __m128 positions = _mm_cvtepi32_ps(values);
+  std::memcpy(output, &positions, sizeof(positions));
+}
+#else
+inline void decode_slider_point_pair(uint8x16_t                     input,
+                                     u32                            shape,
+                                     SliderPoint*                   output,
+                                     const HitObjectParseConstants& constants) {
+  const auto& shuffle = kSliderPointPairShuffles[shape];
+  const auto  positions = vcvtq_f32_u32(decimal_groups(
+      vqtbl1q_u8(vsubq_u8(input, constants.zero),
+                 vld1q_u8(reinterpret_cast<const u8*>(shuffle.bytes)))));
+  std::memcpy(output, &positions, sizeof(positions));
 }
 #endif
 #endif
@@ -189,45 +243,70 @@ FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
   // Common fixed-width points need no delimiter scan or shuffle-table index.
   if ((non_digits & 0xffu) == 0x11u && p[0] == '|' && p[4] == ':' &&
       (p[8] == '|' || p[8] == ',')) {
+    if (p[8] == '|' && ((non_digits >> 8) & 0xffu) == 0x11u && p[12] == ':' &&
+        (p[16] == '|' || p[16] == ',')) {
+      decode_slider_point_pair(
+          _mm256_castsi256_si128(input), 0,
+          beatmap.slider_points.data() + slider_point_count, constants);
+      slider_point_count += 2;
+      return p + 16;
+    }
     beatmap.slider_points[slider_point_count++] =
         decode_slider_point(_mm256_castsi256_si128(input), 3, 3, constants);
-    p += 8;
-    if (p[0] == '|' && ((non_digits >> 8) & 0xffu) == 0x11u && p[4] == ':' &&
-        (p[8] == '|' || p[8] == ',')) {
-      beatmap.slider_points[slider_point_count++] = decode_slider_point(
-          _mm_loadu_si128(reinterpret_cast<const __m128i*>(p)), 3, 3,
-          constants);
-      p += 8;
-    }
-    return p;
+    return p + 8;
   }
   if ((non_digits & 0x7fu) == 0x11u && p[0] == '|' && p[4] == ':' &&
       (p[7] == '|' || p[7] == ',')) {
+    if (p[7] == '|' && ((non_digits >> 7) & 0x7fu) == 0x11u && p[11] == ':' &&
+        (p[14] == '|' || p[14] == ',')) {
+      decode_slider_point_pair(
+          _mm256_castsi256_si128(input), 1,
+          beatmap.slider_points.data() + slider_point_count, constants);
+      slider_point_count += 2;
+      return p + 14;
+    }
     beatmap.slider_points[slider_point_count++] =
         decode_slider_point(_mm256_castsi256_si128(input), 3, 2, constants);
-    p += 7;
-    if (p[0] == '|' && ((non_digits >> 7) & 0x7fu) == 0x11u && p[4] == ':' &&
-        (p[7] == '|' || p[7] == ',')) {
-      beatmap.slider_points[slider_point_count++] = decode_slider_point(
-          _mm_loadu_si128(reinterpret_cast<const __m128i*>(p)), 3, 2,
-          constants);
-      p += 7;
-    }
-    return p;
+    return p + 7;
   }
   if ((non_digits & 0xfu) == 0x5u && p[0] == '|' && p[2] == ':' &&
       (p[4] == '|' || p[4] == ',')) {
+    if (p[4] == '|' && ((non_digits >> 4) & 0xfu) == 0x5u && p[6] == ':' &&
+        (p[8] == '|' || p[8] == ',')) {
+      decode_slider_point_pair(
+          _mm256_castsi256_si128(input), 2,
+          beatmap.slider_points.data() + slider_point_count, constants);
+      slider_point_count += 2;
+      return p + 8;
+    }
     beatmap.slider_points[slider_point_count++] =
         decode_slider_point(_mm256_castsi256_si128(input), 1, 1, constants);
-    p += 4;
-    if (p[0] == '|' && ((non_digits >> 4) & 0xfu) == 0x5u && p[2] == ':' &&
-        (p[4] == '|' || p[4] == ',')) {
-      beatmap.slider_points[slider_point_count++] = decode_slider_point(
-          _mm_loadu_si128(reinterpret_cast<const __m128i*>(p)), 1, 1,
-          constants);
-      p += 4;
-    }
-    return p;
+    return p + 4;
+  }
+#else
+  if ((non_digits & 0xffffu) == 0x1111u && p[0] == '|' && p[4] == ':' &&
+      p[8] == '|' && p[12] == ':' && (p[16] == '|' || p[16] == ',')) {
+    decode_slider_point_pair(input.val[0], 0,
+                             beatmap.slider_points.data() + slider_point_count,
+                             constants);
+    slider_point_count += 2;
+    return p + 16;
+  }
+  if ((non_digits & 0x3fffu) == 0x891u && p[0] == '|' && p[4] == ':' &&
+      p[7] == '|' && p[11] == ':' && (p[14] == '|' || p[14] == ',')) {
+    decode_slider_point_pair(input.val[0], 1,
+                             beatmap.slider_points.data() + slider_point_count,
+                             constants);
+    slider_point_count += 2;
+    return p + 14;
+  }
+  if ((non_digits & 0xffu) == 0x55u && p[0] == '|' && p[2] == ':' &&
+      p[4] == '|' && p[6] == ':' && (p[8] == '|' || p[8] == ',')) {
+    decode_slider_point_pair(input.val[0], 2,
+                             beatmap.slider_points.data() + slider_point_count,
+                             constants);
+    slider_point_count += 2;
+    return p + 8;
   }
 #endif
 
