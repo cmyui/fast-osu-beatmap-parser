@@ -21,12 +21,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include <fosu/arena.h>
 #include <fosu/beatmap.h>
+#include <fosu/enums.h>
+#include <fosu/result.h>
+#include <fosu/slider_path.h>
 #include <fosu/types.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <iterator>
 #include <numbers>
+#include <optional>
+#include <span>
 
 namespace fosu::internal {
 

@@ -1,9 +1,16 @@
 #pragma once
 
+#include <fosu/arena.h>
+#include <fosu/beatmap.h>
+#include <fosu/result.h>
 #include <fosu/slider_geometry.h>
 #include <fosu/types.h>
 
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <limits>
+#include <span>
 
 namespace fosu::internal {
 

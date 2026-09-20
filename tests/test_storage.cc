@@ -1,9 +1,33 @@
+#include <fosu/arena.h>
+#include <fosu/beatmap.h>
+#include <fosu/engine/parse_document.h>
+#include <fosu/engine/parsing_engine.h>
+#include <fosu/enums.h>
+#include <fosu/io.h>
+#include <fosu/mods.h>
+#include <fosu/os.h>
+#include <fosu/parse_options.h>
+#include <fosu/parser.h>
+#include <fosu/result.h>
+#include <fosu/slider_event.h>
+#include <fosu/slider_path.h>
+#include <fosu/types.h>
 #include <tests/support/equality.h>
+#include <tests/support/scalar_engine.h>
 #include <tests/support/test.h>
 
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <ios>
 #include <limits>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
 
 static void test_reparse_reuses_arena_memory() {
   auto input =

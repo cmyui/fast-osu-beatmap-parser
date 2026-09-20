@@ -2,10 +2,31 @@ InlayHints:
   BlockEnd: true
   DefaultArguments: true
 Style: { AngledHeaders: ['^(fosu|tests)/'] }
-Diagnostics: { MissingIncludes: Strict }
+Diagnostics:
+  MissingIncludes: Strict
+  Includes:
+    # SDK/libc declarations live in these implementation headers, but consumers
+    # include their public counterparts (e.g. fcntl.h, sys/resource.h, sys/auxv.h).
+    IgnoreHeader:
+      - 'sys/(fcntl|syslimits|unistd|_types/_ssize_t)\.h'
+      - '_stdlib\.h'
+      - 'bits/types/struct_rusage\.h'
+      - 'linux/limits\.h'
+      # Windows.h is the supported Windows SDK umbrella.
+      - '(um|shared)[/\\][^/\\]+\.h'
 
 ---
 If:
   PathMatch: src/fosu/engine/.*\.h
 CompileFlags:
   Remove: -DFOSU_DISABLE_SIMD
+
+---
+If:
+  PathMatch: src/fosu/bindings/.*
+Diagnostics:
+  Includes:
+    # Python.h is CPython's supported umbrella; its private headers are not.
+    IgnoreHeader:
+      - 'python3\.[0-9]+/.*'
+      - '[Ii]nclude[/\\](cpython[/\\])?[^/\\]+\.h'

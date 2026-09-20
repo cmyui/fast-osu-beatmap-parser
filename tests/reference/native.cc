@@ -1,8 +1,12 @@
 // Canonical serialization of the native result for cross-interface equality.
+#include <fosu/beatmap.h>
+#include <fosu/io.h>
 #include <fosu/parser.h>
 #include <tests/support/canonical_dump.h>
 
+#include <cstddef>
 #include <string>
+#include <sys/types.h>
 #include <unistd.h>
 
 int main(int argc, char** argv) {

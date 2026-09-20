@@ -8,7 +8,9 @@
 #include <fosu/types.h>
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <system_error>
 
 namespace fosu::internal {
 

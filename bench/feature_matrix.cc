@@ -1,8 +1,12 @@
 #include <fosu/io.h>
+#include <fosu/mods.h>
+#include <fosu/parse_options.h>
 #include <fosu/parser.h>
+#include <fosu/types.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>

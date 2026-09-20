@@ -3,6 +3,12 @@
 #include <fosu/beatmap.h>
 #include <fosu/engine/parsing/field_values.h>
 #include <fosu/engine/parsing/lines.h>
+#include <fosu/engine/primitives/byte_scan.h>
+#include <fosu/types.h>
+
+#include <cstddef>
+#include <optional>
+#include <string_view>
 
 namespace fosu::internal {
 

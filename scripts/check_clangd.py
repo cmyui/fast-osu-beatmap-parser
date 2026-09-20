@@ -167,7 +167,8 @@ def main() -> int:
             diagnostics = client.diagnostics_batch(batch)
             for path in batch:
                 for diagnostic in diagnostics[path.as_uri()]:
-                    if diagnostic.get("severity", 1) > 2:
+                    # Include Cleaner reports missing includes at severity 3 (info).
+                    if diagnostic.get("severity", 1) > 3:
                         continue
                     line = diagnostic["range"]["start"]["line"] + 1
                     code = diagnostic.get("code", "unknown")

@@ -9,6 +9,7 @@
 
 #if defined(__aarch64__) && defined(__linux__)
 #include <asm/hwcap.h>
+#include <elf.h>
 #include <sys/auxv.h>
 #endif
 

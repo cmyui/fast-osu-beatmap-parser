@@ -1,5 +1,7 @@
 #include <fosu/compiler.h>
 #include <fosu/engine/parse_document.h>
+#include <fosu/engine/parsing_engine.h>
+#include <fosu/engine/primitives/vector_ops.h>
 
 static_assert(!FOSU_SIMD);
 

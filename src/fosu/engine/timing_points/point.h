@@ -2,14 +2,20 @@
 
 #include <fosu/beatmap.h>
 #include <fosu/compiler.h>
+#include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/parsing/sample_sets.h>
 #include <fosu/engine/primitives/byte_scan.h>
 #include <fosu/engine/primitives/digit_groups.h>
+#include <fosu/engine/primitives/packed_digits.h>
+#include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/engine/timing_points/beat_length.h>
 #include <fosu/types.h>
 
 #include <algorithm>
+#include <array>
 #include <bit>
+#include <cmath>
+#include <cstddef>
 #include <optional>
 
 namespace fosu::internal {

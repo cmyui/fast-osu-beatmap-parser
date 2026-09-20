@@ -6,14 +6,19 @@
 //   profile_parse corpus limit rounds fresh|reuse [sections-mask]
 // Configure with FOSU_ARENA_TELEMETRY=ON to report result/scratch high-water
 // marks.
+#include <fosu/io.h>
+#include <fosu/parse_options.h>
 #include <fosu/parser.h>
+#include <fosu/types.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <ratio>
 #include <string>
 #include <sys/resource.h>
 #include <vector>

@@ -1,11 +1,16 @@
 // libFuzzer + ASan/UBSan: exercise full files and force arbitrary bytes through
 // the hit-object and timing-point parsers, comparing all materialized fields.
+#include <fosu/io.h>
+#include <fosu/parse_options.h>
 #include <fosu/parser.h>
 #include <tests/support/canonical_dump.h>
 #include <tests/support/scalar_engine.h>
 
 #include <cassert>
+#include <cstddef>
+#include <cstdint>
 #include <string>
+#include <string_view>
 
 static void check(std::string_view data, fosu::ParseOptions options) {
   auto         input = fosu::make_padded(data);

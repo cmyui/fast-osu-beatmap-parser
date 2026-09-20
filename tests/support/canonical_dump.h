@@ -3,6 +3,7 @@
 // and optional results; tests/support/decode.py reads the same layout.
 
 #include <fosu/beatmap.h>
+#include <fosu/types.h>
 
 #include <cstdint>
 #include <cstring>

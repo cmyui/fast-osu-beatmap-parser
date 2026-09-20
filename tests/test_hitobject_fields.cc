@@ -1,4 +1,14 @@
+#include <fosu/beatmap.h>
+#include <fosu/engine/hit_objects/object_types.h>
+#include <fosu/engine/primitives/vector_ops.h>
+#include <fosu/io.h>
+#include <fosu/types.h>
 #include <tests/support/test.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <string_view>
 
 static std::string slider_document(std::string_view slider) {
   return "osu file format v14\n[HitObjects]\n0,0,0,2,0," + std::string(slider) +

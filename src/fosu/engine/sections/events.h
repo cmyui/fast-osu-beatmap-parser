@@ -4,10 +4,13 @@
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/parsing/string_lookup.h>
 #include <fosu/engine/primitives/byte_scan.h>
+#include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/types.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <optional>
+#include <string_view>
 
 namespace fosu::internal {
 

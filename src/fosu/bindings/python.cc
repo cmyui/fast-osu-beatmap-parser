@@ -1,16 +1,25 @@
 // Construct detached Python values using the CPython stable ABI.
+#include <fosu/beatmap.h>
 #include <fosu/bindings/records.h>
 #include <fosu/compiler.h>
 #include <fosu/engine/runtime/loader.h>
+#include <fosu/enums.h>
+#include <fosu/mods.h>
+#include <fosu/parse_options.h>
 #include <fosu/parser.h>
+#include <fosu/result.h>
+#include <fosu/slider_event.h>
+#include <fosu/slider_path.h>
 #include <fosu/types.h>
 
 #include <Python.h>
 #include <cerrno>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <new>
 #include <span>
+#include <string_view>
 #include <structmember.h>
 #include <utility>
 #include <vector>

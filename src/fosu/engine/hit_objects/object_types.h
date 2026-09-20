@@ -1,7 +1,14 @@
 #pragma once
 
 #include <fosu/engine/hit_objects/samples.h>
+#include <fosu/engine/parsing/numbers.h>
+#include <fosu/engine/primitives/packed_digits.h>
 #include <fosu/types.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <string_view>
 
 namespace fosu::internal {
 

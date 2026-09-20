@@ -1,14 +1,20 @@
 #pragma once
 
 #include <fosu/beatmap.h>
+#include <fosu/compiler.h>
 #include <fosu/engine/hit_objects/common_fields.h>
 #include <fosu/engine/hit_objects/object_types.h>
+#include <fosu/engine/hit_objects/samples.h>
 #include <fosu/engine/hit_objects/slider.h>
 #include <fosu/engine/parsing/lines.h>
+#include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/primitives/byte_scan.h>
+#include <fosu/engine/primitives/digit_groups.h>
+#include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/types.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <optional>
 

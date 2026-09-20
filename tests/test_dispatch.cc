@@ -1,10 +1,13 @@
+#include <fosu/engine/parsing_engine.h>
 #include <fosu/engine/runtime/cpu_features.h>
 #include <fosu/parser.h>
 #include <fosu/runtime.h>
+#include <fosu/types.h>
 
 #include <cassert>
 #include <cstdlib>  // IWYU pragma: keep (_putenv_s and setenv)
 #include <cstring>
+#include <stdlib.h>
 #include <thread>
 #include <vector>
 
