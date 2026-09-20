@@ -9,10 +9,10 @@ import sys
 import weakref
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from dataclasses import asdict, fields, is_dataclass, replace
+from dataclasses import is_dataclass
 from enum import Enum
 from pathlib import Path
-from typing import get_type_hints
+from typing import ClassVar, get_origin, get_type_hints
 
 import fosu
 import pytest
@@ -185,7 +185,8 @@ def test_path_query_is_detached_and_does_not_mutate():
     before = deepcopy(path)
     point = fosu.slider_position_at(path, 0.5)
     assert point == fosu.PathPoint(50.0, 0.0)
-    point.x = 999
+    with pytest.raises(AttributeError):
+        point.x = 999
     fosu.parse(b"")
     assert path == before
 
@@ -319,8 +320,6 @@ def test_raw_position_without_stacking_and_after_other_normalization():
     notes = fosu.parse(b"[HitObjects]\n10,20,100,1,0\n0,0,200,8,0,300\n").hit_objects
     assert notes[0].raw_position() == (10.0, 20.0)
     assert notes[1].raw_position() == (256.0, 192.0)
-    notes[1].x = -1.5
-    assert notes[1].raw_position() == (-1.5, 192.0)
 
 
 @pytest.mark.parametrize("version", [5, 6, 14])
@@ -481,7 +480,6 @@ def test_slider_end_time_opt_out(tmp_path):
     )
     for copied in (skipped, deepcopy(skipped), pickle.loads(pickle.dumps(skipped))):
         assert copied.hit_objects[1].end_time == 0
-    assert asdict(skipped)["hit_objects"][1]["end_time"] == 0
 
 
 def test_fractional_times_and_malformed_numeric_fields():
@@ -734,7 +732,7 @@ def test_detached_values_remain_valid_after_reuse():
     b = fosu.parse(data)
     note = b.hit_objects[0]
     data[:] = b"x" * len(data)
-    b.title = "Edited"
+    assert b.title == "Retained"
     assert b.hit_objects[0] is note and b.hit_objects[0].x == 32
     for _ in range(100):
         fosu.parse(b"[HitObjects]\n4,5,6,1,0\n")
@@ -830,21 +828,19 @@ def test_points_are_read_only_and_independent_between_results():
     assert other.hit_objects[0].control_points[1].x == 40
 
 
-def test_native_points_have_eager_float_fields_and_no_gc_cycles():
-    point = fosu.Point(x=1, y=2)
+def test_native_points_have_eager_float_fields():
+    point = fosu.Point(x=1.0, y=2.0)
     assert (point.x, point.y) == (1.0, 2.0)
     assert repr(point) == "Point(x=1.0, y=2.0)"
     assert point == fosu.Point(1, 2)
     assert pickle.loads(pickle.dumps(point)) == point
     assert deepcopy(point) == point
-    assert not gc.is_tracked(point)
+    assert gc.is_tracked(point)
     with pytest.raises(AttributeError):
         object.__setattr__(point, "x", point)
-    with pytest.raises(TypeError):
-        fosu.Point([], [])
 
 
-def test_user_cycle_through_mutated_hit_object_is_collected():
+def test_user_cycle_through_slider_list_is_collected():
     class Marker:
         pass
 
@@ -852,7 +848,7 @@ def test_user_cycle_through_mutated_hit_object_is_collected():
     note = beatmap.hit_objects[0]
     marker = Marker()
     marker.note = note
-    note.x = marker
+    note.control_points.append(marker)
     retained = weakref.ref(marker)
     del beatmap, note, marker
     gc.collect()
@@ -876,16 +872,15 @@ def test_parse_preserves_gc_enabled_state():
             gc.disable()
 
 
-def test_repeated_timestamp_fields_remain_independently_assignable():
+def test_repeated_timestamp_fields_preserve_endpoints():
     b = fosu.parse(
         b"[HitObjects]\n1,2,1000.5,1,0\n1,2,2000.5,8,0,3000.5\n"
         b"1,2,4000.5,128,0,5000.5\n"
     )
     circle, spinner, hold = b.hit_objects
     assert circle.end_time == circle.time == 1000.5
-    for note, start in ((spinner, 2000.5), (hold, 4000.5)):
-        note.end_time = 20
-        assert note.time == start
+    assert (spinner.time, spinner.end_time) == (2000.5, 3000.5)
+    assert (hold.time, hold.end_time) == (4000.5, 5000.5)
 
 
 def test_hitsound_flags_preserve_combinations_and_unknown_bits():
@@ -908,18 +903,13 @@ def test_hit_sample_preserves_default_omitted_and_custom_text():
     ]
 
 
-def test_standard_python_copy_and_export():
+def test_standard_python_copy_and_pickle():
     b = fosu.parse(b"[Metadata]\nTitle:Copy\n[HitObjects]\n2,4,6,2,0,B|8:10,1,12\n")
     restored = pickle.loads(pickle.dumps(b))
     copied = deepcopy(b)
     assert b == restored == copied
-    copied.hit_objects[0].x = 100
-    assert b.hit_objects[0].x == 2
-    assert replace(b, title="Replaced").title == "Replaced"
-    assert asdict(b)["hit_objects"][0]["control_points"] == [
-        fosu.Point(2, 4),
-        fosu.Point(8, 10),
-    ]
+    copied.hit_objects[0].control_points.append(fosu.Point(100, 200))
+    assert b.hit_objects[0].control_points == [fosu.Point(2, 4), fosu.Point(8, 10)]
 
 
 def test_plain_lists_support_normal_mutations():
@@ -937,11 +927,19 @@ def test_user_created_cycles_are_collected():
     b = fosu.parse(b"")
     marker = Marker()
     ref = weakref.ref(marker)
-    b.title = marker
-    b.hit_objects.append(b)
+    marker.beatmap = b
+    b.hit_objects.append(marker)
     del b, marker
     gc.collect()
     assert ref() is None
+
+
+def test_copy_and_pickle_preserve_cycles_through_record_lists():
+    b = fosu.parse(b"")
+    b.hit_objects.append(b)
+    for restored in (deepcopy(b), pickle.loads(pickle.dumps(b))):
+        assert restored is not b
+        assert restored.hit_objects[0] is restored
 
 
 def test_buffer_inputs():
@@ -1032,37 +1030,12 @@ def test_all_fields_are_detached_python_values():
         if id(value) in seen:
             return
         seen.add(id(value))
-        if isinstance(value, fosu.Point):
-            assert isinstance(value.x, float) and isinstance(value.y, float)
-        elif isinstance(value, fosu.Circle):
-            for name in (
-                "time",
-                "x",
-                "y",
-                "hitsound",
-                "type",
-                "new_combo",
-                "combo_skip",
-                "hit_sample",
-                "stacking",
-                "end_time",
-            ):
-                visit(getattr(value, name))
-        elif isinstance(value, fosu.TimingPoint):
-            for name in (
-                "time",
-                "beat_length",
-                "meter",
-                "sample_set",
-                "sample_index",
-                "volume",
-                "uninherited",
-                "effects",
-            ):
-                visit(getattr(value, name))
-        elif is_dataclass(value):
-            for f in fields(value):
-                visit(getattr(value, f.name))
+        if type(value).__module__ == "fosu._model" and not isinstance(value, Enum):
+            for name, hint in get_type_hints(type(value)).items():
+                if get_origin(hint) is not ClassVar:
+                    field = getattr(value, name)
+                    assert field is getattr(value, name)
+                    visit(field)
         elif isinstance(value, list):
             for item in value:
                 visit(item)
@@ -1123,18 +1096,87 @@ def test_enum_values_and_malformed_records():
     assert fosu.parse(b"[General]\nSampleSet:None\n").sample_set is fosu.SampleSet.NONE
 
 
-def test_dataclass_record_constructors_are_keyword_only():
-    b = fosu.parse(
-        b"[TimingPoints]\n0,500\n[HitObjects]\n0,0,1,1,0\n"
-        b"0,0,2,2,0,L|1:2,1,30\n0,0,3,8,0,4\n0,0,5,128,0,6\n"
-    )
-    for record in [b, b.stats, *b.timing_points, *b.hit_objects]:
-        if not is_dataclass(record):
-            continue
-        values = {field.name: getattr(record, field.name) for field in fields(record)}
-        assert type(record)(**values) == record
-        with pytest.raises(TypeError):
-            type(record)(*values.values())
+RECORD_TYPES = [
+    fosu.Point,
+    fosu.PathPoint,
+    fosu.Circle,
+    fosu.Slider,
+    fosu.Spinner,
+    fosu.HoldNote,
+    fosu.TimingPoint,
+    fosu.Break,
+    fosu.ParseStats,
+    fosu.Beatmap,
+    fosu.SliderPath,
+    fosu.SliderEvent,
+    fosu.Stacking,
+    fosu.CurveSegment,
+]
+
+
+@pytest.mark.parametrize("kind", RECORD_TYPES)
+def test_record_fields_are_eager_readonly_and_declared_in_model(kind):
+    names = [
+        name
+        for name, hint in get_type_hints(kind).items()
+        if get_origin(hint) is not ClassVar
+    ]
+    values = dict.fromkeys(names, None)
+    record = kind(**values)
+    assert kind.__module__ == "fosu._model"
+    assert not is_dataclass(record)
+    assert kind(*values.values()) == record
+    with pytest.raises(AttributeError):
+        record.__setstate__(tuple(values.values()))
+    for name in names:
+        assert getattr(record, name) is None
+        with pytest.raises(AttributeError):
+            setattr(record, name, 1)
+        with pytest.raises(AttributeError):
+            delattr(record, name)
+        with pytest.raises(AttributeError):
+            object.__setattr__(record, name, 1)
+    with pytest.raises(TypeError):
+        kind(**values, unknown_field=1)
+    with pytest.raises(TypeError):
+        kind(*values.values(), None)
+    with pytest.raises(TypeError):
+        kind(None, **values)
+    with pytest.raises(TypeError):
+        kind()
+    with pytest.raises(TypeError):
+        type("Subclass", (kind,), {})
+
+
+@pytest.mark.parametrize("kind", RECORD_TYPES)
+def test_every_native_record_collects_consumer_reference_cycles(kind):
+    class Marker:
+        pass
+
+    names = [
+        name
+        for name, hint in get_type_hints(kind).items()
+        if get_origin(hint) is not ClassVar
+    ]
+    values = dict.fromkeys(names, None)
+    marker = Marker()
+    values[names[0]] = marker
+    record = kind(**values)
+    marker.record = record
+    retained = weakref.ref(marker)
+    del record, marker, values
+    gc.collect()
+    assert retained() is None
+
+
+def test_internal_hitobject_subclasses_cannot_create_invalid_layouts():
+    from fosu._model import _HitObject
+
+    class Subclass(_HitObject):
+        __slots__ = ("extra",)
+
+    with pytest.raises(TypeError):
+        Subclass.__new__(Subclass)
 
 
 def test_bookmark_field_trimming_and_internal_whitespace():

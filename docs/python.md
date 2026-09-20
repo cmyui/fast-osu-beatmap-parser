@@ -1,10 +1,10 @@
 # Python API
 
 FOSU is in active development; its API may change without compatibility shims.
-Parsing returns eager objects and lists, detached from native memory. Slider
-control points (`Point`), circles (`Circle`), and timing points (`TimingPoint`)
-are read-only native objects with eager Python fields; other records remain
-slotted dataclasses. Attribute reads do not allocate numeric values.
+Parsing returns eager objects and lists, detached from native memory. All records
+are read-only native objects with eager Python fields, declared and typed in
+`_model.py`. Attribute reads do not allocate numeric values. Lists remain ordinary
+mutable Python lists.
 
 ## Install and use
 
@@ -65,9 +65,7 @@ malformed-line counts.
 
 The model classes in
 [_model.py](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/python/fosu/_model.py)
-and native type stubs in
-[_core.pyi](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/python/fosu/_core.pyi)
-define the fields.
+define the fields and convenience methods.
 Shared fields use C++ names. Important Python-specific behavior:
 
 - `hit_objects` contains `Circle`, `Slider`, `Spinner`, or `HoldNote`, in
@@ -89,14 +87,17 @@ Shared fields use C++ names. Important Python-specific behavior:
 - Inherited timing-point NaN beat lengths are preserved; consumers must not
   treat them as ordinary slider velocities.
 
-Most records can be edited, copied with `deepcopy`, exported with
-`dataclasses.asdict`, or pickled. `Point`, `Circle`, and `TimingPoint` are
-read-only and retain their types under `asdict`; they can also be copied or
-pickled. These native classes cannot be subclassed. Editable fields do not validate
-assignments or recompute related fields: changing a slider's position does not
-move its stored head point, and changing `type` does not recalculate combo
-flags. `dataclasses.replace` is a shallow copy for dataclass records. Mutation
-does not change the input or another parse result.
+Records support equality, `repr`, `deepcopy`, and pickle. They are not dataclasses:
+`dataclasses.asdict` and `dataclasses.replace` do not apply. Public record classes
+cannot be subclassed, and attributes cannot be assigned or deleted. Constructors
+accept positional or keyword arguments and retain the supplied values without
+runtime type validation. Parsed numeric fields are always eagerly converted to
+their documented Python types.
+
+List contents can be changed without affecting the input or another parse result.
+Such changes do not recompute derived data. All records participate in cyclic
+garbage collection, including cycles consumers create through lists or values
+passed to constructors.
 
 Pass `calculate_slider_paths=True` to retain each slider's `path` (otherwise
 `None`). `fosu.slider_position_at(slider.path, progress)` is a pure query over

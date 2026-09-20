@@ -1,10 +1,98 @@
 #pragma once
 
 #include <Python.h>
-#include <cstddef>
 #include <structmember.h>
 
 namespace {
+// Object-valued slots hold eager Python values, not C numbers boxed on read.
+struct RecordObject {
+  // clang-format off
+  PyObject_HEAD
+  Py_ssize_t field_count;
+  // clang-format on
+};
+PyObject** record_fields(PyObject* object) {
+  return reinterpret_cast<PyObject**>(reinterpret_cast<char*>(object) +
+                                      sizeof(RecordObject));
+}
+const PyMemberDef* record_members(PyTypeObject* type) {
+  return static_cast<const PyMemberDef*>(PyType_GetSlot(type, Py_tp_members));
+}
+PyObject* allocate_record(PyTypeObject* type, Py_ssize_t count) {
+  PyObject* object = PyType_GenericAlloc(type, 0);
+  if (object)
+    reinterpret_cast<RecordObject*>(object)->field_count = count;
+  return object;
+}
+int record_traverse(PyObject* object, visitproc visit, void* arg) {
+  Py_VISIT(Py_TYPE(object));
+  auto* fields = record_fields(object);
+  for (Py_ssize_t i = 0;
+       i < reinterpret_cast<RecordObject*>(object)->field_count; ++i) {
+    Py_VISIT(fields[i]);
+  }
+  return 0;
+}
+int record_clear(PyObject* object) {
+  auto* fields = record_fields(object);
+  for (Py_ssize_t i = 0;
+       i < reinterpret_cast<RecordObject*>(object)->field_count; ++i) {
+    Py_CLEAR(fields[i]);
+  }
+  return 0;
+}
+void record_dealloc(PyObject* object) {
+  PyObject_GC_UnTrack(object);
+  record_clear(object);
+  PyTypeObject* type = Py_TYPE(object);
+  PyObject_GC_Del(object);
+  Py_DECREF(type);
+}
+PyObject* record_new(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
+  if (PyType_GetSlot(type, Py_tp_dealloc) !=
+      reinterpret_cast<void*>(record_dealloc)) {
+    PyErr_SetString(PyExc_TypeError,
+                    "FOSU record subclasses cannot be instantiated");
+    return nullptr;
+  }
+  const auto* members = record_members(type);
+  Py_ssize_t  count = 0;
+  while (members[count].name)
+    ++count;
+  Py_ssize_t positional = PyTuple_Size(args);
+  if (positional > count) {
+    PyErr_SetString(PyExc_TypeError, "too many positional arguments");
+    return nullptr;
+  }
+  PyObject* object = allocate_record(type, count);
+  if (!object)
+    return nullptr;
+  Py_ssize_t keywords = 0;
+  for (Py_ssize_t i = 0; i < count; ++i) {
+    PyObject* keyword =
+        kwargs ? PyDict_GetItemString(kwargs, members[i].name) : nullptr;
+    if (i < positional && keyword) {
+      PyErr_Format(PyExc_TypeError, "multiple values for %s", members[i].name);
+      Py_DECREF(object);
+      return nullptr;
+    }
+    PyObject* value = i < positional ? PyTuple_GetItem(args, i) : keyword;
+    if (!value) {
+      PyErr_Format(PyExc_TypeError, "missing required argument: %s",
+                   members[i].name);
+      Py_DECREF(object);
+      return nullptr;
+    }
+    keywords += keyword != nullptr;
+    record_fields(object)[i] = Py_NewRef(value);
+  }
+  if (kwargs && keywords != PyDict_Size(kwargs)) {
+    PyErr_SetString(PyExc_TypeError, "unexpected keyword argument");
+    Py_DECREF(object);
+    return nullptr;
+  }
+  return object;
+}
 PyObject* record_values(PyObject* object, const PyMemberDef* members) {
   Py_ssize_t count = 0;
   while (members[count].name)
@@ -25,10 +113,8 @@ PyObject* record_values(PyObject* object, const PyMemberDef* members) {
   }
   return values;
 }
-PyObject* record_equal(PyObject*          left,
-                       PyObject*          right,
-                       int                op,
-                       const PyMemberDef* members) {
+PyObject* record_equal(PyObject* left, PyObject* right, int op) {
+  const auto* members = record_members(Py_TYPE(left));
   if (Py_TYPE(left) != Py_TYPE(right) || (op != Py_EQ && op != Py_NE)) {
     Py_INCREF(Py_NotImplemented);
     return Py_NotImplemented;
@@ -42,19 +128,45 @@ PyObject* record_equal(PyObject*          left,
   Py_XDECREF(b);
   return result;
 }
-PyObject* record_reduce(PyObject* object, const PyMemberDef* members) {
-  PyObject* values = record_values(object, members);
+PyObject* record_reduce(PyObject* object, PyObject*) {
+  const auto* members = record_members(Py_TYPE(object));
+  PyObject*   values = record_values(object, members);
   if (!values)
     return nullptr;
-  PyObject* result =
-      PyTuple_Pack(2, reinterpret_cast<PyObject*>(Py_TYPE(object)), values);
+  PyObject* type = reinterpret_cast<PyObject*>(Py_TYPE(object));
+  PyObject* module_name = PyObject_GetAttrString(type, "__module__");
+  PyObject* module = module_name ? PyImport_Import(module_name) : nullptr;
+  PyObject* restore =
+      module ? PyObject_GetAttrString(module, "_restore") : nullptr;
+  PyObject* args = restore ? PyTuple_Pack(1, type) : nullptr;
+  PyObject* result = args ? PyTuple_Pack(3, restore, args, values) : nullptr;
+  Py_XDECREF(args);
+  Py_XDECREF(restore);
+  Py_XDECREF(module);
+  Py_XDECREF(module_name);
   Py_DECREF(values);
   return result;
 }
-PyObject* record_repr(PyObject*          object,
-                      const char*        name,
-                      const PyMemberDef* members) {
-  int entered = Py_ReprEnter(object);
+PyObject* record_setstate(PyObject* object, PyObject* values) {
+  const auto count = reinterpret_cast<RecordObject*>(object)->field_count;
+  if (!PyTuple_Check(values) || PyTuple_Size(values) != count) {
+    PyErr_SetString(PyExc_TypeError, "record state must contain every field");
+    return nullptr;
+  }
+  auto* fields = record_fields(object);
+  for (Py_ssize_t i = 0; i < count; ++i) {
+    if (fields[i]) {
+      PyErr_SetString(PyExc_AttributeError, "record is already initialized");
+      return nullptr;
+    }
+  }
+  for (Py_ssize_t i = 0; i < count; ++i)
+    fields[i] = Py_NewRef(PyTuple_GetItem(values, i));
+  Py_RETURN_NONE;
+}
+PyObject* record_repr(PyObject* object) {
+  const auto* members = record_members(Py_TYPE(object));
+  int         entered = Py_ReprEnter(object);
   if (entered < 0)
     return nullptr;
   if (entered)
@@ -81,8 +193,14 @@ PyObject* record_repr(PyObject*          object,
   if (!separator)
     goto done;
   joined = PyUnicode_Join(separator, fields);
-  if (joined)
-    result = PyUnicode_FromFormat("%s(%U)", name, joined);
+  if (joined) {
+    PyObject* name = PyObject_GetAttrString(
+        reinterpret_cast<PyObject*>(Py_TYPE(object)), "__name__");
+    if (name) {
+      result = PyUnicode_FromFormat("%U(%U)", name, joined);
+      Py_DECREF(name);
+    }
+  }
 done:
   Py_XDECREF(joined);
   Py_XDECREF(separator);
@@ -91,241 +209,8 @@ done:
   return result;
 }
 
-struct CircleObject {
-  // clang-format off
-  PyObject_HEAD
-  PyObject* time;
-  PyObject* x;
-  PyObject* y;
-  PyObject* hitsound;
-  PyObject* type;
-  PyObject* new_combo;
-  PyObject* combo_skip;
-  PyObject* hit_sample;
-  PyObject* stacking;
-  PyObject* end_time;
-  // clang-format on
-};
-int circle_traverse(PyObject* object, visitproc visit, void* arg) {
-  auto* circle = reinterpret_cast<CircleObject*>(object);
-  Py_VISIT(Py_TYPE(object));
-  Py_VISIT(circle->time);
-  Py_VISIT(circle->x);
-  Py_VISIT(circle->y);
-  Py_VISIT(circle->hitsound);
-  Py_VISIT(circle->type);
-  Py_VISIT(circle->new_combo);
-  Py_VISIT(circle->combo_skip);
-  Py_VISIT(circle->hit_sample);
-  Py_VISIT(circle->stacking);
-  Py_VISIT(circle->end_time);
-  return 0;
-}
-int circle_clear(PyObject* object) {
-  auto* circle = reinterpret_cast<CircleObject*>(object);
-  Py_CLEAR(circle->time);
-  Py_CLEAR(circle->x);
-  Py_CLEAR(circle->y);
-  Py_CLEAR(circle->hitsound);
-  Py_CLEAR(circle->type);
-  Py_CLEAR(circle->new_combo);
-  Py_CLEAR(circle->combo_skip);
-  Py_CLEAR(circle->hit_sample);
-  Py_CLEAR(circle->stacking);
-  Py_CLEAR(circle->end_time);
-  return 0;
-}
-void circle_dealloc(PyObject* object) {
-  PyObject_GC_UnTrack(object);
-  circle_clear(object);
-  PyTypeObject* type = Py_TYPE(object);
-  PyObject_GC_Del(object);
-  Py_DECREF(type);
-}
-PyObject* circle_new(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
-  static const char* names[] = {
-      "time",       "x",          "y",        "hitsound", "type", "new_combo",
-      "combo_skip", "hit_sample", "stacking", "end_time", nullptr};
-  PyObject *time, *x, *y, *hitsound, *kind, *new_combo, *combo_skip,
-      *hit_sample, *stacking, *end_time;
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOOOOOOOOO:Circle",
-                                   const_cast<char**>(names), &time, &x, &y,
-                                   &hitsound, &kind, &new_combo, &combo_skip,
-                                   &hit_sample, &stacking, &end_time))
-    return nullptr;
-  auto* object = reinterpret_cast<CircleObject*>(PyType_GenericAlloc(type, 0));
-  if (!object)
-    return nullptr;
-  object->time = Py_NewRef(time);
-  object->x = Py_NewRef(x);
-  object->y = Py_NewRef(y);
-  object->hitsound = Py_NewRef(hitsound);
-  object->type = Py_NewRef(kind);
-  object->new_combo = Py_NewRef(new_combo);
-  object->combo_skip = Py_NewRef(combo_skip);
-  object->hit_sample = Py_NewRef(hit_sample);
-  object->stacking = Py_NewRef(stacking);
-  object->end_time = Py_NewRef(end_time);
-  return reinterpret_cast<PyObject*>(object);
-}
-PyMemberDef circle_members[] = {
-    {"time", T_OBJECT_EX, offsetof(CircleObject, time), READONLY, nullptr},
-    {"x", T_OBJECT_EX, offsetof(CircleObject, x), READONLY, nullptr},
-    {"y", T_OBJECT_EX, offsetof(CircleObject, y), READONLY, nullptr},
-    {"hitsound", T_OBJECT_EX, offsetof(CircleObject, hitsound), READONLY,
-     nullptr},
-    {"type", T_OBJECT_EX, offsetof(CircleObject, type), READONLY, nullptr},
-    {"new_combo", T_OBJECT_EX, offsetof(CircleObject, new_combo), READONLY,
-     nullptr},
-    {"combo_skip", T_OBJECT_EX, offsetof(CircleObject, combo_skip), READONLY,
-     nullptr},
-    {"hit_sample", T_OBJECT_EX, offsetof(CircleObject, hit_sample), READONLY,
-     nullptr},
-    {"stacking", T_OBJECT_EX, offsetof(CircleObject, stacking), READONLY,
-     nullptr},
-    {"end_time", T_OBJECT_EX, offsetof(CircleObject, end_time), READONLY,
-     nullptr},
-    {nullptr, 0, 0, 0, nullptr}};
-PyObject* circle_repr(PyObject* object) {
-  return record_repr(object, "Circle", circle_members);
-}
-PyObject* circle_equal(PyObject* a, PyObject* b, int op) {
-  return record_equal(a, b, op, circle_members);
-}
-PyObject* circle_reduce(PyObject* object, PyObject*) {
-  return record_reduce(object, circle_members);
-}
-PyMethodDef circle_methods[] = {
-    {"__reduce__", circle_reduce, METH_NOARGS, nullptr},
+PyMethodDef record_methods[] = {
+    {"__reduce__", record_reduce, METH_NOARGS, nullptr},
+    {"__setstate__", record_setstate, METH_O, nullptr},
     {nullptr, nullptr, 0, nullptr}};
-PyType_Slot circle_slots[] = {
-    {Py_tp_new, reinterpret_cast<void*>(circle_new)},
-    {Py_tp_repr, reinterpret_cast<void*>(circle_repr)},
-    {Py_tp_richcompare, reinterpret_cast<void*>(circle_equal)},
-    {Py_tp_hash, reinterpret_cast<void*>(PyObject_HashNotImplemented)},
-    {Py_tp_methods, circle_methods},
-    {Py_tp_dealloc, reinterpret_cast<void*>(circle_dealloc)},
-    {Py_tp_traverse, reinterpret_cast<void*>(circle_traverse)},
-    {Py_tp_clear, reinterpret_cast<void*>(circle_clear)},
-    {Py_tp_members, circle_members},
-    {0, nullptr}};
-PyType_Spec circle_spec = {"fosu._core.Circle", sizeof(CircleObject), 0,
-                           Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
-                           circle_slots};
-
-struct TimingPointObject {
-  // clang-format off
-  PyObject_HEAD
-  PyObject* time;
-  PyObject* beat_length;
-  PyObject* meter;
-  PyObject* sample_set;
-  PyObject* sample_index;
-  PyObject* volume;
-  PyObject* uninherited;
-  PyObject* effects;
-  // clang-format on
-};
-int timing_point_traverse(PyObject* object, visitproc visit, void* arg) {
-  auto* point = reinterpret_cast<TimingPointObject*>(object);
-  Py_VISIT(Py_TYPE(object));
-  Py_VISIT(point->time);
-  Py_VISIT(point->beat_length);
-  Py_VISIT(point->meter);
-  Py_VISIT(point->sample_set);
-  Py_VISIT(point->sample_index);
-  Py_VISIT(point->volume);
-  Py_VISIT(point->uninherited);
-  Py_VISIT(point->effects);
-  return 0;
-}
-int timing_point_clear(PyObject* object) {
-  auto* point = reinterpret_cast<TimingPointObject*>(object);
-  Py_CLEAR(point->time);
-  Py_CLEAR(point->beat_length);
-  Py_CLEAR(point->meter);
-  Py_CLEAR(point->sample_set);
-  Py_CLEAR(point->sample_index);
-  Py_CLEAR(point->volume);
-  Py_CLEAR(point->uninherited);
-  Py_CLEAR(point->effects);
-  return 0;
-}
-void timing_point_dealloc(PyObject* object) {
-  PyObject_GC_UnTrack(object);
-  timing_point_clear(object);
-  PyTypeObject* type = Py_TYPE(object);
-  PyObject_GC_Del(object);
-  Py_DECREF(type);
-}
-PyObject* timing_point_new(PyTypeObject* type,
-                           PyObject*     args,
-                           PyObject*     kwargs) {
-  static const char* names[] = {"time",        "beat_length",  "meter",
-                                "sample_set",  "sample_index", "volume",
-                                "uninherited", "effects",      nullptr};
-  PyObject *time, *beat_length, *meter, *sample_set, *sample_index, *volume,
-      *uninherited, *effects;
-  if (!PyArg_ParseTupleAndKeywords(
-          args, kwargs, "OOOOOOOO:TimingPoint", const_cast<char**>(names),
-          &time, &beat_length, &meter, &sample_set, &sample_index, &volume,
-          &uninherited, &effects))
-    return nullptr;
-  auto* object =
-      reinterpret_cast<TimingPointObject*>(PyType_GenericAlloc(type, 0));
-  if (!object)
-    return nullptr;
-  object->time = Py_NewRef(time);
-  object->beat_length = Py_NewRef(beat_length);
-  object->meter = Py_NewRef(meter);
-  object->sample_set = Py_NewRef(sample_set);
-  object->sample_index = Py_NewRef(sample_index);
-  object->volume = Py_NewRef(volume);
-  object->uninherited = Py_NewRef(uninherited);
-  object->effects = Py_NewRef(effects);
-  return reinterpret_cast<PyObject*>(object);
-}
-PyMemberDef timing_point_members[] = {
-    {"time", T_OBJECT_EX, offsetof(TimingPointObject, time), READONLY, nullptr},
-    {"beat_length", T_OBJECT_EX, offsetof(TimingPointObject, beat_length),
-     READONLY, nullptr},
-    {"meter", T_OBJECT_EX, offsetof(TimingPointObject, meter), READONLY,
-     nullptr},
-    {"sample_set", T_OBJECT_EX, offsetof(TimingPointObject, sample_set),
-     READONLY, nullptr},
-    {"sample_index", T_OBJECT_EX, offsetof(TimingPointObject, sample_index),
-     READONLY, nullptr},
-    {"volume", T_OBJECT_EX, offsetof(TimingPointObject, volume), READONLY,
-     nullptr},
-    {"uninherited", T_OBJECT_EX, offsetof(TimingPointObject, uninherited),
-     READONLY, nullptr},
-    {"effects", T_OBJECT_EX, offsetof(TimingPointObject, effects), READONLY,
-     nullptr},
-    {nullptr, 0, 0, 0, nullptr}};
-PyObject* timing_point_repr(PyObject* object) {
-  return record_repr(object, "TimingPoint", timing_point_members);
-}
-PyObject* timing_point_equal(PyObject* a, PyObject* b, int op) {
-  return record_equal(a, b, op, timing_point_members);
-}
-PyObject* timing_point_reduce(PyObject* object, PyObject*) {
-  return record_reduce(object, timing_point_members);
-}
-PyMethodDef timing_point_methods[] = {
-    {"__reduce__", timing_point_reduce, METH_NOARGS, nullptr},
-    {nullptr, nullptr, 0, nullptr}};
-PyType_Slot timing_point_slots[] = {
-    {Py_tp_new, reinterpret_cast<void*>(timing_point_new)},
-    {Py_tp_repr, reinterpret_cast<void*>(timing_point_repr)},
-    {Py_tp_richcompare, reinterpret_cast<void*>(timing_point_equal)},
-    {Py_tp_hash, reinterpret_cast<void*>(PyObject_HashNotImplemented)},
-    {Py_tp_methods, timing_point_methods},
-    {Py_tp_dealloc, reinterpret_cast<void*>(timing_point_dealloc)},
-    {Py_tp_traverse, reinterpret_cast<void*>(timing_point_traverse)},
-    {Py_tp_clear, reinterpret_cast<void*>(timing_point_clear)},
-    {Py_tp_members, timing_point_members},
-    {0, nullptr}};
-PyType_Spec timing_point_spec = {
-    "fosu._core.TimingPoint", sizeof(TimingPointObject), 0,
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC, timing_point_slots};
 }  // namespace
