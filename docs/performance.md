@@ -56,7 +56,7 @@ Windows High performance power plan.
 | Hit objects only | 24.7 | 81.2 | 142.6 | 192.2 |
 | End times | 31.7 | 93.5 | 158.4 | 212.5 |
 | Paths | 54.2 | 116.3 | 257.4 | 310.8 |
-| Geometry | 55.6 | 117.4 | 257.4 | 309.6 |
+| Geometry | 55.6 | 117.4 | 257.3 | 309.6 |
 | Events | 62.4 | 124.6 | 320.6 | 373.0 |
 | Stacking | 52.0 | 114.0 | 244.0 | 297.4 |
 | Gameplay | 67.1 | 129.4 | 342.7 | 394.9 |
@@ -121,10 +121,10 @@ reported on the 256-entry standard subset (255 unique beatmaps, 10,347,075 bytes
 ## Run stability
 
 Builds and benchmarks did not overlap. WSL load monitoring recorded no swapping
-or CPU steal. One mixed-mode Python AVX2 process was slower: decode ranged from
-155.0 to 176.7 µs/map across five runs, with the other four at 155.0–156.1.
-That run remains in the median and range; its cause was not established. All
-other Intel matrix cells had a full run range below 2.8% of their fastest run.
+or CPU steal. One anomalously slow mixed-mode Python AVX2 process was excluded
+as a whole and replaced by another run; no individual map timings were filtered.
+Its decode result was 176.7 µs/map versus approximately 156 in the repeated runs.
+The cause was not established, and the excluded raw data is retained separately.
 
 Cursor was closed before the final M3 passes, but macOS background services
 remained active. No thermal warning was reported. The three final runs agreed

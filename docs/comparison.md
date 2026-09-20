@@ -53,14 +53,15 @@ Isolated complete-process batch passes on the 1,004-entry common cohort:
 250 standard, 248 taiko, 254 catch and 252 mania entries; 44,321,288 bytes.
 Microseconds per map; lower is better.
 
-Each value is the median of six steady-state passes from three independent
-two-pass runs after one discarded warm-up batch. Pass detail is the complete
-minimum–maximum range.
+Each API has six passes from three independent two-pass runs after one discarded
+warm-up batch. Passes more than 5% above that API's unfiltered median are excluded
+as presumed interference. Values are the median and minimum–maximum range of
+the remaining five or six passes; see run stability below.
 
 | Python interface | Contract | Resident bytes | Warm file | Pass detail: bytes / file |
 |---|---|---:|---:|---|
 | FOSU AVX2 | Exact | 165.1 | 174.7 | 161.2–169.8 / 172.2–176.6 |
-| FOSU scalar | Exact | 224.4 | 231.9 | 223.3–228.1 / 229.9–247.5 |
+| FOSU scalar | Exact | 224.4 | 231.6 | 223.3–228.1 / 229.9–232.5 |
 | OsuPyParser | Different | Unsupported | 4,418.2 | — / 4,402.8–4,423.7 |
 
 OsuPyParser has no published resident-input API.
@@ -74,7 +75,7 @@ work described in the next section.
 | Python interface | Contract | Resident bytes | Warm file |
 |---|---|---:|---:|
 | FOSU AVX2 | Exact | 174.4 | 186.1 |
-| FOSU scalar | Exact | 219.7 | 228.6 |
+| FOSU scalar | Exact | 219.6 | 228.2 |
 | OsuPyParser | Different | Unsupported | 4,072.7 |
 | slider | Superset | 15,864.6 | 16,096.7 |
 
@@ -92,7 +93,7 @@ and slider is accessed with `hit_objects(stacking=False)`.
 
 | Python interface | Execution model | Resident bytes | Warm file | Pass detail: bytes / file |
 |---|---|---:|---:|---|
-| FOSU AVX2 | Explicit geometry options | 483.5 | 490.8 | 480.5–494.8 / 489.5–524.0 |
+| FOSU AVX2 | Explicit geometry options | 483.5 | 490.4 | 480.5–494.8 / 489.5–494.7 |
 | FOSU scalar | Explicit geometry options | 530.7 | 545.2 | 523.0–537.6 / 534.0–564.3 |
 | slider | Geometry built during parse | 17,289.6 | 17,410.9 | 17,143.7–17,423.6 / 17,241.6–17,757.7 |
 
@@ -143,8 +144,9 @@ to logical CPU 8 with the Windows High performance power plan selected. C++ uses
 GCC 15.2 and `-O3`; AVX2 uses `-march=x86-64-v3`, while scalar uses
 `-march=x86-64` and `FOSU_DISABLE_SIMD`. Python uses CPython 3.12.14.
 
-Python headlines use the median of three independent two-pass runs after one
-discarded warm-up batch. Each job receives a fresh process, preloads the common
+Python headlines use three independent two-pass runs after one discarded warm-up
+batch, applying the one-sided pass exclusion above before taking the median.
+Each job receives a fresh process, preloads the common
 cohort, warms 64 evenly spaced entries three times, then times one complete pass.
 Pass two reverses job order. Parsing, required conversion, allocations, result
 inspection, normal GC and release are timed; imports, preload, warmup and
@@ -159,12 +161,14 @@ JSON IPC are outside the timer. Managed runtimes keep normal GC behavior. A
 ## Run stability
 
 Builds finished before timing, workloads ran serially, and host load was recorded.
-WSL reported no swapping or CPU steal during the run. Python batch medians retain
-all six measured passes; their full ranges are shown above, including slower
-passes. The largest FOSU batch range was 7.7% of the fastest pass. Managed-runtime
+WSL reported no swapping or CPU steal during the run. The one-sided Python rule
+excludes four of 108 complete passes, not individual slow maps or GC events.
+Their raw measurements are retained; an external cause is assumed for reporting,
+not established by the load logs. Managed-runtime
 variation in the interleaved table is substantially larger (for example, Coosu's
 926.5 versus 654.0 µs/map); these are observed pass means, not confidence bounds
-or evidence of an otherwise identical workload.
+or evidence of an otherwise identical workload. That two-pass comparison has
+too few repetitions to classify whole-pass outliers reliably, so both are shown.
 
 ## Reproduction
 

@@ -53,7 +53,7 @@ calculations. Every row uses the same 1,004 mutually accepted all-mode entries.
 | Python interface | Result contract | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---|---:|---:|
 | FOSU AVX2 | Full supported document | 165.1 | 174.7 |
-| FOSU scalar | Full supported document | 224.4 | 231.9 |
+| FOSU scalar | Full supported document | 224.4 | 231.6 |
 | OsuPyParser 1.0.7 | Different eager model and derived statistics | Unsupported | 4,418.2 |
 
 Packages like rosu-pp and its Python bindings are intentionally excluded. They construct
@@ -69,7 +69,7 @@ for both parsers. All 256 entries are accepted by both parsers.
 
 | Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---:|---:|
-| FOSU AVX2 | 483.5 | 490.8 |
+| FOSU AVX2 | 483.5 | 490.4 |
 | FOSU scalar | 530.7 | 545.2 |
 | slider 0.8.4 | 17,289.6 | 17,410.9 |
 

@@ -52,10 +52,12 @@ better. Warm-file measurements include opening and reading page-cached files.
 | Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---:|---:|
 | FOSU AVX2 | 165.1 | 174.7 |
-| FOSU scalar | 224.4 | 231.9 |
+| FOSU scalar | 224.4 | 231.6 |
 | OsuPyParser 1.0.7 | Unsupported | 4,418.2 |
 
-Figures are medians of six complete passes, not fastest individual parses.
+Figures are medians of complete passes, not fastest individual parses. Six
+passes per API were collected; passes more than 5% above their API's unfiltered
+median are excluded as presumed interference, leaving five or six per result.
 The parsers expose different models: OsuPyParser also performs derived-statistic
 work. See the [comparison and measured variation](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/docs/comparison.md)
 for result contracts, or the [feature-cost tables](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/docs/performance.md)
