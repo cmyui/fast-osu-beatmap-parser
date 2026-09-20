@@ -13,6 +13,7 @@ else:
     from typing_extensions import Buffer
 
 from . import _core
+from ._core import Point as Point
 from ._core import backend as backend
 from ._model import (
     Beatmap,
@@ -25,7 +26,6 @@ from ._model import (
     HitSound,
     HoldNote,
     ParseStats,
-    Point,
     PathPoint,
     SliderPath,
     SliderEvent,
