@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "fosu"
-version = "0.5.1"
+version = "0.5.2"
 description = "Fast native osu! beatmap parsing with owned Python results"
 readme = "docs/python.md"
 requires-python = ">=3.10"
@@ -48,7 +48,13 @@ cmake.version = ">=3.26"
 ninja.make-fallback = true
 wheel.packages = ["python/fosu"]
 wheel.py-api = "cp310"
-sdist.exclude = ["build", "dist", "tests/reference/official/bin", "tests/reference/official/obj", "bench/comparison/results"]
+sdist.exclude = [
+  "build",
+  "dist",
+  "tests/reference/official/bin",
+  "tests/reference/official/obj",
+  "bench/comparison/results",
+]
 
 [tool.cibuildwheel]
 build = "cp310-*"
