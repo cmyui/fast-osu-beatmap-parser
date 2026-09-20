@@ -35,6 +35,8 @@ struct HitObjectParseConstants {};  // the scalar path has no vector constants
 #endif
 
 inline constexpr u32 kNPrefixVariants = 3 * 3 * 10 * 3;
+inline constexpr u32 kFiveDigitTimeMaskIndex = 504;
+inline constexpr u32 kSixDigitTimeMaskIndex = 510;
 
 #if FOSU_SIMD_X86
 

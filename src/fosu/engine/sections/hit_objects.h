@@ -204,8 +204,6 @@ inline const char* parse_hitobjects_section_simd(
     const char*                    file_end,
     const HitObjectParseConstants& constants,
     i32                            time_offset) {
-  constexpr u32    kFiveDigitTimeMaskIndex = 504;
-  constexpr u32    kSixDigitTimeMaskIndex = 510;
   const ByteVector comma_value = constants.comma;
   const ByteVector zero = constants.zero;
   u32              fast_lines = 0;
@@ -295,8 +293,8 @@ inline const char* parse_hitobjects_section_simd(
       f64       time;
       bool      time_ok = true;
 #if FOSU_SIMD_X86
-      const __m256i digits = _mm256_sub_epi8(ascii, zero);
-      const auto    place_digits = [&](const LaneMasks& masks) {
+      const auto digits = _mm256_sub_epi8(ascii, zero);
+      const auto place_digits = [&](const LaneMasks& masks) {
         const __m256i perm =
             _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.perm));
         const __m256i shuf =
