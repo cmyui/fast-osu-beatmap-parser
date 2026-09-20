@@ -233,7 +233,7 @@ inline const char* parse_hitobjects_section_simd(
     const auto  length = static_cast<size_t>(line_end - p);
     u32         p1, p2, prefix_end, hitsound_length, mask_index;
     bool        common_layout;
-#if FOSU_SIMD_X86
+#if FOSU_SIMD_X86 || FOSU_SIMD_NEON
     // Common editor prefixes: ddd,ddd,ddddd,d,d and ddd,ddd,dddddd,d,d.
     // Match every digit boundary and comma before using fixed shuffle masks.
     if ((nondigits & 0x3ffffu) == 0x2a088u && (commas & 0xffffu) == 0xa088u) {
