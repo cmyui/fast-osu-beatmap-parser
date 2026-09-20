@@ -384,12 +384,12 @@ inline bool calculate_lazer_slider_distance(
   return true;
 }
 
-inline Result<f64> slider_distance(const HitObject&              object,
-                                   const Slider&                 slider,
-                                   std::span<const SliderPoint>  control_points,
-                                   std::span<const CurveSegment> segments,
-                                   Arena*                        arena,
-                                   bool                          lazer_format) {
+inline Result<f64> slider_distance(const Beatmap&   map,
+                                   const HitObject& object,
+                                   Arena*           arena) {
+  const auto& slider = map.sliders[object.slider];
+  const auto  control_points =
+      map.slider_points.subspan(slider.point_begin, slider.point_count);
   // A non-degenerate final linear edge can always reach the declared length.
   // No approximation or scratch allocation is needed to establish its distance.
   if (slider.length > 0 && !control_points.empty()) {
@@ -411,7 +411,9 @@ inline Result<f64> slider_distance(const HitObject&              object,
   const size_t                      count = control_points.size() + 1;
   CurveDistance                     distance;
   const std::span<const CurvePoint> relative_points{points, count};
-  if (lazer_format) {
+  if (map.format_version >= 128) {
+    const auto segments =
+        map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
     if (!calculate_lazer_slider_distance(relative_points, segments,
                                          slider.curve_type, distance, arena)) {
       return Error{ErrorCode::AllocationFailure};
@@ -548,14 +550,13 @@ inline bool calculate_lazer_slider_curve(std::span<const CurvePoint>   points,
   return true;
 }
 
-inline Result<SliderPath> calculate_slider_path(
-    const HitObject&              object,
-    const Slider&                 slider,
-    std::span<const SliderPoint>  control_points,
-    std::span<const CurveSegment> segments,
-    Arena*                        result_arena,
-    Arena*                        scratch_arena,
-    bool                          lazer_format) {
+inline Result<SliderPath> calculate_slider_path(const Beatmap&   map,
+                                                const HitObject& object,
+                                                Arena*           result_arena,
+                                                Arena* scratch_arena) {
+  const auto& slider = map.sliders[object.slider];
+  const auto  control_points =
+      map.slider_points.subspan(slider.point_begin, slider.point_count);
   const TempArena work{scratch_arena};
   auto*           points =
       arena_push_array<CurvePoint>(scratch_arena, control_points.size() + 1);
@@ -572,7 +573,9 @@ inline Result<SliderPath> calculate_slider_path(
   if (count > 1 && points[0] != points[1])
     curve.append(points[0]);
   const std::span<const CurvePoint> relative_points{points, count};
-  if (lazer_format) {
+  if (map.format_version >= 128) {
+    const auto segments =
+        map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
     if (!calculate_lazer_slider_curve(relative_points, segments,
                                       slider.curve_type, curve,
                                       scratch_arena)) {
@@ -620,14 +623,7 @@ inline bool set_slider_paths(Beatmap& map,
   for (const auto& object : map.hit_objects) {
     if (object.slider == HitObject::kNoSlider)
       continue;
-    const auto& slider = map.sliders[object.slider];
-    const auto  control_points =
-        map.slider_points.subspan(slider.point_begin, slider.point_count);
-    const auto segments =
-        map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
-    auto path = calculate_slider_path(object, slider, control_points, segments,
-                                      result_arena, scratch_arena,
-                                      map.format_version >= 128);
+    auto path = calculate_slider_path(map, object, result_arena, scratch_arena);
     if (!path) {
       success = false;
       break;
