@@ -45,7 +45,22 @@ if(BUILD_TESTING)
   foreach(backend auto scalar avx2 neon invalid)
     add_test(NAME dispatch_${backend} COMMAND test_dispatch ${backend})
   endforeach()
+  # This consumer sees only the C header and linker file, never C++20 headers
+  # or propagated CMake compile features from fosu::fosu.
+  add_executable(test_cxx98 EXCLUDE_FROM_ALL tests/test_cxx98.cc)
+  set_target_properties(test_cxx98 PROPERTIES
+    CXX_STANDARD 98 CXX_STANDARD_REQUIRED ON
+    BUILD_RPATH "$<TARGET_FILE_DIR:fosu>")
+  target_link_libraries(test_cxx98 PRIVATE fosu_c)
+  fosu_profile(test_cxx98)
+  add_test(NAME cxx98 COMMAND test_cxx98
+    ${PROJECT_SOURCE_DIR}/tests/fixtures/official/lazer-slider-paths.osu)
+  add_executable(test_c_api EXCLUDE_FROM_ALL tests/test_c_api.c)
+  target_link_libraries(test_c_api PRIVATE fosu_c)
+  fosu_profile(test_c_api)
+  add_test(NAME c_api COMMAND test_c_api)
   add_custom_target(test-binaries DEPENDS ${_test_targets} test_dispatch)
+  add_dependencies(test-binaries test_cxx98 test_c_api)
   add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C $<CONFIG> DEPENDS test-binaries USES_TERMINAL)
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     fosu_executable(fuzz_parser tests/fuzz_parser.cc)

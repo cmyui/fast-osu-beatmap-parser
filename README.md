@@ -26,7 +26,8 @@ Install a prebuilt wheel with `python -m pip install fosu`, or run
 `python -m pip install .` in a source checkout.
 See the [Python guide](docs/python.md) for installation and the complete API.
 
-The C++20 interface is header-only:
+The C++20 interface is header-only; C and C++98 callers can use the
+[C-compatible interface](docs/library.md#c-and-c98-callers):
 
 ```cpp
 #include <fosu/parser.h>

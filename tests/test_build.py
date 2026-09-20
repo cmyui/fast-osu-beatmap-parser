@@ -34,6 +34,9 @@ else()
 endif()
 add_executable(runtime runtime.cc)
 target_link_libraries(runtime PRIVATE fosu::fosu)
+add_executable(legacy legacy.cc)
+set_target_properties(legacy PROPERTIES CXX_STANDARD 98 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(legacy PRIVATE fosu::c)
 """)
     (root / "main.cc").write_text("""#include <fosu/parser.h>
 int main() { fosu::Parser parser; auto result = parser.parse(nullptr, 0);
@@ -50,6 +53,17 @@ int main() {
     if (!result || result.value()->hit_objects.size() != 1) return 2;
     puts(engine->kind == fosu::EngineKind::Scalar ? "scalar" :
          engine->kind == fosu::EngineKind::Avx2 ? "avx2" : "neon");
+}
+""")
+    (root / "legacy.cc").write_text("""#include <fosu/c_api.h>
+#include <cstdio>
+int main() {
+    fosu_c_handle* handle = fosu_c_new(); if (!handle) return 1;
+    const char data[] = "[HitObjects]\\n1,2,3,1,0\\n";
+    int status = fosu_c_parse(handle, data, sizeof(data)-1, NULL);
+    const fosu_c_view* view = fosu_c_get_view(handle);
+    if (status || !view || view->hit_object_count != 1) return 2;
+    puts(fosu_c_backend_name()); fosu_c_free(handle);
 }
 """)
     subprocess.run(
@@ -75,11 +89,14 @@ int main() {
     if os.name == "nt":
         env["PATH"] = str(prefix / "bin") + os.pathsep + env["PATH"]
     selected = subprocess.check_output([consumer], env=env, text=True).strip()
+    legacy = str(executable_dir / f"legacy{suffix}")
+    assert subprocess.check_output([legacy], env=env, text=True).strip() == selected
     # Change only this temporary installation, never the source build.
     engines = list(prefix.rglob("*fosu_engine_*"))
     for engine in engines:
         engine.rename(engine.with_name(engine.name + ".unavailable"))
     assert subprocess.check_output([consumer], env=env, text=True).strip() == "scalar"
+    assert subprocess.check_output([legacy], env=env, text=True).strip() == "scalar"
     if selected != "scalar":
         env["FOSU_BACKEND"] = selected
         assert subprocess.run([consumer], env=env).returncode == 1
