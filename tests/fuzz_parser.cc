@@ -7,14 +7,17 @@
 #include <cassert>
 #include <string>
 
-static void check(std::string_view data) {
+static void check(std::string_view data, fosu::ParseOptions options) {
   auto         input = fosu::make_padded(data);
   fosu::Parser scalar_parser(fosu_test::scalar_engine());
   fosu::Parser simd_parser;
-  auto         scalar =
-      scalar_parser.parse(input, {.calculate_slider_end_times = true});
-  auto simd = simd_parser.parse(input, {.calculate_slider_end_times = true});
-  assert(scalar && simd);
+  auto         scalar = scalar_parser.parse(input, options);
+  auto         simd = simd_parser.parse(input, options);
+  assert(bool(scalar) == bool(simd));
+  if (!scalar) {
+    assert(scalar.error().code == simd.error().code);
+    return;
+  }
   auto a = *scalar.value();
   auto b = *simd.value();
   a.stats.fast_path_lines = a.stats.slow_path_lines = 0;
@@ -28,9 +31,17 @@ static void check(std::string_view data) {
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (size > 65536)
     return 0;
-  std::string text(reinterpret_cast<const char*>(data), size);
-  check(text);
-  check("[HitObjects]\n" + text);
-  check("[TimingPoints]\n" + text);
+  std::string              text(reinterpret_cast<const char*>(data), size);
+  const fosu::ParseOptions timing{.calculate_slider_end_times = true};
+  check(text, timing);
+  check("[HitObjects]\n" + text, timing);
+  check("[TimingPoints]\n" + text, timing);
+  if (size <= 4096) {
+    const fosu::ParseOptions all{.calculate_slider_events = true,
+                                 .apply_stacking = true};
+    check(text, all);
+    check("[HitObjects]\n" + text, all);
+    check("[TimingPoints]\n" + text, all);
+  }
   return 0;
 }

@@ -63,7 +63,7 @@ inline ParserArenaPoolCleanup parser_arena_pool_cleanup;
 #endif
 
 inline size_t velocity_preset_capacity(std::span<const char> input) {
-  constexpr std::string_view field = "VelocityPresets:";
+  constexpr std::string_view field = "VelocityPresets";
   const std::string_view     document{input.data(), input.size()};
   size_t                     capacity = 3;
   size_t                     search_from = 0;
@@ -71,14 +71,18 @@ inline size_t velocity_preset_capacity(std::span<const char> input) {
     const size_t field_begin = document.find(field, search_from);
     if (field_begin == std::string_view::npos)
       break;
-    const size_t value_begin = field_begin + field.size();
-    const size_t line_end = document.find('\n', value_begin);
+    const size_t key_end = field_begin + field.size();
+    const size_t line_end = document.find('\n', key_end);
     const size_t value_end =
         line_end == std::string_view::npos ? document.size() : line_end;
-    size_t values = 1;
-    for (size_t i = value_begin; i < value_end; ++i)
-      values += document[i] == ',';
-    capacity = std::max(capacity, values);
+    const size_t colon = document.find(':', key_end);
+    if (colon < value_end && trim_field(document.substr(
+                                 field_begin, colon - field_begin)) == field) {
+      size_t values = 1;
+      for (size_t i = colon + 1; i < value_end; ++i)
+        values += document[i] == ',';
+      capacity = std::max(capacity, values);
+    }
     search_from = value_end;
   }
   return capacity;

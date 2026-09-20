@@ -173,6 +173,145 @@ static void test_rejected_slider_points() {
   }
 }
 
+static void test_canonical_dump_covers_parsed_values() {
+  fosu::Parser parser;
+  auto         parsed = parser.parse(
+      "osu file format v128\n[Editor]\nVelocityPresets:1,2\n"
+      "[TimingPoints]\n0,500\n[HitObjects]\n"
+      "10.25,20.25,1000,2,0,B2|100.25:0|100:100|0:100,1,300\n",
+      {.calculate_slider_events = true, .apply_stacking = true});
+  auto& map = require_parse(parsed);
+  CHECK_EQ(map.slider_segments.size(), 1u);
+  CHECK_EQ(map.slider_paths.size(), 1u);
+  CHECK_EQ(map.slider_events.size(), 1u);
+  CHECK_EQ(map.stacking.size(), 1u);
+  const std::string original = canonical(map);
+  const auto        detects = [&](auto& field, auto replacement) {
+    const auto saved = field;
+    field = replacement;
+    CHECK(canonical(map) != original);
+    field = saved;
+  };
+  detects(map.hit_objects[0].x, 10.75f);
+  detects(map.slider_points[0].x, 100.75f);
+  detects(map.slider_segments[0].degree, std::optional<fosu::u32>{3});
+  detects(map.velocity_presets[0], 4.0);
+  detects(map.slider_paths[0].points.back().y, 42.0f);
+  detects(map.slider_events[0][0].time, 999.0);
+  detects(map.stacking[0].stack_height, 42);
+}
+
+static void test_option_combinations_on_reused_parser() {
+  const std::string input =
+      "osu file format v14\n[General]\nMode:0\n[Difficulty]\n"
+      "SliderMultiplier:1\nSliderTickRate:1\n[TimingPoints]\n0,500\n"
+      "[HitObjects]\n100,100,1000,1,0\n100,100,1100,2,0,"
+      "L|200:100,2,100\n";
+  const fosu::Mods mods = fosu::Mods::HardRock | fosu::Mods::DoubleTime;
+  for (const auto* engine :
+       {&fosu::internal::compiled_engine, &fosu_test::scalar_engine()}) {
+    fosu::Parser             parser(*engine);
+    fosu::Parser             fresh(*engine);
+    const fosu::ParseOptions full{
+        .calculate_slider_events = true, .apply_stacking = true, .mods = mods};
+    const auto& with_events = require_parse(parser.parse(input, full));
+    CHECK_EQ(with_events.slider_paths.size(), 1u);
+    CHECK_EQ(with_events.slider_events.size(), 1u);
+    CHECK_EQ(with_events.stacking.size(), 2u);
+    CHECK_EQ(canonical(with_events),
+             canonical(require_parse(fresh.parse(input, full))));
+    const double end_time = with_events.hit_objects[1].end_time;
+    const auto&  duration = require_parse(parser.parse(
+        input, {.calculate_slider_end_times = true, .mods = mods}));
+    CHECK_EQ(duration.hit_objects[1].end_time, end_time);
+    CHECK(duration.slider_paths.empty() && duration.slider_events.empty());
+    CHECK(duration.stacking.empty());
+    CHECK_EQ(canonical(duration),
+             canonical(require_parse(fresh.parse(
+                 input, {.calculate_slider_end_times = true, .mods = mods}))));
+    const auto& partial =
+        require_parse(parser.parse(input, {.sections = fosu::kSectionHitObjects,
+                                           .calculate_slider_events = true,
+                                           .apply_stacking = true}));
+    CHECK(partial.timing_points.empty());
+    CHECK_EQ(partial.slider_paths.size(), 1u);
+    CHECK_EQ(partial.slider_events.size(), 1u);
+    CHECK_EQ(partial.stacking.size(), 2u);
+    CHECK_EQ(canonical(partial),
+             canonical(require_parse(
+                 fresh.parse(input, {.sections = fosu::kSectionHitObjects,
+                                     .calculate_slider_events = true,
+                                     .apply_stacking = true}))));
+    const auto& raw = require_parse(parser.parse(input));
+    CHECK(raw.slider_paths.empty() && raw.slider_events.empty());
+    CHECK(raw.stacking.empty());
+    CHECK_EQ(raw.hit_objects[1].end_time, 0);
+    CHECK_EQ(canonical(raw), canonical(require_parse(fresh.parse(input))));
+  }
+}
+
+static void test_event_budget_failure_and_reuse() {
+  const std::string oversized =
+      "[Difficulty]\nSliderMultiplier:1\nSliderTickRate:8\n"
+      "[TimingPoints]\n0,500\n[HitObjects]\n"
+      "0,0,1000,2,0,L|100000:0,9000,100000\n";
+  const std::string small =
+      "[TimingPoints]\n0,500\n[HitObjects]\n"
+      "0,0,1000,2,0,L|100:0,1,100\n";
+  for (const auto* engine :
+       {&fosu::internal::compiled_engine, &fosu_test::scalar_engine()}) {
+    fosu::Parser parser(*engine);
+    const auto   failed =
+        parser.parse(oversized, {.calculate_slider_events = true});
+    CHECK(!failed);
+    CHECK_EQ(failed.error().code, fosu::ErrorCode::AllocationFailure);
+    const auto& recovered =
+        require_parse(parser.parse(small, {.calculate_slider_events = true}));
+    CHECK_EQ(recovered.slider_events.size(), 1u);
+    CHECK_EQ(recovered.hit_objects.size(), 1u);
+  }
+}
+
+static void test_tick_endpoint_exclusion() {
+  for (const auto* engine :
+       {&fosu::internal::compiled_engine, &fosu_test::scalar_engine()}) {
+    fosu::Parser parser(*engine);
+    for (const auto [length, tick_count] :
+         {std::pair{14.49, 0u}, std::pair{14.5, 0u}, std::pair{14.51, 1u}}) {
+      const std::string input =
+          "[Difficulty]\nSliderMultiplier:1\nSliderTickRate:8\n"
+          "[TimingPoints]\n0,500\n[HitObjects]\n"
+          "0,0,1000,2,0,L|100:0,1," +
+          std::to_string(length) + "\n";
+      const auto& map =
+          require_parse(parser.parse(input, {.calculate_slider_events = true}));
+      CHECK_EQ(map.slider_events.size(), 1u);
+      size_t ticks = 0;
+      for (const auto& event : map.slider_events[0])
+        ticks += event.type == fosu::SliderEventType::Tick;
+      CHECK_EQ(ticks, tick_count);
+    }
+  }
+}
+
+static void test_multisegment_path_trim() {
+  const std::string input =
+      "osu file format v128\n[HitObjects]\n"
+      "0,0,1000,2,0,L|100:0|L|100:100,1,50\n";
+  for (const auto* engine :
+       {&fosu::internal::compiled_engine, &fosu_test::scalar_engine()}) {
+    fosu::Parser parser(*engine);
+    const auto&  map =
+        require_parse(parser.parse(input, {.calculate_slider_paths = true}));
+    CHECK_EQ(map.slider_segments.size(), 2u);
+    CHECK_EQ(map.slider_paths.size(), 1u);
+    CHECK_EQ(map.slider_paths[0].distance(), 50);
+    const auto end = fosu::slider_position_at(map.slider_paths[0], 1);
+    CHECK_EQ(end.x, 50);
+    CHECK_EQ(end.y, 0);
+  }
+}
+
 static void test_copy_owns_all_data() {
   fosu::Arena* program_arena = fosu::arena_alloc();
   CHECK(program_arena != nullptr);
@@ -479,6 +618,11 @@ int main() {
   test_empty_reparse_resets_defaults();
   test_large_arena_arrays();
   test_rejected_slider_points();
+  test_canonical_dump_covers_parsed_values();
+  test_option_combinations_on_reused_parser();
+  test_event_budget_failure_and_reuse();
+  test_tick_endpoint_exclusion();
+  test_multisegment_path_trim();
   test_copy_owns_all_data();
   test_failed_parse_resets_and_parser_remains_reusable();
   test_failed_copy_rewinds_destination();

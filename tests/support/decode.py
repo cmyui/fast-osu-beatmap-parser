@@ -33,8 +33,8 @@ class Reader:
 
 
 def decode(data: bytes) -> dict[str, Any]:
-    if len(data) < 36 or data[:8] != b"FOSUDMP8":
-        raise ValueError("not a FOSUDMP8 stream")
+    if len(data) < 36 or data[:8] != b"FOSUDMP9":
+        raise ValueError("not a FOSUDMP9 stream")
     trailer_size = struct.unpack("<Q", data[-8:])[0]
     start = len(data) - 8 - trailer_size
     if start < 8:
@@ -80,13 +80,46 @@ def decode(data: bytes) -> dict[str, Any]:
         reader.fields(timing_point, "B", "uninherited")
         reader.fields(timing_point, "I", "effects")
         timing.append(timing_point)
+    velocity_presets = [reader.value("d") for _ in range(reader.value("I"))]
+    segments = []
+    for _ in range(reader.value("I")):
+        segment: dict[str, Any] = {}
+        reader.fields(segment, "B", "type has_degree")
+        reader.fields(segment, "I", "degree point_begin point_count")
+        if not segment.pop("has_degree"):
+            segment["degree"] = None
+        segments.append(segment)
+    paths = []
+    for _ in range(reader.value("I")):
+        count = reader.value("I")
+        points_on_path = [struct.unpack("<ff", reader.take(8)) for _ in range(count)]
+        lengths = [reader.value("d") for _ in range(count)]
+        paths.append({"points": points_on_path, "cumulative_lengths": lengths})
+    events = []
+    for _ in range(reader.value("I")):
+        slider_events = []
+        for _ in range(reader.value("I")):
+            event: dict[str, Any] = {}
+            reader.fields(event, "B", "type")
+            reader.fields(event, "d", "time")
+            reader.fields(event, "i", "span_index")
+            reader.fields(event, "d", "span_start_time path_progress")
+            reader.fields(event, "f", "x y")
+            slider_events.append(event)
+        events.append(slider_events)
+    stacking = []
+    for _ in range(reader.value("I")):
+        item: dict[str, Any] = {}
+        reader.fields(item, "i", "stack_height")
+        reader.fields(item, "f", "x y")
+        stacking.append(item)
     stats: dict[str, Any] = {}
     reader.fields(
         stats, "I", "malformed_lines storyboard_lines fast_path_lines slow_path_lines"
     )
-    points: list[tuple[int, int] | None] = [None] * point_count
+    points: list[tuple[float, float] | None] = [None] * point_count
 
-    def point(index: int, value: tuple[int, int]) -> None:
+    def point(index: int, value: tuple[float, float]) -> None:
         if index >= len(points) or points[index] is not None:
             raise ValueError("invalid or overlapping point range")
         points[index] = value
@@ -94,14 +127,14 @@ def decode(data: bytes) -> dict[str, Any]:
     orphan_count = reader.value("I")
     for _ in range(orphan_count):
         index = reader.value("I")
-        point(index, struct.unpack("<ii", reader.take(8)))
+        point(index, struct.unpack("<ff", reader.take(8)))
     reader.done()
     reader = Reader(data[8:start])
     objects: list[dict[str, Any]] = []
     sliders: list[dict[str, Any]] = [{} for _ in range(slider_count)]
     for _ in range(object_count):
         hit_object: dict[str, Any] = {}
-        reader.fields(hit_object, "i", "x y")
+        reader.fields(hit_object, "f", "x y")
         reader.fields(hit_object, "I", "type hitsound")
         reader.fields(hit_object, "d", "time end_time")
         reader.fields(hit_object, "I", "slider")
@@ -111,9 +144,11 @@ def decode(data: bytes) -> dict[str, Any]:
             if hit_object["slider"] >= slider_count or sliders[hit_object["slider"]]:
                 raise ValueError("invalid slider index")
             slider: dict[str, Any] = {}
-            reader.fields(slider, "I", "point_begin point_count")
+            reader.fields(
+                slider, "I", "point_begin point_count segment_begin segment_count"
+            )
             for i in range(slider["point_count"]):
-                point(slider["point_begin"] + i, struct.unpack("<ii", reader.take(8)))
+                point(slider["point_begin"] + i, struct.unpack("<ff", reader.take(8)))
             reader.fields(slider, "i", "slides")
             reader.fields(slider, "d", "length")
             slider["curve_type"] = bytes(reader.take(1))
@@ -130,6 +165,11 @@ def decode(data: bytes) -> dict[str, Any]:
         "hit_objects": objects,
         "sliders": sliders,
         "slider_points": points,
+        "slider_segments": segments,
+        "velocity_presets": velocity_presets,
+        "slider_paths": paths,
+        "slider_events": events,
+        "stacking": stacking,
         "timing_points": timing,
         "breaks": breaks,
         "combo_colours": colours,
