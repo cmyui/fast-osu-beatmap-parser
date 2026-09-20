@@ -204,6 +204,8 @@ inline const char* parse_hitobjects_section_simd(
     const char*                    file_end,
     const HitObjectParseConstants& constants,
     i32                            time_offset) {
+  constexpr u32    kFiveDigitTimeMaskIndex = 504;
+  constexpr u32    kSixDigitTimeMaskIndex = 510;
   const ByteVector comma_value = constants.comma;
   const ByteVector zero = constants.zero;
   u32              fast_lines = 0;
@@ -240,7 +242,7 @@ inline const char* parse_hitobjects_section_simd(
       p2 = 13;
       prefix_end = 17;
       hitsound_length = 1;
-      mask_index = 504;
+      mask_index = kFiveDigitTimeMaskIndex;
       common_layout = true;
     } else if ((nondigits & 0x7ffffu) == 0x54088u &&
                (commas & 0x1ffffu) == 0x14088u) {
@@ -248,7 +250,7 @@ inline const char* parse_hitobjects_section_simd(
       p2 = 14;
       prefix_end = 18;
       hitsound_length = 1;
-      mask_index = 510;
+      mask_index = kSixDigitTimeMaskIndex;
       common_layout = true;
     } else {
       const u32 m1 = nondigits & (nondigits - 1);
@@ -293,14 +295,22 @@ inline const char* parse_hitobjects_section_simd(
       f64       time;
       bool      time_ok = true;
 #if FOSU_SIMD_X86
-      const __m256i    digits = _mm256_sub_epi8(ascii, zero);
-      const LaneMasks& masks = kLaneMasks[mask_index];
-      const __m256i    perm =
-          _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.perm));
-      const __m256i shuf =
-          _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.shuf));
-      const __m256i placed =
-          _mm256_shuffle_epi8(_mm256_permutevar8x32_epi32(digits, perm), shuf);
+      const __m256i digits = _mm256_sub_epi8(ascii, zero);
+      const auto    place_digits = [&](const LaneMasks& masks) {
+        const __m256i perm =
+            _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.perm));
+        const __m256i shuf =
+            _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.shuf));
+        return _mm256_shuffle_epi8(_mm256_permutevar8x32_epi32(digits, perm),
+                                   shuf);
+      };
+      __m256i placed;
+      if (mask_index == kFiveDigitTimeMaskIndex)
+        placed = place_digits(kLaneMasks[kFiveDigitTimeMaskIndex]);
+      else if (mask_index == kSixDigitTimeMaskIndex)
+        placed = place_digits(kLaneMasks[kSixDigitTimeMaskIndex]);
+      else
+        placed = place_digits(kLaneMasks[mask_index]);
       const __m256i pair_weights = _mm256_setr_epi8(
           0, 100, 10, 1, 0, 100, 10, 1, 0, 100, 10, 1, 0, 0, 10, 1, 0, 0, 10, 1,
           0, 0, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1);
