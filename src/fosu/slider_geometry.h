@@ -215,6 +215,8 @@ inline void catmull_distance(std::span<const CurvePoint> points,
     const auto a = points[i ? i - 1 : i], b = points[i], c = points[i + 1];
     const auto d = i + 2 < points.size() ? points[i + 2] : c * 2 - b;
     for (i32 sample = 0; sample < 100; ++sample) {
+      // Match osu!'s paired samples: 0, 1/50, 1/50, 2/50, ... , 1.
+      // NOLINTNEXTLINE(bugprone-integer-division)
       const f32 t = static_cast<f32>((sample + 1) / 2) / 50;
       distance.append(catmull_point(a, b, c, d, t));
     }

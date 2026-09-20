@@ -3,8 +3,6 @@
 #include <fosu/slider_path.h>
 #include <fosu/types.h>
 
-#include <cstdint>
-
 namespace fosu {
 enum class SliderEventType : u8 { Head, Tick, Repeat, LegacyLastTick, Tail };
 

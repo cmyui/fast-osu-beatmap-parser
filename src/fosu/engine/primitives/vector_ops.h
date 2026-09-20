@@ -1,6 +1,5 @@
 #pragma once
-#include <bit>
-#include <cstdint>
+#include <fosu/types.h>
 
 #if (defined(FOSU_COMPILE_AVX2) ||                                     \
      (!defined(_MSC_VER) && defined(__AVX2__) && defined(__BMI__))) && \
@@ -17,6 +16,10 @@
 #define FOSU_SIMD_NEON 0
 #endif
 #define FOSU_SIMD (FOSU_SIMD_X86 || FOSU_SIMD_NEON)
+
+#if FOSU_SIMD_NEON
+#include <bit>
+#endif
 
 namespace fosu::internal {
 #if FOSU_SIMD

@@ -2,8 +2,6 @@
 #include <fosu/mods.h>
 #include <fosu/types.h>
 
-#include <cstdint>
-
 namespace fosu {
 enum : u32 {
   kSectionGeneral = 1u << 1,

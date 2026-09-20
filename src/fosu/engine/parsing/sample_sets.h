@@ -3,7 +3,6 @@
 #include <fosu/enums.h>
 #include <fosu/types.h>
 
-#include <cstdint>
 #include <optional>
 
 namespace fosu::internal {
