@@ -2,7 +2,9 @@
 
 #include <fosu/engine/primitives/vector_ops.h>
 
+#if FOSU_SIMD_X86
 #include <array>
+#endif
 #include <cstddef>
 
 namespace fosu::internal {

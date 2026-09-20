@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <limits>
-#include <new>
+#include <new>  // IWYU pragma: keep (placement new)
 #include <type_traits>
 
 #if defined(__has_feature)

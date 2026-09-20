@@ -9,7 +9,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <limits>
 
 namespace fosu::internal {
 

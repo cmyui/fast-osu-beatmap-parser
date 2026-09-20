@@ -1,6 +1,7 @@
 #pragma once
+#include <fosu/types.h>
+
 #include <bit>
-#include <cstdint>
 
 #if (defined(FOSU_COMPILE_AVX2) ||                                     \
      (!defined(_MSC_VER) && defined(__AVX2__) && defined(__BMI__))) && \

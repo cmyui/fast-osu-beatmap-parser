@@ -1,7 +1,6 @@
 #pragma once
 #include <fosu/types.h>
 
-#include <cstdint>
 #if defined(_MSC_VER) && defined(_M_X64)
 #include <intrin.h>
 #elif defined(__x86_64__)

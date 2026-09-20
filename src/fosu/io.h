@@ -2,9 +2,10 @@
 
 #include <fosu/types.h>
 
+#if defined(_WIN32)
 #include <algorithm>
+#endif
 #include <cerrno>
-#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <limits>

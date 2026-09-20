@@ -3,7 +3,6 @@
 #include <fosu/engine/parsing/string_lookup.h>
 #include <fosu/types.h>
 
-#include <cstdint>
 #include <string_view>
 
 namespace fosu::internal {

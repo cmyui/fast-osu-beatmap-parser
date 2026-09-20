@@ -490,7 +490,8 @@ static void test_parser_prepares_engine_input_and_output() {
         CHECK(!beatmap.hit_objects.empty());
         CHECK(beatmap.timing_points.empty());
         CHECK_EQ(beatmap.sample_set, fosu::SampleSet::Normal);
-        beatmap.hit_objects[0] = {.x = 42};
+        beatmap.hit_objects[0] = {};
+        beatmap.hit_objects[0].x = 42;
         beatmap.hit_objects = beatmap.hit_objects.first(1);
         beatmap.sliders = {};
         beatmap.slider_points = {};

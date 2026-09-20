@@ -1,0 +1,8 @@
+InlayHints:
+  Enabled: false
+
+---
+If:
+  PathMatch: src/fosu/engine/.*\.h
+CompileFlags:
+  Remove: -DFOSU_DISABLE_SIMD

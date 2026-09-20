@@ -10,7 +10,6 @@
 
 #include <fosu/types.h>
 
-#include <cstdint>
 #include <cstring>
 #if defined(_MSC_VER)
 #include <intrin.h>
