@@ -99,7 +99,7 @@ inline void subdivide_bezier(std::span<const CurvePoint> points,
   for (size_t i = 0; i < count; ++i) {
     left[i] = midpoints[0];
     right[count - i - 1] = midpoints[count - i - 1];
-#if FOSU_SIMD_NEON
+#if FOSU_SIMD_NEON && defined(__clang__)
     static_assert(sizeof(CurvePoint) == 2 * sizeof(f32));
     const size_t remaining = count - i - 1;
     size_t       j = 0;
