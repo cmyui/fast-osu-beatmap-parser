@@ -1,5 +1,7 @@
 #include <fosu/engine/parse_document.h>
 #include <fosu/engine/parsing/string_lookup.h>
+#include <fosu/engine/parsing_engine.h>
+#include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/engine/runtime/cpu_features.h>
 #include <fosu/engine/runtime/loader.h>
 
@@ -7,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string_view>
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN

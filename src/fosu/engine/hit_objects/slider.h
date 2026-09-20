@@ -10,6 +10,8 @@
 #include <fosu/engine/hit_objects/samples.h>
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/primitives/digit_groups.h>
+#include <fosu/engine/primitives/packed_digits.h>
+#include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/enums.h>
 #include <fosu/types.h>
 
@@ -17,6 +19,7 @@
 #include <array>
 #include <bit>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <optional>
 #include <string_view>

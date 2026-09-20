@@ -1,13 +1,16 @@
 #include <fosu/io.h>
+#include <fosu/types.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct Module {

@@ -3,6 +3,7 @@
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/types.h>
 
+#include <cstdint>
 #include <optional>
 #include <string_view>
 

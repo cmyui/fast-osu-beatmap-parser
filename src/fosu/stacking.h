@@ -3,9 +3,15 @@
 // Full-map stacking adapted from ppy's OsuBeatmapProcessor.
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>; MIT licence in slider_geometry.h.
 
+#include <fosu/arena.h>
 #include <fosu/beatmap.h>
 #include <fosu/slider_path.h>
 #include <fosu/types.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <span>
 
 namespace fosu::internal {
 

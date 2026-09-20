@@ -1,10 +1,18 @@
+#include <fosu/beatmap.h>
+#include <fosu/engine/hit_objects/samples.h>
+#include <fosu/engine/parse_document.h>
+#include <fosu/engine/parsing/numbers.h>
+#include <fosu/io.h>
+#include <fosu/parse_options.h>
 #include <fosu/parser.h>
+#include <fosu/types.h>
 #include <tests/support/canonical_dump.h>
 #include <tests/support/scalar_engine.h>
 
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 
 static fosu::Beatmap must_parse(fosu::Parser&           parser,

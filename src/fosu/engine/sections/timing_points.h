@@ -3,8 +3,12 @@
 #include <fosu/beatmap.h>
 #include <fosu/engine/parsing/lines.h>
 #include <fosu/engine/primitives/byte_scan.h>
+#include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/engine/timing_points/point.h>
 #include <fosu/types.h>
+
+#include <cstddef>
+#include <string_view>
 
 namespace fosu::internal {
 

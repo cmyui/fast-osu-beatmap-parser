@@ -1,11 +1,16 @@
 #pragma once
+#include <fosu/arena.h>
 #include <fosu/beatmap.h>
 #include <fosu/engine/parse_document.h>
+#include <fosu/engine/parsing/key_value.h>
 #include <fosu/engine/parsing_engine.h>
 #include <fosu/io.h>
 #include <fosu/legacy_rules.h>
 #include <fosu/mods.h>
+#include <fosu/parse_options.h>
+#include <fosu/result.h>
 #include <fosu/slider_events.h>
+#include <fosu/slider_geometry.h>
 #include <fosu/slider_timing.h>
 #include <fosu/stacking.h>
 #include <fosu/types.h>
@@ -13,8 +18,11 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cstddef>
 #include <cstring>
 #include <limits>
+#include <span>
+#include <string_view>
 
 namespace fosu {
 

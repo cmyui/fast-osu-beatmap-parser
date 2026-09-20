@@ -1,3 +1,4 @@
+#include <fosu/engine/parsing_engine.h>
 #include <fosu/engine/runtime/loader.h>
 #include <fosu/runtime.h>
 

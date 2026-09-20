@@ -1,7 +1,12 @@
 #pragma once
 
+#include <fosu/beatmap.h>
+#include <fosu/engine/hit_objects/slider.h>
+#include <fosu/engine/parsing/lines.h>
+#include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/parsing/section_names.h>
 #include <fosu/engine/parsing_engine.h>
+#include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/engine/sections/colours.h>
 #include <fosu/engine/sections/difficulty.h>
 #include <fosu/engine/sections/editor.h>
@@ -10,7 +15,14 @@
 #include <fosu/engine/sections/hit_objects.h>
 #include <fosu/engine/sections/metadata.h>
 #include <fosu/engine/sections/timing_points.h>
+#include <fosu/parse_options.h>
 #include <fosu/types.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <optional>
+#include <span>
+#include <string_view>
 
 namespace fosu::internal {
 

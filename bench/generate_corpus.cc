@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <ios>
 #include <string>
 
 uint64_t rng_state = 0x9E3779B97F4A7C15ull;

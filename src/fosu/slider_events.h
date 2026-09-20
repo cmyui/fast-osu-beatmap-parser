@@ -3,8 +3,16 @@
 // Event ordering and endpoint exclusion follow ppy's SliderEventGenerator.
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>; MIT licence in slider_geometry.h.
 
+#include <fosu/arena.h>
+#include <fosu/beatmap.h>
+#include <fosu/slider_event.h>
+#include <fosu/slider_path.h>
 #include <fosu/slider_timing.h>
 #include <fosu/types.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <span>
 
 namespace fosu::internal {
 

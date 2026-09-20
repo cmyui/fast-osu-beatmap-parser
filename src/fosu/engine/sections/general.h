@@ -1,7 +1,20 @@
 #pragma once
 
+#include <fosu/beatmap.h>
+#include <fosu/beatmap_header.h>
+#include <fosu/engine/parsing/field_values.h>
 #include <fosu/engine/parsing/key_value.h>
+#include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/parsing/sample_sets.h>
+#include <fosu/engine/parsing/string_lookup.h>
+#include <fosu/engine/primitives/byte_scan.h>
+#include <fosu/enums.h>
+#include <fosu/types.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <string_view>
 
 namespace fosu::internal {
 

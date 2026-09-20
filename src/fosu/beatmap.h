@@ -2,6 +2,7 @@
 
 #include <fosu/arena.h>
 #include <fosu/beatmap_header.h>
+#include <fosu/enums.h>
 #include <fosu/result.h>
 #include <fosu/slider_event.h>
 #include <fosu/slider_path.h>

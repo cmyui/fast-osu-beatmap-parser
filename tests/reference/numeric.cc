@@ -2,9 +2,11 @@
 // conversion with libc over a bounded copy. Compile without AVX2 and with
 // hidden visibility so inline parser definitions cannot interpose on the test.
 #include <fosu/engine/parsing/numbers.h>
+#include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/engine/timing_points/beat_length.h>
 
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 

@@ -6,12 +6,14 @@
 #include <algorithm>
 #endif
 #include <cerrno>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <new>
 #include <string_view>
+#include <utility>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN

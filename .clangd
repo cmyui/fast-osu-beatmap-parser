@@ -2,10 +2,25 @@ InlayHints:
   BlockEnd: true
   DefaultArguments: true
 Style: { AngledHeaders: ['^(fosu|tests)/'] }
-Diagnostics: { MissingIncludes: Strict }
+Diagnostics:
+  MissingIncludes: Strict
+  Includes:
+    # Apple SDK declarations live in these private headers, but consumers
+    # include their public POSIX counterparts (fcntl.h, limits.h, unistd.h).
+    IgnoreHeader:
+      - 'sys/(fcntl|syslimits|unistd|_types/_ssize_t)\.h'
+      - '_stdlib\.h'
 
 ---
 If:
   PathMatch: src/fosu/engine/.*\.h
 CompileFlags:
   Remove: -DFOSU_DISABLE_SIMD
+
+---
+If:
+  PathMatch: src/fosu/bindings/.*
+Diagnostics:
+  Includes:
+    # Python.h is CPython's supported umbrella; its private headers are not.
+    IgnoreHeader: 'python3\.[0-9]+/.*'

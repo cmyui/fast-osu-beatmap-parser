@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fosu/engine/primitives/vector_ops.h>
+#include <fosu/types.h>
 
 #if FOSU_SIMD_X86
 #include <array>

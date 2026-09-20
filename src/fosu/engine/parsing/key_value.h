@@ -1,9 +1,15 @@
 #pragma once
 
 #include <fosu/beatmap.h>
+#include <fosu/beatmap_header.h>
 #include <fosu/engine/parsing/field_values.h>
 #include <fosu/engine/parsing/lines.h>
 #include <fosu/engine/parsing/string_lookup.h>
+#include <fosu/engine/primitives/byte_scan.h>
+
+#include <cstddef>
+#include <optional>
+#include <string_view>
 
 namespace fosu::internal {
 

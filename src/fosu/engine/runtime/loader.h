@@ -1,6 +1,8 @@
 #pragma once
 #include <fosu/engine/parsing_engine.h>
 
+#include <string_view>
+
 namespace fosu::internal {
 const ParsingEngine* selected_engine();
 bool engine_available(EngineKind kind);

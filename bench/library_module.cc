@@ -1,5 +1,7 @@
 // Isolated DSO entry points for paired in-process measurements. Build each
 // version with hidden visibility so C++ inline symbols cannot interpose.
+#include <cstddef>
+#include <cstdlib>
 #define EXPORT extern "C" __attribute__((visibility("default")))
 #include <fosu/parser.h>
 using Result = fosu::Parser;

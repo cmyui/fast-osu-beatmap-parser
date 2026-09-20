@@ -3,6 +3,8 @@
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/types.h>
 
+#include <limits>
+
 namespace fosu::internal {
 
 // NaN has a defined gameplay meaning only for inherited timing points.

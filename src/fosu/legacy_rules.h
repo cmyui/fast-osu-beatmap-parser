@@ -1,9 +1,13 @@
 #pragma once
 
+#include <fosu/arena.h>
 #include <fosu/beatmap.h>
 #include <fosu/types.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstring>
+#include <span>
 
 namespace fosu::internal {
 

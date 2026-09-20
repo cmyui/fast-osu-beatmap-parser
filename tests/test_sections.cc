@@ -1,5 +1,24 @@
+#include <fosu/beatmap.h>
+#include <fosu/engine/parse_document.h>
+#include <fosu/engine/primitives/byte_scan.h>
+#include <fosu/engine/primitives/vector_ops.h>
+#include <fosu/engine/timing_points/point.h>
+#include <fosu/enums.h>
+#include <fosu/io.h>
+#include <fosu/parse_options.h>
+#include <fosu/parser.h>
+#include <fosu/types.h>
 #include <tests/support/equality.h>
+#include <tests/support/scalar_engine.h>
 #include <tests/support/test.h>
+
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <string>
+#include <string_view>
+#include <type_traits>
 
 static void test_all_sections() {
   const char* input =

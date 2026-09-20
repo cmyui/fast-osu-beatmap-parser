@@ -1,7 +1,22 @@
+#include <fosu/beatmap.h>
+#include <fosu/engine/parsing/numbers.h>
+#include <fosu/engine/primitives/vector_ops.h>
+#include <fosu/engine/timing_points/point.h>
+#include <fosu/slider_geometry.h>
+#include <fosu/types.h>
 #include <tests/support/test.h>
 
 #include <algorithm>
 #include <bit>
+#include <cinttypes>  // IWYU pragma: keep (SIMD-only test)
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#include <string_view>  // IWYU pragma: keep (SIMD-only test)
 
 // Independent numeric oracle: libc conversion over a bounded copy, rather
 // than a second copy of the parser's mantissa arithmetic.
