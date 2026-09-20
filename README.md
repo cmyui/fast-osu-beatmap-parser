@@ -20,7 +20,7 @@ positions, difficulty settings, and timeline values with supported mods applied.
 EZ and HR currently support osu!standard and osu!taiko; osu!catch and osu!mania
 support is planned. DT, NC, and HT support every mode.
 
-Python returns fully populated, mutable dataclasses and lists. All supported
+Python returns fully populated, detached objects and lists. All supported
 fields are eager; returned values do not retain native memory or depend on a parser.
 Install a prebuilt wheel with `python -m pip install fosu`, or run
 `python -m pip install .` in a source checkout.
@@ -119,7 +119,7 @@ show the cost of each FOSU option on x86-64 and AArch64. See the
 | Interface | Result | Use |
 |---|---|---|
 | [C++ library](docs/library.md) | Parser-owned `Beatmap` view | Direct parsing in a C++ application |
-| [Python package](docs/python.md) | Detached `Beatmap` dataclass and lists | Ordinary mutable Python values |
+| [Python package](docs/python.md) | Detached `Beatmap` and lists | Eager Python values |
 
 Native representations are checked against a fixed all-mode compatibility
 corpus. Comparisons cover strings, raw float

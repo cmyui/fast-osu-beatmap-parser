@@ -1,6 +1,5 @@
 """Static public API contract; checked by mypy, not executed."""
 
-from dataclasses import asdict, replace
 from typing import Literal
 
 import fosu
@@ -23,14 +22,12 @@ assert_type(b.mode, fosu.GameMode)
 assert_type(b.sample_set, fosu.SampleSet)
 assert_type(b.preview_time, int | None)
 assert_type(b.hit_objects, list[fosu.HitObject])
-b.title = "Edited"
 b.tag_list.append("new")
 for note in b.hit_objects:
     assert_type(note.time, float)
     assert_type(note.x, float)
     assert_type(note.y, float)
     assert_type(note.raw_position(), tuple[float, float])
-    note.x = 100
     assert_type(note.stacking, fosu.Stacking | None)
     if note.stacking is not None:
         assert_type(note.stacking.stack_height, int)
@@ -54,5 +51,5 @@ for note in b.hit_objects:
         assert_type(note.end_time, float)
     else:
         assert_never(note)
-assert_type(replace(b, title="Copy"), fosu.Beatmap)
-asdict(b)
+assert_type(fosu.Point(1, 2), fosu.Point)
+assert_type(fosu.PathPoint(x=1, y=2), fosu.PathPoint)

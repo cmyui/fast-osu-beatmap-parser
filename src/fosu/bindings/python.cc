@@ -1,4 +1,5 @@
 // Construct detached Python values using the CPython stable ABI.
+#include <fosu/bindings/records.h>
 #include <fosu/compiler.h>
 #include <fosu/engine/runtime/loader.h>
 #include <fosu/parser.h>
@@ -6,11 +7,13 @@
 
 #include <Python.h>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
-#include <initializer_list>
 #include <new>
 #include <span>
+#include <structmember.h>
 #include <utility>
+#include <vector>
 
 namespace {
 using fosu::f32;
@@ -36,6 +39,13 @@ struct PythonRef {
   }
   PyObject* release() { return std::exchange(p, nullptr); }
   operator PyObject*() const { return p; }
+};
+struct PauseGC {
+  int was_enabled = PyGC_Disable();
+  ~PauseGC() {
+    if (was_enabled)
+      PyGC_Enable();
+  }
 };
 PythonRef integer(long long n) {
   return PythonRef(PyLong_FromLongLong(n));
@@ -301,25 +311,167 @@ constexpr const char* type_names[] = {
     "PathPoint", "SliderPath",   "Beatmap",         "SliderEvent",
     "Stacking",  "CurveSegment", "SliderEventType", "HitSound",
     "GameMode",  "SampleSet",    "CurveType"};
-struct PythonSlot {
-  PyObject*    descriptor;
-  descrsetfunc assign;
-};
 struct State {
   PyObject*  model;
   PyObject*  types[type_count];
-  PythonSlot slots[record_type_count][field_count];
+  Py_ssize_t slots[record_type_count][field_count];
+  Py_ssize_t record_sizes[record_type_count];
+  PyObject*  hit_object_base;
   PyObject*  sounds[16];
   PyObject*  samples[4];
   PyObject*  curves[4];
+  PyObject*  event_types[5];
+  PyObject*  coordinates[513];
   PyObject*  bookmark_whitespace;
 };
+
+PyObject* make_record(PyObject* module, PyObject* args) {
+  const char* name;
+  PyObject*   fields;
+  if (!PyArg_ParseTuple(args, "sO:_record", &name, &fields))
+    return nullptr;
+  if (!PyTuple_Check(fields)) {
+    PyErr_SetString(PyExc_TypeError, "fields must be a tuple");
+    return nullptr;
+  }
+  constexpr const char* names[] = {
+      "fosu._model.Point",     "fosu._model.Circle",
+      "fosu._model.Slider",    "fosu._model.Spinner",
+      "fosu._model.HoldNote",  "fosu._model.TimingPoint",
+      "fosu._model.Break",     "fosu._model.ParseStats",
+      "fosu._model.PathPoint", "fosu._model.SliderPath",
+      "fosu._model.Beatmap",   "fosu._model.SliderEvent",
+      "fosu._model.Stacking",  "fosu._model.CurveSegment",
+      "fosu._model._HitObject"};
+  int kind = 0;
+  while (kind < record_type_count && std::strcmp(name, type_names[kind]) != 0)
+    ++kind;
+  if (kind == record_type_count && std::strcmp(name, "_HitObject") != 0) {
+    PyErr_SetString(PyExc_TypeError, "unknown FOSU record");
+    return nullptr;
+  }
+  auto*      state = static_cast<State*>(PyModule_GetState(module));
+  PyObject*& type =
+      kind == record_type_count ? state->hit_object_base : state->types[kind];
+  if (type) {
+    PyErr_SetString(PyExc_TypeError, "record already defined");
+    return nullptr;
+  }
+  Py_ssize_t count = PyTuple_Size(fields);
+  if (count > field_count) {
+    PyErr_SetString(PyExc_TypeError, "too many record fields");
+    return nullptr;
+  }
+  try {
+    std::vector<PyMemberDef> members(count + 1);
+    for (Py_ssize_t i = 0; i < count; ++i) {
+      PyObject* field = PyTuple_GetItem(fields, i);
+      if (!PyUnicode_Check(field)) {
+        PyErr_SetString(PyExc_TypeError, "field names must be strings");
+        return nullptr;
+      }
+      int index = 0;
+      for (; index < field_count; ++index) {
+        int equal = PyUnicode_CompareWithASCIIString(field, field_names[index]);
+        if (equal == -1 && PyErr_Occurred())
+          return nullptr;
+        if (equal == 0)
+          break;
+      }
+      if (index == field_count) {
+        PyErr_SetString(PyExc_TypeError, "unknown record field");
+        return nullptr;
+      }
+      for (Py_ssize_t j = 0; j < i; ++j) {
+        if (members[j].name == field_names[index]) {
+          PyErr_SetString(PyExc_TypeError, "duplicate record field");
+          return nullptr;
+        }
+      }
+      members[i] = {
+          field_names[index], T_OBJECT_EX,
+          static_cast<Py_ssize_t>(sizeof(RecordObject) + i * sizeof(PyObject*)),
+          READONLY, nullptr};
+    }
+    PyType_Slot slots[] = {
+        {Py_tp_new, reinterpret_cast<void*>(record_new)},
+        {Py_tp_repr, reinterpret_cast<void*>(record_repr)},
+        {Py_tp_richcompare, reinterpret_cast<void*>(record_equal)},
+        {Py_tp_hash, reinterpret_cast<void*>(PyObject_HashNotImplemented)},
+        {Py_tp_methods, record_methods},
+        {Py_tp_dealloc, reinterpret_cast<void*>(record_dealloc)},
+        {Py_tp_traverse, reinterpret_cast<void*>(record_traverse)},
+        {Py_tp_clear, reinterpret_cast<void*>(record_clear)},
+        {Py_tp_members, members.data()},
+        {0, nullptr}};
+    PyType_Spec spec = {
+        names[kind],
+        static_cast<int>(sizeof(RecordObject) + count * sizeof(PyObject*)), 0,
+        Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC, slots};
+    if (kind == record_type_count)
+      spec.flags |= Py_TPFLAGS_BASETYPE;
+    PythonRef bases(PyTuple_New(kind >= t_circle && kind <= t_hold ? 1 : 0));
+    if (kind >= t_circle && kind <= t_hold) {
+      if (!state->hit_object_base) {
+        PyErr_SetString(PyExc_TypeError, "hit-object base is not defined");
+        return nullptr;
+      }
+      const auto* base = record_members(
+          reinterpret_cast<PyTypeObject*>(state->hit_object_base));
+      for (Py_ssize_t i = 0; base[i].name; ++i) {
+        if (i >= count || base[i].name != members[i].name) {
+          PyErr_SetString(PyExc_TypeError,
+                          "hit-object fields must preserve the base layout");
+          return nullptr;
+        }
+      }
+      if (PyTuple_SetItem(bases, 0, Py_NewRef(state->hit_object_base)) < 0)
+        return nullptr;
+    }
+    // CPython copies the definitions. Their names refer to static strings.
+    type = PyType_FromSpecWithBases(
+        &spec, kind >= t_circle && kind <= t_hold ? bases.p : nullptr);
+    if (!type)
+      return nullptr;
+    if (kind < record_type_count) {
+      state->record_sizes[kind] = count;
+      for (int field = 0; field < field_count; ++field)
+        state->slots[kind][field] = -1;
+      for (Py_ssize_t i = 0; i < count; ++i) {
+        for (int field = 0; field < field_count; ++field) {
+          if (members[i].name == field_names[field])
+            state->slots[kind][field] = i;
+        }
+      }
+    }
+    return Py_NewRef(type);
+  } catch (const PythonError&) {
+    return nullptr;
+  } catch (const std::bad_alloc&) {
+    return PyErr_NoMemory();
+  }
+}
+
+PyObject* restore_record(PyObject* module, PyObject* type) {
+  const auto* state = static_cast<State*>(PyModule_GetState(module));
+  for (int kind = 0; kind < record_type_count; ++kind) {
+    if (type == state->types[kind])
+      return allocate_record(reinterpret_cast<PyTypeObject*>(type),
+                             state->record_sizes[kind]);
+  }
+  PyErr_SetString(PyExc_TypeError, "expected a FOSU record type");
+  return nullptr;
+}
 
 struct BeatmapConverter {
   const fosu::Beatmap& map;
   const State&         state;
+  PythonRef            default_hit_sample;
   BeatmapConverter(const fosu::Beatmap& map, const State& state)
-      : map(map), state(state) {}
+      : map(map),
+        state(state),
+        default_hit_sample(
+            PyUnicode_DecodeUTF8("0:0:0:0:", 8, "surrogateescape")) {}
 
   PythonRef sample_set(fosu::SampleSet value) {
     return retain(state.samples[static_cast<int>(value)]);
@@ -343,22 +495,26 @@ struct BeatmapConverter {
     Field     field;
     PythonRef value;
   };
-  PythonRef record(PythonType                   kind,
-                   std::initializer_list<Value> values,
-                   std::span<const Value>       common = {}) {
-    // The package owns these plain slotted dataclasses. Allocate once and use
-    // their cached descriptor setters, without name lookup or Python __init__.
-    PythonRef out(PyType_GenericAlloc(
-        reinterpret_cast<PyTypeObject*>(state.types[kind]), 0));
-    auto      assign = [&](const Value& value) {
-      const auto& slot = state.slots[kind][value.field];
-      if (slot.assign(slot.descriptor, out, value.value) < 0)
-        throw PythonError{};
-    };
-    for (const auto& value : common)
-      assign(value);
-    for (const auto& value : values)
-      assign(value);
+  PythonRef allocate(PythonType kind) {
+    return PythonRef(
+        allocate_record(reinterpret_cast<PyTypeObject*>(state.types[kind]),
+                        state.record_sizes[kind]));
+  }
+  void set_field(PyObject*  object,
+                 PythonType kind,
+                 Field      field,
+                 PythonRef  value) {
+    const auto index = state.slots[kind][field];
+    if (index < 0) {
+      PyErr_SetString(PyExc_TypeError, "record is missing an expected field");
+      throw PythonError{};
+    }
+    record_fields(object)[index] = value.release();
+  }
+  PythonRef record(PythonType kind, std::span<Value> values) {
+    PythonRef out = allocate(kind);
+    for (auto& value : values)
+      set_field(out, kind, value.field, std::move(value.value));
     return out;
   }
   PythonRef sound(u32 value) {
@@ -371,8 +527,25 @@ struct BeatmapConverter {
     return PythonRef(PyUnicode_DecodeUTF8(s.empty() ? "" : s.data(), s.size(),
                                           "surrogateescape"));
   }
+  PythonRef coordinate(f32 value) {
+    if (value >= 0 && value <= 512 && !std::signbit(value)) {
+      auto index = static_cast<u32>(value);
+      if (value == static_cast<f32>(index))
+        return retain(state.coordinates[index]);
+    }
+    return number(value);
+  }
   PythonRef point(f32 x, f32 y) {
-    return record(t_point, {{f_x, number(x)}, {f_y, number(y)}});
+    PythonRef out = allocate(t_point);
+    set_field(out, t_point, f_x, coordinate(x));
+    set_field(out, t_point, f_y, coordinate(y));
+    return out;
+  }
+  PythonRef path_point(f64 x, f64 y) {
+    PythonRef out = allocate(t_path_point);
+    set_field(out, t_path_point, f_x, number(x));
+    set_field(out, t_path_point, f_y, number(y));
+    return out;
   }
   template <class F>
   PythonRef list(size_t count, F item) {
@@ -385,90 +558,90 @@ struct BeatmapConverter {
     return out;
   }
   PythonRef hit_object(const fosu::HitObject& h) {
-    const bool  circle = h.type & 1, slider = !circle && (h.type & 2);
-    PythonRef   time = number(h.time);
-    const Value common[] = {
-        {f_time, retain(time)},
-        {f_stacking, stacking(h)},
-        {f_end_time, circle ? std::move(time) : number(h.end_time)},
-        {f_x, number(h.x)},
-        {f_y, number(h.y)},
-        {f_hitsound, sound(h.hitsound)},
-        {f_type, integer(h.type)},
-        {f_new_combo, boolean(h.new_combo)},
-        {f_combo_skip, integer(h.combo_skip)},
-        {f_hit_sample, string(h.hit_sample)}};
-    if (slider) {
+    const auto kind = h.type & 1   ? t_circle
+                      : h.type & 2 ? t_slider
+                      : h.type & 8 ? t_spinner
+                                   : t_hold;
+    PythonRef  out = allocate(kind);
+    PythonRef  time = number(h.time);
+    set_field(out, kind, f_time, retain(time));
+    set_field(out, kind, f_end_time,
+              kind == t_circle ? std::move(time) : number(h.end_time));
+    set_field(out, kind, f_x, coordinate(h.x));
+    set_field(out, kind, f_y, coordinate(h.y));
+    set_field(out, kind, f_hitsound, sound(h.hitsound));
+    set_field(out, kind, f_type, integer(h.type));
+    set_field(out, kind, f_new_combo, boolean(h.new_combo));
+    set_field(out, kind, f_combo_skip, integer(h.combo_skip));
+    set_field(out, kind, f_hit_sample,
+              h.hit_sample == "0:0:0:0:" ? retain(default_hit_sample)
+                                         : string(h.hit_sample));
+    set_field(out, kind, f_stacking, stacking(h));
+    if (kind == t_slider) {
       const auto& s = map.sliders[h.slider];
-      return record(t_slider,
-                    {{f_slides, integer(s.slides)},
-                     {f_events, slider_events(h.slider)},
-                     {f_path, map.slider_paths.empty()
-                                  ? none()
-                                  : slider_path(map.slider_paths[h.slider])},
-                     {f_length, number(s.length)},
-                     {f_curve_type, curve(s.curve_type)},
-                     {f_curve_segments, curve_segments(h, s)},
-                     {f_edge_sounds, string(s.edge_sounds)},
-                     {f_edge_sets, string(s.edge_sets)},
-                     {f_control_points,
-                      list(s.point_count + 1,
-                           [&](size_t j) {
-                             if (j == 0)
-                               return point(h.x, h.y);
-                             const auto& p =
-                                 map.slider_points[s.point_begin + j - 1];
-                             return point(p.x, p.y);
-                           })}},
-                    common);
+      set_field(out, kind, f_slides, integer(s.slides));
+      set_field(out, kind, f_events, slider_events(h.slider));
+      set_field(out, kind, f_path,
+                map.slider_paths.empty()
+                    ? none()
+                    : slider_path(map.slider_paths[h.slider]));
+      set_field(out, kind, f_length, number(s.length));
+      set_field(out, kind, f_curve_type, curve(s.curve_type));
+      set_field(out, kind, f_curve_segments, curve_segments(h, s));
+      set_field(out, kind, f_edge_sounds, string(s.edge_sounds));
+      set_field(out, kind, f_edge_sets, string(s.edge_sets));
+      set_field(out, kind, f_control_points,
+                list(s.point_count + 1, [&](size_t j) {
+                  if (j == 0)
+                    return point(h.x, h.y);
+                  const auto& p = map.slider_points[s.point_begin + j - 1];
+                  return point(p.x, p.y);
+                }));
     }
-    return record(circle       ? t_circle
-                  : h.type & 8 ? t_spinner
-                               : t_hold,
-                  {}, common);
+    return out;
   }
   PythonRef curve_segments(const fosu::HitObject& object,
                            const fosu::Slider&    slider) {
     return list(slider.segment_count, [&](size_t i) {
       const auto& segment = map.slider_segments[slider.segment_begin + i];
       const bool  head = i == 0;
-      return record(
-          t_curve_segment,
-          {{f_type, curve(segment.type)},
-           {f_degree, segment.degree ? integer(*segment.degree) : none()},
-           {f_control_points, list(segment.point_count + head, [&](size_t j) {
-              if (head && !j)
-                return point(object.x, object.y);
-              const auto& value =
-                  map.slider_points[slider.point_begin + segment.point_begin +
-                                    j - head];
-              return point(value.x, value.y);
-            })}});
+      Value       values[] = {
+          {f_type, curve(segment.type)},
+          {f_degree, segment.degree ? integer(*segment.degree) : none()},
+          {f_control_points, list(segment.point_count + head, [&](size_t j) {
+             if (head && !j)
+               return point(object.x, object.y);
+             const auto& value =
+                 map.slider_points[slider.point_begin + segment.point_begin +
+                                   j - head];
+             return point(value.x, value.y);
+           })}};
+      return record(t_curve_segment, values);
     });
   }
 
   PythonRef timing_point(const fosu::TimingPoint& t) {
-    return record(t_timing, {{f_time, number(t.time)},
-                             {f_beat_length, number(t.beat_length)},
-                             {f_meter, integer(t.meter)},
-                             {f_sample_set, sample_set(t.sample_set)},
-                             {f_sample_index, integer(t.sample_index)},
-                             {f_volume, integer(t.volume)},
-                             {f_uninherited, boolean(t.uninherited)},
-                             {f_effects, integer(t.effects)}});
+    PythonRef out = allocate(t_timing);
+    set_field(out, t_timing, f_time, number(t.time));
+    set_field(out, t_timing, f_beat_length, number(t.beat_length));
+    set_field(out, t_timing, f_meter, integer(t.meter));
+    set_field(out, t_timing, f_sample_set, sample_set(t.sample_set));
+    set_field(out, t_timing, f_sample_index, integer(t.sample_index));
+    set_field(out, t_timing, f_volume, integer(t.volume));
+    set_field(out, t_timing, f_uninherited, boolean(t.uninherited));
+    set_field(out, t_timing, f_effects, integer(t.effects));
+    return out;
   }
   PythonRef stacking(const fosu::HitObject& object) {
     if (map.stacking.empty())
       return none();
     const auto& value = map.stacking[&object - map.hit_objects.data()];
-    return record(
-        t_stacking,
-        {
-            {f_stack_height, integer(value.stack_height)},
-            {f_stack_offset,
-             record(t_path_point, {{f_x, number(value.stack_offset.x)},
-                                   {f_y, number(value.stack_offset.y)}})},
-        });
+    Value       values[] = {
+        {f_stack_height, integer(value.stack_height)},
+        {f_stack_offset,
+         path_point(value.stack_offset.x, value.stack_offset.y)},
+    };
+    return record(t_stacking, values);
   }
   PythonRef slider_events(size_t index) {
     const auto events = map.slider_events.empty()
@@ -476,48 +649,42 @@ struct BeatmapConverter {
                             : map.slider_events[index];
     return list(events.size(), [&](size_t i) {
       const auto& e = events[i];
-      return record(
-          t_event,
-          {
-              {f_type,
-               PythonRef(PyObject_CallFunction(state.types[t_event_type], "i",
-                                               static_cast<int>(e.type)))},
-              {f_time, number(e.time)},
-              {f_span_index, integer(e.span_index)},
-              {f_span_start_time, number(e.span_start_time)},
-              {f_path_progress, number(e.path_progress)},
-              {f_position, record(t_path_point, {{f_x, number(e.position.x)},
-                                                 {f_y, number(e.position.y)}})},
-          });
+      Value       values[] = {
+          {f_type, retain(state.event_types[static_cast<int>(e.type)])},
+          {f_time, number(e.time)},
+          {f_span_index, integer(e.span_index)},
+          {f_span_start_time, number(e.span_start_time)},
+          {f_path_progress, number(e.path_progress)},
+          {f_position, path_point(e.position.x, e.position.y)},
+      };
+      return record(t_event, values);
     });
   }
   PythonRef slider_path(const fosu::SliderPath& path) {
-    return record(
-        t_path,
-        {
-            {f_points, list(path.points.size(),
-                            [&](size_t i) {
-                              return record(t_path_point,
-                                            {{f_x, number(path.points[i].x)},
-                                             {f_y, number(path.points[i].y)}});
-                            })},
-            {f_cumulative_lengths, list(path.cumulative_lengths.size(),
-                                        [&](size_t i) {
-                                          return number(
-                                              path.cumulative_lengths[i]);
-                                        })},
-        });
+    Value values[] = {
+        {f_points, list(path.points.size(),
+                        [&](size_t i) {
+                          return path_point(path.points[i].x, path.points[i].y);
+                        })},
+        {f_cumulative_lengths, list(path.cumulative_lengths.size(),
+                                    [&](size_t i) {
+                                      return number(path.cumulative_lengths[i]);
+                                    })},
+    };
+    return record(t_path, values);
   }
   PythonRef break_period(const fosu::Break& period) {
-    return record(t_break, {{f_start, number(period.start)},
-                            {f_end, number(period.end)}});
+    Value values[] = {{f_start, number(period.start)},
+                      {f_end, number(period.end)}};
+    return record(t_break, values);
   }
   PythonRef stats() {
-    return record(t_stats,
-                  {{f_fast_path_lines, integer(map.stats.fast_path_lines)},
-                   {f_slow_path_lines, integer(map.stats.slow_path_lines)},
-                   {f_malformed_lines, integer(map.stats.malformed_lines)},
-                   {f_storyboard_lines, integer(map.stats.storyboard_lines)}});
+    Value values[] = {
+        {f_fast_path_lines, integer(map.stats.fast_path_lines)},
+        {f_slow_path_lines, integer(map.stats.slow_path_lines)},
+        {f_malformed_lines, integer(map.stats.malformed_lines)},
+        {f_storyboard_lines, integer(map.stats.storyboard_lines)}};
+    return record(t_stats, values);
   }
   PythonRef bookmark_list(PyObject* bookmarks) {
     PythonRef marks(PyList_New(0));
@@ -551,73 +718,72 @@ struct BeatmapConverter {
   PythonRef beatmap() {
     const auto& m = map;
     PythonRef   tags = string(m.tags), bookmarks = string(m.bookmarks);
-    return record(
-        t_beatmap,
-        {{f_format_version, integer(m.format_version)},
-         {f_audio_filename, string(m.audio_filename)},
-         {f_audio_lead_in, integer(m.audio_lead_in)},
-         {f_preview_time, optional_integer(m.preview_time)},
-         {f_countdown, integer(m.countdown)},
-         {f_sample_set, sample_set(m.sample_set)},
-         {f_sample_volume, integer(m.sample_volume)},
-         {f_stack_leniency, number(m.stack_leniency)},
-         {f_mode, PythonRef(PyObject_CallFunctionObjArgs(
-                      state.types[t_mode], integer(m.mode).p, nullptr))},
-         {f_letterbox_in_breaks, boolean(m.letterbox_in_breaks)},
-         {f_widescreen_storyboard, boolean(m.widescreen_storyboard)},
-         {f_epilepsy_warning, boolean(m.epilepsy_warning)},
-         {f_special_style, boolean(m.special_style)},
-         {f_use_skin_sprites, boolean(m.use_skin_sprites)},
-         {f_samples_match_playback_rate,
-          boolean(m.samples_match_playback_rate)},
-         {f_countdown_offset, integer(m.countdown_offset)},
-         {f_overlay_position, string(m.overlay_position)},
-         {f_skin_preference, string(m.skin_preference)},
-         {f_velocity_presets, list(m.velocity_presets.size(),
-                                   [&](size_t i) {
-                                     return number(m.velocity_presets[i]);
-                                   })},
-         {f_distance_spacing, number(m.distance_spacing)},
-         {f_beat_divisor, integer(m.beat_divisor)},
-         {f_grid_size, integer(m.grid_size)},
-         {f_timeline_zoom, number(m.timeline_zoom)},
-         {f_title, string(m.title)},
-         {f_title_unicode, string(m.title_unicode)},
-         {f_artist, string(m.artist)},
-         {f_artist_unicode, string(m.artist_unicode)},
-         {f_creator, string(m.creator)},
-         {f_version, string(m.version)},
-         {f_source, string(m.source)},
-         {f_beatmap_id, optional_integer(m.beatmap_id)},
-         {f_beatmap_set_id, optional_integer(m.beatmap_set_id)},
-         {f_hp, number(m.hp)},
-         {f_cs, number(m.cs)},
-         {f_od, number(m.od)},
-         {f_ar, number(m.ar)},
-         {f_slider_multiplier, number(m.slider_multiplier)},
-         {f_slider_tick_rate, number(m.slider_tick_rate)},
-         {f_background, string(m.background)},
-         {f_video, string(m.video)},
-         {f_tag_list, PythonRef(PyUnicode_Split(tags, nullptr, -1))},
-         {f_bookmark_list, bookmark_list(bookmarks)},
-         {f_tags, std::move(tags)},
-         {f_bookmarks, std::move(bookmarks)},
-         {f_hit_objects, list(map.hit_objects.size(),
-                              [&](size_t i) {
-                                return hit_object(map.hit_objects[i]);
-                              })},
-         {f_timing_points, list(map.timing_points.size(),
-                                [&](size_t i) {
-                                  return timing_point(map.timing_points[i]);
-                                })},
-         {f_breaks, list(map.breaks.size(),
-                         [&](size_t i) {
-                           return break_period(map.breaks[i]);
-                         })},
-         {f_stats, stats()},
-         {f_combo_colours, list(map.combo_colours.size(), [&](size_t i) {
-            return integer(map.combo_colours[i]);
-          })}});
+    Value       values[] = {
+        {f_format_version, integer(m.format_version)},
+        {f_audio_filename, string(m.audio_filename)},
+        {f_audio_lead_in, integer(m.audio_lead_in)},
+        {f_preview_time, optional_integer(m.preview_time)},
+        {f_countdown, integer(m.countdown)},
+        {f_sample_set, sample_set(m.sample_set)},
+        {f_sample_volume, integer(m.sample_volume)},
+        {f_stack_leniency, number(m.stack_leniency)},
+        {f_mode, PythonRef(PyObject_CallFunctionObjArgs(
+                     state.types[t_mode], integer(m.mode).p, nullptr))},
+        {f_letterbox_in_breaks, boolean(m.letterbox_in_breaks)},
+        {f_widescreen_storyboard, boolean(m.widescreen_storyboard)},
+        {f_epilepsy_warning, boolean(m.epilepsy_warning)},
+        {f_special_style, boolean(m.special_style)},
+        {f_use_skin_sprites, boolean(m.use_skin_sprites)},
+        {f_samples_match_playback_rate, boolean(m.samples_match_playback_rate)},
+        {f_countdown_offset, integer(m.countdown_offset)},
+        {f_overlay_position, string(m.overlay_position)},
+        {f_skin_preference, string(m.skin_preference)},
+        {f_velocity_presets, list(m.velocity_presets.size(),
+                                  [&](size_t i) {
+                                    return number(m.velocity_presets[i]);
+                                  })},
+        {f_distance_spacing, number(m.distance_spacing)},
+        {f_beat_divisor, integer(m.beat_divisor)},
+        {f_grid_size, integer(m.grid_size)},
+        {f_timeline_zoom, number(m.timeline_zoom)},
+        {f_title, string(m.title)},
+        {f_title_unicode, string(m.title_unicode)},
+        {f_artist, string(m.artist)},
+        {f_artist_unicode, string(m.artist_unicode)},
+        {f_creator, string(m.creator)},
+        {f_version, string(m.version)},
+        {f_source, string(m.source)},
+        {f_beatmap_id, optional_integer(m.beatmap_id)},
+        {f_beatmap_set_id, optional_integer(m.beatmap_set_id)},
+        {f_hp, number(m.hp)},
+        {f_cs, number(m.cs)},
+        {f_od, number(m.od)},
+        {f_ar, number(m.ar)},
+        {f_slider_multiplier, number(m.slider_multiplier)},
+        {f_slider_tick_rate, number(m.slider_tick_rate)},
+        {f_background, string(m.background)},
+        {f_video, string(m.video)},
+        {f_tag_list, PythonRef(PyUnicode_Split(tags, nullptr, -1))},
+        {f_bookmark_list, bookmark_list(bookmarks)},
+        {f_tags, std::move(tags)},
+        {f_bookmarks, std::move(bookmarks)},
+        {f_hit_objects, list(map.hit_objects.size(),
+                             [&](size_t i) {
+                               return hit_object(map.hit_objects[i]);
+                             })},
+        {f_timing_points, list(map.timing_points.size(),
+                               [&](size_t i) {
+                                 return timing_point(map.timing_points[i]);
+                               })},
+        {f_breaks, list(map.breaks.size(),
+                        [&](size_t i) {
+                          return break_period(map.breaks[i]);
+                        })},
+        {f_stats, stats()},
+        {f_combo_colours, list(map.combo_colours.size(), [&](size_t i) {
+           return integer(map.combo_colours[i]);
+         })}};
+    return record(t_beatmap, values);
   }
 };
 PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
@@ -690,6 +856,7 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
       throw PythonError{};
     }
     auto*            state = static_cast<State*>(PyModule_GetState(module));
+    PauseGC          pause_gc;
     BeatmapConverter converter(*result.value(), *state);
     return converter.beatmap().release();
     // Parser destruction releases native storage before the result escapes.
@@ -706,10 +873,12 @@ PyObject* parse_file(PyObject* m, PyObject* arg) {
   return parse_impl(m, arg, true);
 }
 PyMethodDef methods[] = {
+    {"_record", make_record, METH_VARARGS, nullptr},
+    {"_restore_record", restore_record, METH_O, nullptr},
     {"parse", parse, METH_VARARGS,
-     "Parse bytes into a detached dataclass graph."},
+     "Parse bytes into detached eager Python records."},
     {"parse_file", parse_file, METH_VARARGS,
-     "Read and parse a file into a detached dataclass graph."},
+     "Read and parse a file into detached eager Python records."},
     {nullptr, nullptr, 0, nullptr}};
 int traverse(PyObject* m, visitproc visit, void* arg) {
   auto* s = static_cast<State*>(PyModule_GetState(m));
@@ -719,10 +888,7 @@ int traverse(PyObject* m, visitproc visit, void* arg) {
   for (auto* type : s->types) {
     Py_VISIT(type);
   }
-  for (const auto& row : s->slots)
-    for (const auto& slot : row) {
-      Py_VISIT(slot.descriptor);
-    }
+  Py_VISIT(s->hit_object_base);
   for (auto* sound : s->sounds) {
     Py_VISIT(sound);
   }
@@ -731,6 +897,12 @@ int traverse(PyObject* m, visitproc visit, void* arg) {
   }
   for (auto* curve : s->curves) {
     Py_VISIT(curve);
+  }
+  for (auto* type : s->event_types) {
+    Py_VISIT(type);
+  }
+  for (auto* coordinate : s->coordinates) {
+    Py_VISIT(coordinate);
   }
   Py_VISIT(s->bookmark_whitespace);
   return 0;
@@ -743,10 +915,7 @@ int clear(PyObject* m) {
   for (auto*& type : s->types) {
     Py_CLEAR(type);
   }
-  for (auto& row : s->slots)
-    for (auto& slot : row) {
-      Py_CLEAR(slot.descriptor);
-    }
+  Py_CLEAR(s->hit_object_base);
   for (auto*& sound : s->sounds) {
     Py_CLEAR(sound);
   }
@@ -755,6 +924,12 @@ int clear(PyObject* m) {
   }
   for (auto*& curve : s->curves) {
     Py_CLEAR(curve);
+  }
+  for (auto*& type : s->event_types) {
+    Py_CLEAR(type);
+  }
+  for (auto*& coordinate : s->coordinates) {
+    Py_CLEAR(coordinate);
   }
   Py_CLEAR(s->bookmark_whitespace);
   return 0;
@@ -780,30 +955,11 @@ int exec_module(PyObject* m) {
     if (!s->model)
       return -1;
     for (int i = 0; i < type_count; ++i) {
+      if (i < record_type_count)
+        continue;
       s->types[i] = PyObject_GetAttrString(s->model, type_names[i]);
       if (!s->types[i])
         return -1;
-    }
-    for (int type = 0; type < record_type_count; ++type) {
-      for (int field = 0; field < field_count; ++field) {
-        auto& slot = s->slots[type][field];
-        slot.descriptor =
-            PyObject_GetAttrString(s->types[type], field_names[field]);
-        if (!slot.descriptor) {
-          // This field belongs to a different record type.
-          if (!PyErr_ExceptionMatches(PyExc_AttributeError))
-            return -1;
-          PyErr_Clear();
-          continue;
-        }
-        slot.assign = reinterpret_cast<descrsetfunc>(
-            PyType_GetSlot(Py_TYPE(slot.descriptor), Py_tp_descr_set));
-        if (!slot.assign) {
-          PyErr_Format(PyExc_TypeError, "%s.%s must be a writable slot",
-                       type_names[type], field_names[field]);
-          return -1;
-        }
-      }
     }
     for (int i = 0; i < 16; ++i) {
       s->sounds[i] = PyObject_CallFunction(s->types[t_sound], "i", i);
@@ -820,6 +976,16 @@ int exec_module(PyObject* m) {
     for (int i = 0; i < 4; ++i) {
       s->curves[i] = PyObject_GetAttrString(s->types[t_curve], curves[i]);
       if (!s->curves[i])
+        return -1;
+    }
+    for (int i = 0; i <= 512; ++i) {
+      s->coordinates[i] = PyFloat_FromDouble(i);
+      if (!s->coordinates[i])
+        return -1;
+    }
+    for (int i = 0; i < 5; ++i) {
+      s->event_types[i] = PyObject_CallFunction(s->types[t_event_type], "i", i);
+      if (!s->event_types[i])
         return -1;
     }
     constexpr wchar_t bookmark_whitespace[] =

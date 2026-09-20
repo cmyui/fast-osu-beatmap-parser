@@ -1,8 +1,47 @@
-"""Mutable, detached beatmap values; all fields are populated during parsing."""
+"""Detached beatmap values; all fields are populated during parsing."""
 
-from dataclasses import dataclass
+import sys
 from enum import Enum, IntEnum, IntFlag
-from typing import ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias, TypeVar, cast, get_origin
+
+if sys.version_info >= (3, 11):
+    from typing import dataclass_transform
+else:
+    from typing_extensions import dataclass_transform
+
+from . import _core
+
+_T = TypeVar("_T")
+
+
+def _restore(cls: type[_T]) -> _T:
+    # Pickle/deepcopy memoize the empty record before restoring cyclic fields.
+    return cast(_T, _core._restore_record(cls))
+
+
+@dataclass_transform(frozen_default=True)
+def _record(cls: type[_T]) -> type[_T]:
+    """Keep the domain declaration here; give its eager fields native storage."""
+    annotations = {}
+    for base in reversed(cls.__mro__[:-1]):
+        annotations.update(base.__annotations__)
+    fields = tuple(
+        name
+        for name, hint in annotations.items()
+        if cast(object, get_origin(hint)) is not ClassVar
+    )
+    result = _core._record(cls.__name__, fields)
+    for name, value in vars(cls).items():
+        if name not in {"__dict__", "__weakref__", "__annotations__"}:
+            setattr(result, name, value)
+    result.__annotations__ = annotations
+    return cast(type[_T], result)
+
+
+@_record
+class Point:
+    x: float
+    y: float
 
 
 class GameMode(IntEnum):
@@ -33,26 +72,20 @@ class HitSound(IntFlag):
     CLAP = 8
 
 
-@dataclass(slots=True)
-class Point:
-    x: float
-    y: float
-
-
-@dataclass(slots=True)
+@_record
 class CurveSegment:
     type: CurveType
     degree: int | None
     control_points: list[Point]
 
 
-@dataclass(slots=True)
+@_record
 class PathPoint:
     x: float
     y: float
 
 
-@dataclass(slots=True)
+@_record
 class SliderPath:
     """Retained polyline, relative to the head; distances are playfield pixels."""
 
@@ -63,13 +96,13 @@ class SliderPath:
         return self.cumulative_lengths[-1] if self.cumulative_lengths else 0.0
 
 
-@dataclass(slots=True)
+@_record
 class Stacking:
     stack_height: int
     stack_offset: PathPoint
 
 
-@dataclass(slots=True, kw_only=True)
+@_record
 class _HitObject:
     time: float
     x: float
@@ -93,6 +126,12 @@ class _HitObject:
         return self.x - offset.x, self.y - offset.y
 
 
+@_record
+class Circle(_HitObject):
+    end_time: float
+    is_circle: ClassVar[bool] = True
+
+
 class SliderEventType(IntEnum):
     HEAD = 0
     TICK = 1
@@ -101,7 +140,7 @@ class SliderEventType(IntEnum):
     TAIL = 4
 
 
-@dataclass(slots=True)
+@_record
 class SliderEvent:
     type: SliderEventType
     time: float
@@ -111,13 +150,7 @@ class SliderEvent:
     position: PathPoint
 
 
-@dataclass(slots=True, kw_only=True)
-class Circle(_HitObject):
-    end_time: float
-    is_circle: ClassVar[bool] = True
-
-
-@dataclass(slots=True, kw_only=True)
+@_record
 class Slider(_HitObject):
     end_time: float
     slides: int
@@ -132,13 +165,13 @@ class Slider(_HitObject):
     is_slider: ClassVar[bool] = True
 
 
-@dataclass(slots=True, kw_only=True)
+@_record
 class Spinner(_HitObject):
     end_time: float
     is_spinner: ClassVar[bool] = True
 
 
-@dataclass(slots=True, kw_only=True)
+@_record
 class HoldNote(_HitObject):
     end_time: float
     is_hold: ClassVar[bool] = True
@@ -147,7 +180,7 @@ class HoldNote(_HitObject):
 HitObject: TypeAlias = Circle | Slider | Spinner | HoldNote
 
 
-@dataclass(slots=True, kw_only=True)
+@_record
 class TimingPoint:
     time: float
     beat_length: float
@@ -159,13 +192,13 @@ class TimingPoint:
     effects: int
 
 
-@dataclass(slots=True)
+@_record
 class Break:
     start: float
     end: float
 
 
-@dataclass(slots=True, kw_only=True)
+@_record
 class ParseStats:
     fast_path_lines: int
     slow_path_lines: int
@@ -173,7 +206,7 @@ class ParseStats:
     storyboard_lines: int
 
 
-@dataclass(slots=True, repr=False, kw_only=True)
+@_record
 class Beatmap:
     format_version: int
     audio_filename: str

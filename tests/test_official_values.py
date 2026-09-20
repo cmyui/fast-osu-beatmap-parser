@@ -8,7 +8,6 @@ Reports contain local paths and input-derived values; keep them private.
 
 import argparse
 from collections import Counter
-from dataclasses import fields
 from enum import Enum
 import json
 import math
@@ -17,6 +16,7 @@ import re
 import shlex
 import struct
 import subprocess
+from typing import ClassVar, get_origin, get_type_hints
 
 import fosu
 
@@ -26,8 +26,12 @@ def value(obj):
         return obj.value
     if isinstance(obj, list):
         return [value(item) for item in obj]
-    if hasattr(obj, "__dataclass_fields__"):
-        return {field.name: value(getattr(obj, field.name)) for field in fields(obj)}
+    if type(obj).__module__ == "fosu._model":
+        return {
+            name: value(getattr(obj, name))
+            for name, hint in get_type_hints(type(obj)).items()
+            if get_origin(hint) is not ClassVar
+        }
     return obj
 
 

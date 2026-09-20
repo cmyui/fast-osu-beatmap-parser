@@ -5,6 +5,8 @@ from ._model import Beatmap
 
 backend: Final[Literal["avx2", "neon", "scalar"]]
 
+def _record(name: str, fields: tuple[str, ...], /) -> type: ...
+def _restore_record(cls: type, /) -> object: ...
 def parse(
     data: bytes,
     sections: int,
