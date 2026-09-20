@@ -222,11 +222,20 @@ inline const char* parse_hitobjects_section_simd(
 
   while (p < file_end) {
     const Bytes32 ascii = load32(p);
-    const auto    endings = line_end_mask32(ascii);
-    const auto    commas = equal_mask32(ascii, comma_value);
-    const u32     nondigits = nondigit_mask32(ascii);
-    const char*   line_end =
+#if FOSU_SIMD_NEON
+    const u32 first_ending = first_line_end32(ascii);
+#else
+    const auto endings = line_end_mask32(ascii);
+#endif
+    const auto commas = equal_mask32(ascii, comma_value);
+    const u32  nondigits = nondigit_mask32(ascii);
+#if FOSU_SIMD_NEON
+    const char* line_end =
+        first_ending < 32 ? p + first_ending : find_line_end(p + 32, file_end);
+#else
+    const char* line_end =
         endings ? p + trailing_zeros(endings) : find_line_end(p + 32, file_end);
+#endif
     const char* next_line = after_line_ending(line_end, file_end);
     const auto  length = static_cast<size_t>(line_end - p);
     u32         p1, p2, prefix_end, hitsound_length, mask_index;
