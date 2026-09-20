@@ -318,8 +318,12 @@ struct State {
 struct BeatmapConverter {
   const fosu::Beatmap& map;
   const State&         state;
+  PythonRef            default_hit_sample;
   BeatmapConverter(const fosu::Beatmap& map, const State& state)
-      : map(map), state(state) {}
+      : map(map),
+        state(state),
+        default_hit_sample(
+            PyUnicode_DecodeUTF8("0:0:0:0:", 8, "surrogateescape")) {}
 
   PythonRef sample_set(fosu::SampleSet value) {
     return retain(state.samples[static_cast<int>(value)]);
@@ -397,7 +401,8 @@ struct BeatmapConverter {
         {f_type, integer(h.type)},
         {f_new_combo, boolean(h.new_combo)},
         {f_combo_skip, integer(h.combo_skip)},
-        {f_hit_sample, string(h.hit_sample)}};
+        {f_hit_sample, h.hit_sample == "0:0:0:0:" ? retain(default_hit_sample)
+                                                  : string(h.hit_sample)}};
     if (slider) {
       const auto& s = map.sliders[h.slider];
       return record(t_slider,

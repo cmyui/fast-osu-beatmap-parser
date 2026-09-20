@@ -781,6 +781,15 @@ def test_hitsound_flags_preserve_combinations_and_unknown_bits():
     assert all(isinstance(note.hitsound, fosu.HitSound) for note in b.hit_objects)
 
 
+def test_hit_sample_preserves_default_omitted_and_custom_text():
+    b = fosu.parse(b"[HitObjects]\n1,2,1,1,0,0:0:0:0:\n1,2,2,1,0\n1,2,3,1,0,1:2:0:0:\n")
+    assert [note.hit_sample for note in b.hit_objects] == [
+        "0:0:0:0:",
+        "",
+        "1:2:0:0:",
+    ]
+
+
 def test_standard_python_copy_and_export():
     b = fosu.parse(b"[Metadata]\nTitle:Copy\n[HitObjects]\n2,4,6,2,0,B|8:10,1,12\n")
     restored = pickle.loads(pickle.dumps(b))
