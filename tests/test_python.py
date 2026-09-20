@@ -772,6 +772,21 @@ def test_native_points_have_eager_float_fields_and_no_gc_cycles():
         fosu.Point([], [])
 
 
+def test_user_cycle_through_mutated_hit_object_is_collected():
+    class Marker:
+        pass
+
+    beatmap = fosu.parse(b"[HitObjects]\n1,2,3,2,0,L|4:5,1,6\n")
+    note = beatmap.hit_objects[0]
+    marker = Marker()
+    marker.note = note
+    note.x = marker
+    retained = weakref.ref(marker)
+    del beatmap, note, marker
+    gc.collect()
+    assert retained() is None
+
+
 def test_parse_preserves_gc_enabled_state():
     data = b"[HitObjects]\n1,2,3,1,0\n"
     original = gc.isenabled()
