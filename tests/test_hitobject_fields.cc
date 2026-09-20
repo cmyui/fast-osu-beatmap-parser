@@ -114,6 +114,26 @@ static void test_slider_point_digit_widths() {
 #endif
 }
 
+static void test_slider_point_pairs_resume_after_fallback() {
+  const auto input = slider_document(
+      "B|123:456|789:123|12.5:7.5|123:456|789:123|123:45|678:90|1:2|3:4,1,10");
+  const fosu::SliderPoint expected[] = {
+      {123, 456}, {789, 123}, {12, 7}, {123, 456}, {789, 123},
+      {123, 45},  {678, 90},  {1, 2},  {3, 4},
+  };
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(input, simd);
+    CHECK_EQ(map.sliders.size(), 1u);
+    CHECK_EQ(map.slider_points.size(), 9u);
+    if (map.slider_points.size() != 9)
+      continue;
+    for (size_t i = 0; i < 9; ++i) {
+      CHECK_EQ(map.slider_points[i].x, expected[i].x);
+      CHECK_EQ(map.slider_points[i].y, expected[i].y);
+    }
+  }
+}
+
 static void test_slider_repeats_and_length() {
   struct Case {
     const char* tail;
@@ -230,6 +250,7 @@ int main() {
   test_slider_points();
   test_slider_pool_indices_after_rejected_record();
   test_slider_point_digit_widths();
+  test_slider_point_pairs_resume_after_fallback();
   test_slider_repeats_and_length();
   test_slider_sounds();
   test_hitobject_details();

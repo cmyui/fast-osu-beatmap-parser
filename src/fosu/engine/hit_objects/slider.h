@@ -229,6 +229,37 @@ FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
     }
     return p;
   }
+#else
+  if ((non_digits & 0xffffu) == 0x1111u && p[0] == '|' && p[4] == ':' &&
+      p[8] == '|' && p[12] == ':' && (p[16] == '|' || p[16] == ',')) {
+    static_assert(sizeof(SliderPoint) == 8 && offsetof(SliderPoint, x) == 0 &&
+                  offsetof(SliderPoint, y) == 4);
+    const auto digits = vsubq_u8(input.val[0], constants.zero);
+    // The four delimiter bytes become zero; each coordinate is now a
+    // right-aligned, three-digit group for decimal_groups.
+    const auto positions = vcvtq_f32_u32(
+        decimal_groups(vandq_u8(digits, vcltq_u8(digits, vdupq_n_u8(10)))));
+    std::memcpy(beatmap.slider_points.data() + slider_point_count, &positions,
+                sizeof(positions));
+    slider_point_count += 2;
+    return p + 16;
+  }
+  if ((non_digits & 0x3fffu) == 0x891u && p[0] == '|' && p[4] == ':' &&
+      p[7] == '|' && p[11] == ':' && (p[14] == '|' || p[14] == ',')) {
+    beatmap.slider_points[slider_point_count++] =
+        decode_slider_point(input.val[0], 3, 2, constants);
+    beatmap.slider_points[slider_point_count++] = decode_slider_point(
+        vld1q_u8(reinterpret_cast<const u8*>(p + 7)), 3, 2, constants);
+    return p + 14;
+  }
+  if ((non_digits & 0xffu) == 0x55u && p[0] == '|' && p[2] == ':' &&
+      p[4] == '|' && p[6] == ':' && (p[8] == '|' || p[8] == ',')) {
+    beatmap.slider_points[slider_point_count++] =
+        decode_slider_point(input.val[0], 1, 1, constants);
+    beatmap.slider_points[slider_point_count++] = decode_slider_point(
+        vld1q_u8(reinterpret_cast<const u8*>(p + 4)), 1, 1, constants);
+    return p + 8;
+  }
 #endif
 
   const u32 colons = equal_mask32(input, constants.colon);
