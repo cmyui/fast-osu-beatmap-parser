@@ -1,4 +1,4 @@
-"""Fast .osu parsing into ordinary, mutable Python values."""
+"""Fast .osu parsing into eager, detached Python values."""
 
 from __future__ import annotations
 

@@ -1,7 +1,9 @@
 # Python API
 
 FOSU is in active development; its API may change without compatibility shims.
-Parsing returns eager, mutable dataclasses and lists, detached from native memory.
+Parsing returns eager objects and lists, detached from native memory. Slider
+control points are read-only native `Point` objects; other records remain
+slotted dataclasses.
 
 ## Install and use
 
@@ -60,9 +62,9 @@ malformed-line counts.
 
 ## Results and important distinctions
 
-The typed dataclasses in
+The model classes in
 [_model.py](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/python/fosu/_model.py)
-define the fields.
+and the native `Point` type define the fields.
 Shared fields use C++ names. Important Python-specific behavior:
 
 - `hit_objects` contains `Circle`, `Slider`, `Spinner`, or `HoldNote`, in
@@ -84,11 +86,13 @@ Shared fields use C++ names. Important Python-specific behavior:
 - Inherited timing-point NaN beat lengths are preserved; consumers must not
   treat them as ordinary slider velocities.
 
-Values can be edited, copied with `deepcopy`, exported with `dataclasses.asdict`,
-or pickled. They do not validate assignments or recompute related fields:
-changing a slider's position does not move its stored head point, and changing
-`type` does not recalculate combo flags. `dataclasses.replace` is a shallow copy.
-Mutation does not change the input or another parse result.
+Most records can be edited, copied with `deepcopy`, exported with
+`dataclasses.asdict`, or pickled. `Point` is read-only and is left as a `Point`
+by `asdict`; it can also be copied or pickled. Editable fields do not validate
+assignments or recompute related fields: changing a slider's position does not
+move its stored head point, and changing `type` does not recalculate combo
+flags. `dataclasses.replace` is a shallow copy for dataclass records. Mutation
+does not change the input or another parse result.
 
 Pass `calculate_slider_paths=True` to retain each slider's `path` (otherwise
 `None`). `fosu.slider_position_at(slider.path, progress)` is a pure query over

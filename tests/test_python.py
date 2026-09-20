@@ -748,13 +748,26 @@ def test_detached_values_remain_valid_after_reuse():
     assert (note.x, note.y, note.time) == (99, 48, 600)
 
 
-def test_points_are_independent_between_results():
+def test_points_are_read_only_and_independent_between_results():
     data = b"[HitObjects]\n10,20,30,2,0,L|40:50,1,60\n"
     b = fosu.parse(data)
     other = fosu.parse(data)
-    b.hit_objects[0].control_points[1].x = 70
-    assert b.hit_objects[0].control_points[1].x == 70
+    with pytest.raises(AttributeError):
+        b.hit_objects[0].control_points[1].x = 70
+    assert b.hit_objects[0].control_points[1].x == 40
     assert other.hit_objects[0].control_points[1].x == 40
+
+
+def test_native_points_have_eager_float_fields_and_no_gc_cycles():
+    point = fosu.Point(x=1, y=2)
+    assert (point.x, point.y) == (1.0, 2.0)
+    assert repr(point) == "Point(x=1.0, y=2.0)"
+    assert point == fosu.Point(1, 2)
+    assert pickle.loads(pickle.dumps(point)) == point
+    assert deepcopy(point) == point
+    assert not gc.is_tracked(point)
+    with pytest.raises(AttributeError):
+        object.__setattr__(point, "x", point)
 
 
 def test_parse_preserves_gc_enabled_state():
@@ -815,10 +828,9 @@ def test_standard_python_copy_and_export():
     copied.hit_objects[0].x = 100
     assert b.hit_objects[0].x == 2
     assert replace(b, title="Replaced").title == "Replaced"
-    result = asdict(b)
-    assert result["hit_objects"][0]["control_points"] == [
-        {"x": 2, "y": 4},
-        {"x": 8, "y": 10},
+    assert asdict(b)["hit_objects"][0]["control_points"] == [
+        fosu.Point(2, 4),
+        fosu.Point(8, 10),
     ]
 
 
@@ -930,7 +942,9 @@ def test_all_fields_are_detached_python_values():
         if id(value) in seen:
             return
         seen.add(id(value))
-        if is_dataclass(value):
+        if isinstance(value, fosu.Point):
+            assert isinstance(value.x, float) and isinstance(value.y, float)
+        elif is_dataclass(value):
             for f in fields(value):
                 visit(getattr(value, f.name))
         elif isinstance(value, list):

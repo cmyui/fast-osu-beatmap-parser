@@ -1,8 +1,10 @@
-"""Mutable, detached beatmap values; all fields are populated during parsing."""
+"""Detached beatmap values; all fields are populated during parsing."""
 
 from dataclasses import dataclass
 from enum import Enum, IntEnum, IntFlag
 from typing import ClassVar, TypeAlias
+
+from ._core import Point
 
 
 class GameMode(IntEnum):
@@ -31,12 +33,6 @@ class HitSound(IntFlag):
     WHISTLE = 2
     FINISH = 4
     CLAP = 8
-
-
-@dataclass(slots=True)
-class Point:
-    x: float
-    y: float
 
 
 @dataclass(slots=True)
