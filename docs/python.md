@@ -42,6 +42,27 @@ releases the GIL; Python value construction holds it. Concurrent calls return
 independent results. Malformed records are skipped and counted in
 `beatmap.stats.malformed_lines`; success does not certify playability.
 
+## Performance
+
+FOSU 0.5.0 (`798b810`), measured on 2026-09-20 using CPython 3.12.14 on an
+Intel Core i7-8700 under Linux/WSL2. All rows use the same 1,004 mutually accepted
+all-mode maps. Times include eager result construction and release; lower is
+better. Warm-file measurements include opening and reading page-cached files.
+
+| Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
+|---|---:|---:|
+| FOSU AVX2 | 165.1 | 174.7 |
+| FOSU scalar | 224.4 | 231.6 |
+| OsuPyParser 1.0.7 | Unsupported | 4,418.2 |
+
+Figures are medians of complete passes, not fastest individual parses. Six
+passes per API were collected; passes more than 5% above their API's unfiltered
+median are excluded as presumed interference, leaving five or six per result.
+The parsers expose different models: OsuPyParser also performs derived-statistic
+work. See the [comparison and measured variation](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/docs/comparison.md)
+for result contracts, or the [feature-cost tables](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/docs/performance.md)
+for slider geometry, gameplay, mods, and ARM measurements.
+
 ## Section selection
 
 ```python

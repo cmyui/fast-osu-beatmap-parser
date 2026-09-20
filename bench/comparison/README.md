@@ -107,6 +107,13 @@ the timed API, corpus and summary statistic are unchanged.
 ## Measurement contract
 
 The Python headline uses `python_batch.py`, not the interleaved per-call means.
+For the published refresh, discard one warm-up invocation, then run three more
+invocations into separate reports. For each library/API/cohort, collect the six
+`pass_mean_us` values, exclude complete passes greater than 1.05 times their
+unfiltered median, and report the retained median and minimum–maximum range.
+Keep the rejected passes in the raw evidence and disclose the exclusion count.
+This one-sided rule assumes slow interference; it does not identify its cause.
+Do not apply it to individual maps, GC events, or the two-pass native sweep.
 Each library/API/pass gets a fresh process, preloads the common Python cohort,
 warms on 64 maps three times, then times one complete loop. Normal GC and loop
 bookkeeping are included. Imports, preload, warmup and process teardown are
