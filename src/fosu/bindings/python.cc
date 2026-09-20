@@ -37,6 +37,13 @@ struct PythonRef {
   PyObject* release() { return std::exchange(p, nullptr); }
   operator PyObject*() const { return p; }
 };
+struct PauseGC {
+  int was_enabled = PyGC_Disable();
+  ~PauseGC() {
+    if (was_enabled)
+      PyGC_Enable();
+  }
+};
 PythonRef integer(long long n) {
   return PythonRef(PyLong_FromLongLong(n));
 }
@@ -695,6 +702,7 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
       throw PythonError{};
     }
     auto*            state = static_cast<State*>(PyModule_GetState(module));
+    PauseGC          pause_gc;
     BeatmapConverter converter(*result.value(), *state);
     return converter.beatmap().release();
     // Parser destruction releases native storage before the result escapes.

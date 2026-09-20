@@ -757,6 +757,23 @@ def test_points_are_independent_between_results():
     assert other.hit_objects[0].control_points[1].x == 40
 
 
+def test_parse_preserves_gc_enabled_state():
+    data = b"[HitObjects]\n1,2,3,1,0\n"
+    original = gc.isenabled()
+    try:
+        gc.enable()
+        assert fosu.parse(data).hit_objects[0].time == 3
+        assert gc.isenabled()
+        gc.disable()
+        assert fosu.parse(data).hit_objects[0].time == 3
+        assert not gc.isenabled()
+    finally:
+        if original:
+            gc.enable()
+        else:
+            gc.disable()
+
+
 def test_repeated_timestamp_fields_remain_independently_assignable():
     b = fosu.parse(
         b"[HitObjects]\n1,2,1000.5,1,0\n1,2,2000.5,8,0,3000.5\n"
