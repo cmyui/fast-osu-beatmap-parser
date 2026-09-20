@@ -278,10 +278,24 @@ inline bool circular_arc_distance(std::span<const CurvePoint> points,
                                                      1 - 0.1f / radius)))));
   if (!std::isfinite(amount) || amount >= 1000)
     return false;
-  for (i32 i = 0; i < static_cast<i32>(amount); ++i) {
-    const f64 theta = start + direction * (i / (amount - 1)) * range;
-    distance.append(centre + CurvePoint{static_cast<f32>(std::cos(theta)),
-                                        static_cast<f32>(std::sin(theta))} *
+  const i32 count = static_cast<i32>(amount);
+  const f64 step = direction * range / (amount - 1);
+  const f64 step_cos = std::cos(step), step_sin = std::sin(step);
+  f64       unit_x = 0, unit_y = 0;
+  for (i32 i = 0; i < count; ++i) {
+    // Re-anchor every 16 vertices to limit roundoff. Evaluate both endpoints
+    // from their absolute angles rather than the recurrence.
+    if (i % 16 == 0 || i + 1 == count) {
+      const f64 theta = start + direction * (i / (amount - 1)) * range;
+      unit_x = std::cos(theta);
+      unit_y = std::sin(theta);
+    } else {
+      const f64 x = unit_x * step_cos - unit_y * step_sin;
+      unit_y = unit_y * step_cos + unit_x * step_sin;
+      unit_x = x;
+    }
+    distance.append(centre + CurvePoint{static_cast<f32>(unit_x),
+                                        static_cast<f32>(unit_y)} *
                                  radius);
   }
   return true;
