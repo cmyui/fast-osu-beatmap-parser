@@ -358,28 +358,43 @@ inline const char* parse_hitobjects_section_simd(
 
       if (time_ok) [[likely]] {
         ++fast_lines;
-        HitObject object{
-            .x = static_cast<f32>(fields[0]),
-            .y = static_cast<f32>(fields[1]),
-            .type = fields[2],
-            .hitsound = fields[3],
-            .time = time,
-            .end_time = 0,
-            .slider = HitObject::kNoSlider,
-            .new_combo = false,
-            .combo_skip = 0,
-            .hit_sample = {},
-        };
         const HitObjectKind kind = classify_hitobject_kind(fields[2]);
+        const auto          make_object = [&] {
+          return HitObject{
+              .x = static_cast<f32>(fields[0]),
+              .y = static_cast<f32>(fields[1]),
+              .type = fields[2],
+              .hitsound = fields[3],
+              .time = time,
+              .end_time = 0,
+              .slider = HitObject::kNoSlider,
+              .new_combo = false,
+              .combo_skip = 0,
+              .hit_sample = {},
+          };
+        };
+        const bool simple_circle =
+            kind == HitObjectKind::Circle &&
+            (prefix_end == length ||
+             (length - prefix_end == 9 && after_prefix == ',' &&
+              short_sample(p + prefix_end + 1)));
+        // Publish common circles before the address-taken object used by
+        // slider and detail handlers is materialized on the stack.
+        if (simple_circle) [[likely]] {
+          HitObject circle = make_object();
+          if (prefix_end != length)
+            circle.hit_sample = {p + prefix_end + 1, 8};
+          beatmap.hit_objects[counts.objects] = normalize_hitobject(
+              circle, counts.objects, preceding_was_spinner, time_offset);
+          preceding_was_spinner = false;
+          ++counts.objects;
+          p = next_line;
+          continue;
+        }
+        HitObject object = make_object();
         if (kind == HitObjectKind::Circle) {
-          if (prefix_end == length) {
-            object.hit_sample = {};
-          } else if (length - prefix_end == 9 && after_prefix == ',' &&
-                     short_sample(p + prefix_end + 1)) {
-            object.hit_sample = {p + prefix_end + 1, 8};
-          } else if (!parse_hitobject_details(beatmap, counts, object,
-                                              p + prefix_end, line_end,
-                                              constants)) {
+          if (!parse_hitobject_details(beatmap, counts, object, p + prefix_end,
+                                       line_end, constants)) {
             ++malformed;
             p = next_line;
             continue;
