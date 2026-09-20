@@ -1,4 +1,5 @@
 // Construct detached Python values using the CPython stable ABI.
+#include <fosu/bindings/records.h>
 #include <fosu/compiler.h>
 #include <fosu/engine/runtime/loader.h>
 #include <fosu/parser.h>
@@ -6,6 +7,7 @@
 
 #include <Python.h>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
 #include <initializer_list>
 #include <new>
@@ -406,6 +408,8 @@ struct State {
   PyObject*  sounds[16];
   PyObject*  samples[4];
   PyObject*  curves[4];
+  PyObject*  event_types[5];
+  PyObject*  coordinates[513];
   PyObject*  bookmark_whitespace;
 };
 
@@ -469,12 +473,20 @@ struct BeatmapConverter {
     return PythonRef(PyUnicode_DecodeUTF8(s.empty() ? "" : s.data(), s.size(),
                                           "surrogateescape"));
   }
+  PythonRef coordinate(f32 value) {
+    if (value >= 0 && value <= 512 && !std::signbit(value)) {
+      auto index = static_cast<u32>(value);
+      if (value == static_cast<f32>(index))
+        return retain(state.coordinates[index]);
+    }
+    return number(value);
+  }
   PythonRef point(f32 x, f32 y) {
     PythonRef out(PyType_GenericAlloc(
         reinterpret_cast<PyTypeObject*>(state.types[t_point]), 0));
     auto*     point = reinterpret_cast<PointObject*>(out.p);
-    point->x = number(x).release();
-    point->y = number(y).release();
+    point->x = coordinate(x).release();
+    point->y = coordinate(y).release();
     return out;
   }
   template <class F>
@@ -488,14 +500,33 @@ struct BeatmapConverter {
     return out;
   }
   PythonRef hit_object(const fosu::HitObject& h) {
-    const bool  circle = h.type & 1, slider = !circle && (h.type & 2);
+    const bool circle = h.type & 1, slider = !circle && (h.type & 2);
+    if (circle) {
+      PythonRef out(PyType_GenericAlloc(
+          reinterpret_cast<PyTypeObject*>(state.types[t_circle]), 0));
+      auto*     object = reinterpret_cast<CircleObject*>(out.p);
+      object->time = number(h.time).release();
+      object->end_time = retain(object->time).release();
+      object->x = coordinate(h.x).release();
+      object->y = coordinate(h.y).release();
+      object->hitsound = sound(h.hitsound).release();
+      object->type = integer(h.type).release();
+      object->new_combo = boolean(h.new_combo).release();
+      object->combo_skip = integer(h.combo_skip).release();
+      object->hit_sample =
+          (h.hit_sample == "0:0:0:0:" ? retain(default_hit_sample)
+                                      : string(h.hit_sample))
+              .release();
+      object->stacking = stacking(h).release();
+      return out;
+    }
     PythonRef   time = number(h.time);
     const Value common[] = {
         {f_time, retain(time)},
         {f_stacking, stacking(h)},
-        {f_end_time, circle ? std::move(time) : number(h.end_time)},
-        {f_x, number(h.x)},
-        {f_y, number(h.y)},
+        {f_end_time, number(h.end_time)},
+        {f_x, coordinate(h.x)},
+        {f_y, coordinate(h.y)},
         {f_hitsound, sound(h.hitsound)},
         {f_type, integer(h.type)},
         {f_new_combo, boolean(h.new_combo)},
@@ -526,10 +557,7 @@ struct BeatmapConverter {
                            })}},
                     common);
     }
-    return record(circle       ? t_circle
-                  : h.type & 8 ? t_spinner
-                               : t_hold,
-                  {}, common);
+    return record(h.type & 8 ? t_spinner : t_hold, {}, common);
   }
   PythonRef curve_segments(const fosu::HitObject& object,
                            const fosu::Slider&    slider) {
@@ -552,14 +580,18 @@ struct BeatmapConverter {
   }
 
   PythonRef timing_point(const fosu::TimingPoint& t) {
-    return record(t_timing, {{f_time, number(t.time)},
-                             {f_beat_length, number(t.beat_length)},
-                             {f_meter, integer(t.meter)},
-                             {f_sample_set, sample_set(t.sample_set)},
-                             {f_sample_index, integer(t.sample_index)},
-                             {f_volume, integer(t.volume)},
-                             {f_uninherited, boolean(t.uninherited)},
-                             {f_effects, integer(t.effects)}});
+    PythonRef out(PyType_GenericAlloc(
+        reinterpret_cast<PyTypeObject*>(state.types[t_timing]), 0));
+    auto*     point = reinterpret_cast<TimingPointObject*>(out.p);
+    point->time = number(t.time).release();
+    point->beat_length = number(t.beat_length).release();
+    point->meter = integer(t.meter).release();
+    point->sample_set = sample_set(t.sample_set).release();
+    point->sample_index = integer(t.sample_index).release();
+    point->volume = integer(t.volume).release();
+    point->uninherited = boolean(t.uninherited).release();
+    point->effects = integer(t.effects).release();
+    return out;
   }
   PythonRef stacking(const fosu::HitObject& object) {
     if (map.stacking.empty())
@@ -583,9 +615,7 @@ struct BeatmapConverter {
       return record(
           t_event,
           {
-              {f_type,
-               PythonRef(PyObject_CallFunction(state.types[t_event_type], "i",
-                                               static_cast<int>(e.type)))},
+              {f_type, retain(state.event_types[static_cast<int>(e.type)])},
               {f_time, number(e.time)},
               {f_span_index, integer(e.span_index)},
               {f_span_start_time, number(e.span_start_time)},
@@ -812,9 +842,9 @@ PyObject* parse_file(PyObject* m, PyObject* arg) {
 }
 PyMethodDef methods[] = {
     {"parse", parse, METH_VARARGS,
-     "Parse bytes into a detached dataclass graph."},
+     "Parse bytes into detached eager Python records."},
     {"parse_file", parse_file, METH_VARARGS,
-     "Read and parse a file into a detached dataclass graph."},
+     "Read and parse a file into detached eager Python records."},
     {nullptr, nullptr, 0, nullptr}};
 int traverse(PyObject* m, visitproc visit, void* arg) {
   auto* s = static_cast<State*>(PyModule_GetState(m));
@@ -836,6 +866,12 @@ int traverse(PyObject* m, visitproc visit, void* arg) {
   }
   for (auto* curve : s->curves) {
     Py_VISIT(curve);
+  }
+  for (auto* type : s->event_types) {
+    Py_VISIT(type);
+  }
+  for (auto* coordinate : s->coordinates) {
+    Py_VISIT(coordinate);
   }
   Py_VISIT(s->bookmark_whitespace);
   return 0;
@@ -861,6 +897,12 @@ int clear(PyObject* m) {
   for (auto*& curve : s->curves) {
     Py_CLEAR(curve);
   }
+  for (auto*& type : s->event_types) {
+    Py_CLEAR(type);
+  }
+  for (auto*& coordinate : s->coordinates) {
+    Py_CLEAR(coordinate);
+  }
   Py_CLEAR(s->bookmark_whitespace);
   return 0;
 }
@@ -879,6 +921,19 @@ int exec_module(PyObject* m) {
             m, "backend", fosu::internal::engine_name(engine->kind)) < 0)
       return -1;
     auto* s = static_cast<State*>(PyModule_GetState(m));
+    s->types[t_circle] = PyType_FromSpec(&circle_spec);
+    s->types[t_timing] = PyType_FromSpec(&timing_point_spec);
+    if (!s->types[t_circle] || !s->types[t_timing] ||
+        PyObject_SetAttrString(m, "Circle", s->types[t_circle]) < 0 ||
+        PyObject_SetAttrString(m, "TimingPoint", s->types[t_timing]) < 0)
+      return -1;
+    for (const char* flag :
+         {"is_circle", "is_slider", "is_spinner", "is_hold"}) {
+      if (PyObject_SetAttrString(
+              s->types[t_circle], flag,
+              std::strcmp(flag, "is_circle") == 0 ? Py_True : Py_False) < 0)
+        return -1;
+    }
     s->types[t_point] = PyType_FromSpec(&point_spec);
     if (!s->types[t_point] ||
         PyObject_SetAttrString(m, "Point", s->types[t_point]) < 0)
@@ -889,14 +944,14 @@ int exec_module(PyObject* m) {
     if (!s->model)
       return -1;
     for (int i = 0; i < type_count; ++i) {
-      if (i == t_point)
+      if (i == t_point || i == t_circle || i == t_timing)
         continue;
       s->types[i] = PyObject_GetAttrString(s->model, type_names[i]);
       if (!s->types[i])
         return -1;
     }
     for (int type = 0; type < record_type_count; ++type) {
-      if (type == t_point)
+      if (type == t_point || type == t_circle || type == t_timing)
         continue;
       for (int field = 0; field < field_count; ++field) {
         auto& slot = s->slots[type][field];
@@ -933,6 +988,16 @@ int exec_module(PyObject* m) {
     for (int i = 0; i < 4; ++i) {
       s->curves[i] = PyObject_GetAttrString(s->types[t_curve], curves[i]);
       if (!s->curves[i])
+        return -1;
+    }
+    for (int i = 0; i <= 512; ++i) {
+      s->coordinates[i] = PyFloat_FromDouble(i);
+      if (!s->coordinates[i])
+        return -1;
+    }
+    for (int i = 0; i < 5; ++i) {
+      s->event_types[i] = PyObject_CallFunction(s->types[t_event_type], "i", i);
+      if (!s->event_types[i])
         return -1;
     }
     constexpr wchar_t bookmark_whitespace[] =

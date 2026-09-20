@@ -30,7 +30,6 @@ for note in b.hit_objects:
     assert_type(note.x, float)
     assert_type(note.y, float)
     assert_type(note.raw_position(), tuple[float, float])
-    note.x = 100
     assert_type(note.stacking, fosu.Stacking | None)
     if note.stacking is not None:
         assert_type(note.stacking.stack_height, int)

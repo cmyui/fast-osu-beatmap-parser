@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum, IntEnum, IntFlag
 from typing import ClassVar, TypeAlias
 
-from ._core import Point
+from ._core import Circle as Circle, Point as Point, TimingPoint as TimingPoint
 
 
 class GameMode(IntEnum):
@@ -89,6 +89,9 @@ class _HitObject:
         return self.x - offset.x, self.y - offset.y
 
 
+setattr(Circle, "raw_position", _HitObject.raw_position)
+
+
 class SliderEventType(IntEnum):
     HEAD = 0
     TICK = 1
@@ -105,12 +108,6 @@ class SliderEvent:
     span_start_time: float
     path_progress: float
     position: PathPoint
-
-
-@dataclass(slots=True, kw_only=True)
-class Circle(_HitObject):
-    end_time: float
-    is_circle: ClassVar[bool] = True
 
 
 @dataclass(slots=True, kw_only=True)
@@ -141,18 +138,6 @@ class HoldNote(_HitObject):
 
 
 HitObject: TypeAlias = Circle | Slider | Spinner | HoldNote
-
-
-@dataclass(slots=True, kw_only=True)
-class TimingPoint:
-    time: float
-    beat_length: float
-    meter: int
-    sample_set: SampleSet
-    sample_index: int
-    volume: int
-    uninherited: bool
-    effects: int
 
 
 @dataclass(slots=True)

@@ -289,10 +289,6 @@ def test_circle_stacking_applies_positions_and_recovers_raw_position(
     )
     assert pickle.loads(pickle.dumps(map)) == map
     assert deepcopy(map) == map
-    map.hit_objects[0].x = 123.5
-    assert map.hit_objects[0].raw_position() == pytest.approx(
-        (123.5 - map.hit_objects[0].stacking.stack_offset.x, 100)
-    )
 
 
 def test_stacked_slider_control_points_and_relative_geometry():
@@ -323,8 +319,8 @@ def test_raw_position_without_stacking_and_after_other_normalization():
     notes = fosu.parse(b"[HitObjects]\n10,20,100,1,0\n0,0,200,8,0,300\n").hit_objects
     assert notes[0].raw_position() == (10.0, 20.0)
     assert notes[1].raw_position() == (256.0, 192.0)
-    notes[0].x = -1.5
-    assert notes[0].raw_position() == (-1.5, 20.0)
+    notes[1].x = -1.5
+    assert notes[1].raw_position() == (-1.5, 192.0)
 
 
 @pytest.mark.parametrize("version", [5, 6, 14])
@@ -739,13 +735,89 @@ def test_detached_values_remain_valid_after_reuse():
     note = b.hit_objects[0]
     data[:] = b"x" * len(data)
     b.title = "Edited"
-    note.x = 99
-    assert b.hit_objects[0] is note and b.hit_objects[0].x == 99
+    assert b.hit_objects[0] is note and b.hit_objects[0].x == 32
     for _ in range(100):
         fosu.parse(b"[HitObjects]\n4,5,6,1,0\n")
     del b
     gc.collect()
-    assert (note.x, note.y, note.time) == (99, 48, 600)
+    assert (note.x, note.y, note.time) == (32, 48, 600)
+
+
+@pytest.mark.parametrize("kind", [fosu.Circle, fosu.TimingPoint])
+def test_native_records_have_eager_readonly_fields_and_value_protocols(kind):
+    b = fosu.parse(
+        b"[TimingPoints]\n0,500,4,1,0,100,1,0\n[HitObjects]\n32,48,600,1,0\n"
+    )
+    record = b.hit_objects[0] if kind is fosu.Circle else b.timing_points[0]
+    assert type(record) is kind
+    assert record.time is record.time
+    assert repr(record).startswith(kind.__name__ + "(time=")
+    assert pickle.loads(pickle.dumps(record)) == record
+    assert deepcopy(record) == record
+    assert record != object()
+    assert gc.is_tracked(record)
+    with pytest.raises(AttributeError):
+        record.time = 123
+    with pytest.raises(AttributeError):
+        del record.time
+    with pytest.raises(AttributeError):
+        object.__setattr__(record, "time", 123)
+
+
+@pytest.mark.parametrize("kind", [fosu.Circle, fosu.TimingPoint])
+def test_consumer_created_native_record_cycles_are_collected(kind):
+    class Marker:
+        pass
+
+    marker = Marker()
+    if kind is fosu.Circle:
+        record = kind(
+            time=0,
+            x=1,
+            y=2,
+            hitsound=fosu.HitSound(0),
+            type=1,
+            new_combo=False,
+            combo_skip=0,
+            hit_sample="",
+            stacking=marker,
+            end_time=0,
+        )
+    else:
+        record = kind(
+            time=marker,
+            beat_length=500,
+            meter=4,
+            sample_set=fosu.SampleSet(1),
+            sample_index=0,
+            volume=100,
+            uninherited=True,
+            effects=0,
+        )
+    marker.record = record
+    retained = weakref.ref(marker)
+    del record, marker
+    gc.collect()
+    assert retained() is None
+
+
+@pytest.mark.parametrize("coordinate", ["0", "512", "513", "-1", "1.25", "-0"])
+def test_shared_coordinates_preserve_values_and_signed_zero(coordinate):
+    data = (
+        f"osu file format v128\n[HitObjects]\n"
+        f"{coordinate},{coordinate},1,2,0,L|{coordinate}:{coordinate},1,10\n"
+    ).encode()
+    slider = fosu.parse(data).hit_objects[0]
+    expected = float(coordinate)
+    for actual in (
+        slider.x,
+        slider.y,
+        slider.control_points[1].x,
+        slider.control_points[1].y,
+    ):
+        assert type(actual) is float
+        assert actual == expected
+        assert math.copysign(1, actual) == math.copysign(1, expected)
 
 
 def test_points_are_read_only_and_independent_between_results():
@@ -810,8 +882,7 @@ def test_repeated_timestamp_fields_remain_independently_assignable():
         b"1,2,4000.5,128,0,5000.5\n"
     )
     circle, spinner, hold = b.hit_objects
-    circle.end_time = 10
-    assert circle.time == 1000.5
+    assert circle.end_time == circle.time == 1000.5
     for note, start in ((spinner, 2000.5), (hold, 4000.5)):
         note.end_time = 20
         assert note.time == start
@@ -952,7 +1023,9 @@ def test_backend_errors_in_fresh_process():
 
 
 def test_all_fields_are_detached_python_values():
-    b = fosu.parse(b"[HitObjects]\n1,2,3,2,0,L|4:5,1,6\n")
+    b = fosu.parse(
+        b"[TimingPoints]\n0,500\n[HitObjects]\n1,2,3,2,0,L|4:5,1,6\n1,2,4,1,0\n"
+    )
     seen = set()
 
     def visit(value):
@@ -961,6 +1034,32 @@ def test_all_fields_are_detached_python_values():
         seen.add(id(value))
         if isinstance(value, fosu.Point):
             assert isinstance(value.x, float) and isinstance(value.y, float)
+        elif isinstance(value, fosu.Circle):
+            for name in (
+                "time",
+                "x",
+                "y",
+                "hitsound",
+                "type",
+                "new_combo",
+                "combo_skip",
+                "hit_sample",
+                "stacking",
+                "end_time",
+            ):
+                visit(getattr(value, name))
+        elif isinstance(value, fosu.TimingPoint):
+            for name in (
+                "time",
+                "beat_length",
+                "meter",
+                "sample_set",
+                "sample_index",
+                "volume",
+                "uninherited",
+                "effects",
+            ):
+                visit(getattr(value, name))
         elif is_dataclass(value):
             for f in fields(value):
                 visit(getattr(value, f.name))
@@ -1024,12 +1123,14 @@ def test_enum_values_and_malformed_records():
     assert fosu.parse(b"[General]\nSampleSet:None\n").sample_set is fosu.SampleSet.NONE
 
 
-def test_record_constructors_are_keyword_only():
+def test_dataclass_record_constructors_are_keyword_only():
     b = fosu.parse(
         b"[TimingPoints]\n0,500\n[HitObjects]\n0,0,1,1,0\n"
         b"0,0,2,2,0,L|1:2,1,30\n0,0,3,8,0,4\n0,0,5,128,0,6\n"
     )
     for record in [b, b.stats, *b.timing_points, *b.hit_objects]:
+        if not is_dataclass(record):
+            continue
         values = {field.name: getattr(record, field.name) for field in fields(record)}
         assert type(record)(**values) == record
         with pytest.raises(TypeError):
