@@ -333,6 +333,13 @@ static void test_invalid_byte_in_hitobjects() {
         CHECK(map.title == "sentinel");
         if (map.hit_objects.size() == 1)
           CHECK_EQ(map.stats.malformed_lines, 1u);
+        size_t required_end = 0;
+        for (int field = 0; field < 5; ++field)
+          required_end = record.find(',', required_end) + 1;
+        if (position < required_end) {
+          CHECK_EQ(map.hit_objects.size(), 1u);
+          CHECK_EQ(map.stats.malformed_lines, 1u);
+        }
       }
     }
   }
@@ -354,7 +361,66 @@ static void test_invalid_byte_in_timing_points() {
       CHECK(map.title == "sentinel");
       if (map.timing_points.size() == 1)
         CHECK_EQ(map.stats.malformed_lines, 1u);
+      const size_t required_end = timing.find(',', timing.find(',') + 1) + 1;
+      if (position < required_end) {
+        CHECK_EQ(map.timing_points.size(), 1u);
+        CHECK_EQ(map.stats.malformed_lines, 1u);
+      }
     }
+  }
+}
+
+static void test_invalid_byte_in_other_sections() {
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(
+        "osu file format v14\n"
+        "[General]\nMode:\x01\nMode:0\n"
+        "[Editor]\nGridSize:3\x01\nGridSize:32\n"
+        "[Difficulty]\nSliderMultiplier:1.\x01\nSliderMultiplier:1.4\n"
+        "[Events]\n2,10\x01,20\n2,30,40\n"
+        "[Colours]\nCombo1:1,\x01,3\nCombo2:4,5,6\n"
+        "[Metadata]\nTitle:a\x01"
+        "b\nBeatmapID:1\x01\nBeatmapID:42\n"
+        "[HitObjects]\n1,2,100,1,0\n",
+        simd);
+    CHECK_EQ(map.mode, 0);
+    CHECK_EQ(map.grid_size, 32);
+    CHECK_EQ(map.slider_multiplier, 1.4);
+    CHECK_EQ(map.breaks.size(), 1u);
+    CHECK_EQ(map.breaks[0].start, 30);
+    CHECK_EQ(map.combo_colours.size(), 1u);
+    CHECK_EQ(map.beatmap_id, 42);
+    CHECK(map.title ==
+          "a\x01"
+          "b");
+    CHECK_EQ(map.hit_objects.size(), 1u);
+    CHECK_EQ(map.stats.malformed_lines, 6u);
+  }
+}
+
+static void test_invalid_byte_replacement_across_document() {
+  std::string input =
+      "osu file format v128\n"
+      "[General]\nMode:0\n"
+      "[Editor]\nVelocityPresets :1,2,3,4\n"
+      "[Metadata]\nTitle:before\n"
+      "[Difficulty]\nSliderMultiplier:1.4\n"
+      "[Events]\n2,100,200\n"
+      "[TimingPoints]\n0,500,4,1,0,100,1,0\n"
+      "[Colours]\nCombo1:255,128,0\n"
+      "[HitObjects]\n0,0,1000,2,0,B2|100:0|100:100|0:100,1,300\n"
+      "[Metadata]\nTitle:after\n";
+  fosu::Parser native;
+  fosu::Parser scalar(fosu_test::scalar_engine());
+  for (size_t position = 0; position < input.size(); ++position) {
+    const char previous = input[position];
+    input[position] = '\x01';
+    auto& a = require_parse(native.parse(input));
+    auto& b = require_parse(scalar.parse(input));
+    a.stats.fast_path_lines = a.stats.slow_path_lines = 0;
+    b.stats.fast_path_lines = b.stats.slow_path_lines = 0;
+    CHECK_EQ(canonical(a), canonical(b));
+    input[position] = previous;
   }
 }
 
@@ -987,6 +1053,16 @@ static void test_repeated_lazer_velocity_presets() {
   CHECK_EQ(map.velocity_presets[3], 6);
   CHECK_EQ(map.velocity_presets[4], 7);
   CHECK_EQ(map.stats.malformed_lines, 0u);
+  for (bool simd : {false, true}) {
+    const auto spaced = parse_str(
+        "osu file format v128\n[Editor]\n"
+        "VelocityPresets :1,2,3,4,5\n",
+        simd);
+    CHECK_EQ(spaced.velocity_presets.size(), 5u);
+    CHECK_EQ(spaced.velocity_presets[0], 1);
+    CHECK_EQ(spaced.velocity_presets[4], 5);
+    CHECK_EQ(spaced.stats.malformed_lines, 0u);
+  }
 }
 
 static void test_combo_colour_domain() {
@@ -1114,6 +1190,8 @@ int main() {
   test_malformed();
   test_invalid_byte_in_hitobjects();
   test_invalid_byte_in_timing_points();
+  test_invalid_byte_in_other_sections();
+  test_invalid_byte_replacement_across_document();
   test_bracketed_records_do_not_change_section();
   test_unknown_section_does_not_resume_hitobjects();
   test_line_endings();

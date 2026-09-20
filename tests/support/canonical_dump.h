@@ -1,47 +1,6 @@
 #pragma once
-// Private canonical Beatmap representation for correctness comparisons.
-// Little-endian fixed-width
-// fields, strings by value (u32 length + bytes), doubles as raw bit
-// patterns, so equality means bit-identical parsing, plus the parser's
-// own path counters and any pool points no slider references, so nothing
-// the library's Beatmap holds is outside the comparison. Pool offsets
-// are explicit, including each orphan's position. Slider points follow
-// their record inline, so the finished beatmap can be serialized in one pass.
-//
-//   "FOSUDMP8"
-//   hit objects, in stable timestamp order, each:
-//     i32 x, y; u32 type, hitsound; f64 time, end_time; u32 slider
-//     (kNoSlider or the original slider-pool index); u8 new_combo, combo_skip;
-//     u32 hit_sample length;
-//     if a slider was parsed (slider != kNoSlider): u32 point_begin,
-//     point_count; {i32 x, y} x point_count; i32 slides; f64 length; u8
-//     curve_type; str edge_sounds, edge_sets; then the hit_sample bytes (slider
-//     records may appear out of pool order)
-//   trailer:
-//     "TRLR" u32 n_hitobjects, n_sliders, n_points (pool size)
-//     i32 format_version
-//     [General]   str audio_filename; i32 audio_lead_in, preview_time,
-//                 countdown; str sample_set; f64 stack_leniency; i32 mode;
-//                 u8 letterbox_in_breaks, widescreen_storyboard,
-//                 epilepsy_warning, special_style, use_skin_sprites,
-//                 samples_match_playback_rate; i32 countdown_offset;
-//                 str overlay_position, skin_preference
-//     [Editor]    str bookmarks; f64 distance_spacing; i32 beat_divisor,
-//                 grid_size; f64 timeline_zoom
-//     [Metadata]  str title, title_unicode, artist, artist_unicode,
-//                 creator, version, source, tags; i64 beatmap_id,
-//                 beatmap_set_id
-//     [Difficulty] f64 hp, cs, od, ar, slider_multiplier, slider_tick_rate
-//     [Events]    str background, video; u32 n; {f64 start, end} x n
-//     [Colours]   u32 n; u32 rgb x n
-//     [TimingPoints] u32 n; {f64 time, beat_length; i32 meter, sample_set,
-//                 sample_index, volume; u8 uninherited; u32 effects} x n
-//     stats       u32 malformed_lines, storyboard_lines, fast_path_lines,
-//                 slow_path_lines
-//     orphans     u32 n; {u32 pool_index; i32 x, y} x n  (pool points no slider
-//     covers,
-//                 in pool order)
-//     footer      u64 trailer byte length (excluding this footer)
+// Private, versioned comparison stream. Keep floating-point bits, pool indices
+// and optional results; tests/support/decode.py reads the same layout.
 
 #include <fosu/beatmap.h>
 
@@ -62,6 +21,7 @@ struct Out {
   void i32(int32_t v) { raw(&v, 4); }
   void u32(uint32_t v) { raw(&v, 4); }
   void i64(int64_t v) { raw(&v, 8); }
+  void f32(float v) { raw(&v, 4); }
   void f64(double v) { raw(&v, 8); }
   void str(std::string_view v) {
     u32(static_cast<uint32_t>(v.size()));
@@ -79,11 +39,11 @@ inline std::string_view resolve(const Map& bm, String s) {
 
 template <typename Map, typename Output>
 inline void dump_to(const Map& bm, Output& o) {
-  o.raw("FOSUDMP8", 8);
+  o.raw("FOSUDMP9", 8);
   for (const auto& h : bm.hit_objects) {
     const auto sample = resolve(bm, h.hit_sample);
-    o.i32(h.x);
-    o.i32(h.y);
+    o.f32(h.x);
+    o.f32(h.y);
     o.u32(h.type);
     o.u32(h.hitsound);
     o.f64(h.time);
@@ -96,10 +56,12 @@ inline void dump_to(const Map& bm, Output& o) {
       const auto& s = bm.sliders[h.slider];
       o.u32(s.point_begin);
       o.u32(s.point_count);
+      o.u32(s.segment_begin);
+      o.u32(s.segment_count);
       for (uint32_t i = 0; i < s.point_count; ++i) {
         const auto& p = bm.slider_points[s.point_begin + i];
-        o.i32(p.x);
-        o.i32(p.y);
+        o.f32(p.x);
+        o.f32(p.y);
       }
       o.i32(s.slides);
       o.f64(s.length);
@@ -175,6 +137,46 @@ inline void dump_to(const Map& bm, Output& o) {
     o.u8(t.uninherited);
     o.u32(t.effects);
   }
+  o.u32(static_cast<uint32_t>(bm.velocity_presets.size()));
+  for (fosu::f64 preset : bm.velocity_presets)
+    o.f64(preset);
+  o.u32(static_cast<uint32_t>(bm.slider_segments.size()));
+  for (const auto& segment : bm.slider_segments) {
+    o.u8(static_cast<fosu::u8>(segment.type));
+    o.u8(segment.degree.has_value());
+    o.u32(segment.degree.value_or(0));
+    o.u32(segment.point_begin);
+    o.u32(segment.point_count);
+  }
+  o.u32(static_cast<uint32_t>(bm.slider_paths.size()));
+  for (const auto& path : bm.slider_paths) {
+    o.u32(static_cast<uint32_t>(path.points.size()));
+    for (const auto& point : path.points) {
+      o.f32(point.x);
+      o.f32(point.y);
+    }
+    for (fosu::f64 length : path.cumulative_lengths)
+      o.f64(length);
+  }
+  o.u32(static_cast<uint32_t>(bm.slider_events.size()));
+  for (const auto& events : bm.slider_events) {
+    o.u32(static_cast<uint32_t>(events.size()));
+    for (const auto& event : events) {
+      o.u8(static_cast<fosu::u8>(event.type));
+      o.f64(event.time);
+      o.i32(event.span_index);
+      o.f64(event.span_start_time);
+      o.f64(event.path_progress);
+      o.f32(event.position.x);
+      o.f32(event.position.y);
+    }
+  }
+  o.u32(static_cast<uint32_t>(bm.stacking.size()));
+  for (const auto& stacking : bm.stacking) {
+    o.i32(stacking.stack_height);
+    o.f32(stacking.stack_offset.x);
+    o.f32(stacking.stack_offset.y);
+  }
   o.u32(bm.stats.malformed_lines);
   o.u32(bm.stats.storyboard_lines);
   o.u32(bm.stats.fast_path_lines);
@@ -187,8 +189,8 @@ inline void dump_to(const Map& bm, Output& o) {
   size_t     point = 0;
   const auto orphan = [&] {
     o.u32(static_cast<uint32_t>(point));
-    o.i32(bm.slider_points[point].x);
-    o.i32(bm.slider_points[point].y);
+    o.f32(bm.slider_points[point].x);
+    o.f32(bm.slider_points[point].y);
     ++point;
   };
   for (const auto& slider : bm.sliders) {

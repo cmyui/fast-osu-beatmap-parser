@@ -57,11 +57,15 @@ def test_standard_mods_adjust_difficulty_positions_and_gameplay_time():
         (fosu.Mods.HALF_TIME, 0.75),
     ],
 )
-def test_rate_mods_support_every_mode_and_preserve_inherited_velocity(mods, rate):
-    data = (
-        b"[General]\nMode:3\n[TimingPoints]\n300,600\n600,-50,4,0,0,100,0,0\n"
-        b"[HitObjects]\n0,0,900,128,0,1500:0:0:0:0:\n"
+@pytest.mark.parametrize("mode", [0, 1, 2, 3])
+def test_rate_mods_support_every_mode_and_preserve_inherited_velocity(mods, rate, mode):
+    object_line = (
+        "0,0,900,128,0,1500:0:0:0:0:" if mode == 3 else "0,0,900,8,0,1500,0:0:0:0:"
     )
+    data = (
+        f"[General]\nMode:{mode}\n[TimingPoints]\n300,600\n"
+        f"600,-50,4,0,0,100,0,0\n[HitObjects]\n{object_line}\n"
+    ).encode()
     map = fosu.parse(data, mods=mods)
     assert (map.hit_objects[0].time, map.hit_objects[0].end_time) == pytest.approx(
         (900 / rate, 1500 / rate)
@@ -71,6 +75,19 @@ def test_rate_mods_support_every_mode_and_preserve_inherited_velocity(mods, rate
     )
     assert map.timing_points[0].beat_length == pytest.approx(600 / rate)
     assert map.timing_points[1].beat_length == -50
+
+
+@pytest.mark.parametrize(
+    "fixture", sorted((Path(__file__).parent / "fixtures" / "official").glob("*.osu"))
+)
+def test_duration_only_matches_full_calculation_on_official_fixtures(fixture):
+    data = fixture.read_bytes()
+    duration_only = fosu.parse(data, calculate_slider_end_times=True)
+    full = fosu.parse(data, calculate_slider_events=True, apply_stacking=True)
+    assert [obj.end_time for obj in duration_only.hit_objects] == [
+        obj.end_time for obj in full.hit_objects
+    ]
+    assert duration_only.mode == full.mode
 
 
 def test_taiko_difficulty_mods_follow_mode_specific_rules():
