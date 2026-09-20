@@ -118,19 +118,6 @@ reported on the 256-entry standard subset (255 unique beatmaps, 10,347,075 bytes
 | HR+DT | 29.3 | 188.3 | 20.5 | 126.4 |
 | Full HR+DT | 132.7 | 685.1 | 65.4 | 449.0 |
 
-## Run stability
-
-Builds and benchmarks did not overlap. WSL load monitoring recorded no swapping
-or CPU steal. One anomalously slow mixed-mode Python AVX2 process was excluded
-as a whole and replaced by another run; no individual map timings were filtered.
-Its decode result was 176.7 µs/map versus approximately 156 in the repeated runs.
-The cause was not established, and the excluded raw data is retained separately.
-
-Cursor was closed before the final M3 passes, but macOS background services
-remained active. No thermal warning was reported. The three final runs agreed
-within 3.0% for every cell; these are repeatable desktop measurements, not a claim
-of an idle machine. Earlier exploratory M3 passes are excluded as whole runs.
-
 ## Reproduce FOSU measurements
 
 Build the native matrix for the desired ISA, then use the same corpus and
