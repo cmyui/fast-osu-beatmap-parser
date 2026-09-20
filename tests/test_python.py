@@ -872,6 +872,43 @@ def test_parse_preserves_gc_enabled_state():
             gc.disable()
 
 
+@pytest.mark.parametrize("gc_enabled", [False, True], ids=["gc-disabled", "gc-enabled"])
+@pytest.mark.parametrize(
+    "line",
+    [
+        "1,2,1000,1,1073741824",
+        "1,2,1000,2,1073741824,L|100:100,1,100",
+        "1,2,1000,8,1073741824,2000",
+        "1,2,1000,128,1073741824,2000:0:0:0:0:",
+    ],
+    ids=["circle", "slider", "spinner", "hold"],
+)
+def test_hitobject_conversion_error_preserves_gc_and_next_parse(
+    monkeypatch, line, gc_enabled
+):
+    error = RuntimeError("conversion failed")
+
+    def fail(cls, value):
+        raise error
+
+    original = gc.isenabled()
+    try:
+        (gc.enable if gc_enabled else gc.disable)()
+        with monkeypatch.context() as patch:
+            patch.setattr(fosu.HitSound, "_missing_", classmethod(fail))
+            with pytest.raises(RuntimeError) as caught:
+                fosu.parse(f"[HitObjects]\n{line}\n".encode())
+            assert caught.value is error
+            assert gc.isenabled() is gc_enabled
+
+        result = fosu.parse(b"[HitObjects]\n1,2,3000,1,0\n")
+        assert len(result.hit_objects) == 1
+        assert result.hit_objects[0].time == 3000
+        assert gc.isenabled() is gc_enabled
+    finally:
+        (gc.enable if original else gc.disable)()
+
+
 def test_repeated_timestamp_fields_preserve_endpoints():
     b = fosu.parse(
         b"[HitObjects]\n1,2,1000.5,1,0\n1,2,2000.5,8,0,3000.5\n"
