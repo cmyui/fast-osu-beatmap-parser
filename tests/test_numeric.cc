@@ -38,31 +38,34 @@ static uint64_t rng() {
   return z ^ (z >> 31);
 }
 
-static void test_four_point_bezier_subdivision() {
+static void test_bezier_subdivision() {
   using fosu::internal::CurvePoint;
-  for (fosu::i32 sample = 0; sample < 1000; ++sample) {
-    CurvePoint points[4];
-    for (auto& point : points) {
-      auto coordinate = [] {
-        const uint32_t bits = static_cast<uint32_t>(rng() & 0x807fffffu) |
-                              (static_cast<uint32_t>(126 + rng() % 10) << 23);
-        return std::bit_cast<float>(bits);
-      };
-      point = {coordinate(), coordinate()};
-    }
-    CurvePoint left[4], right[4], midpoints[4];
-    fosu::internal::subdivide_bezier({points, 4}, left, right, midpoints);
+  for (size_t count = 4; count <= 10; ++count) {
+    for (fosu::i32 sample = 0; sample < 1000; ++sample) {
+      CurvePoint points[10];
+      for (size_t i = 0; i < count; ++i) {
+        auto coordinate = [] {
+          const uint32_t bits = static_cast<uint32_t>(rng() & 0x807fffffu) |
+                                (static_cast<uint32_t>(126 + rng() % 10) << 23);
+          return std::bit_cast<float>(bits);
+        };
+        points[i] = {coordinate(), coordinate()};
+      }
+      CurvePoint left[10], right[10], midpoints[10];
+      fosu::internal::subdivide_bezier({points, count}, left, right, midpoints);
 
-    CurvePoint expected_left[4], expected_right[4], work[4];
-    std::copy_n(points, 4, work);
-    for (size_t i = 0; i < 4; ++i) {
-      expected_left[i] = work[0];
-      expected_right[3 - i] = work[3 - i];
-      for (size_t j = 0; j < 3 - i; ++j)
-        work[j] = (work[j] + work[j + 1]) * 0.5f;
+      CurvePoint expected_left[10], expected_right[10], work[10];
+      std::copy_n(points, count, work);
+      for (size_t i = 0; i < count; ++i) {
+        expected_left[i] = work[0];
+        expected_right[count - i - 1] = work[count - i - 1];
+        for (size_t j = 0; j < count - i - 1; ++j)
+          work[j] = (work[j] + work[j + 1]) * 0.5f;
+      }
+      CHECK(std::memcmp(left, expected_left, count * sizeof(CurvePoint)) == 0);
+      CHECK(std::memcmp(right, expected_right, count * sizeof(CurvePoint)) ==
+            0);
     }
-    CHECK(std::memcmp(left, expected_left, sizeof(left)) == 0);
-    CHECK(std::memcmp(right, expected_right, sizeof(right)) == 0);
   }
 }
 
@@ -440,6 +443,6 @@ int main() {
 #else
   puts("SIMD path: not built");
 #endif
-  test_four_point_bezier_subdivision();
+  test_bezier_subdivision();
   return test_result();
 }
