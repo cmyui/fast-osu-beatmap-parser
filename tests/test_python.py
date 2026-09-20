@@ -768,6 +768,8 @@ def test_native_points_have_eager_float_fields_and_no_gc_cycles():
     assert not gc.is_tracked(point)
     with pytest.raises(AttributeError):
         object.__setattr__(point, "x", point)
+    with pytest.raises(TypeError):
+        fosu.Point([], [])
 
 
 def test_parse_preserves_gc_enabled_state():
