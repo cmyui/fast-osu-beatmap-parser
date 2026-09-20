@@ -1,6 +1,5 @@
 #pragma once
 
-// Full-map stacking adapted from ppy's OsuBeatmapProcessor.
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>; MIT licence in slider_geometry.h.
 
 #include <fosu/arena.h>
