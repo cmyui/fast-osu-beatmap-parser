@@ -343,9 +343,7 @@ struct BeatmapConverter {
     Field     field;
     PythonRef value;
   };
-  PythonRef record(PythonType                   kind,
-                   std::initializer_list<Value> values,
-                   std::span<const Value>       common = {}) {
+  PythonRef record(PythonType kind, std::initializer_list<Value> values) {
     // The package owns these plain slotted dataclasses. Allocate once and use
     // their cached descriptor setters, without name lookup or Python __init__.
     PythonRef out(PyType_GenericAlloc(
@@ -355,8 +353,6 @@ struct BeatmapConverter {
       if (slot.assign(slot.descriptor, out, value.value) < 0)
         throw PythonError{};
     };
-    for (const auto& value : common)
-      assign(value);
     for (const auto& value : values)
       assign(value);
     return out;
@@ -385,47 +381,51 @@ struct BeatmapConverter {
     return out;
   }
   PythonRef hit_object(const fosu::HitObject& h) {
-    const bool  circle = h.type & 1, slider = !circle && (h.type & 2);
-    PythonRef   time = number(h.time);
-    const Value common[] = {
-        {f_time, retain(time)},
-        {f_stacking, stacking(h)},
-        {f_end_time, circle ? std::move(time) : number(h.end_time)},
-        {f_x, number(h.x)},
-        {f_y, number(h.y)},
-        {f_hitsound, sound(h.hitsound)},
-        {f_type, integer(h.type)},
-        {f_new_combo, boolean(h.new_combo)},
-        {f_combo_skip, integer(h.combo_skip)},
-        {f_hit_sample, string(h.hit_sample)}};
+    const bool       circle = h.type & 1, slider = !circle && (h.type & 2);
+    const PythonType kind = circle       ? t_circle
+                            : slider     ? t_slider
+                            : h.type & 8 ? t_spinner
+                                         : t_hold;
+    PythonRef        out(PyType_GenericAlloc(
+        reinterpret_cast<PyTypeObject*>(state.types[kind]), 0));
+    // Assign each field immediately instead of keeping an array of temporary
+    // Python values alive across later allocations.
+    auto             assign = [&](Field field, PythonRef value) {
+      const auto& slot = state.slots[kind][field];
+      if (slot.assign(slot.descriptor, out, value) < 0)
+        throw PythonError{};
+    };
+    PythonRef time = number(h.time);
+    assign(f_time, retain(time));
+    assign(f_stacking, stacking(h));
+    assign(f_end_time, circle ? std::move(time) : number(h.end_time));
+    assign(f_x, number(h.x));
+    assign(f_y, number(h.y));
+    assign(f_hitsound, sound(h.hitsound));
+    assign(f_type, integer(h.type));
+    assign(f_new_combo, boolean(h.new_combo));
+    assign(f_combo_skip, integer(h.combo_skip));
+    assign(f_hit_sample, string(h.hit_sample));
     if (slider) {
       const auto& s = map.sliders[h.slider];
-      return record(t_slider,
-                    {{f_slides, integer(s.slides)},
-                     {f_events, slider_events(h.slider)},
-                     {f_path, map.slider_paths.empty()
-                                  ? none()
-                                  : slider_path(map.slider_paths[h.slider])},
-                     {f_length, number(s.length)},
-                     {f_curve_type, curve(s.curve_type)},
-                     {f_curve_segments, curve_segments(h, s)},
-                     {f_edge_sounds, string(s.edge_sounds)},
-                     {f_edge_sets, string(s.edge_sets)},
-                     {f_control_points,
-                      list(s.point_count + 1,
-                           [&](size_t j) {
-                             if (j == 0)
-                               return point(h.x, h.y);
-                             const auto& p =
-                                 map.slider_points[s.point_begin + j - 1];
-                             return point(p.x, p.y);
-                           })}},
-                    common);
+      assign(f_slides, integer(s.slides));
+      assign(f_events, slider_events(h.slider));
+      assign(f_path, map.slider_paths.empty()
+                         ? none()
+                         : slider_path(map.slider_paths[h.slider]));
+      assign(f_length, number(s.length));
+      assign(f_curve_type, curve(s.curve_type));
+      assign(f_curve_segments, curve_segments(h, s));
+      assign(f_edge_sounds, string(s.edge_sounds));
+      assign(f_edge_sets, string(s.edge_sets));
+      assign(f_control_points, list(s.point_count + 1, [&](size_t j) {
+               if (j == 0)
+                 return point(h.x, h.y);
+               const auto& p = map.slider_points[s.point_begin + j - 1];
+               return point(p.x, p.y);
+             }));
     }
-    return record(circle       ? t_circle
-                  : h.type & 8 ? t_spinner
-                               : t_hold,
-                  {}, common);
+    return out;
   }
   PythonRef curve_segments(const fosu::HitObject& object,
                            const fosu::Slider&    slider) {

@@ -804,6 +804,32 @@ def test_plain_lists_support_normal_mutations():
     assert b.hit_objects[::-1][0] is first
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        "1,2,1000,1,1073741824",
+        "1,2,1000,2,1073741824,L|100:100,1,100",
+        "1,2,1000,8,1073741824,2000",
+        "1,2,1000,128,1073741824,2000:0:0:0:0:",
+    ],
+)
+def test_hitobject_conversion_error_does_not_poison_next_parse(monkeypatch, line):
+    error = RuntimeError("conversion failed")
+
+    def fail(cls, value):
+        raise error
+
+    with monkeypatch.context() as patch:
+        patch.setattr(fosu.HitSound, "_missing_", classmethod(fail))
+        with pytest.raises(RuntimeError) as caught:
+            fosu.parse(f"[HitObjects]\n{line}\n".encode())
+        assert caught.value is error
+
+    result = fosu.parse(b"[HitObjects]\n1,2,3000,1,0\n")
+    assert len(result.hit_objects) == 1
+    assert result.hit_objects[0].time == 3000
+
+
 def test_user_created_cycles_are_collected():
     class Marker:
         pass
