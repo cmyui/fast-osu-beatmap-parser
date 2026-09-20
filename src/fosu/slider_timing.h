@@ -115,15 +115,10 @@ inline bool set_slider_end_times(Beatmap&                map,
       ++next;
     }
     const auto& slider = map.sliders[object.slider];
-    const auto  control_points =
-        map.slider_points.subspan(slider.point_begin, slider.point_count);
-    const auto segments =
-        map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
-    auto distance =
+    auto        distance =
         !map.slider_paths.empty()
             ? Result<f64>{map.slider_paths[object.slider].distance()}
-            : slider_distance(object, slider, control_points, segments,
-                              scratch_arena, map.format_version >= 128);
+            : slider_distance(map, object, scratch_arena);
     if (!distance)
       return false;
     const f64 pixels_per_millisecond =

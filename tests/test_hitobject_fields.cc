@@ -41,6 +41,44 @@ static void test_slider_points() {
   }
 }
 
+static void test_slider_pool_indices_after_rejected_record() {
+  for (bool simd : {false, true}) {
+    for (fosu::i32 version : {14, 128}) {
+      const auto curve = version == 128 ? "B1" : "L";
+      const auto map =
+          parse_str("osu file format v" + std::to_string(version) +
+                        "\n[HitObjects]\n0,0,100,1,0\n0,0,200,2,0," + curve +
+                        "|10:20,1,30\n"
+                        "0,0,300,2,0,L|30:40|B|50:60|bad:80,1,30\n"
+                        "[Metadata]\nTitle:gap\n[HitObjects]\n"
+                        "0.5,0,400,2,0," +
+                        curve + "|70:80,1,40\n",
+                    simd);
+      CHECK_EQ(map.stats.malformed_lines, 1u);
+      CHECK_EQ(map.hit_objects.size(), 3u);
+      CHECK_EQ(map.sliders.size(), 2u);
+      CHECK_EQ(map.slider_points.size(), 2u);
+      CHECK_EQ(map.slider_segments.size(), version == 128 ? 2u : 0u);
+      if (map.hit_objects.size() != 3 || map.sliders.size() != 2 ||
+          map.slider_points.size() != 2)
+        continue;
+      CHECK_EQ(map.hit_objects[0].slider, fosu::HitObject::kNoSlider);
+      CHECK_EQ(map.hit_objects[1].slider, 0u);
+      CHECK_EQ(map.hit_objects[2].slider, 1u);
+      for (size_t i = 0; i < 2; ++i) {
+        CHECK_EQ(map.sliders[i].point_begin, i);
+        CHECK_EQ(map.sliders[i].point_count, 1u);
+        CHECK_EQ(map.sliders[i].segment_begin, version == 128 ? i : 0u);
+        CHECK_EQ(map.sliders[i].segment_count, version == 128 ? 1u : 0u);
+      }
+      CHECK_EQ(map.slider_points[0].x, 10);
+      CHECK_EQ(map.slider_points[0].y, 20);
+      CHECK_EQ(map.slider_points[1].x, 70);
+      CHECK_EQ(map.slider_points[1].y, 80);
+    }
+  }
+}
+
 static void test_slider_point_digit_widths() {
 #if FOSU_SIMD
   // Exercise every SIMD shuffle-table entry through the resulting path.
@@ -180,6 +218,7 @@ static void test_hitobject_details() {
 
 int main() {
   test_slider_points();
+  test_slider_pool_indices_after_rejected_record();
   test_slider_point_digit_widths();
   test_slider_repeats_and_length();
   test_slider_sounds();

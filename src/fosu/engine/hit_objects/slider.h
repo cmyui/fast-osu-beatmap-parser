@@ -23,6 +23,13 @@
 
 namespace fosu::internal {
 
+struct HitObjectCounts {
+  size_t objects = 0;
+  size_t sliders = 0;
+  size_t slider_segments = 0;
+  size_t slider_points = 0;
+};
+
 inline std::optional<CurveType> parse_curve_type(char value) {
   switch (value) {
     case 'B':
@@ -294,9 +301,7 @@ FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
 // arrays back so rejected sliders leave no published data behind.
 FOSU_NOINLINE inline bool parse_slider(
     Beatmap&                                        beatmap,
-    size_t&                                         slider_count,
-    size_t&                                         slider_segment_count,
-    size_t&                                         slider_point_count,
+    HitObjectCounts&                                counts,
     HitObject&                                      object,
     const char*                                     p,
     const char*                                     end,
@@ -305,8 +310,8 @@ FOSU_NOINLINE inline bool parse_slider(
     return false;
 
   const bool   lazer = beatmap.format_version >= 128;
-  const size_t slider_point_begin = slider_point_count;
-  const size_t slider_segment_begin = slider_segment_count;
+  const size_t slider_point_begin = counts.slider_points;
+  const size_t slider_segment_begin = counts.slider_segments;
 
   const auto   first_curve_type = parse_curve_type(*p++);
   if (!first_curve_type)
@@ -324,13 +329,13 @@ FOSU_NOINLINE inline bool parse_slider(
 
   CurveType          current_curve_type = *first_curve_type;
   std::optional<u32> current_curve_degree = first_curve_degree;
-  size_t             segment_point_begin = slider_point_count;
+  size_t             segment_point_begin = counts.slider_points;
   bool               has_explicit_segments = false;
 
   while (p < end && *p == '|') {
 #if FOSU_SIMD
-    const char* ordinary_points_end =
-        parse_ordinary_slider_points(beatmap, slider_point_count, p, constants);
+    const char* ordinary_points_end = parse_ordinary_slider_points(
+        beatmap, counts.slider_points, p, constants);
     if (ordinary_points_end != p) [[likely]] {
       p = ordinary_points_end;
       continue;
@@ -347,8 +352,8 @@ FOSU_NOINLINE inline bool parse_slider(
       ++p;
       const auto type = parse_curve_type(*p++);
       if (!type) {
-        slider_point_count = slider_point_begin;
-        slider_segment_count = slider_segment_begin;
+        counts.slider_points = slider_point_begin;
+        counts.slider_segments = slider_segment_begin;
         return false;
       }
       next_curve_type = *type;
@@ -357,8 +362,8 @@ FOSU_NOINLINE inline bool parse_slider(
         i64         degree;
         const char* next = parse_osu_int(p, end, degree);
         if (next == p || degree <= 0 || degree > UINT32_MAX) {
-          slider_point_count = slider_point_begin;
-          slider_segment_count = slider_segment_begin;
+          counts.slider_points = slider_point_begin;
+          counts.slider_segments = slider_segment_begin;
           return false;
         }
         next_curve_degree = static_cast<u32>(degree);
@@ -367,36 +372,36 @@ FOSU_NOINLINE inline bool parse_slider(
     }
 
     if (p >= end || *p != '|') {
-      slider_point_count = slider_point_begin;
-      slider_segment_count = slider_segment_begin;
+      counts.slider_points = slider_point_begin;
+      counts.slider_segments = slider_segment_begin;
       return false;
     }
 
     const auto point = parse_slider_point(p, end, lazer, constants);
     if (!point) {
-      slider_point_count = slider_point_begin;
-      slider_segment_count = slider_segment_begin;
+      counts.slider_points = slider_point_begin;
+      counts.slider_segments = slider_segment_begin;
       return false;
     }
-    beatmap.slider_points[slider_point_count++] = point->point;
+    beatmap.slider_points[counts.slider_points++] = point->point;
     p = point->end;
 
     if (starts_segment) {
-      if (slider_segment_count == beatmap.slider_segments.size()) {
-        slider_point_count = slider_point_begin;
-        slider_segment_count = slider_segment_begin;
+      if (counts.slider_segments == beatmap.slider_segments.size()) {
+        counts.slider_points = slider_point_begin;
+        counts.slider_segments = slider_segment_begin;
         return false;
       }
-      beatmap.slider_segments[slider_segment_count++] = {
+      beatmap.slider_segments[counts.slider_segments++] = {
           .type = current_curve_type,
           .degree = current_curve_degree,
           .point_begin =
               static_cast<u32>(segment_point_begin - slider_point_begin),
           .point_count =
-              static_cast<u32>(slider_point_count - segment_point_begin),
+              static_cast<u32>(counts.slider_points - segment_point_begin),
       };
       has_explicit_segments = true;
-      segment_point_begin = slider_point_count - 1;
+      segment_point_begin = counts.slider_points - 1;
       current_curve_type = next_curve_type;
       current_curve_degree = next_curve_degree;
     }
@@ -404,8 +409,8 @@ FOSU_NOINLINE inline bool parse_slider(
 
   // Everything after the point list is positional.
   if (p >= end || *p != ',') {
-    slider_point_count = slider_point_begin;
-    slider_segment_count = slider_segment_begin;
+    counts.slider_points = slider_point_begin;
+    counts.slider_segments = slider_segment_begin;
     return false;
   }
   ++p;
@@ -428,8 +433,8 @@ FOSU_NOINLINE inline bool parse_slider(
       i64         parsed_slides;
       const char* next = parse_osu_int(p, end, parsed_slides);
       if (next == p) {
-        slider_point_count = slider_point_begin;
-        slider_segment_count = slider_segment_begin;
+        counts.slider_points = slider_point_begin;
+        counts.slider_segments = slider_segment_begin;
         return false;
       }
       slides = clamp_i32(parsed_slides);
@@ -437,8 +442,8 @@ FOSU_NOINLINE inline bool parse_slider(
     }
   }
   if (slides > 9000 || (p < end && *p != ',')) {
-    slider_point_count = slider_point_begin;
-    slider_segment_count = slider_segment_begin;
+    counts.slider_points = slider_point_begin;
+    counts.slider_segments = slider_segment_begin;
     return false;
   }
 
@@ -502,8 +507,8 @@ FOSU_NOINLINE inline bool parse_slider(
     if (next != length_begin)
       next = skip_numeric_space(next, end);
     if (next == length_begin || (next < end && *next != ',')) {
-      slider_point_count = slider_point_begin;
-      slider_segment_count = slider_segment_begin;
+      counts.slider_points = slider_point_begin;
+      counts.slider_segments = slider_segment_begin;
       return false;
     }
     p = next;
@@ -575,34 +580,35 @@ FOSU_NOINLINE inline bool parse_slider(
   const std::string_view edge_sets = sound_fields[1];
   const std::string_view hit_sample = sound_fields[2];
   if (!valid_sample(hit_sample, true) || !valid_edge_sets(edge_sets, slides)) {
-    slider_point_count = slider_point_begin;
-    slider_segment_count = slider_segment_begin;
+    counts.slider_points = slider_point_begin;
+    counts.slider_segments = slider_segment_begin;
     return false;
   }
 
   if (lazer && (has_explicit_segments || first_curve_degree)) {
-    if (slider_segment_count == beatmap.slider_segments.size()) {
-      slider_point_count = slider_point_begin;
-      slider_segment_count = slider_segment_begin;
+    if (counts.slider_segments == beatmap.slider_segments.size()) {
+      counts.slider_points = slider_point_begin;
+      counts.slider_segments = slider_segment_begin;
       return false;
     }
-    beatmap.slider_segments[slider_segment_count++] = {
+    beatmap.slider_segments[counts.slider_segments++] = {
         .type = current_curve_type,
         .degree = current_curve_degree,
         .point_begin =
             static_cast<u32>(segment_point_begin - slider_point_begin),
         .point_count =
-            static_cast<u32>(slider_point_count - segment_point_begin),
+            static_cast<u32>(counts.slider_points - segment_point_begin),
     };
   }
 
-  beatmap.sliders[slider_count] = {
+  beatmap.sliders[counts.sliders] = {
       .point_begin = static_cast<u32>(slider_point_begin),
-      .point_count = static_cast<u32>(slider_point_count - slider_point_begin),
+      .point_count =
+          static_cast<u32>(counts.slider_points - slider_point_begin),
       .segment_begin = static_cast<u32>(slider_segment_begin),
-      .segment_count =
-          lazer ? static_cast<u32>(slider_segment_count - slider_segment_begin)
-                : 0,
+      .segment_count = lazer ? static_cast<u32>(counts.slider_segments -
+                                                slider_segment_begin)
+                             : 0,
       .slides = std::max(1, slides),
       .curve_type = *first_curve_type,
       .length = std::max(0.0, length),
@@ -610,7 +616,7 @@ FOSU_NOINLINE inline bool parse_slider(
       .edge_sets = edge_sets,
   };
   object.hit_sample = hit_sample;
-  object.slider = static_cast<u32>(slider_count++);
+  object.slider = static_cast<u32>(counts.sliders++);
   return true;
 }
 }  // namespace fosu::internal

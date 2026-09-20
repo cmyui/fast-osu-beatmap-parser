@@ -21,9 +21,7 @@ namespace fosu::internal {
 // spinner/hold end times, or a trailing hit sample.
 FOSU_NOINLINE inline bool parse_hitobject_details(
     Beatmap&                       beatmap,
-    size_t&                        slider_count,
-    size_t&                        slider_segment_count,
-    size_t&                        slider_point_count,
+    HitObjectCounts&               counts,
     HitObject&                     object,
     const char*                    p,
     const char*                    end,
@@ -39,8 +37,7 @@ FOSU_NOINLINE inline bool parse_hitobject_details(
     }
     case HitObjectKind::Slider:
       return p < end && *p == ',' &&
-             parse_slider(beatmap, slider_count, slider_segment_count,
-                          slider_point_count, object, p + 1, end, constants);
+             parse_slider(beatmap, counts, object, p + 1, end, constants);
     case HitObjectKind::Spinner: {
       const auto details = parse_spinner_details(p, end);
       if (!details)
@@ -67,9 +64,7 @@ FOSU_NOINLINE inline bool parse_hitobject_details(
 // signed, decimal, spaced or wide fields; anything else is malformed.
 inline std::optional<HitObject> parse_hitobject_line_scalar(
     Beatmap&                       beatmap,
-    size_t&                        slider_count,
-    size_t&                        slider_segment_count,
-    size_t&                        slider_point_count,
+    HitObjectCounts&               counts,
     const char*                    p,
     const char*                    line_end,
     const HitObjectParseConstants& constants) {
@@ -120,8 +115,7 @@ inline std::optional<HitObject> parse_hitobject_line_scalar(
       .combo_skip = 0,
       .hit_sample = {},
   };
-  if (!parse_hitobject_details(beatmap, slider_count, slider_segment_count,
-                               slider_point_count, object, next, line_end,
+  if (!parse_hitobject_details(beatmap, counts, object, next, line_end,
                                constants)) {
     return std::nullopt;
   }
@@ -158,10 +152,7 @@ inline HitObject normalize_hitobject(HitObject object,
 
 inline const char* parse_hitobjects_section_scalar(
     Beatmap&                       beatmap,
-    size_t&                        hit_object_count,
-    size_t&                        slider_count,
-    size_t&                        slider_segment_count,
-    size_t&                        slider_point_count,
+    HitObjectCounts&               counts,
     const char*                    p,
     const char*                    file_end,
     const HitObjectParseConstants& constants,
@@ -178,17 +169,16 @@ inline const char* parse_hitobjects_section_scalar(
     const char* following_line = after_line_ending(line_end, file_end);
     if (!ignored_line(p, line_end)) {
       if (const auto object = parse_hitobject_line_scalar(
-              beatmap, slider_count, slider_segment_count, slider_point_count,
-              p, line_end, constants)) {
+              beatmap, counts, p, line_end, constants)) {
         const bool preceding_was_spinner =
-            hit_object_count && (object->is_circle() || object->is_slider()) &&
+            counts.objects && (object->is_circle() || object->is_slider()) &&
             !(object->type & 4) &&
             classify_hitobject_kind(
-                beatmap.hit_objects[hit_object_count - 1].type) ==
+                beatmap.hit_objects[counts.objects - 1].type) ==
                 HitObjectKind::Spinner;
-        beatmap.hit_objects[hit_object_count] = normalize_hitobject(
-            *object, hit_object_count, preceding_was_spinner, time_offset);
-        ++hit_object_count;
+        beatmap.hit_objects[counts.objects] = normalize_hitobject(
+            *object, counts.objects, preceding_was_spinner, time_offset);
+        ++counts.objects;
       } else [[unlikely]] {
         ++beatmap.stats.malformed_lines;
       }
@@ -203,10 +193,7 @@ inline const char* parse_hitobjects_section_scalar(
 // non-digit masks. Lines outside the common editor shape take the scalar path.
 inline const char* parse_hitobjects_section_simd(
     Beatmap&                       beatmap,
-    size_t&                        hit_object_count,
-    size_t&                        slider_count,
-    size_t&                        slider_segment_count,
-    size_t&                        slider_point_count,
+    HitObjectCounts&               counts,
     const char*                    p,
     const char*                    file_end,
     const HitObjectParseConstants& constants,
@@ -216,8 +203,8 @@ inline const char* parse_hitobjects_section_simd(
   u32              fast_lines = 0;
   u32              malformed = 0;
   bool             preceding_was_spinner =
-      hit_object_count &&
-      classify_hitobject_kind(beatmap.hit_objects[hit_object_count - 1].type) ==
+      counts.objects &&
+      classify_hitobject_kind(beatmap.hit_objects[counts.objects - 1].type) ==
           HitObjectKind::Spinner;
 
   while (p < file_end) {
@@ -384,46 +371,42 @@ inline const char* parse_hitobjects_section_simd(
           } else if (length - prefix_end == 9 && after_prefix == ',' &&
                      short_sample(p + prefix_end + 1)) {
             object.hit_sample = {p + prefix_end + 1, 8};
-          } else if (!parse_hitobject_details(
-                         beatmap, slider_count, slider_segment_count,
-                         slider_point_count, object, p + prefix_end, line_end,
-                         constants)) {
+          } else if (!parse_hitobject_details(beatmap, counts, object,
+                                              p + prefix_end, line_end,
+                                              constants)) {
             ++malformed;
             p = next_line;
             continue;
           }
         } else if (kind == HitObjectKind::Slider) {
           if (prefix_end >= length || after_prefix != ',' ||
-              !parse_slider(beatmap, slider_count, slider_segment_count,
-                            slider_point_count, object, p + prefix_end + 1,
+              !parse_slider(beatmap, counts, object, p + prefix_end + 1,
                             line_end, constants)) {
             ++malformed;
             p = next_line;
             continue;
           }
-        } else if (!parse_hitobject_details(
-                       beatmap, slider_count, slider_segment_count,
-                       slider_point_count, object, p + prefix_end, line_end,
-                       constants)) {
+        } else if (!parse_hitobject_details(beatmap, counts, object,
+                                            p + prefix_end, line_end,
+                                            constants)) {
           ++malformed;
           p = next_line;
           continue;
         }
 
-        beatmap.hit_objects[hit_object_count] = normalize_hitobject(
-            object, hit_object_count, preceding_was_spinner, time_offset);
+        beatmap.hit_objects[counts.objects] = normalize_hitobject(
+            object, counts.objects, preceding_was_spinner, time_offset);
         preceding_was_spinner = kind == HitObjectKind::Spinner;
-        ++hit_object_count;
+        ++counts.objects;
       } else {
-        const auto object = parse_hitobject_line_scalar(
-            beatmap, slider_count, slider_segment_count, slider_point_count, p,
-            line_end, constants);
+        const auto object = parse_hitobject_line_scalar(beatmap, counts, p,
+                                                        line_end, constants);
         if (object) {
-          beatmap.hit_objects[hit_object_count] = normalize_hitobject(
-              *object, hit_object_count, preceding_was_spinner, time_offset);
+          beatmap.hit_objects[counts.objects] = normalize_hitobject(
+              *object, counts.objects, preceding_was_spinner, time_offset);
           preceding_was_spinner =
               classify_hitobject_kind(object->type) == HitObjectKind::Spinner;
-          ++hit_object_count;
+          ++counts.objects;
         } else [[unlikely]] {
           ++malformed;
         }
@@ -438,13 +421,12 @@ inline const char* parse_hitobjects_section_simd(
         break;
       if (!ignored_line(p, line_end)) {
         if (const auto object = parse_hitobject_line_scalar(
-                beatmap, slider_count, slider_segment_count, slider_point_count,
-                p, line_end, constants)) {
-          beatmap.hit_objects[hit_object_count] = normalize_hitobject(
-              *object, hit_object_count, preceding_was_spinner, time_offset);
+                beatmap, counts, p, line_end, constants)) {
+          beatmap.hit_objects[counts.objects] = normalize_hitobject(
+              *object, counts.objects, preceding_was_spinner, time_offset);
           preceding_was_spinner =
               classify_hitobject_kind(object->type) == HitObjectKind::Spinner;
-          ++hit_object_count;
+          ++counts.objects;
         } else [[unlikely]] {
           ++malformed;
         }
@@ -459,23 +441,18 @@ inline const char* parse_hitobjects_section_simd(
 }
 #endif
 
-inline const char* parse_hitobjects_section(Beatmap&    beatmap,
-                                            size_t&     hit_object_count,
-                                            size_t&     slider_count,
-                                            size_t&     slider_segment_count,
-                                            size_t&     slider_point_count,
-                                            const char* p,
-                                            const char* file_end,
-                                            i32         time_offset = 0) {
+inline const char* parse_hitobjects_section(Beatmap&         beatmap,
+                                            HitObjectCounts& counts,
+                                            const char*      p,
+                                            const char*      file_end,
+                                            i32              time_offset = 0) {
   const HitObjectParseConstants constants;
 #if FOSU_SIMD
-  return parse_hitobjects_section_simd(beatmap, hit_object_count, slider_count,
-                                       slider_segment_count, slider_point_count,
-                                       p, file_end, constants, time_offset);
+  return parse_hitobjects_section_simd(beatmap, counts, p, file_end, constants,
+                                       time_offset);
 #else
-  return parse_hitobjects_section_scalar(
-      beatmap, hit_object_count, slider_count, slider_segment_count,
-      slider_point_count, p, file_end, constants, time_offset);
+  return parse_hitobjects_section_scalar(beatmap, counts, p, file_end,
+                                         constants, time_offset);
 #endif
 }
 

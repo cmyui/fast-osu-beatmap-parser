@@ -52,12 +52,11 @@ inline void parse_document(std::span<const char> input,
       set_default_velocity_presets(beatmap);
     return;
   }
-  const char* end = input.data() + input.size();
-  const char* p = parse_preamble(beatmap, input.data(), end);
-  const i32   time_offset = beatmap.format_version < 5 ? 24 : 0;
-  size_t      break_count = 0, colour_count = 0, timing_point_count = 0;
-  size_t      hit_object_count = 0, slider_count = 0, slider_point_count = 0;
-  size_t      slider_segment_count = 0;
+  const char*        end = input.data() + input.size();
+  const char*        p = parse_preamble(beatmap, input.data(), end);
+  const i32          time_offset = beatmap.format_version < 5 ? 24 : 0;
+  size_t             break_count = 0, colour_count = 0, timing_point_count = 0;
+  HitObjectCounts    counts;
   std::optional<f64> approach_rate;
   u32                pending = options.sections & 0x1FEu;
 
@@ -99,9 +98,7 @@ inline void parse_document(std::span<const char> input,
         p = parse_colours_section(beatmap, colour_count, p, end);
         break;
       case Section::HitObjects:
-        p = parse_hitobjects_section(beatmap, hit_object_count, slider_count,
-                                     slider_segment_count, slider_point_count,
-                                     p, end, time_offset);
+        p = parse_hitobjects_section(beatmap, counts, p, end, time_offset);
         break;
       case Section::None:
       case Section::Unknown:
@@ -121,10 +118,11 @@ inline void parse_document(std::span<const char> input,
   beatmap.breaks = beatmap.breaks.first(break_count);
   beatmap.combo_colours = beatmap.combo_colours.first(colour_count);
   beatmap.timing_points = beatmap.timing_points.first(timing_point_count);
-  beatmap.hit_objects = beatmap.hit_objects.first(hit_object_count);
-  beatmap.sliders = beatmap.sliders.first(slider_count);
-  beatmap.slider_segments = beatmap.slider_segments.first(slider_segment_count);
-  beatmap.slider_points = beatmap.slider_points.first(slider_point_count);
+  beatmap.hit_objects = beatmap.hit_objects.first(counts.objects);
+  beatmap.sliders = beatmap.sliders.first(counts.sliders);
+  beatmap.slider_segments =
+      beatmap.slider_segments.first(counts.slider_segments);
+  beatmap.slider_points = beatmap.slider_points.first(counts.slider_points);
   beatmap.velocity_presets =
       beatmap.velocity_presets.first(velocity_preset_count);
 }
