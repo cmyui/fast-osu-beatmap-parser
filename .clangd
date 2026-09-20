@@ -10,7 +10,7 @@ Diagnostics:
     IgnoreHeader:
       - 'sys/(fcntl|syslimits|unistd|_types/_ssize_t)\.h'
       - '_stdlib\.h'
-      - 'bits/(auxv|types/struct_rusage)\.h'
+      - 'bits/types/struct_rusage\.h'
       - 'linux/limits\.h'
       # Windows.h is the supported Windows SDK umbrella.
       - '(um|shared)[/\\][^/\\]+\.h'

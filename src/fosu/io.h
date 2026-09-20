@@ -7,7 +7,7 @@
 #endif
 #include <cerrno>
 #include <cstddef>
-#include <cstdint>
+#include <cstdint>  // IWYU pragma: keep (Windows-only UINT32_MAX)
 #include <cstdlib>
 #include <cstring>
 #include <limits>
