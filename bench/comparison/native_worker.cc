@@ -2,9 +2,13 @@
 #include <fosu/parser.h>
 
 #include <chrono>
+#include <cstddef>
+#include <exception>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <nlohmann/json.hpp>
+#include <stdexcept>
 #include <string>
 
 using Json = nlohmann::json;

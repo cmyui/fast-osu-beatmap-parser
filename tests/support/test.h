@@ -1,5 +1,7 @@
 #pragma once
+#include <fosu/beatmap.h>
 #include <fosu/parser.h>
+#include <fosu/result.h>
 #include <tests/support/scalar_engine.h>
 
 #include <cinttypes>

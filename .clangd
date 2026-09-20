@@ -5,11 +5,15 @@ Style: { AngledHeaders: ['^(fosu|tests)/'] }
 Diagnostics:
   MissingIncludes: Strict
   Includes:
-    # Apple SDK declarations live in these private headers, but consumers
-    # include their public POSIX counterparts (fcntl.h, limits.h, unistd.h).
+    # SDK/libc declarations live in these implementation headers, but consumers
+    # include their public counterparts (e.g. fcntl.h, sys/resource.h, sys/auxv.h).
     IgnoreHeader:
       - 'sys/(fcntl|syslimits|unistd|_types/_ssize_t)\.h'
       - '_stdlib\.h'
+      - 'bits/(auxv|types/struct_rusage)\.h'
+      - 'linux/limits\.h'
+      # Windows.h is the supported Windows SDK umbrella.
+      - '(um|shared)[/\\][^/\\]+\.h'
 
 ---
 If:
@@ -23,4 +27,6 @@ If:
 Diagnostics:
   Includes:
     # Python.h is CPython's supported umbrella; its private headers are not.
-    IgnoreHeader: 'python3\.[0-9]+/.*'
+    IgnoreHeader:
+      - 'python3\.[0-9]+/.*'
+      - '[Ii]nclude[/\\](cpython[/\\])?[^/\\]+\.h'
