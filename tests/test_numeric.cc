@@ -63,7 +63,8 @@ static void test_bezier_subdivision() {
           work[j] = (work[j] + work[j + 1]) * 0.5f;
       }
       CHECK(std::memcmp(left, expected_left, count * sizeof(CurvePoint)) == 0);
-      CHECK(std::memcmp(right, expected_right, count * sizeof(CurvePoint)) == 0);
+      CHECK(std::memcmp(right, expected_right, count * sizeof(CurvePoint)) ==
+            0);
     }
   }
 }
