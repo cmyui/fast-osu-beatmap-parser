@@ -460,6 +460,10 @@ struct CurveVertices {
 
   void begin_segment() { first_in_segment = true; }
 
+#if defined(__GNUC__) && !defined(__clang__)
+  // GCC otherwise calls this for every generated curve vertex.
+  [[gnu::always_inline]]
+#endif
   void append(CurvePoint point) {
     const bool shared = first_in_segment && count && last_point == point;
     first_in_segment = false;
