@@ -155,5 +155,14 @@ or NEON on AArch64, with scalar fallback. Header-only C++ uses the caller’s co
 Measurements are
 bounded to the documented corpus and host; see [performance](docs/performance.md).
 
-The project concept and original SIMD hitobject prototype are by
-[Flamme](https://github.com/infernalfire72).
+## Acknowledgments
+
+- [osu!](https://github.com/ppy/osu) and
+  [osu!framework](https://github.com/ppy/osu-framework) by ppy Pty Ltd and
+  contributors are FOSU's primary references for beatmap behavior. FOSU adapts
+  curve approximation from osu!framework 2026.807.0 and osu!. FOSU's slider
+  event ordering and endpoint exclusion follow `SliderEventGenerator`; full-map
+  stacking follows `OsuBeatmapProcessor`. The ppy copyright and MIT license
+  notices remain in the relevant headers.
+- [Flamme](https://github.com/infernalfire72) originated the project concept
+  and the SIMD hitobject prototype on which FOSU's AVX2 prefix parser builds.

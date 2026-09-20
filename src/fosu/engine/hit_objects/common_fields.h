@@ -2,11 +2,11 @@
 
 // Parsers for the hitobject line prefix "x,y,time,type,hitSound".
 //
-// The AVX2 path is based on a prototype by Flamme (fla.me): classify
-// delimiters with one vector compare, derive a (len_x, len_y, len_time,
-// len_type) signature, and use it to index precomputed permute+shuffle
-// masks that normalize every digit into a fixed position, so a single
-// maddubs/madd chain converts the whole prefix at once. This version adds:
+// The AVX2 path classifies delimiters with one vector compare, derives a
+// (len_x, len_y, len_time, len_type) signature, and uses it to index
+// precomputed permute+shuffle masks that normalize every digit into a
+// fixed position. A single maddubs/madd chain converts the whole prefix at
+// once. It also uses:
 //   - parallel delimiter extraction (blsr chain + independent tzcnts)
 //     instead of a serialized tzcnt/shift chain
 //   - the table index computed directly from delimiter positions:

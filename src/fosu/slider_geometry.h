@@ -1,6 +1,5 @@
 #pragma once
 
-// Curve approximation adapted from osu-framework (2026.807.0) and osu!.
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
