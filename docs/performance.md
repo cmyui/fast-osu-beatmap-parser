@@ -27,7 +27,7 @@ new behavior or change the parser's explicit option interface.
 
 ## Current feature costs
 
-Measured on 2026-09-18 from parser revision `2d68f2a`. The performance profile
+Measured on 2026-09-20 from FOSU 0.5.0 (`798b810`). The performance profile
 contains 1,024 entries (986 unique beatmaps), 256 per mode and 46,029,610 bytes.
 Repeated entries are deliberate products of the stratified selection. Input is
 resident in memory. Native rows create a fresh `Parser`; Python rows include the
@@ -38,28 +38,29 @@ The corpus SHA-256 is
 
 Each run reports the arithmetic mean of the fastest sample for every corpus
 entry. Native uses five samples and Python three, with profile order rotated per
-entry. Each cell averages three independent runs. This is a lower-envelope
-feature-cost comparison, not a latency percentile. Microseconds per map; lower
-is better.
+entry. Each cell is the median of five measured runs on Intel and three on M3,
+reversing backend order between runs. Warm-up batches are excluded as whole
+batches, not selected per cell. This is a lower-envelope feature-cost comparison,
+not a latency percentile. Microseconds per map; lower is better.
 
 ### Intel Core i7-8700, Linux x86-64 under WSL2
 
 GCC 15.2, `-O3`; native AVX2 uses `x86-64-v3`, while the Python AVX2 engine
 uses AVX2, BMI and BMI2 without host-specific tuning. Python is CPython 3.12.14.
-Runs used the WSL2 ext4 filesystem, were pinned to logical CPU 8 and temporarily
-selected the Windows High performance power plan.
+Runs used the WSL2 ext4 filesystem, were pinned to logical CPU 8 and used the
+Windows High performance power plan.
 
 | Profile | C++ AVX2 | C++ scalar | Python AVX2 | Python scalar |
 |---|---:|---:|---:|---:|
-| Decode | 28.5 | 84.1 | 439.6 | 487.5 |
-| Hit objects only | 24.1 | 75.0 | 413.2 | 458.7 |
-| End times | 31.0 | 86.9 | 442.1 | 490.5 |
-| Paths | 54.5 | 109.4 | 618.3 | 666.9 |
-| Geometry | 55.8 | 110.4 | 617.1 | 665.4 |
-| Events | 62.6 | 117.5 | 877.2 | 925.1 |
-| Stacking | 51.5 | 106.9 | 598.0 | 646.2 |
-| Gameplay | 67.0 | 122.6 | 932.7 | 980.1 |
-| Double time | 30.2 | 85.6 | 445.1 | 492.3 |
+| Decode | 29.2 | 90.9 | 155.8 | 209.8 |
+| Hit objects only | 24.7 | 81.2 | 142.6 | 192.2 |
+| End times | 31.7 | 93.5 | 158.4 | 212.5 |
+| Paths | 54.2 | 116.3 | 257.4 | 310.8 |
+| Geometry | 55.6 | 117.4 | 257.4 | 309.6 |
+| Events | 62.4 | 124.6 | 320.6 | 373.0 |
+| Stacking | 52.0 | 114.0 | 244.0 | 297.4 |
+| Gameplay | 67.1 | 129.4 | 342.7 | 394.9 |
+| Double time | 31.0 | 92.6 | 158.7 | 212.5 |
 
 ### Apple M3 Max, macOS AArch64
 
@@ -67,15 +68,15 @@ Apple Clang 17, `-O3`; Python is CPython 3.12.9.
 
 | Profile | C++ NEON | C++ scalar | Python NEON | Python scalar |
 |---|---:|---:|---:|---:|
-| Decode | 19.7 | 54.1 | 300.8 | 338.6 |
-| Hit objects only | 17.5 | 47.5 | 284.7 | 318.6 |
-| End times | 20.8 | 55.1 | 301.8 | 340.7 |
-| Paths | 31.2 | 65.5 | 418.7 | 455.7 |
-| Geometry | 31.7 | 66.0 | 416.2 | 454.6 |
-| Events | 33.9 | 68.3 | 584.7 | 624.9 |
-| Stacking | 29.5 | 63.9 | 404.2 | 443.0 |
-| Gameplay | 35.5 | 69.9 | 620.7 | 663.5 |
-| Double time | 20.2 | 54.4 | 302.6 | 341.5 |
+| Decode | 19.8 | 58.5 | 108.9 | 148.0 |
+| Hit objects only | 17.4 | 51.4 | 100.8 | 135.1 |
+| End times | 20.8 | 59.6 | 110.3 | 149.3 |
+| Paths | 31.3 | 70.1 | 178.7 | 217.8 |
+| Geometry | 31.8 | 70.7 | 177.9 | 216.9 |
+| Events | 34.0 | 73.0 | 220.0 | 259.5 |
+| Stacking | 29.6 | 68.5 | 168.6 | 208.3 |
+| Gameplay | 35.7 | 74.7 | 235.0 | 273.9 |
+| Double time | 20.3 | 59.0 | 110.2 | 149.2 |
 
 Small negative option costs in Python are measurement noise around eager result
 construction. Paths and especially events dominate the optional work.
@@ -94,15 +95,15 @@ that v128 parsing is faster than legacy parsing.
 
 | Profile | x86 C++ AVX2 | x86 C++ scalar | x86 Python AVX2 | x86 Python scalar | M3 C++ NEON | M3 C++ scalar | M3 Python NEON | M3 Python scalar |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Decode | 23.7 | 55.0 | 216.7 | 245.0 | 18.3 | 38.7 | 150.3 | 172.7 |
-| Hit objects only | 18.8 | 46.1 | 196.0 | 222.3 | 15.3 | 31.9 | 136.3 | 156.0 |
-| End times | 24.0 | 55.3 | 218.3 | 246.8 | 18.5 | 38.9 | 150.5 | 174.1 |
-| Paths | 26.6 | 57.9 | 238.9 | 268.6 | 19.8 | 40.0 | 165.3 | 188.6 |
-| Geometry | 26.8 | 58.2 | 239.0 | 268.3 | 19.7 | 40.0 | 165.0 | 188.0 |
-| Events | 27.8 | 59.1 | 263.1 | 293.0 | 20.1 | 40.4 | 179.7 | 204.0 |
-| Stacking | 27.1 | 58.5 | 243.2 | 273.3 | 19.9 | 40.0 | 167.8 | 191.2 |
-| Gameplay | 28.6 | 59.9 | 273.4 | 302.4 | 20.5 | 40.6 | 186.2 | 209.6 |
-| Double time | 24.4 | 55.7 | 218.3 | 247.5 | 18.6 | 38.9 | 151.2 | 173.2 |
+| Decode | 23.7 | 59.9 | 96.9 | 128.1 | 18.5 | 41.4 | 69.5 | 92.7 |
+| Hit objects only | 18.9 | 50.7 | 84.5 | 113.3 | 15.5 | 34.2 | 61.8 | 80.6 |
+| End times | 24.2 | 60.4 | 97.5 | 129.4 | 18.7 | 41.7 | 69.7 | 93.2 |
+| Paths | 26.7 | 62.9 | 109.2 | 140.7 | 19.9 | 42.8 | 77.5 | 101.7 |
+| Geometry | 26.9 | 63.2 | 108.4 | 140.1 | 20.0 | 42.9 | 77.3 | 100.9 |
+| Events | 28.0 | 64.2 | 116.7 | 148.3 | 20.3 | 43.2 | 82.5 | 106.0 |
+| Stacking | 27.2 | 63.5 | 110.8 | 142.1 | 20.0 | 42.9 | 78.7 | 102.2 |
+| Gameplay | 28.7 | 65.0 | 121.1 | 152.3 | 20.6 | 43.4 | 85.4 | 109.6 |
+| Double time | 24.6 | 60.8 | 98.1 | 130.0 | 18.8 | 41.7 | 69.8 | 93.2 |
 
 ## Standard gameplay and mods
 
@@ -112,10 +113,23 @@ reported on the 256-entry standard subset (255 unique beatmaps, 10,347,075 bytes
 
 | Profile | x86 C++ AVX2 | x86 Python AVX2 | ARM C++ NEON | ARM Python NEON |
 |---|---:|---:|---:|---:|
-| Decode | 29.4 | 493.0 | 19.4 | 336.0 |
-| DT | 28.5 | 486.9 | 19.6 | 333.9 |
-| HR+DT | 28.8 | 485.2 | 19.9 | 332.7 |
-| Full HR+DT | 132.9 | 1,684.7 | 63.4 | 1,144.6 |
+| Decode | 29.8 | 192.9 | 19.9 | 128.0 |
+| DT | 29.0 | 189.0 | 20.3 | 126.8 |
+| HR+DT | 29.3 | 188.3 | 20.5 | 126.4 |
+| Full HR+DT | 132.7 | 685.1 | 65.4 | 449.0 |
+
+## Run stability
+
+Builds and benchmarks did not overlap. WSL load monitoring recorded no swapping
+or CPU steal. One mixed-mode Python AVX2 process was slower: decode ranged from
+155.0 to 176.7 µs/map across five runs, with the other four at 155.0–156.1.
+That run remains in the median and range; its cause was not established. All
+other Intel matrix cells had a full run range below 2.8% of their fastest run.
+
+Cursor was closed before the final M3 passes, but macOS background services
+remained active. No thermal warning was reported. The three final runs agreed
+within 3.0% for every cell; these are repeatable desktop measurements, not a claim
+of an idle machine. Earlier exploratory M3 passes are excluded as whole runs.
 
 ## Reproduce FOSU measurements
 
@@ -132,6 +146,10 @@ FOSU_BACKEND=avx2 python bench/python_feature_matrix.py /path/to/maps \
   --reps 3 --variant python-avx2 --suite all-modes > build/python.csv
 python bench/summarize.py build/python.csv --corpus-manifest /path/to/manifest.csv
 ```
+
+Repeat into separate CSV files, reversing backend order between runs, then take
+the median of each profile's `mean_file_min_us`. Retain all run values to report
+their spread; do not substitute the minimum of the complete runs.
 
 For standard-only HR profiles, pass a standard-only directory and replace
 `all-modes` with `standard` or `--suite all-modes` with `--suite standard`.
