@@ -367,7 +367,7 @@ PyObject* make_record(PyObject* module, PyObject* args) {
     return nullptr;
   }
   Py_ssize_t count = PyTuple_Size(fields);
-  if (count > field_count) {
+  if (count > field_count || count > 64) {
     PyErr_SetString(PyExc_TypeError, "too many record fields");
     return nullptr;
   }
@@ -518,7 +518,7 @@ struct BeatmapConverter {
       PyErr_SetString(PyExc_TypeError, "record is missing an expected field");
       throw PythonError{};
     }
-    record_fields(object)[index] = value.release();
+    record_set_field(object, index, value.release());
   }
   PythonRef record(PythonType kind, std::span<Value> values) {
     PythonRef out = allocate(kind);
