@@ -399,7 +399,7 @@ inline const char* parse_hitobjects_section_simd(
         HitObject object = make_object();
         if (kind == HitObjectKind::Circle) {
           if (!parse_hitobject_details(beatmap, counts, object, p + prefix_end,
-                                       line_end, constants)) {
+                                       line_end, constants)) [[unlikely]] {
             ++malformed;
             p = next_line;
             continue;
@@ -407,14 +407,14 @@ inline const char* parse_hitobjects_section_simd(
         } else if (kind == HitObjectKind::Slider) {
           if (prefix_end >= length || after_prefix != ',' ||
               !parse_slider(beatmap, counts, object, p + prefix_end + 1,
-                            line_end, constants)) {
+                            line_end, constants)) [[unlikely]] {
             ++malformed;
             p = next_line;
             continue;
           }
         } else if (!parse_hitobject_details(beatmap, counts, object,
                                             p + prefix_end, line_end,
-                                            constants)) {
+                                            constants)) [[unlikely]] {
           ++malformed;
           p = next_line;
           continue;

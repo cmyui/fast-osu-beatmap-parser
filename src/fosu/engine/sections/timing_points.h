@@ -64,7 +64,7 @@ inline const char* parse_timing_points_section_simd(Beatmap&    beatmap,
               : parse_timing_point(p, line_end, 0, time_offset);
       if (point) {
         beatmap.timing_points[point_count++] = *point;
-      } else
+      } else [[unlikely]]
         ++malformed;
     }
     p = next_line;
