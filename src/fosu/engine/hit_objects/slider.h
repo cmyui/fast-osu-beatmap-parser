@@ -189,17 +189,29 @@ FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
   // Common fixed-width points need no delimiter scan or shuffle-table index.
   if ((non_digits & 0xffu) == 0x11u && p[0] == '|' && p[4] == ':' &&
       (p[8] == '|' || p[8] == ',')) {
-    beatmap.slider_points[slider_point_count++] =
-        decode_slider_point(_mm256_castsi256_si128(input), 3, 3, constants);
-    p += 8;
-    if (p[0] == '|' && ((non_digits >> 8) & 0xffu) == 0x11u && p[4] == ':' &&
-        (p[8] == '|' || p[8] == ',')) {
-      beatmap.slider_points[slider_point_count++] = decode_slider_point(
-          _mm_loadu_si128(reinterpret_cast<const __m128i*>(p)), 3, 3,
-          constants);
-      p += 8;
+    static_assert(sizeof(SliderPoint) == 8 && offsetof(SliderPoint, x) == 0 &&
+                  offsetof(SliderPoint, y) == 4);
+    const __m128i digits = _mm_sub_epi8(_mm256_castsi256_si128(input),
+                                        _mm256_castsi256_si128(constants.zero));
+    // Right-align four three-digit coordinates in separate 32-bit lanes.
+    const __m128i placed = _mm_shuffle_epi8(
+        digits, _mm_setr_epi8(-128, 1, 2, 3, -128, 5, 6, 7, -128, 9, 10, 11,
+                              -128, 13, 14, 15));
+    const __m128i coordinates =
+        _mm_madd_epi16(_mm_maddubs_epi16(placed, _mm_set1_epi16(0x010a)),
+                       _mm_set1_epi32(0x00010064));
+    const __m128 positions = _mm_cvtepi32_ps(coordinates);
+    auto*        destination = reinterpret_cast<__m128i*>(
+        beatmap.slider_points.data() + slider_point_count);
+    if (p[8] == '|' && ((non_digits >> 8) & 0xffu) == 0x11u && p[12] == ':' &&
+        (p[16] == '|' || p[16] == ',')) {
+      _mm_storeu_si128(destination, _mm_castps_si128(positions));
+      slider_point_count += 2;
+      return p + 16;
     }
-    return p;
+    _mm_storel_epi64(destination, _mm_castps_si128(positions));
+    ++slider_point_count;
+    return p + 8;
   }
   if ((non_digits & 0x7fu) == 0x11u && p[0] == '|' && p[4] == ':' &&
       (p[7] == '|' || p[7] == ',')) {
