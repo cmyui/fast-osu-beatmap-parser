@@ -49,6 +49,7 @@ __all__ = [
     "HoldNote",
     "Mods",
     "ParseStats",
+    "Parser",
     "Point",
     "PathPoint",
     "SliderPath",
@@ -92,6 +93,68 @@ class Mods(IntFlag):
     NIGHTCORE = 1 << 9
 
 
+class Parser:
+    """Reusable parser for parsing many beatmaps.
+
+    Native memory is kept between calls and released with the parser, which
+    avoids reallocating it for every beatmap. Returned values are detached and
+    stay valid after later calls. A parser may not be used by two threads at
+    once; use one parser per thread.
+    """
+
+    __slots__ = ("_native",)
+
+    def __init__(self) -> None:
+        self._native = _core.Parser()
+
+    def parse(
+        self,
+        data: Buffer,
+        *,
+        sections: Sections = Sections.ALL,
+        calculate_slider_end_times: bool = False,
+        calculate_slider_paths: bool = False,
+        calculate_slider_events: bool = False,
+        apply_stacking: bool = False,
+        mods: Mods = Mods.NONE,
+    ) -> Beatmap:
+        """Parse selected sections into detached values, copying mutable buffers."""
+        if not isinstance(data, bytes):
+            with memoryview(data) as view:
+                data = view.tobytes()
+        return self._native.parse(
+            data,
+            sections,
+            calculate_slider_end_times,
+            calculate_slider_paths,
+            calculate_slider_events,
+            apply_stacking,
+            int(mods),
+        )
+
+    def parse_file(
+        self,
+        path: str | bytes | PathLike[str] | PathLike[bytes],
+        *,
+        sections: Sections = Sections.ALL,
+        calculate_slider_end_times: bool = False,
+        calculate_slider_paths: bool = False,
+        calculate_slider_events: bool = False,
+        apply_stacking: bool = False,
+        mods: Mods = Mods.NONE,
+    ) -> Beatmap:
+        """Read selected sections; raise OSError on file errors."""
+        return self._native.parse_file(
+            path,
+            sections,
+            calculate_slider_end_times,
+            calculate_slider_paths,
+            calculate_slider_events,
+            apply_stacking,
+            int(mods),
+        )
+
+
 def parse(
     data: Buffer,
     *,
@@ -102,18 +165,15 @@ def parse(
     apply_stacking: bool = False,
     mods: Mods = Mods.NONE,
 ) -> Beatmap:
-    """Parse selected sections into detached values, copying mutable buffers."""
-    if not isinstance(data, bytes):
-        with memoryview(data) as view:
-            data = view.tobytes()
-    return _core.parse(
+    """Parse once with a temporary parser; see Parser.parse."""
+    return Parser().parse(
         data,
-        sections,
-        calculate_slider_end_times,
-        calculate_slider_paths,
-        calculate_slider_events,
-        apply_stacking,
-        int(mods),
+        sections=sections,
+        calculate_slider_end_times=calculate_slider_end_times,
+        calculate_slider_paths=calculate_slider_paths,
+        calculate_slider_events=calculate_slider_events,
+        apply_stacking=apply_stacking,
+        mods=mods,
     )
 
 
@@ -127,15 +187,15 @@ def parse_file(
     apply_stacking: bool = False,
     mods: Mods = Mods.NONE,
 ) -> Beatmap:
-    """Read selected sections; raise OSError on file errors."""
-    return _core.parse_file(
+    """Parse once with a temporary parser; see Parser.parse_file."""
+    return Parser().parse_file(
         path,
-        sections,
-        calculate_slider_end_times,
-        calculate_slider_paths,
-        calculate_slider_events,
-        apply_stacking,
-        int(mods),
+        sections=sections,
+        calculate_slider_end_times=calculate_slider_end_times,
+        calculate_slider_paths=calculate_slider_paths,
+        calculate_slider_events=calculate_slider_events,
+        apply_stacking=apply_stacking,
+        mods=mods,
     )
 
 

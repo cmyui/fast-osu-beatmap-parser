@@ -36,11 +36,25 @@ for note in beatmap.hit_objects:
 memoryview, and arrays. Non-bytes buffers are copied to an immutable snapshot;
 encode text explicitly.
 
-Inputs are bounded by available address space. Allocation failures raise
-`MemoryError`, and file failures raise `OSError`. Native parsing
-releases the GIL; Python value construction holds it. Concurrent calls return
-independent results. Malformed records are skipped and counted in
-`beatmap.stats.malformed_lines`; success does not certify playability.
+File failures raise `OSError`; other parse failures, including invalid
+options and inputs too large to allocate, raise `ValueError`. Native parsing
+releases the GIL; Python value construction holds it. Malformed records are
+skipped and counted in `beatmap.stats.malformed_lines`; success does not
+certify playability.
+
+`parse` and `parse_file` allocate native memory for each call. To parse many
+maps, reuse a `fosu.Parser`, which keeps that memory until the parser is
+garbage-collected:
+
+```python
+parser = fosu.Parser()
+maps = [parser.parse_file(path) for path in paths]
+```
+
+Its `parse` and `parse_file` methods take the same arguments as the module
+functions. Results are detached, so later calls never change earlier results.
+One parser handles one call at a time; a concurrent call raises
+`RuntimeError`. Use one parser per thread.
 
 ## Performance
 

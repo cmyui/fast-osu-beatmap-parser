@@ -1,6 +1,5 @@
 // Canonical serialization of the native result for cross-interface equality.
 #include <fosu/beatmap.h>
-#include <fosu/io.h>
 #include <fosu/parser.h>
 #include <tests/support/canonical_dump.h>
 
@@ -12,14 +11,11 @@
 int main(int argc, char** argv) {
   if (argc < 2)
     return 2;
-  const fosu::FileBuffer buf = fosu::read_file_padded(argv[1]);
-  if (!buf)
-    return 1;
   fosu::Parser parser;
-  auto         parsed = parser.parse(buf);
+  auto*        parsed = parser.parse_file(argv[1]);
   if (!parsed)
     return 1;
-  const fosu::Beatmap& bm = *parsed.value();
+  const fosu::Beatmap& bm = *parsed;
   std::string          out;
   fosu_dump::dump(bm, out);
   size_t done = 0;

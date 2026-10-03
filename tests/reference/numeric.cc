@@ -71,10 +71,11 @@ static_assert(!FOSU_SIMD,
 extern "C" __attribute__((visibility("default"))) void
 fosu_numeric_oracle(const char* data, size_t size, std::string& output) {
   fosu::Parser parser;
-  auto parsed = parser.parse(data, size, {.calculate_slider_end_times = true});
+  auto         parsed =
+      parser.parse({data, size}, {.calculate_slider_end_times = true});
   if (!parsed)
     return;
-  auto map = *parsed.value();
+  auto map = *parsed;
   map.stats.fast_path_lines = map.stats.slow_path_lines = 0;
   fosu_dump::dump(map, output);
 }

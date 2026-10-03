@@ -1,4 +1,3 @@
-#include <fosu/io.h>
 #include <fosu/mods.h>
 #include <fosu/parse_options.h>
 #include <fosu/parser.h>
@@ -10,6 +9,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -54,13 +55,20 @@ uint64_t now() {
       .count();
 }
 
-void parse(fosu::Parser&           parser,
-           const fosu::FileBuffer& input,
-           fosu::ParseOptions      options) {
+// Benchmarks parse resident bytes, so file contents are read before timing.
+static bool read_file(const char* path, std::string& out) {
+  std::ifstream file(path, std::ios::binary);
+  out.assign(std::istreambuf_iterator<char>(file), {});
+  return !file.bad() && file.is_open();
+}
+
+void parse(fosu::Parser&      parser,
+           std::string_view   input,
+           fosu::ParseOptions options) {
   auto parsed = parser.parse(input, options);
   if (!parsed)
     std::abort();
-  const auto& beatmap = *parsed.value();
+  const auto& beatmap = *parsed;
 #if defined(_MSC_VER)
   result_sink = &beatmap;
   object_count_sink = beatmap.hit_objects.size();
@@ -101,11 +109,11 @@ int main(int argc, char** argv) {
   }
 
   std::puts("file,bytes,rep,variant,workload,wall_ns");
-  fosu::FileBuffer input;
-  fosu::Parser     reused_parser;
+  std::string  input;
+  fosu::Parser reused_parser;
   for (size_t file_index = 0; file_index < files.size(); ++file_index) {
     const std::string filename = files[file_index].string();
-    if (!fosu::read_into(filename.c_str(), input))
+    if (!read_file(filename.c_str(), input))
       return 1;
     for (fosu::i32 rep = 0; rep < reps; ++rep) {
       for (size_t job_index = 0; job_index < profile_count * 2; ++job_index) {
@@ -121,7 +129,7 @@ int main(int argc, char** argv) {
           parse(parser, input, profile.options);
         }
         const uint64_t elapsed = now() - begin;
-        std::printf("%s,%zu,%d,%s,%s-%s,%llu\n", filename.c_str(), input.size,
+        std::printf("%s,%zu,%d,%s,%s-%s,%llu\n", filename.c_str(), input.size(),
                     rep, argv[3], profile.name, reuse ? "reused" : "fresh",
                     static_cast<unsigned long long>(elapsed));
       }

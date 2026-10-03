@@ -2,7 +2,6 @@
 #include <fosu/arena.h>
 #include <fosu/beatmap.h>
 #include <fosu/engine/parse_document.h>
-#include <fosu/engine/parsing/key_value.h>
 #include <fosu/engine/parsing_engine.h>
 #include <fosu/io.h>
 #include <fosu/legacy_rules.h>
@@ -14,8 +13,6 @@
 #include <fosu/stacking.h>
 #include <fosu/types.h>
 
-#include <algorithm>
-#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstring>
@@ -25,175 +22,40 @@
 
 namespace fosu {
 
-namespace internal {
-
-// Parser construction is common in convenience and Python APIs. Retain one
-// inactive result/scratch pair without ever sharing live arenas between
-// parsers.
-struct ParserArenaPool {
-  std::atomic<Arena*> result{};
-  std::atomic<Arena*> scratch{};
-};
-
-inline ParserArenaPool parser_arena_pool{};
-
-inline Arena* acquire_parser_arena(std::atomic<Arena*>& pool) {
-  Arena* arena = pool.exchange(nullptr, std::memory_order_acquire);
-  if (!arena)
-    return arena_alloc();
-  return arena;
-}
-
-inline void recycle_parser_arena(std::atomic<Arena*>& pool, Arena* arena) {
-  if (!arena)
-    return;
-  arena_clear(arena);
-  Arena* empty = nullptr;
-  if (!pool.compare_exchange_strong(empty, arena, std::memory_order_release,
-                                    std::memory_order_relaxed)) {
-    arena_release(arena);
-  }
-}
-
-inline void clear_parser_arena_pool() {
-  arena_release(
-      parser_arena_pool.result.exchange(nullptr, std::memory_order_acquire));
-  arena_release(
-      parser_arena_pool.scratch.exchange(nullptr, std::memory_order_acquire));
-}
-
-#ifndef FOSU_MANAGED_ARENA_CLEANUP
-struct ParserArenaPoolCleanup {
-  ~ParserArenaPoolCleanup() { clear_parser_arena_pool(); }
-};
-inline ParserArenaPoolCleanup parser_arena_pool_cleanup;
-#endif
-
-inline size_t velocity_preset_capacity(std::span<const char> input) {
-  constexpr std::string_view field = "VelocityPresets";
-  const std::string_view     document{input.data(), input.size()};
-  size_t                     capacity = 3;
-  size_t                     search_from = 0;
-  for (;;) {
-    const size_t field_begin = document.find(field, search_from);
-    if (field_begin == std::string_view::npos)
-      break;
-    const size_t key_end = field_begin + field.size();
-    const size_t line_end = document.find('\n', key_end);
-    const size_t value_end =
-        line_end == std::string_view::npos ? document.size() : line_end;
-    const size_t colon = document.find(':', key_end);
-    if (colon < value_end && trim_field(document.substr(
-                                 field_begin, colon - field_begin)) == field) {
-      size_t values = 1;
-      for (size_t i = colon + 1; i < value_end; ++i)
-        values += document[i] == ',';
-      capacity = std::max(capacity, values);
-    }
-    search_from = value_end;
-  }
-  return capacity;
-}
-
-inline bool allocate_beatmap_arrays(Arena*                arena,
-                                    Beatmap&              beatmap,
-                                    std::span<const char> input,
-                                    u32                   selected_sections,
-                                    bool lazer_format) noexcept {
-  const size_t input_size = input.size();
-  // Each capacity is a conservative bound derived from the shortest accepted
-  // spelling. sizeof includes the string literal's trailing null byte.
-  // The arena reserves address space for the bound, but physical pages are
-  // only used where the parser writes accepted records.
-  if (selected_sections & kSectionEvents) {
-    const size_t capacity = input_size / (sizeof("2,0,0") - 1) + 1;
-    Break*       values = arena_push_array<Break>(arena, capacity);
-    if (!values)
-      return false;
-    beatmap.breaks = {values, capacity};
-  }
-
-  if (selected_sections & kSectionColours) {
-    const size_t capacity = input_size / (sizeof("Combo1:0,0,0") - 1) + 1;
-    u32*         values = arena_push_array<u32>(arena, capacity);
-    if (!values)
-      return false;
-    beatmap.combo_colours = {values, capacity};
-  }
-
-  if (selected_sections & kSectionEditor) {
-    const size_t capacity = lazer_format ? velocity_preset_capacity(input) : 3;
-    f64*         values = arena_push_array<f64>(arena, capacity);
-    if (!values)
-      return false;
-    beatmap.velocity_presets = {values, capacity};
-  }
-
-  if (selected_sections & kSectionTimingPoints) {
-    const size_t capacity = input_size / (sizeof("0,0") - 1) + 1;
-    TimingPoint* values = arena_push_array<TimingPoint>(arena, capacity);
-    if (!values)
-      return false;
-    beatmap.timing_points = {values, capacity};
-  }
-
-  if (selected_sections & kSectionHitObjects) {
-    const size_t object_capacity = input_size / (sizeof("0,0,0,1,0") - 1) + 1;
-    HitObject*   objects = arena_push_array<HitObject>(arena, object_capacity);
-    if (!objects)
-      return false;
-    beatmap.hit_objects = {objects, object_capacity};
-
-    const size_t slider_capacity =
-        input_size / (sizeof("0,0,0,2,0,L,0") - 1) + 1;
-    Slider* sliders = arena_push_array<Slider>(arena, slider_capacity);
-    if (!sliders)
-      return false;
-    beatmap.sliders = {sliders, slider_capacity};
-
-    if (lazer_format) {
-      const size_t  segment_capacity = input_size / (sizeof("|L|0:0") - 1) + 1;
-      CurveSegment* segments =
-          arena_push_array<CurveSegment>(arena, segment_capacity);
-      if (!segments)
-        return false;
-      beatmap.slider_segments = {segments, segment_capacity};
-    }
-
-    const size_t point_capacity = input_size / (sizeof("|0:0") - 1) + 1;
-    SliderPoint* points = arena_push_array<SliderPoint>(arena, point_capacity);
-    if (!points)
-      return false;
-    beatmap.slider_points = {points, point_capacity};
-  }
-
-  return true;
-}
-
-}  // namespace internal
-
-class Parser;
+inline constexpr size_t kBufferPadding = 128;
 
 namespace internal {
-struct ParserStorage {
-  Arena*      result_arena;
-  Arena*      scratch_arena;
-  const char* input;
-  size_t      input_size;
-  size_t      input_storage_size;
-};
 
-ParserStorage parser_storage(Parser& parser);
+template <typename T>
+inline bool push_span(Arena* arena, std::span<T>& out, size_t capacity) {
+  T* values = arena_push_array<T>(arena, capacity);
+  out = {values, values ? capacity : 0};
+  return values;
+}
+
+inline bool allocate_beatmap_arrays(Arena* arena, Beatmap& beatmap, size_t n) {
+  auto bound = [n](std::string_view shortest) {
+    return n / shortest.size() + 1;
+  };
+  return push_span(arena, beatmap.breaks, bound("2,0,0")) &&
+         push_span(arena, beatmap.combo_colours, bound("Combo1:0,0,0")) &&
+         // At least three, for the default presets:
+         push_span(arena, beatmap.velocity_presets, bound("0,") + 2) &&
+         push_span(arena, beatmap.timing_points, bound("0,0")) &&
+         push_span(arena, beatmap.hit_objects, bound("0,0,0,1,0")) &&
+         push_span(arena, beatmap.sliders, bound("0,0,0,2,0,L,0")) &&
+         push_span(arena, beatmap.slider_segments, bound("|L|0:0")) &&
+         push_span(arena, beatmap.slider_points, bound("|0:0"));
+}
+
 }  // namespace internal
 
 class Parser {
  public:
   explicit Parser(
       const ParsingEngine& engine = internal::compiled_engine) noexcept
-      : result_arena_(
-            internal::acquire_parser_arena(internal::parser_arena_pool.result)),
-        scratch_arena_(internal::acquire_parser_arena(
-            internal::parser_arena_pool.scratch)),
+      : result_arena_(arena_alloc()),
+        scratch_arena_(arena_alloc()),
         engine_(&engine) {}
 
   Parser(const Parser&) = delete;
@@ -202,206 +64,142 @@ class Parser {
   Parser& operator=(Parser&&) = delete;
 
   ~Parser() {
-    internal::recycle_parser_arena(internal::parser_arena_pool.result,
-                                   result_arena_);
-    internal::recycle_parser_arena(internal::parser_arena_pool.scratch,
-                                   scratch_arena_);
+    arena_release(result_arena_);
+    arena_release(scratch_arena_);
   }
 
-  Beatmap* parse(const char*  data,
-                 size_t       size,
-                 ParseOptions opts = {}) noexcept {
-    reset_working_result();
-    if ((!data && size) || invalid_options(opts))
+  Beatmap* parse(std::string_view input, ParseOptions opts = {}) noexcept {
+    reset();
+    if (invalid_options(opts))
       return nullptr;
-    auto prepared = prepare_input(size, data);
-    if (!prepared) {
-      reset_working_result();
+    char* buffer = reserve_input(input.size());
+    if (!buffer)
       return nullptr;
-    }
-    return finish_parse(opts);
-  }
-
-  Beatmap* parse(std::span<const char> input, ParseOptions opts = {}) noexcept {
-    return parse(input.data(), input.size(), opts);
-  }
-
-  Beatmap* parse(const FileBuffer& input, ParseOptions opts = {}) noexcept {
-    return parse(input.data.get(), input.size, opts);
+    if (!input.empty())
+      std::memcpy(buffer, input.data(), input.size());
+    return parse_input({buffer, input.size()}, opts);
   }
 
   Beatmap* parse_file(const char* path, ParseOptions opts = {}) noexcept {
-    reset_working_result();
-    if (!path || invalid_options(opts))
+    reset();
+    if (invalid_options(opts))
       return nullptr;
-
-    const internal::InputFile file = internal::open_input_file(path);
-    if (file == internal::kInvalidInputFile)
+    const std::span<const char> input = load_file(path);
+    if (!input.data())
       return nullptr;
-
-    u64 file_size;
-    if (!internal::input_file_size(file, file_size)) {
-      internal::close_input_file(file);
-      return nullptr;
-    }
-    if (file_size > std::numeric_limits<size_t>::max() - kBufferPadding) {
-      internal::close_input_file(file);
-      return nullptr;
-    }
-
-    const size_t size = static_cast<size_t>(file_size);
-    auto         prepared = prepare_input(size, nullptr);
-    if (!prepared) {
-      internal::close_input_file(file);
-      reset_working_result();
-      return nullptr;
-    }
-    size_t bytes_read = 0;
-    while (bytes_read < size) {
-      const ptrdiff_t count = internal::read_input_file(
-          file, input_ + bytes_read, size - bytes_read);
-      if (count < 0 && errno == EINTR)
-        continue;
-      if (count <= 0) {
-        internal::close_input_file(file);
-        reset_working_result();
-        return nullptr;
-      }
-      bytes_read += static_cast<size_t>(count);
-    }
-    internal::close_input_file(file);
-
-    return finish_parse(opts);
+    return parse_input(input, opts);
   }
 
  private:
-  friend internal::ParserStorage internal::parser_storage(Parser& parser);
-
-  static bool invalid_sections(u32 sections) noexcept {
-    return sections & ~kAllSections;
-  }
-
-  static bool invalid_options(ParseOptions opts) noexcept {
-    if (invalid_sections(opts.sections) || internal::invalid_mods(opts.mods))
-      return true;
-    return internal::has_difficulty_mod(opts.mods) &&
-           (opts.sections & (kSectionGeneral | kSectionDifficulty)) !=
-               (kSectionGeneral | kSectionDifficulty);
-  }
-
-  char* prepare_input(size_t size, const char* data) noexcept {
-    if (!can_pad_input(size))
+  Beatmap* parse_input(std::span<const char> input,
+                       ParseOptions          opts) noexcept {
+    if (!input.empty() && !internal::allocate_beatmap_arrays(
+                              result_arena_, beatmap_, input.size())) {
+      reset();
       return nullptr;
-    if (!result_arena_)
-      result_arena_ =
-          internal::acquire_parser_arena(internal::parser_arena_pool.result);
-    if (!scratch_arena_)
-      scratch_arena_ =
-          internal::acquire_parser_arena(internal::parser_arena_pool.scratch);
-    if (!result_arena_ || !scratch_arena_)
-      return nullptr;
-    input_ =
-        static_cast<char*>(arena_push(result_arena_, size + kBufferPadding, 1));
-    if (!input_)
-      return nullptr;
-    if (data && size)
-      std::memmove(input_, data, size);
-    std::memset(input_ + size, 0, kBufferPadding);
-    input_size_ = size;
-    return input_;
-  }
-
-  Beatmap* finish_parse(ParseOptions opts) noexcept {
-    const std::span<const char> input{input_, input_size_};
-    if (input_size_ != 0) {
-      Beatmap preamble;
-      internal::parse_preamble(preamble, input.data(),
-                               input.data() + input.size());
-      if (!internal::allocate_beatmap_arrays(result_arena_, beatmap_, input,
-                                             opts.sections,
-                                             preamble.format_version >= 128)) {
-        reset_working_result();
-        return nullptr;
-      }
     }
     engine_->parse_document(input, beatmap_, opts);
-    if (!internal::apply_legacy_rules(beatmap_, scratch_arena_)) {
-      reset_working_result();
+    if (!post_process(opts)) {
+      reset();
       return nullptr;
     }
-    if (!internal::apply_mods_before_calculations(beatmap_, opts.mods)) {
-      reset_working_result();
-      return nullptr;
-    }
-    const bool     stacking = opts.apply_stacking && beatmap_.mode == 0;
-    size_t         stacking_scratch_pos = 0;
-    std::span<f64> stacking_end_times;
-    if (stacking && !beatmap_.sliders.empty()) {
-      stacking_scratch_pos = arena_pos(scratch_arena_);
-      auto* end_times =
-          arena_push_array<f64>(scratch_arena_, beatmap_.sliders.size());
-      if (!end_times) {
-        reset_working_result();
-        return nullptr;
-      }
-      stacking_end_times = {end_times, beatmap_.sliders.size()};
-    }
-    if ((opts.calculate_slider_paths || opts.calculate_slider_events ||
-         stacking) &&
-        !internal::set_slider_paths(beatmap_, result_arena_, scratch_arena_)) {
-      reset_working_result();
-      return nullptr;
-    }
-    if (opts.calculate_slider_events &&
-        !internal::set_slider_events(beatmap_, result_arena_, scratch_arena_,
-                                     stacking_end_times)) {
-      reset_working_result();
-      return nullptr;
-    }
-    if ((opts.calculate_slider_end_times || stacking) &&
-        !opts.calculate_slider_events &&
-        !internal::set_slider_end_times(beatmap_, scratch_arena_, {},
-                                        stacking_end_times)) {
-      reset_working_result();
-      return nullptr;
-    }
-    if (stacking && !internal::apply_stacking(beatmap_, result_arena_,
-                                              stacking_end_times)) {
-      reset_working_result();
-      return nullptr;
-    }
-    if (!stacking_end_times.empty())
-      arena_pop_to(scratch_arena_, stacking_scratch_pos);
-    internal::apply_clock_rate(beatmap_, opts.mods);
     return &beatmap_;
   }
 
-  void reset_working_result() noexcept {
+  bool post_process(ParseOptions opts) noexcept {
+    const bool stacking = opts.apply_stacking && beatmap_.mode == 0;
+    const bool events = opts.calculate_slider_events;
+    const bool paths = opts.calculate_slider_paths || events || stacking;
+
+    const bool end_times =
+        (opts.calculate_slider_end_times || stacking) && !events;
+
+    std::span<f64> stacking_end_times;
+
+    auto&          map = beatmap_;
+    auto*          result = result_arena_;
+    auto*          scratch = scratch_arena_;
+
+    using namespace internal;
+    if (!apply_legacy_rules(map, scratch))
+      return false;
+    if (!apply_mods_before_calculations(map, opts.mods))
+      return false;
+    if (stacking && !push_span(scratch, stacking_end_times, map.sliders.size()))
+      return false;
+    if (paths && !set_slider_paths(map, result, scratch))
+      return false;
+    if (events && !set_slider_events(map, result, scratch, stacking_end_times))
+      return false;
+    if (end_times &&
+        !set_slider_end_times(map, scratch, {}, stacking_end_times))
+      return false;
+    if (stacking && !apply_stacking(map, result, stacking_end_times))
+      return false;
+    apply_clock_rate(map, opts.mods);
+    return true;
+  }
+
+  // Reads the whole file into the result arena. Returns a span with a null
+  // data() on failure, leaving errno set.
+  std::span<const char> load_file(const char* path) noexcept {
+    const internal::InputFile file = internal::open_input_file(path);
+    if (file == internal::kInvalidInputFile)
+      return {};
+    u64   size = 0;
+    char* buffer = nullptr;
+    if (internal::input_file_size(file, size))
+      buffer = reserve_input(size);
+    for (u64 done = 0; buffer && done < size;) {
+      const ptrdiff_t count =
+          internal::read_input_file(file, buffer + done, size - done);
+      if (count < 0 && errno == EINTR)
+        continue;
+      if (count == 0)
+        errno = EIO;  // The file shrank after its size was read.
+      if (count <= 0)
+        buffer = nullptr;
+      else
+        done += static_cast<u64>(count);
+    }
+    const int error = errno;
+    internal::close_input_file(file);
+    errno = error;
+    if (!buffer)
+      return {};
+    return {buffer, static_cast<size_t>(size)};
+  }
+
+  static bool invalid_options(ParseOptions opts) noexcept {
+    return (opts.sections & ~kAllSections) ||
+           internal::invalid_mods(opts.mods) ||
+           (internal::has_difficulty_mod(opts.mods) &&
+            (opts.sections & (kSectionGeneral | kSectionDifficulty)) !=
+                (kSectionGeneral | kSectionDifficulty));
+  }
+
+  char* reserve_input(u64 size) noexcept {
+    if (size > std::numeric_limits<size_t>::max() - kBufferPadding) {
+      errno = EFBIG;
+      return nullptr;
+    }
+    auto* buffer = static_cast<char*>(arena_push(
+        result_arena_, static_cast<size_t>(size) + kBufferPadding, 1));
+    if (buffer)
+      std::memset(buffer + size, 0, kBufferPadding);
+    return buffer;
+  }
+
+  void reset() noexcept {
     arena_clear(result_arena_);
     arena_clear(scratch_arena_);
-    input_ = nullptr;
-    input_size_ = 0;
     beatmap_ = {};
   }
 
   Arena*               result_arena_;
   Arena*               scratch_arena_;
   const ParsingEngine* engine_;
-  char*                input_ = nullptr;
-  size_t               input_size_ = 0;
   Beatmap              beatmap_{};
 };
-
-namespace internal {
-inline ParserStorage parser_storage(Parser& parser) {
-  return {
-      .result_arena = parser.result_arena_,
-      .scratch_arena = parser.scratch_arena_,
-      .input = parser.input_,
-      .input_size = parser.input_size_,
-      .input_storage_size = parser.input_size_ + kBufferPadding,
-  };
-}
-}  // namespace internal
 
 }  // namespace fosu

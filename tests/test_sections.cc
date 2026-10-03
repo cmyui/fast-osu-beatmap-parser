@@ -4,7 +4,6 @@
 #include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/engine/timing_points/point.h>
 #include <fosu/enums.h>
-#include <fosu/io.h>
 #include <fosu/parse_options.h>
 #include <fosu/parser.h>
 #include <fosu/types.h>
@@ -657,7 +656,7 @@ static void test_omitted_sections_use_defaults() {
 }
 
 static void test_difficulty_selection_skips_other_sections() {
-  auto input = fosu::make_padded(
+  auto input = std::string(
       "[Metadata]\nTitle:Unrequested\n"
       "[Difficulty]\nHPDrainRate:3\nCircleSize:4\nOverallDifficulty:"
       "7\nApproachRate:8\n"
@@ -680,7 +679,7 @@ static void test_difficulty_selection_skips_other_sections() {
 }
 
 static void test_metadata_and_difficulty_selection() {
-  auto input = fosu::make_padded(
+  auto input = std::string(
       "[General]\nAudioFilename:unrequested.mp3\n"
       "[Metadata]\nTitle:Selected metadata\nBeatmapID:42\n"
       "[Difficulty]\nOverallDifficulty:6\n"
@@ -701,7 +700,7 @@ static void test_metadata_and_difficulty_selection() {
 }
 
 static void test_hitobject_selection_skips_preceding_sections() {
-  auto input = fosu::make_padded(
+  auto input = std::string(
       "[Metadata]\nTitle:Skipped metadata\n"
       "[TimingPoints]\n100,400\n"
       "[HitObjects]\n32,48,3000,1,2\n256,192,4000,8,0,5000\n");
@@ -721,7 +720,7 @@ static void test_hitobject_selection_skips_preceding_sections() {
 }
 
 static void test_selected_missing_section_uses_defaults() {
-  auto input = fosu::make_padded(
+  auto input = std::string(
       "[Metadata]\nTitle:No difficulty section\n"
       "[HitObjects]\n96,64,6000,1,0\n");
   for (bool simd : {false, true}) {
@@ -739,7 +738,7 @@ static void test_selected_missing_section_uses_defaults() {
 }
 
 static void test_all_section_mask_matches_default() {
-  auto input = fosu::make_padded(
+  auto input = std::string(
       "[General]\nMode:3\n"
       "[Metadata]\nTitle:Explicit all sections\n"
       "[Events]\n2,100.25,200.75\n"
@@ -810,7 +809,7 @@ static void test_timing_integer_widths() {
     for (bool simd : {false, true}) {
       fosu::Parser parser(simd ? fosu::internal::compiled_engine
                                : fosu_test::scalar_engine());
-      const auto& map = require_parse(parser.parse(input.data(), input.size()));
+      const auto&  map = require_parse(parser.parse(input));
       CHECK_EQ(map.timing_points.size(), 1u);
       CHECK_EQ(map.stats.malformed_lines, 0u);
       if (map.timing_points.size() != 1)
@@ -837,8 +836,8 @@ static void test_masked_timing_fallback() {
         "0,NaN,4,0,0,100,1,0", "bad,500", "0,500,"}) {
     for (size_t length : {line.size(), size_t(63), size_t(64)}) {
       const std::string text = line + std::string(length - line.size(), ' ');
-      const auto        input = fosu::make_padded(text + ",outside\n");
-      const char*       p = input.data.get();
+      const auto        input = fosu_test::padded(text + ",outside\n");
+      const char*       p = input.data();
       uint64_t          commas = 0;
       for (size_t i = 0; i < text.size(); ++i)
         if (p[i] == ',')
@@ -877,8 +876,8 @@ static void test_byte_scan_boundaries() {
         text[alignment + length] = Delimiter;
         if (position < length)
           text[alignment + position] = Delimiter;
-        const auto  input = fosu::make_padded(text);
-        const char* p = input.data.get() + alignment;
+        const auto  input = fosu_test::padded(text);
+        const char* p = input.data() + alignment;
         CHECK_EQ(fosu::internal::find_byte<Delimiter>(p, p + length),
                  p + position);
       }
@@ -897,8 +896,8 @@ static void check_line_end_scan_boundaries() {
         text[alignment + length] = Ending;
         if (position < length)
           text[alignment + position] = Ending;
-        const auto  input = fosu::make_padded(text);
-        const char* p = input.data.get() + alignment;
+        const auto  input = fosu_test::padded(text);
+        const char* p = input.data() + alignment;
         CHECK_EQ(fosu::internal::find_line_end(p, p + length), p + position);
       }
     }
@@ -935,13 +934,12 @@ static void test_section_skip_boundaries() {
       const std::string text =
           "[Unknown]\nvalue:" + std::string(padding, 'x') +
           "[Metadata]\nTitle:ignored\n[Metadata]\nTitle:retained";
-      auto& map = require_parse(parser.parse(
-          text.data(), text.size(), {.sections = fosu::kSectionMetadata}));
+      auto& map = require_parse(
+          parser.parse(text, {.sections = fosu::kSectionMetadata}));
       CHECK_EQ(map.title, "retained");
       const std::string missing = "[Unknown]\nvalue:[Metadata]";
-      auto&             empty =
-          require_parse(parser.parse(missing.data(), missing.size(),
-                                     {.sections = fosu::kSectionMetadata}));
+      auto&             empty = require_parse(
+          parser.parse(missing, {.sections = fosu::kSectionMetadata}));
       CHECK(empty.title.empty());
     }
   }

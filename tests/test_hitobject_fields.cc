@@ -1,7 +1,6 @@
 #include <fosu/beatmap.h>
 #include <fosu/engine/hit_objects/object_types.h>
 #include <fosu/engine/primitives/vector_ops.h>
-#include <fosu/io.h>
 #include <fosu/types.h>
 #include <tests/support/test.h>
 
@@ -208,17 +207,18 @@ static void test_hitobject_details() {
       {136, ",12.5,0:0", 12.5, "0:0"},  // Spinner wins over hold.
   };
   for (const auto& test : cases) {
-    auto       input = fosu::make_padded(test.text);
+    const auto input = fosu_test::padded(test.text);
+    const auto size = std::string_view(test.text).size();
     const auto kind = fosu::internal::classify_hitobject_kind(test.type);
     if (kind == fosu::internal::HitObjectKind::Circle) {
       const auto details = fosu::internal::parse_circle_details(
-          input.data.get(), input.data.get() + input.size);
+          input.data(), input.data() + size);
       CHECK(details.has_value());
       if (details)
         CHECK_EQ(details->hit_sample, test.sample);
     } else if (kind == fosu::internal::HitObjectKind::Spinner) {
       const auto details = fosu::internal::parse_spinner_details(
-          input.data.get(), input.data.get() + input.size);
+          input.data(), input.data() + size);
       CHECK(details.has_value());
       if (details) {
         CHECK_EQ(details->end_time, test.end_time);
@@ -226,7 +226,7 @@ static void test_hitobject_details() {
       }
     } else {
       const auto details = fosu::internal::parse_hold_details(
-          10, input.data.get(), input.data.get() + input.size);
+          10, input.data(), input.data() + size);
       CHECK(details.has_value());
       if (details) {
         CHECK_EQ(details->end_time, test.end_time);
@@ -235,14 +235,14 @@ static void test_hitobject_details() {
     }
   }
   for (const auto text : {"", ",", ",bad", ",12:0:0", ",12,/:0"}) {
-    auto input = fosu::make_padded(text);
+    const auto input = fosu_test::padded(text);
     CHECK(!fosu::internal::parse_spinner_details(
-        input.data.get(), input.data.get() + input.size));
+        input.data(), input.data() + std::string_view(text).size()));
   }
   for (const auto text : {",2147483648:0:0:0:0:", ",12x:0:0:0:0:"}) {
-    auto input = fosu::make_padded(text);
-    CHECK(!fosu::internal::parse_hold_details(10, input.data.get(),
-                                              input.data.get() + input.size));
+    const auto input = fosu_test::padded(text);
+    CHECK(!fosu::internal::parse_hold_details(
+        10, input.data(), input.data() + std::string_view(text).size()));
   }
 }
 

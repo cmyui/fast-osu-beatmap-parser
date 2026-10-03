@@ -995,6 +995,22 @@ def test_buffer_inputs():
         fosu.parse("not a buffer")
 
 
+def test_reused_parser_keeps_earlier_results(tmp_path):
+    parser = fosu.Parser()
+    first = parser.parse(b"[Metadata]\nTitle:first\n[HitObjects]\n1,2,3,1,0\n")
+    path = tmp_path / "second.osu"
+    path.write_bytes(b"[Metadata]\nTitle:second\n")
+    second = parser.parse_file(path)
+    with pytest.raises(ValueError, match="invalid input"):
+        parser.parse(b"", mods=fosu.Mods.EASY | fosu.Mods.HARD_ROCK)
+    with pytest.raises(FileNotFoundError):
+        parser.parse_file(tmp_path / "missing.osu")
+    third = parser.parse(b"[Metadata]\nTitle:third\n")
+    assert first.title == "first" and first.hit_objects[0].time == 3
+    assert second.title == "second" and not second.hit_objects
+    assert third.title == "third"
+
+
 def test_file_errors(tmp_path):
     with pytest.raises(FileNotFoundError) as error:
         fosu.parse_file(tmp_path / "missing.osu")

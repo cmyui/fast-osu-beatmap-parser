@@ -1,4 +1,3 @@
-#include <fosu/io.h>
 #include <fosu/types.h>
 
 #include <algorithm>
@@ -9,6 +8,8 @@
 #include <cstring>
 #include <dlfcn.h>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -25,6 +26,13 @@ uint64_t now() {
              std::chrono::steady_clock::now().time_since_epoch())
       .count();
 }
+// Benchmarks parse resident bytes, so file contents are read before timing.
+static bool read_file(const char* path, std::string& out) {
+  std::ifstream file(path, std::ios::binary);
+  out.assign(std::istreambuf_iterator<char>(file), {});
+  return !file.bad() && file.is_open();
+}
+
 int main(int argc, char** argv) {
   if (argc < 4) {
     fprintf(stderr,
@@ -68,9 +76,9 @@ int main(int argc, char** argv) {
   if (files.empty())
     return 2;
   puts("file,bytes,rep,variant,reuse,wall_ns");
-  fosu::FileBuffer input;
+  std::string input;
   for (size_t i = 0; i < files.size(); ++i) {
-    if (!fosu::read_into(files[i].c_str(), input))
+    if (!read_file(files[i].c_str(), input))
       return 1;
     for (fosu::i32 r = 0; r < reps; ++r) {
       for (size_t j = 0; j < modules.size() * 2; ++j) {
@@ -78,9 +86,9 @@ int main(int argc, char** argv) {
         const int    reuse = slot % 2;
         auto&        m = modules[slot / 2];
         const auto   begin = now();
-        m.parse(m.ctx, input.data.get(), input.size, reuse);
+        m.parse(m.ctx, input.data(), input.size(), reuse);
         const auto ns = now() - begin;
-        printf("%s,%zu,%d,%s,%d,%llu\n", files[i].c_str(), input.size, r,
+        printf("%s,%zu,%d,%s,%d,%llu\n", files[i].c_str(), input.size(), r,
                m.name, reuse, static_cast<unsigned long long>(ns));
       }
     }

@@ -18,13 +18,12 @@ size_t parse_and_count(const std::string& data,
                        const std::string& path,
                        bool               file) {
   fosu::Parser parser;
-  auto         result = file ? parser.parse_file(path.c_str())
-                             : parser.parse(data.data(), data.size());
+  auto* result = file ? parser.parse_file(path.c_str()) : parser.parse(data);
   if (!result)
     throw std::runtime_error("parse failed");
-  const auto count = result.value()->hit_objects.size();
+  const auto count = result->hit_objects.size();
   // Keep decoding observable even with whole-program optimization.
-  asm volatile("" : : "g"(result.value()) : "memory");
+  asm volatile("" : : "g"(result) : "memory");
   return count;  // Parser destruction is inside the measured call.
 }
 

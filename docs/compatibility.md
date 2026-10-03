@@ -78,9 +78,8 @@ rules using only the selected data; omitted events cannot contribute breaks,
 and omitted General metadata leaves the mode at its default.
 
 Inputs are bounded by the process address space rather than an arbitrary format
-limit. Sizes that cannot fit together with the parser's readable padding return
-`ErrorCode::InputTooLarge`; `make_padded` returns an empty `FileBuffer`, and
-`read_into` returns failure with `errno=EFBIG`.
+limit. Sizes that cannot fit together with the parser's readable padding fail the
+parse; `parse_file` also sets `errno=EFBIG`.
 Output arrays and temporary allocations can exceed the source size. This is
 not a strict memory or CPU quota, particularly for consumer geometry code.
 

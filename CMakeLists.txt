@@ -22,7 +22,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(FOSU_ISA auto CACHE STRING "Native targets: auto, scalar, avx2, neon")
 set_property(CACHE FOSU_ISA PROPERTY STRINGS auto scalar avx2 neon)
 option(FOSU_SANITIZE "Enable address, undefined and float-cast sanitizers" OFF)
-option(FOSU_ARENA_TELEMETRY "Instrument arena use in the profiling driver" OFF)
 set(_python OFF)
 if(SKBUILD)
   set(_python ON)
@@ -212,8 +211,7 @@ function(fosu_dispatch target product)
   target_link_libraries(${target} PRIVATE ${CMAKE_DL_LIBS})
   target_compile_definitions(${target} PRIVATE
     FOSU_DEFAULT_BACKEND="${FOSU_ISA}"
-    FOSU_ENGINE_SUFFIX="${CMAKE_SHARED_LIBRARY_SUFFIX}"
-    FOSU_MANAGED_ARENA_CLEANUP)
+    FOSU_ENGINE_SUFFIX="${CMAKE_SHARED_LIBRARY_SUFFIX}")
   set_target_properties(${target} PROPERTIES
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
   set(variant "")

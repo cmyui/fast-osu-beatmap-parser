@@ -28,6 +28,16 @@ inline int test_result() {
   return g_failures ? 1 : 0;
 }
 
+namespace fosu_test {
+// Internal scanners may read up to kBufferPadding bytes past their end
+// pointer; the parser guarantees that padding, so direct calls must too.
+inline std::string padded(std::string_view text) {
+  std::string buffer(text);
+  buffer.resize(text.size() + fosu::kBufferPadding);
+  return buffer;
+}
+}  // namespace fosu_test
+
 [[maybe_unused]] static fosu::Beatmap& require_parse(fosu::Beatmap* parsed) {
   CHECK(parsed);
   if (!parsed)
@@ -40,5 +50,5 @@ inline int test_result() {
   static fosu::Parser native_parser;
   static fosu::Parser scalar_parser(fosu_test::scalar_engine());
   auto&               parser = use_simd ? native_parser : scalar_parser;
-  return require_parse(parser.parse(s.data(), s.size()));
+  return require_parse(parser.parse(s));
 }

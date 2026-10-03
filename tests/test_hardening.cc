@@ -2,12 +2,12 @@
 #include <fosu/engine/hit_objects/samples.h>
 #include <fosu/engine/parse_document.h>
 #include <fosu/engine/parsing/numbers.h>
-#include <fosu/io.h>
 #include <fosu/parse_options.h>
 #include <fosu/parser.h>
 #include <fosu/types.h>
 #include <tests/support/canonical_dump.h>
 #include <tests/support/scalar_engine.h>
+#include <tests/support/test.h>
 
 #include <cassert>
 #include <cmath>
@@ -15,16 +15,16 @@
 #include <cstdlib>
 #include <string>
 
-static fosu::Beatmap must_parse(fosu::Parser&           parser,
-                                const fosu::FileBuffer& input,
-                                fosu::ParseOptions      options = {}) {
+static fosu::Beatmap must_parse(fosu::Parser&      parser,
+                                std::string_view   input,
+                                fosu::ParseOptions options = {}) {
   auto parsed = parser.parse(input, options);
   assert(parsed);
   return *parsed;
 }
 
 static void check(const std::string& text) {
-  auto         input = fosu::make_padded(text);
+  auto         input = std::string(text);
   fosu::Parser scalar_parser(fosu_test::scalar_engine());
   fosu::Parser simd_parser;
   auto         scalar = must_parse(scalar_parser, input);
@@ -45,10 +45,10 @@ static void test_short_sample_shape() {
     for (unsigned byte = 0; byte < 256; ++byte) {
       std::string sample = "0:1:2:3:";
       sample[pos] = static_cast<char>(byte);
-      auto       padded = fosu::make_padded(sample);
+      const auto padded = fosu_test::padded(sample);
       const bool exact_shape =
           pos % 2 ? byte == ':' : byte >= '0' && byte <= '9';
-      assert(fosu::internal::short_sample(padded.data.get()) == exact_shape);
+      assert(fosu::internal::short_sample(padded.data()) == exact_shape);
       check("[HitObjects]\n1,2,3,1,0," + sample);
     }
   }
@@ -66,14 +66,14 @@ static void test_circle_type_precedence() {
 
 static void test_empty_input() {
   fosu::Parser parser;
-  auto         empty = parser.parse(nullptr, 0);
+  auto         empty = parser.parse("");
   assert(empty && empty->hit_objects.empty());
-  assert(must_parse(parser, fosu::make_padded({})).hit_objects.empty());
+  assert(must_parse(parser, "").hit_objects.empty());
 }
 
 static void test_section_header_inside_value() {
   fosu::Parser parser;
-  auto         embedded = fosu::make_padded(
+  auto         embedded = std::string(
       "[Metadata]\nTitle:[HitObjects]\n1,2,3,1,0\n[HitObjects]\n1,2,4,1,0\n");
   auto selected =
       must_parse(parser, embedded, {.sections = fosu::kSectionHitObjects});
@@ -86,7 +86,7 @@ static void test_combo_state_across_malformed_lines() {
   for (bool simd : {false, true}) {
     fosu::Parser combo_parser(simd ? fosu::internal::compiled_engine
                                    : fosu_test::scalar_engine());
-    auto         input = fosu::make_padded(
+    auto         input = std::string(
         "[HitObjects]\n256,192,100,8,0,150\n0,0,160,8,0,bad\n"
         "[Metadata]\nTitle:gap\n[HitObjects]\n"
         "100,100,200,1,0\n101,100,201,1,0\n"
@@ -103,7 +103,7 @@ static void test_combo_state_across_malformed_lines() {
 static void test_slider_point_numbers() {
   fosu::Parser parser;
   auto         point_input =
-      fosu::make_padded("[HitObjects]\n1,2,3,2,0,B|1:2.5|3:4e1,1,10\n");
+      std::string("[HitObjects]\n1,2,3,2,0,B|1:2.5|3:4e1,1,10\n");
   auto points = must_parse(parser, point_input);
   assert(points.sliders.size() == 1 && points.slider_points.size() == 2);
   assert(points.slider_points[0].y == 2 && points.slider_points[1].y == 40);
@@ -160,7 +160,7 @@ static void test_slider_tail_shapes() {
 
 static void test_slider_sample_with_commas() {
   fosu::Parser parser;
-  auto         input = fosu::make_padded(
+  auto         input = std::string(
       "[HitObjects]\n1,2,3,2,0,L|1:2,1,100,0|0,0:0|0:0,0:0:0:0:a,b\n");
   auto m = must_parse(parser, input);
   assert(m.hit_objects.size() == 1 &&
@@ -175,7 +175,7 @@ static void test_near_integer_decimals() {
         "[TimingPoints]\n0,100.0000000000000,4,2,1,100,1,0\n1," + decimal +
         ",4,2,1,100,1,0\n[HitObjects]\n1,2,3,2,0,B|1:2,1," + decimal;
     check(text);
-    auto         input = fosu::make_padded(text);
+    auto         input = std::string(text);
     auto         map = must_parse(parser, input);
     const double expected = strtod(decimal.c_str(), nullptr);
     assert(map.timing_points[1].beat_length == expected);
@@ -187,7 +187,7 @@ static void test_unusual_numeric_values() {
   for (bool simd : {false, true}) {
     fosu::Parser parser(simd ? fosu::internal::compiled_engine
                              : fosu_test::scalar_engine());
-    auto         input = fosu::make_padded(
+    auto         input = std::string(
         "[Metadata]\nTitle:real\nTitlX:wrong\nBeatmapID:-9223372036854775808\n"
         "[MetadataFake]\nTitle:wrong\n[Difficulty]\nApproachRate:1e309\n"
         "[TimingPoints]\n0,500\n1,NaN,4,2,1,100,0,0\n2,NaN,4,2,1,100,1,0\n"
@@ -234,9 +234,9 @@ static void test_integer_overflow_beatmap_id() {
 
 static void test_parse_double_respects_end() {
   // Explicit logical end must bound the slow numeric fallback too.
-  auto        input = fosu::make_padded("1.234567890123456789e2junk");
+  const auto  input = fosu_test::padded("1.234567890123456789e2junk");
   double      value;
-  const char* start = input.data.get();
+  const char* start = input.data();
   assert(fosu::internal::parse_double(start, start + 20, value) <= start + 20);
 }
 

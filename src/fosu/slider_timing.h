@@ -124,9 +124,7 @@ inline bool set_slider_end_times(Beatmap&                map,
     auto        distance = !map.slider_paths.empty()
                                ? map.slider_paths[object.slider].distance()
                                : slider_distance(map, object, scratch_arena);
-    if (!distance)
-      return false;
-    const f64 pixels_per_millisecond =
+    const f64   pixels_per_millisecond =
         100 * map.slider_multiplier * velocity / beat_length;
     // osu! suppresses repeats on effectively zero-length paths. Keep the
     // encoded span count on Slider, but use the effective count for duration.

@@ -32,10 +32,9 @@ The C++20 interface is header-only:
 #include <fosu/parser.h>
 
 fosu::Parser parser;
-auto parsed = parser.parse_file("map.osu");
-if (!parsed) return 1;
-fosu::Beatmap& map = *parsed.value();
-// map.title, map.ar, map.hit_objects, map.sliders, map.slider_points, ...
+fosu::Beatmap* map = parser.parse_file("map.osu");
+if (!map) return 1;
+// map->title, map->ar, map->hit_objects, map->sliders, ...
 // map remains valid until parser parses another beatmap or is destroyed.
 ```
 

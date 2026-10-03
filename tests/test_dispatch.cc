@@ -78,7 +78,7 @@ static void test_concurrent_backend_selection(const char* requested) {
       fosu::Parser   parser(*engine);
       constexpr char input[] =
           "[Metadata]\nTitle:dispatch\n[HitObjects]\n1,2,3,1,0\n";
-      auto result = parser.parse(input, sizeof(input) - 1);
+      auto result = parser.parse(input);
       assert(result && result->hit_objects.size() == 1);
       assert(result->hit_objects[0].x == 1);
     });

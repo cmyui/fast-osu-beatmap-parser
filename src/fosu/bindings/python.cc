@@ -12,6 +12,7 @@
 #include <fosu/types.h>
 
 #include <Python.h>
+#include <atomic>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -794,7 +795,62 @@ struct BeatmapConverter {
     return record(t_beatmap, values);
   }
 };
-PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
+// A Python-owned parser. Its arenas are reused by every parse call and
+// released with the object. Results are detached, so reuse never invalidates
+// a previously returned Beatmap.
+struct NativeParser {
+  fosu::Parser      parser;
+  std::atomic<bool> busy{false};
+  explicit NativeParser(const fosu::ParsingEngine& engine) : parser(engine) {}
+};
+struct ParserObject {
+  PyObject_HEAD NativeParser* native;
+};
+
+// Parsing releases the GIL, so concurrent calls on one object would share
+// arenas. Reject them; callers wanting parallelism use one Parser per thread.
+struct ParserLease {
+  NativeParser& native;
+  explicit ParserLease(NativeParser& n) : native(n) {
+    bool expected = false;
+    if (!native.busy.compare_exchange_strong(expected, true)) {
+      PyErr_SetString(PyExc_RuntimeError, "Parser is already in use");
+      throw PythonError{};
+    }
+  }
+  ~ParserLease() { native.busy.store(false); }
+};
+
+PyObject* parser_new(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
+  if (!PyArg_ParseTuple(args, ":Parser") || (kwargs && PyDict_Size(kwargs))) {
+    if (!PyErr_Occurred())
+      PyErr_SetString(PyExc_TypeError, "Parser() takes no arguments");
+    return nullptr;
+  }
+  auto* alloc = reinterpret_cast<allocfunc>(PyType_GetSlot(type, Py_tp_alloc));
+  auto* self = reinterpret_cast<ParserObject*>(alloc(type, 0));
+  if (!self)
+    return nullptr;
+  // Backend selection was checked when the module was imported.
+  self->native =
+      new (std::nothrow) NativeParser(*fosu::internal::selected_engine());
+  if (!self->native) {
+    Py_DECREF(self);
+    return PyErr_NoMemory();
+  }
+  return reinterpret_cast<PyObject*>(self);
+}
+
+void parser_dealloc(PyObject* object) {
+  auto* self = reinterpret_cast<ParserObject*>(object);
+  auto* type = Py_TYPE(object);
+  delete self->native;
+  auto* free = reinterpret_cast<freefunc>(PyType_GetSlot(type, Py_tp_free));
+  free(object);
+  Py_DECREF(type);
+}
+
+PyObject* parser_parse_impl(PyObject* object, PyObject* args, bool file) {
   PyObject*     arg;
   long          sections;
   int           calculate_slider_end_times;
@@ -833,61 +889,60 @@ PyObject* parse_impl(PyObject* module, PyObject* args, bool file) {
       PyErr_SetString(PyExc_ValueError, "embedded null byte");
       throw PythonError{};
     }
-    const auto*    engine = fosu::internal::selected_engine();
-    // Backend selection was checked when the module was imported.
-    fosu::Parser   parser(*engine);
-    // Both native entry points are noexcept, including allocation and I/O
-    // failures.
+    auto&          native = *reinterpret_cast<ParserObject*>(object)->native;
+    ParserLease    lease(native);
     PyThreadState* thread = PyEval_SaveThread();
-    auto           result = file ? parser.parse_file(bytes, options)
-                                 : parser.parse(bytes, size, options);
+    errno = 0;
+    fosu::Beatmap* result =
+        file ? native.parser.parse_file(bytes, options)
+             : native.parser.parse({bytes, static_cast<size_t>(size)}, options);
+    const int read_error = file && !result ? errno : 0;
     PyEval_RestoreThread(thread);
-    if (!result) {
-      const auto error = result.error();
-      switch (error.code) {
-        case fosu::ErrorCode::AllocationFailure:
-          PyErr_NoMemory();
-          break;
-        case fosu::ErrorCode::IoFailure:
-          errno = error.os_code;
-          PyErr_SetFromErrnoWithFilenameObject(PyExc_OSError, arg);
-          break;
-        case fosu::ErrorCode::InputTooLarge:
-          PyErr_SetString(
-              PyExc_ValueError,
-              "beatmap input cannot fit in the process address space");
-          break;
-        case fosu::ErrorCode::InvalidInput:
-          PyErr_SetString(PyExc_ValueError, "invalid input");
-          break;
-      }
+    if (read_error) {
+      errno = read_error;
+      PyErr_SetFromErrnoWithFilenameObject(PyExc_OSError, arg);
       throw PythonError{};
     }
-    auto*            state = static_cast<State*>(PyModule_GetState(module));
+    if (!result) {
+      PyErr_SetString(PyExc_ValueError, "invalid input");
+      throw PythonError{};
+    }
+    const auto* state =
+        static_cast<State*>(PyType_GetModuleState(Py_TYPE(object)));
     PauseGC          pause_gc;
-    BeatmapConverter converter(*result.value(), *state);
+    BeatmapConverter converter(*result, *state);
     return converter.beatmap().release();
-    // Parser destruction releases native storage before the result escapes.
   } catch (PythonError&) {
     return nullptr;
   } catch (std::bad_alloc&) {
     return PyErr_NoMemory();
   }
 }
-PyObject* parse(PyObject* m, PyObject* arg) {
-  return parse_impl(m, arg, false);
+PyObject* parser_parse(PyObject* self, PyObject* args) {
+  return parser_parse_impl(self, args, false);
 }
-PyObject* parse_file(PyObject* m, PyObject* arg) {
-  return parse_impl(m, arg, true);
+PyObject* parser_parse_file(PyObject* self, PyObject* args) {
+  return parser_parse_impl(self, args, true);
 }
-PyMethodDef methods[] = {
-    {"_record", make_record, METH_VARARGS, nullptr},
-    {"_restore_record", restore_record, METH_O, nullptr},
-    {"parse", parse, METH_VARARGS,
+PyMethodDef parser_methods[] = {
+    {"parse", parser_parse, METH_VARARGS,
      "Parse bytes into detached eager Python records."},
-    {"parse_file", parse_file, METH_VARARGS,
+    {"parse_file", parser_parse_file, METH_VARARGS,
      "Read and parse a file into detached eager Python records."},
     {nullptr, nullptr, 0, nullptr}};
+PyType_Slot parser_slots[] = {
+    {Py_tp_new, reinterpret_cast<void*>(parser_new)},
+    {Py_tp_dealloc, reinterpret_cast<void*>(parser_dealloc)},
+    {Py_tp_methods, parser_methods},
+    {Py_tp_doc,
+     const_cast<char*>("Reusable native parser; not safe for concurrent use.")},
+    {0, nullptr}};
+PyType_Spec parser_spec = {"fosu._core.Parser", sizeof(ParserObject), 0,
+                           Py_TPFLAGS_DEFAULT, parser_slots};
+
+PyMethodDef methods[] = {{"_record", make_record, METH_VARARGS, nullptr},
+                         {"_restore_record", restore_record, METH_O, nullptr},
+                         {nullptr, nullptr, 0, nullptr}};
 int traverse(PyObject* m, visitproc visit, void* arg) {
   auto* s = static_cast<State*>(PyModule_GetState(m));
   if (!s)
@@ -955,6 +1010,9 @@ int exec_module(PyObject* m) {
     }
     if (PyModule_AddStringConstant(
             m, "backend", fosu::internal::engine_name(engine->kind)) < 0)
+      return -1;
+    PythonRef parser_type(PyType_FromModuleAndSpec(m, &parser_spec, nullptr));
+    if (PyModule_AddObjectRef(m, "Parser", parser_type) < 0)
       return -1;
     auto*     s = static_cast<State*>(PyModule_GetState(m));
     PythonRef package(PyObject_GetAttrString(m, "__package__"));
@@ -1025,13 +1083,10 @@ PyModuleDef      definition = {PyModuleDef_HEAD_INIT,
                                traverse,
                                clear,
                                free_module};
-// Release cached arenas and the selected engine when the extension is unloaded,
-// not when an individual interpreter releases its module.
+// Release the selected engine when the extension is unloaded, not when an
+// individual interpreter releases its module.
 struct Cleanup {
-  ~Cleanup() {
-    fosu::internal::clear_parser_arena_pool();
-    fosu::internal::unload_engine();
-  }
+  ~Cleanup() { fosu::internal::unload_engine(); }
 };
 Cleanup cleanup;
 }  // namespace
