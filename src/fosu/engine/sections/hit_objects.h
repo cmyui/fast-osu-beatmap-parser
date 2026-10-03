@@ -14,7 +14,7 @@
 #include <fosu/types.h>
 
 #include <algorithm>
-#include <cstdint>
+#include <array>
 #include <cstring>
 #include <optional>
 
@@ -195,8 +195,192 @@ inline const char* parse_hitobjects_section_scalar(
 }
 
 #if FOSU_SIMD
-// SIMD section loop. One 32-byte load per line yields the newline, comma and
-// non-digit masks. Lines outside the common editor shape take the scalar path.
+// Publishes an object whose x,y,time,type,hitSound prefix is decoded. `rest`
+// is everything after the prefix: empty, or starting with ','.
+FOSU_ALWAYS_INLINE void accept_hitobject(
+    Beatmap&                       beatmap,
+    HitObjectCounts&               counts,
+    const HitObjectParseConstants& constants,
+    i32                            time_offset,
+    bool&                          preceding_was_spinner,
+    HitObject                      object,
+    const char*                    rest,
+    const char*                    line_end) {
+  const HitObjectKind kind = classify_hitobject_kind(object.type);
+  const auto          rest_length = static_cast<size_t>(line_end - rest);
+  // Most objects are circles with no sample or the editor's "0:0:0:0:".
+  if (kind == HitObjectKind::Circle &&
+      (rest_length == 0 || (rest_length == 9 && short_sample(rest + 1))))
+      [[likely]] {
+    if (rest_length)
+      object.hit_sample = {rest + 1, 8};
+  } else if (!(kind == HitObjectKind::Slider
+                   ? rest_length && parse_slider(beatmap, counts, object,
+                                                 rest + 1, line_end, constants)
+                   : parse_hitobject_details(beatmap, counts, object, rest,
+                                             line_end, constants)))
+      [[unlikely]] {
+    ++beatmap.stats.malformed_lines;
+    return;
+  }
+  const size_t count = counts.objects++;
+  beatmap.hit_objects[count] =
+      normalize_hitobject(object, count, preceding_was_spinner, time_offset);
+  preceding_was_spinner = kind == HitObjectKind::Spinner;
+}
+
+// Prefix shapes for one time width, keyed by the comma bits of a line's
+// first eight bytes, which always include the commas after 1-3 digit x and y.
+// Each entry also precomputes the common case of one-digit type and
+// hitSound: its delimiter mask (including the byte after hitSound), prefix
+// end and shuffle index. x == 0 marks any other key.
+struct PrefixLayout {
+  u8  x, y, common_end;
+  u16 common_index;
+  u32 common_delimiters;
+};
+template <u32 TimeDigits>
+consteval std::array<PrefixLayout, 256> make_prefix_layouts() {
+  std::array<PrefixLayout, 256> layouts{};
+  for (u32 x = 1; x <= 3; ++x)
+    for (u32 y = 1; y <= 3; ++y) {
+      const u32 type_at = x + y + TimeDigits + 3;
+      const u32 delimiters = (1u << x) | (1u << (x + y + 1)) |
+                             (1u << (type_at - 1)) | (1u << (type_at + 1)) |
+                             (1u << (type_at + 3));
+      // The byte after hitSound may be a line ending rather than a comma, so
+      // it must lie outside the key.
+      if (type_at + 3 < 8)
+        continue;
+      layouts[delimiters & 0xff] = {
+          .x = static_cast<u8>(x),
+          .y = static_cast<u8>(y),
+          .common_end = static_cast<u8>(type_at + 3),
+          .common_index = static_cast<u16>(
+              (((x - 1) * 3 + y - 1) * 10 + TimeDigits - 1) * 3 * 2),
+          .common_delimiters = delimiters,
+      };
+    }
+  return layouts;
+}
+template <u32 TimeDigits>
+inline constexpr auto kPrefixLayouts = make_prefix_layouts<TimeDigits>();
+
+// Parses lines whose time has exactly TimeDigits digits, with 1-3 digit x and
+// y, 1-3 digit type and 1-2 digit hitSound. Times only grow through a map, so
+// one width usually covers a long run of lines. Returns at the first other
+// line.
+template <u32 TimeDigits>
+FOSU_NOINLINE const char* parse_hitobjects_fixed_time(
+    Beatmap&                       beatmap,
+    HitObjectCounts&               counts,
+    const HitObjectParseConstants& constants,
+    i32                            time_offset,
+    bool&                          preceding_was_spinner_ref,
+    const char*                    p,
+    const char*                    file_end) {
+  bool preceding_was_spinner = preceding_was_spinner_ref;
+  u32  fast_lines = 0;
+  while (p < file_end) {
+    const Bytes32       ascii = load32(p);
+    const u32           commas = equal_mask32(ascii, constants.comma);
+    const u32           nondigits = nondigit_mask32(ascii);
+
+    const PrefixLayout& layout = kPrefixLayouts<TimeDigits>[commas & 0xff];
+    u32                 prefix_end = layout.common_end;
+    u32                 mask_index = layout.common_index;
+    const u32 common = (2u << prefix_end) - 1;  // through the byte after
+    if ((nondigits & common) != layout.common_delimiters ||
+        (commas & layout.common_delimiters & (common >> 1)) !=
+            (layout.common_delimiters & (common >> 1))) [[unlikely]] {
+      // Longer type or hitSound: measure both digit runs.
+      const u32 type_at = layout.x + layout.y + TimeDigits + 3;
+      const u32 type_digits = trailing_zeros(nondigits >> type_at);
+      const u32 sound_at = type_at + type_digits + 1;
+      const u32 sound_digits = trailing_zeros(nondigits >> sound_at);
+      prefix_end = sound_at + sound_digits;
+      const u32 delimiters =
+          (1u << layout.x) | (1u << (layout.x + layout.y + 1)) |
+          (1u << (type_at - 1)) | (1u << (type_at + type_digits));
+      if (!layout.x || type_digits - 1 > 2 || sound_digits - 1 > 1 ||
+          (nondigits & ((1u << prefix_end) - 1)) != delimiters ||
+          (commas & delimiters) != delimiters)
+        break;
+      mask_index += (type_digits - 1) * 2 + sound_digits - 1;
+    }
+    const char after = p[prefix_end];
+    if (after != ',' && after != '\r' && after != '\n' && after != '\0')
+      break;
+
+    u32 fields[4];
+    f64 time;
+#if FOSU_SIMD_X86
+    const auto&   masks = kLaneMasks[mask_index];
+    const __m256i placed = _mm256_shuffle_epi8(
+        _mm256_permutevar8x32_epi32(
+            _mm256_sub_epi8(ascii, constants.zero),
+            _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.perm))),
+        _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.shuf)));
+    const __m256i values = _mm256_madd_epi16(
+        _mm256_maddubs_epi16(
+            placed, _mm256_setr_epi8(0, 100, 10, 1, 0, 100, 10, 1, 0, 100, 10,
+                                     1, 0, 0, 10, 1, 0, 0, 10, 1, 0, 0, 10, 1,
+                                     10, 1, 10, 1, 10, 1, 10, 1)),
+        _mm256_setr_epi16(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 100, 1, 100, 1));
+    const __m128i time_groups = _mm256_extracti128_si256(values, 1);
+    _mm_storeu_si128(reinterpret_cast<__m128i*>(fields),
+                     _mm_add_epi32(_mm256_castsi256_si128(values),
+                                   _mm_slli_si128(time_groups, 12)));
+    const __m128i packed = _mm_packus_epi32(time_groups, time_groups);
+    const __m128i combined =
+        _mm_madd_epi16(packed, _mm_setr_epi16(0, 0, 10000, 1, 0, 0, 0, 0));
+    _mm_store_sd(&time, _mm_cvtepi32_pd(_mm_shuffle_epi32(
+                            combined, _MM_SHUFFLE(0, 0, 0, 1))));
+#else
+    const Bytes32        digits{{vsubq_u8(ascii.val[0], constants.zero),
+                                 vsubq_u8(ascii.val[1], constants.zero)}};
+    const PrefixShuffle& masks = kPrefixShuffles[mask_index];
+    vst1q_u32(fields,
+              decimal_groups(vqtbl2q_u8(digits, vld1q_u8(masks.bytes))));
+    const auto time_groups =
+        decimal_groups(vqtbl2q_u8(digits, vld1q_u8(masks.bytes + 16)));
+    const u32  weights[2] = {10000, 1};
+    const auto terms = vmul_u32(vget_high_u32(time_groups), vld1_u32(weights));
+    time = vgetq_lane_f64(vcvtq_f64_u64(vmovl_u32(vpadd_u32(terms, terms))), 0);
+#endif
+
+#if FOSU_SIMD_NEON
+    const u32   first_ending = first_line_end32(ascii);
+    const char* line_end =
+        first_ending < 32 ? p + first_ending : find_line_end(p + 32, file_end);
+#else
+    const u32   endings = line_end_mask32(ascii);
+    const char* line_end =
+        endings ? p + trailing_zeros(endings) : find_line_end(p + 32, file_end);
+#endif
+    ++fast_lines;
+    accept_hitobject(beatmap, counts, constants, time_offset,
+                     preceding_was_spinner,
+                     HitObject{
+                         .x = static_cast<f32>(fields[0]),
+                         .y = static_cast<f32>(fields[1]),
+                         .type = fields[2],
+                         .hitsound = fields[3],
+                         .time = time,
+                         .end_time = 0,
+                         .slider = HitObject::kNoSlider,
+                         .new_combo = false,
+                         .combo_skip = 0,
+                         .hit_sample = {},
+                     },
+                     p + prefix_end, line_end);
+    p = after_line_ending(line_end, file_end);
+  }
+  beatmap.stats.fast_path_lines += fast_lines;
+  preceding_was_spinner_ref = preceding_was_spinner;
+  return p;
+}
+
 inline const char* parse_hitobjects_section_simd(
     Beatmap&                       beatmap,
     HitObjectCounts&               counts,
@@ -204,242 +388,51 @@ inline const char* parse_hitobjects_section_simd(
     const char*                    file_end,
     const HitObjectParseConstants& constants,
     i32                            time_offset) {
-  const ByteVector comma_value = constants.comma;
-  const ByteVector zero = constants.zero;
-  u32              fast_lines = 0;
-  u32              malformed = 0;
-  bool             preceding_was_spinner =
+  bool preceding_was_spinner =
       counts.objects &&
       classify_hitobject_kind(beatmap.hit_objects[counts.objects - 1].type) ==
           HitObjectKind::Spinner;
-
   while (p < file_end) {
-    const Bytes32 ascii = load32(p);
-#if FOSU_SIMD_NEON
-    const u32 first_ending = first_line_end32(ascii);
-#else
-    const auto endings = line_end_mask32(ascii);
-#endif
-    const auto commas = equal_mask32(ascii, comma_value);
-    const u32  nondigits = nondigit_mask32(ascii);
-#if FOSU_SIMD_NEON
-    const char* line_end =
-        first_ending < 32 ? p + first_ending : find_line_end(p + 32, file_end);
-#else
-    const char* line_end =
-        endings ? p + trailing_zeros(endings) : find_line_end(p + 32, file_end);
-#endif
-    const char* next_line = after_line_ending(line_end, file_end);
-    const auto  length = static_cast<size_t>(line_end - p);
-    u32         p1, p2, prefix_end, hitsound_length, mask_index;
-    bool        common_layout;
-    {
-      const u32 m1 = nondigits & (nondigits - 1);
-      const u32 m2 = m1 & (m1 - 1);
-      const u32 m3 = m2 & (m2 - 1);
-      const u32 m4 = m3 & (m3 - 1);
-      const u64 p0 = trailing_zeros(nondigits);
-      p1 = trailing_zeros(m1);
-      p2 = trailing_zeros(m2);
-      const u64 p3 = trailing_zeros(m3);
-      prefix_end = trailing_zeros(m4);
-
-      // Lanes (low to high): the first four delimiter positions. Their
-      // differences are the lengths of x, y, time and type.
-      const u64 delimiter_positions =
-          p0 | u64(p1) << 16 | u64(p2) << 32 | p3 << 48;
-      const u64 field_lengths =
-          (delimiter_positions - (delimiter_positions << 16)) -
-          0x0002000200020001ull;
-      const u64  overlong_fields = field_lengths + 0x7FFD7FF67FFD7FFDull;
-      const bool field_lengths_ok =
-          ((field_lengths | overlong_fields) & 0x8000800080008000ull) == 0;
-      const u32  through_type = static_cast<u32>((2ull << p3) - 1);
-      const bool delimiters_are_commas =
-          ((nondigits ^ commas) & through_type) == 0;
-      hitsound_length = prefix_end - static_cast<u32>(p3) - 1;
-      const bool hitsound_length_ok = hitsound_length - 1 <= 1;
-      common_layout =
-          field_lengths_ok & delimiters_are_commas & hitsound_length_ok;
-      mask_index = static_cast<u32>(
-                       (delimiter_positions * 0x003C001B00020001ull) >> 48) -
-                   158;
-      mask_index = mask_index * 2 + hitsound_length - 1;
+    p = parse_hitobjects_fixed_time<1>(beatmap, counts, constants, time_offset,
+                                       preceding_was_spinner, p, file_end);
+    p = parse_hitobjects_fixed_time<2>(beatmap, counts, constants, time_offset,
+                                       preceding_was_spinner, p, file_end);
+    p = parse_hitobjects_fixed_time<3>(beatmap, counts, constants, time_offset,
+                                       preceding_was_spinner, p, file_end);
+    p = parse_hitobjects_fixed_time<4>(beatmap, counts, constants, time_offset,
+                                       preceding_was_spinner, p, file_end);
+    p = parse_hitobjects_fixed_time<5>(beatmap, counts, constants, time_offset,
+                                       preceding_was_spinner, p, file_end);
+    p = parse_hitobjects_fixed_time<6>(beatmap, counts, constants, time_offset,
+                                       preceding_was_spinner, p, file_end);
+    p = parse_hitobjects_fixed_time<7>(beatmap, counts, constants, time_offset,
+                                       preceding_was_spinner, p, file_end);
+    if (p >= file_end)
+      break;
+    // A line no fixed-width loop accepts: blank lines, comments, a section
+    // header, or a prefix with another width or spelling.
+    const char c = *p;
+    if (c == '\r' || c == '\n') {
+      ++p;
+      continue;
     }
-    const char after_prefix = p[prefix_end];
-
-    if (common_layout && (prefix_end == length || after_prefix == ',' ||
-                          after_prefix == '\0')) [[likely]] {
-      const u32 time_span = static_cast<u32>(p2 - p1);
-
-      u32       fields[4];
-      f64       time;
-      bool      time_ok = true;
-#if FOSU_SIMD_X86
-      const auto digits = _mm256_sub_epi8(ascii, zero);
-      const auto place_digits = [&](const LaneMasks& masks) {
-        const __m256i perm =
-            _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.perm));
-        const __m256i shuf =
-            _mm256_load_si256(reinterpret_cast<const __m256i*>(masks.shuf));
-        return _mm256_shuffle_epi8(_mm256_permutevar8x32_epi32(digits, perm),
-                                   shuf);
-      };
-      const __m256i placed = place_digits(kLaneMasks[mask_index]);
-      const __m256i pair_weights = _mm256_setr_epi8(
-          0, 100, 10, 1, 0, 100, 10, 1, 0, 100, 10, 1, 0, 0, 10, 1, 0, 0, 10, 1,
-          0, 0, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1);
-      const __m256i word_weights =
-          _mm256_setr_epi16(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 100, 1, 100, 1);
-      const __m256i words = _mm256_maddubs_epi16(placed, pair_weights);
-      const __m256i values = _mm256_madd_epi16(words, word_weights);
-      const __m128i low = _mm256_castsi256_si128(values);
-      const __m128i time_groups = _mm256_extracti128_si256(values, 1);
-      const __m128i field_values =
-          _mm_add_epi32(low, _mm_slli_si128(time_groups, 12));
-      _mm_storeu_si128(reinterpret_cast<__m128i*>(fields), field_values);
-      if (time_span <= 9) [[likely]] {
-        const __m128i packed = _mm_packus_epi32(time_groups, time_groups);
-        const __m128i combined =
-            _mm_madd_epi16(packed, _mm_setr_epi16(0, 0, 10000, 1, 0, 0, 0, 0));
-        const __m128i pair =
-            _mm_shuffle_epi32(combined, _MM_SHUFFLE(0, 0, 0, 1));
-        _mm_store_sd(&time, _mm_cvtepi32_pd(pair));
-      } else {
-        const u64 parsed_time =
-            static_cast<u32>(_mm_extract_epi32(time_groups, 1)) * 100000000ull +
-            static_cast<u32>(_mm_extract_epi32(time_groups, 2)) * 10000ull +
-            static_cast<u32>(_mm_extract_epi32(time_groups, 3));
-        time_ok = parsed_time <= INT32_MAX;
-        time = static_cast<f64>(parsed_time);
-      }
-#else
-      const Bytes32 digits{
-          {vsubq_u8(ascii.val[0], zero), vsubq_u8(ascii.val[1], zero)}};
-      const PrefixShuffle& masks = kPrefixShuffles[mask_index];
-      const auto           field_values =
-          decimal_groups(vqtbl2q_u8(digits, vld1q_u8(masks.bytes)));
-      const auto time_groups =
-          decimal_groups(vqtbl2q_u8(digits, vld1q_u8(masks.bytes + 16)));
-      vst1q_u32(fields, field_values);
-      if (time_span <= 9) [[likely]] {
-        const u32  weights[2] = {10000, 1};
-        const auto terms =
-            vmul_u32(vget_high_u32(time_groups), vld1_u32(weights));
-        const auto sum = vpadd_u32(terms, terms);
-        time = vgetq_lane_f64(vcvtq_f64_u64(vmovl_u32(sum)), 0);
-      } else {
-        const u64 parsed_time =
-            u64(vgetq_lane_u32(time_groups, 1)) * 100000000 +
-            u64(vgetq_lane_u32(time_groups, 2)) * 10000 +
-            vgetq_lane_u32(time_groups, 3);
-        time_ok = parsed_time <= INT32_MAX;
-        time = static_cast<f64>(parsed_time);
-      }
-#endif
-
-      if (time_ok) [[likely]] {
-        ++fast_lines;
-        const HitObjectKind kind = classify_hitobject_kind(fields[2]);
-        const auto          make_object = [&] {
-          return HitObject{
-              .x = static_cast<f32>(fields[0]),
-              .y = static_cast<f32>(fields[1]),
-              .type = fields[2],
-              .hitsound = fields[3],
-              .time = time,
-              .end_time = 0,
-              .slider = HitObject::kNoSlider,
-              .new_combo = false,
-              .combo_skip = 0,
-              .hit_sample = {},
-          };
-        };
-        const bool simple_circle =
-            kind == HitObjectKind::Circle &&
-            (prefix_end == length ||
-             (length - prefix_end == 9 && after_prefix == ',' &&
-              short_sample(p + prefix_end + 1)));
-        // Publish common circles before the address-taken object used by
-        // slider and detail handlers is materialized on the stack.
-        if (simple_circle) [[likely]] {
-          HitObject circle = make_object();
-          if (prefix_end != length)
-            circle.hit_sample = {p + prefix_end + 1, 8};
-          beatmap.hit_objects[counts.objects] = normalize_hitobject(
-              circle, counts.objects, preceding_was_spinner, time_offset);
-          preceding_was_spinner = false;
-          ++counts.objects;
-          p = next_line;
-          continue;
-        }
-        HitObject object = make_object();
-        if (kind == HitObjectKind::Circle) {
-          if (!parse_hitobject_details(beatmap, counts, object, p + prefix_end,
-                                       line_end, constants)) [[unlikely]] {
-            ++malformed;
-            p = next_line;
-            continue;
-          }
-        } else if (kind == HitObjectKind::Slider) {
-          if (prefix_end >= length || after_prefix != ',' ||
-              !parse_slider(beatmap, counts, object, p + prefix_end + 1,
-                            line_end, constants)) [[unlikely]] {
-            ++malformed;
-            p = next_line;
-            continue;
-          }
-        } else if (!parse_hitobject_details(beatmap, counts, object,
-                                            p + prefix_end, line_end,
-                                            constants)) [[unlikely]] {
-          ++malformed;
-          p = next_line;
-          continue;
-        }
-
-        beatmap.hit_objects[counts.objects] = normalize_hitobject(
-            object, counts.objects, preceding_was_spinner, time_offset);
-        preceding_was_spinner = kind == HitObjectKind::Spinner;
-        ++counts.objects;
-      } else {
-        const auto object = parse_hitobject_line_scalar(beatmap, counts, p,
-                                                        line_end, constants);
-        if (object) {
-          beatmap.hit_objects[counts.objects] = normalize_hitobject(
-              *object, counts.objects, preceding_was_spinner, time_offset);
-          preceding_was_spinner =
-              classify_hitobject_kind(object->type) == HitObjectKind::Spinner;
-          ++counts.objects;
-        } else [[unlikely]] {
-          ++malformed;
-        }
-      }
-    } else {
-      const char c = *p;
-      if (c == '\r' || c == '\n') {
-        ++p;
-        continue;
-      }
-      if (c == '[' && section_header_line(p, line_end))
-        break;
-      if (!ignored_line(p, line_end)) {
-        if (const auto object = parse_hitobject_line_scalar(
-                beatmap, counts, p, line_end, constants)) {
-          beatmap.hit_objects[counts.objects] = normalize_hitobject(
-              *object, counts.objects, preceding_was_spinner, time_offset);
-          preceding_was_spinner =
-              classify_hitobject_kind(object->type) == HitObjectKind::Spinner;
-          ++counts.objects;
-        } else [[unlikely]] {
-          ++malformed;
-        }
+    const char* line_end = find_line_end(p, file_end);
+    if (c == '[' && section_header_line(p, line_end))
+      break;
+    if (!ignored_line(p, line_end)) {
+      if (const auto object = parse_hitobject_line_scalar(
+              beatmap, counts, p, line_end, constants)) {
+        const size_t count = counts.objects++;
+        beatmap.hit_objects[count] = normalize_hitobject(
+            *object, count, preceding_was_spinner, time_offset);
+        preceding_was_spinner =
+            classify_hitobject_kind(object->type) == HitObjectKind::Spinner;
+      } else [[unlikely]] {
+        ++beatmap.stats.malformed_lines;
       }
     }
-    p = next_line;
+    p = after_line_ending(line_end, file_end);
   }
-
-  beatmap.stats.fast_path_lines += fast_lines;
-  beatmap.stats.malformed_lines += malformed;
   return p;
 }
 #endif
