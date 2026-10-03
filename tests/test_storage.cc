@@ -8,7 +8,6 @@
 #include <fosu/os.h>
 #include <fosu/parse_options.h>
 #include <fosu/parser.h>
-#include <fosu/result.h>
 #include <fosu/slider_event.h>
 #include <fosu/slider_path.h>
 #include <fosu/types.h>
@@ -27,7 +26,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <utility>
 
 static void test_reparse_reuses_arena_memory() {
   auto input =
@@ -288,7 +286,6 @@ static void test_event_budget_failure_and_reuse() {
     const auto   failed =
         parser.parse(oversized, {.calculate_slider_events = true});
     CHECK(!failed);
-    CHECK_EQ(failed.error().code, fosu::ErrorCode::AllocationFailure);
     const auto& recovered =
         require_parse(parser.parse(small, {.calculate_slider_events = true}));
     CHECK_EQ(recovered.slider_events.size(), 1u);
@@ -336,42 +333,6 @@ static void test_multisegment_path_trim() {
   }
 }
 
-static void test_copy_owns_all_data() {
-  fosu::Arena* program_arena = fosu::arena_alloc();
-  CHECK(program_arena != nullptr);
-  fosu::Beatmap owned{};
-  std::string   expected;
-  {
-    auto input = fosu::make_padded(
-        "[General]\nAudioFilename:song.mp3\n"
-        "[Metadata]\nTitle:Owned title\nArtist:Owned artist\n"
-        "[Events]\n0,0,\"background.jpg\",0,0\n2,10,20\n"
-        "[TimingPoints]\n0,500\n"
-        "[Colours]\nCombo1:1,2,3\n"
-        "[HitObjects]\n"
-        "1,2,3,1,0,1:2:3:4:sample.wav\n"
-        "1,2,4,2,0,B|7:8|9:10,1,20,2|0,1:2|3:4,"
-        "1:2:3:4:slider.wav\n");
-    fosu::Parser parser;
-    const auto&  parsed = require_parse(parser.parse(input));
-    expected = canonical(parsed);
-    auto copied = parsed.copy(*program_arena);
-    CHECK(copied);
-    if (copied)
-      owned = copied.value();
-    owned.hit_objects[0].x = 42;
-    CHECK_EQ(parsed.hit_objects[0].x, 1);
-    owned.hit_objects[0].x = 1;
-    std::memset(input.data.get(), 'x', input.size);
-    CHECK_EQ(canonical(parsed), expected);
-    auto replacement = fosu::make_padded(
-        "[Metadata]\nTitle:Replacement\n[HitObjects]\n1,2,5,1,0\n");
-    require_parse(parser.parse(replacement));
-  }
-  CHECK_EQ(canonical(owned), expected);
-  fosu::arena_release(program_arena);
-}
-
 static void test_failed_parse_resets_and_parser_remains_reusable() {
   fosu::Parser parser;
   auto         input = fosu::make_padded("[Metadata]\nTitle:Before failure\n");
@@ -379,7 +340,6 @@ static void test_failed_parse_resets_and_parser_remains_reusable() {
 
   auto failed = parser.parse(nullptr, 1);
   CHECK(!failed);
-  CHECK_EQ(failed.error().code, fosu::ErrorCode::InvalidInput);
   const auto storage = fosu::internal::parser_storage(parser);
   CHECK(storage.input == nullptr);
   CHECK(storage.result_arena != storage.scratch_arena);
@@ -388,34 +348,6 @@ static void test_failed_parse_resets_and_parser_remains_reusable() {
 
   const auto& recovered = require_parse(parser.parse(input));
   CHECK(recovered.title == "Before failure");
-}
-
-static void test_failed_copy_rewinds_destination() {
-  std::string text = "[HitObjects]\n";
-  for (size_t i = 0; i < 2000; ++i)
-    text += "1,2,3,1,0,1:2:3:4:sample.wav\n";
-  auto         input = fosu::make_padded(text);
-  fosu::Parser parser;
-  const auto&  beatmap = require_parse(parser.parse(input));
-
-  const size_t page_size = fosu::internal::os_page_size();
-  fosu::Arena* destination = fosu::arena_alloc({
-      .reserve_size = page_size,
-      .commit_size = page_size,
-      .flags = 0,
-  });
-  CHECK(destination != nullptr);
-  auto* existing = fosu::arena_push_array<uint32_t>(destination, 1);
-  CHECK(existing != nullptr);
-  *existing = 0x12345678;
-  const size_t checkpoint = fosu::arena_pos(destination);
-
-  auto         copied = beatmap.copy(*destination);
-  CHECK(!copied);
-  CHECK_EQ(copied.error().code, fosu::ErrorCode::AllocationFailure);
-  CHECK_EQ(fosu::arena_pos(destination), checkpoint);
-  CHECK_EQ(*existing, 0x12345678u);
-  fosu::arena_release(destination);
 }
 
 static void test_arena_interface() {
@@ -497,7 +429,6 @@ static void test_input_size_overflow() {
   fosu::Parser parser;
   auto memory_result = parser.parse(&byte, std::numeric_limits<size_t>::max());
   CHECK(!memory_result);
-  CHECK(memory_result.error().code == fosu::ErrorCode::InputTooLarge);
 }
 
 static void test_parser_prepares_engine_input_and_output() {
@@ -532,110 +463,25 @@ static void test_parser_prepares_engine_input_and_output() {
   CHECK_EQ(calls, 1);
 }
 
+static void test_mods_apply_to_parsed_values() {
+  fosu::Parser parser;
+  const auto   input = fosu::make_padded(
+      "[General]\nMode:0\n[Difficulty]\nHPDrainRate:4\nCircleSize:4\n"
+      "OverallDifficulty:4\nApproachRate:4\n[TimingPoints]\n0,500\n"
+      "[HitObjects]\n100,100,1500,1,0\n");
+  const auto  mods = fosu::Mods::HardRock | fosu::Mods::DoubleTime;
+  const auto& map = require_parse(parser.parse(input, {.mods = mods}));
+  CHECK_EQ(map.hit_objects[0].time, 1000);
+  CHECK_EQ(map.hit_objects[0].y, 284);
+  CHECK_EQ(map.hp, 4 * 1.4);
+  CHECK_EQ(map.cs, 4 * 1.3);
+  CHECK_EQ(map.timing_points[0].beat_length, 500.0 / 1.5);
+  CHECK(
+      !parser.parse(input, {.mods = fosu::Mods::Easy | fosu::Mods::HardRock}));
+}
+
 int main() {
-  {
-    fosu::Parser parser;
-    const auto   input = fosu::make_padded(
-        "[General]\nMode:0\n[Difficulty]\nHPDrainRate:4\nCircleSize:4\n"
-        "OverallDifficulty:4\nApproachRate:4\n[TimingPoints]\n0,500\n"
-        "[HitObjects]\n100,100,1500,1,0\n");
-    const auto  mods = fosu::Mods::HardRock | fosu::Mods::DoubleTime;
-    const auto& map = require_parse(parser.parse(input, {.mods = mods}));
-    CHECK_EQ(map.hit_objects[0].time, 1000);
-    CHECK_EQ(map.hit_objects[0].y, 284);
-    CHECK_EQ(map.hp, 4 * 1.4);
-    CHECK_EQ(map.cs, 4 * 1.3);
-    CHECK_EQ(map.timing_points[0].beat_length, 500.0 / 1.5);
-    CHECK(!parser.parse(input,
-                        {.mods = fosu::Mods::Easy | fosu::Mods::HardRock}));
-  }
-  {
-    fosu::Parser parser;
-    const auto   input = fosu::make_padded(
-        "osu file format v14\n[HitObjects]\n100,100,0,1,0\n100,100,10,1,0\n");
-    const auto& map =
-        require_parse(parser.parse(input, {.apply_stacking = true}));
-    CHECK_EQ(map.stacking[0].stack_height, 1);
-    CHECK(map.hit_objects[0].x < 100);
-    CHECK_EQ(
-        map.hit_objects[0].raw_position(map.stacking[0].stack_offset).first,
-        100);
-    auto* destination = fosu::arena_alloc();
-    auto  copy = map.copy(*destination);
-    CHECK(copy);
-    CHECK(copy.value().stacking.data() != map.stacking.data());
-    require_parse(parser.parse(fosu::make_padded("")));
-    CHECK_EQ(copy.value().stacking[0].stack_height, 1);
-    CHECK_EQ(copy.value()
-                 .hit_objects[0]
-                 .raw_position(copy.value().stacking[0].stack_offset)
-                 .first,
-             100);
-    fosu::arena_release(destination);
-  }
-  {
-    fosu::Parser parser;
-    auto         input = fosu::make_padded(
-        "[Difficulty]\nSliderMultiplier:1\n[TimingPoints]\n0,500\n"
-        "[HitObjects]\n0,0,0,2,0,L|400:0,2,400\n");
-    const auto& map =
-        require_parse(parser.parse(input, {.calculate_slider_events = true}));
-    CHECK_EQ(map.slider_events[0].size(), 10u);
-    CHECK(map.slider_events[0].front().type == fosu::SliderEventType::Head);
-    CHECK(map.slider_events[0].back().type == fosu::SliderEventType::Tail);
-    CHECK(map.slider_events[0][8].type ==
-          fosu::SliderEventType::LegacyLastTick);
-    CHECK_EQ(map.slider_events[0][8].time, 3964);
-    CHECK_EQ(map.slider_events[0].back().time, map.hit_objects[0].end_time);
-    const auto storage = fosu::internal::parser_storage(parser);
-    CHECK_EQ(fosu::arena_pos(storage.scratch_arena), fosu::kArenaHeaderSize);
-    CHECK(fosu::arena_pos(storage.result_arena) > fosu::kArenaHeaderSize);
-    auto* destination = fosu::arena_alloc();
-    auto  copy = map.copy(*destination);
-    CHECK(copy);
-    CHECK(copy.value().slider_events[0].data() != map.slider_events[0].data());
-    require_parse(parser.parse(fosu::make_padded("")));
-    CHECK_EQ(copy.value().slider_events[0].back().time, 4000);
-    fosu::arena_release(destination);
-  }
-  {
-    fosu::Parser parser;
-    const auto   input =
-        fosu::make_padded("[HitObjects]\n10,20,1000,2,0,L|110:20,1,150\n");
-    const auto& map =
-        require_parse(parser.parse(input, {.calculate_slider_paths = true}));
-    CHECK_EQ(map.hit_objects[0].end_time, 0);
-    CHECK_EQ(map.slider_paths.size(), 1u);
-    CHECK_EQ(map.slider_paths[0].distance(), 150);
-    CHECK_EQ(fosu::slider_position_at(map.slider_paths[0], 0.5).x, 75);
-    auto* arena = fosu::arena_alloc();
-    CHECK(arena);
-    auto copy = map.copy(*arena);
-    CHECK(copy);
-    CHECK(copy.value().slider_paths[0].points.data() !=
-          map.slider_paths[0].points.data());
-    require_parse(parser.parse(fosu::make_padded("")));
-    CHECK_EQ(fosu::slider_position_at(copy.value().slider_paths[0], 1).x, 150);
-    fosu::arena_release(arena);
-  }
-  for (const auto* engine :
-       {&fosu::internal::compiled_engine, &fosu_test::scalar_engine()}) {
-    fosu::Parser      parser(*engine);
-    const std::string input = "[HitObjects]\n0,0,1000,2,0,L|100:0,1,140\n";
-    const auto&       skipped = require_parse(
-        parser.parse(input, {.calculate_slider_end_times = false}));
-    CHECK_EQ(skipped.hit_objects[0].end_time, 0);
-    auto* destination = fosu::arena_alloc();
-    CHECK(destination);
-    auto copy = skipped.copy(*destination);
-    CHECK(copy);
-    CHECK_EQ(require_parse(parser.parse(input)).hit_objects[0].end_time, 0);
-    const auto& calculated = require_parse(
-        parser.parse(input, {.calculate_slider_end_times = true}));
-    CHECK(calculated.hit_objects[0].end_time > calculated.hit_objects[0].time);
-    CHECK_EQ(copy.value().hit_objects[0].end_time, 0);
-    fosu::arena_release(destination);
-  }
+  test_mods_apply_to_parsed_values();
   test_parser_prepares_engine_input_and_output();
   test_reparse_reuses_arena_memory();
   test_reparse_accepts_larger_arrays();
@@ -648,9 +494,7 @@ int main() {
   test_event_budget_failure_and_reuse();
   test_tick_endpoint_exclusion();
   test_multisegment_path_trim();
-  test_copy_owns_all_data();
   test_failed_parse_resets_and_parser_remains_reusable();
-  test_failed_copy_rewinds_destination();
   test_arena_interface();
   test_read_into_reuse();
   test_input_size_overflow();

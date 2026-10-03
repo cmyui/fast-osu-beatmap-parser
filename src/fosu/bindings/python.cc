@@ -7,7 +7,6 @@
 #include <fosu/mods.h>
 #include <fosu/parse_options.h>
 #include <fosu/parser.h>
-#include <fosu/result.h>
 #include <fosu/slider_event.h>
 #include <fosu/slider_path.h>
 #include <fosu/types.h>

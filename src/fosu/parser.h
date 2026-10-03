@@ -8,7 +8,6 @@
 #include <fosu/legacy_rules.h>
 #include <fosu/mods.h>
 #include <fosu/parse_options.h>
-#include <fosu/result.h>
 #include <fosu/slider_events.h>
 #include <fosu/slider_geometry.h>
 #include <fosu/slider_timing.h>
@@ -209,59 +208,53 @@ class Parser {
                                    scratch_arena_);
   }
 
-  Result<Beatmap*> parse(const char*  data,
-                         size_t       size,
-                         ParseOptions opts = {}) noexcept {
+  Beatmap* parse(const char*  data,
+                 size_t       size,
+                 ParseOptions opts = {}) noexcept {
     reset_working_result();
     if ((!data && size) || invalid_options(opts))
-      return Error{ErrorCode::InvalidInput};
+      return nullptr;
     auto prepared = prepare_input(size, data);
     if (!prepared) {
-      const Error error = prepared.error();
       reset_working_result();
-      return error;
+      return nullptr;
     }
     return finish_parse(opts);
   }
 
-  Result<Beatmap*> parse(std::span<const char> input,
-                         ParseOptions          opts = {}) noexcept {
+  Beatmap* parse(std::span<const char> input, ParseOptions opts = {}) noexcept {
     return parse(input.data(), input.size(), opts);
   }
 
-  Result<Beatmap*> parse(const FileBuffer& input,
-                         ParseOptions      opts = {}) noexcept {
+  Beatmap* parse(const FileBuffer& input, ParseOptions opts = {}) noexcept {
     return parse(input.data.get(), input.size, opts);
   }
 
-  Result<Beatmap*> parse_file(const char*  path,
-                              ParseOptions opts = {}) noexcept {
+  Beatmap* parse_file(const char* path, ParseOptions opts = {}) noexcept {
     reset_working_result();
     if (!path || invalid_options(opts))
-      return Error{ErrorCode::InvalidInput};
+      return nullptr;
 
     const internal::InputFile file = internal::open_input_file(path);
     if (file == internal::kInvalidInputFile)
-      return Error{ErrorCode::IoFailure, kNoErrorOffset, errno};
+      return nullptr;
 
     u64 file_size;
     if (!internal::input_file_size(file, file_size)) {
-      const int error = errno;
       internal::close_input_file(file);
-      return Error{ErrorCode::IoFailure, kNoErrorOffset, error};
+      return nullptr;
     }
     if (file_size > std::numeric_limits<size_t>::max() - kBufferPadding) {
       internal::close_input_file(file);
-      return Error{ErrorCode::InputTooLarge};
+      return nullptr;
     }
 
     const size_t size = static_cast<size_t>(file_size);
     auto         prepared = prepare_input(size, nullptr);
     if (!prepared) {
-      const Error error = prepared.error();
       internal::close_input_file(file);
       reset_working_result();
-      return error;
+      return nullptr;
     }
     size_t bytes_read = 0;
     while (bytes_read < size) {
@@ -270,10 +263,9 @@ class Parser {
       if (count < 0 && errno == EINTR)
         continue;
       if (count <= 0) {
-        const int error = count < 0 ? errno : EIO;
         internal::close_input_file(file);
         reset_working_result();
-        return Error{ErrorCode::IoFailure, kNoErrorOffset, error};
+        return nullptr;
       }
       bytes_read += static_cast<size_t>(count);
     }
@@ -297,9 +289,9 @@ class Parser {
                (kSectionGeneral | kSectionDifficulty);
   }
 
-  Result<char*> prepare_input(size_t size, const char* data) noexcept {
+  char* prepare_input(size_t size, const char* data) noexcept {
     if (!can_pad_input(size))
-      return Error{ErrorCode::InputTooLarge};
+      return nullptr;
     if (!result_arena_)
       result_arena_ =
           internal::acquire_parser_arena(internal::parser_arena_pool.result);
@@ -307,11 +299,11 @@ class Parser {
       scratch_arena_ =
           internal::acquire_parser_arena(internal::parser_arena_pool.scratch);
     if (!result_arena_ || !scratch_arena_)
-      return Error{ErrorCode::AllocationFailure};
+      return nullptr;
     input_ =
         static_cast<char*>(arena_push(result_arena_, size + kBufferPadding, 1));
     if (!input_)
-      return Error{ErrorCode::AllocationFailure};
+      return nullptr;
     if (data && size)
       std::memmove(input_, data, size);
     std::memset(input_ + size, 0, kBufferPadding);
@@ -319,7 +311,7 @@ class Parser {
     return input_;
   }
 
-  Result<Beatmap*> finish_parse(ParseOptions opts) noexcept {
+  Beatmap* finish_parse(ParseOptions opts) noexcept {
     const std::span<const char> input{input_, input_size_};
     if (input_size_ != 0) {
       Beatmap preamble;
@@ -329,17 +321,17 @@ class Parser {
                                              opts.sections,
                                              preamble.format_version >= 128)) {
         reset_working_result();
-        return Error{ErrorCode::AllocationFailure};
+        return nullptr;
       }
     }
     engine_->parse_document(input, beatmap_, opts);
     if (!internal::apply_legacy_rules(beatmap_, scratch_arena_)) {
       reset_working_result();
-      return Error{ErrorCode::AllocationFailure};
+      return nullptr;
     }
     if (!internal::apply_mods_before_calculations(beatmap_, opts.mods)) {
       reset_working_result();
-      return Error{ErrorCode::InvalidInput};
+      return nullptr;
     }
     const bool     stacking = opts.apply_stacking && beatmap_.mode == 0;
     size_t         stacking_scratch_pos = 0;
@@ -350,7 +342,7 @@ class Parser {
           arena_push_array<f64>(scratch_arena_, beatmap_.sliders.size());
       if (!end_times) {
         reset_working_result();
-        return Error{ErrorCode::AllocationFailure};
+        return nullptr;
       }
       stacking_end_times = {end_times, beatmap_.sliders.size()};
     }
@@ -358,25 +350,25 @@ class Parser {
          stacking) &&
         !internal::set_slider_paths(beatmap_, result_arena_, scratch_arena_)) {
       reset_working_result();
-      return Error{ErrorCode::AllocationFailure};
+      return nullptr;
     }
     if (opts.calculate_slider_events &&
         !internal::set_slider_events(beatmap_, result_arena_, scratch_arena_,
                                      stacking_end_times)) {
       reset_working_result();
-      return Error{ErrorCode::AllocationFailure};
+      return nullptr;
     }
     if ((opts.calculate_slider_end_times || stacking) &&
         !opts.calculate_slider_events &&
         !internal::set_slider_end_times(beatmap_, scratch_arena_, {},
                                         stacking_end_times)) {
       reset_working_result();
-      return Error{ErrorCode::AllocationFailure};
+      return nullptr;
     }
     if (stacking && !internal::apply_stacking(beatmap_, result_arena_,
                                               stacking_end_times)) {
       reset_working_result();
-      return Error{ErrorCode::AllocationFailure};
+      return nullptr;
     }
     if (!stacking_end_times.empty())
       arena_pop_to(scratch_arena_, stacking_scratch_pos);

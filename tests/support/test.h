@@ -1,16 +1,12 @@
 #pragma once
 #include <fosu/beatmap.h>
 #include <fosu/parser.h>
-#include <fosu/result.h>
 #include <tests/support/scalar_engine.h>
 
-#include <cinttypes>
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
-#include <string_view>
 
 static int g_failures = 0;
 
@@ -32,12 +28,11 @@ inline int test_result() {
   return g_failures ? 1 : 0;
 }
 
-[[maybe_unused]] static fosu::Beatmap& require_parse(
-    fosu::Result<fosu::Beatmap*> parsed) {
+[[maybe_unused]] static fosu::Beatmap& require_parse(fosu::Beatmap* parsed) {
   CHECK(parsed);
   if (!parsed)
     std::abort();
-  return *parsed.value();
+  return *parsed;
 }
 
 [[maybe_unused]] static fosu::Beatmap parse_str(const std::string& s,

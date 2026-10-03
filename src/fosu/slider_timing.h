@@ -2,7 +2,6 @@
 
 #include <fosu/arena.h>
 #include <fosu/beatmap.h>
-#include <fosu/result.h>
 #include <fosu/slider_geometry.h>
 #include <fosu/types.h>
 
@@ -122,19 +121,17 @@ inline bool set_slider_end_times(Beatmap&                map,
       ++next;
     }
     const auto& slider = map.sliders[object.slider];
-    auto        distance =
-        !map.slider_paths.empty()
-            ? Result<f64>{map.slider_paths[object.slider].distance()}
-            : slider_distance(map, object, scratch_arena);
+    auto        distance = !map.slider_paths.empty()
+                               ? map.slider_paths[object.slider].distance()
+                               : slider_distance(map, object, scratch_arena);
     if (!distance)
       return false;
     const f64 pixels_per_millisecond =
         100 * map.slider_multiplier * velocity / beat_length;
     // osu! suppresses repeats on effectively zero-length paths. Keep the
     // encoded span count on Slider, but use the effective count for duration.
-    const i32 spans = distance.value() <= 1e-7 ? 1 : slider.slides;
-    object.end_time =
-        object.time + spans * distance.value() / pixels_per_millisecond;
+    const i32 spans = distance <= 1e-7 ? 1 : slider.slides;
+    object.end_time = object.time + spans * distance / pixels_per_millisecond;
     if (!stacking_end_times.empty()) {
       // Standard stacking uses the osu! ruleset slider velocity, including its
       // legacy f32 precision adjustment. Keep the public end time as the
@@ -145,7 +142,7 @@ inline bool set_slider_end_times(Beatmap&                map,
       const f64 stacking_velocity =
           100 * map.slider_multiplier / adjusted_beat_length;
       stacking_end_times[object.slider] =
-          object.time + spans * distance.value() / stacking_velocity;
+          object.time + spans * distance / stacking_velocity;
     }
     if (!timings.empty()) {
       const f64 tick_distance =
@@ -155,7 +152,7 @@ inline bool set_slider_end_times(Beatmap&                map,
               : std::numeric_limits<f64>::infinity();
       timings[object.slider] = {
           pixels_per_millisecond, tick_distance,
-          (spans * distance.value() / pixels_per_millisecond) / spans, spans};
+          (spans * distance / pixels_per_millisecond) / spans, spans};
     }
   }
   return true;

@@ -19,7 +19,7 @@ void set_backend(const char* value) {
 #endif
 }
 
-int main(int argc, char** argv) {
+static void test_avx2_feature_requirements() {
   using namespace fosu_dispatch;
   CpuFeatures full{required_leaf1, required_leaf7, required_extended, 6};
   assert(supports_avx2(full));
@@ -39,8 +39,10 @@ int main(int argc, char** argv) {
     f.xcr0 = x;
     assert(supports_avx2(f) == ((x & 6) == 6));
   }
-  assert(argc == 2);
-  const char* requested = argv[1];
+}
+
+static void test_concurrent_backend_selection(const char* requested) {
+  using namespace fosu_dispatch;
   set_backend(requested);
   bool avx2 = false, neon = false;
 #ifdef FOSU_TEST_avx2
@@ -77,12 +79,22 @@ int main(int argc, char** argv) {
       constexpr char input[] =
           "[Metadata]\nTitle:dispatch\n[HitObjects]\n1,2,3,1,0\n";
       auto result = parser.parse(input, sizeof(input) - 1);
-      assert(result && result.value()->hit_objects.size() == 1);
-      assert(result.value()->hit_objects[0].x == 1);
+      assert(result && result->hit_objects.size() == 1);
+      assert(result->hit_objects[0].x == 1);
     });
   for (auto& t : threads)
     t.join();
+}
+
+static void test_unknown_backend_keeps_selected_engine() {
   const auto* before = fosu::runtime_engine();
   set_backend("unknown");
   assert(before == fosu::runtime_engine());
+}
+
+int main(int argc, char** argv) {
+  assert(argc == 2);
+  test_avx2_feature_requirements();
+  test_concurrent_backend_selection(argv[1]);
+  test_unknown_backend_keeps_selected_engine();
 }
