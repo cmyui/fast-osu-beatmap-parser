@@ -292,7 +292,7 @@ static void test_fuzz_slider_length() {
   }
 }
 
-// Fuzz the one-pass timing point parser against the generic reference:
+// Fuzz the common timing point fast path against the general parser:
 // whenever it accepts a line, every field must be bitwise identical.
 // Shapes: 8-field editor lines plus old 2..7-field forms, decimal and
 // negative offsets, integer and long-fraction beatLengths, and injected
@@ -342,10 +342,8 @@ static void test_fuzz_timing_point() {
     }
     memset(buf + len, 0, sizeof(buf) - (size_t)len);
 
-    const auto a = fosu::internal::load32(buf);
-    const auto b = fosu::internal::load32(buf + 32);
     const auto point =
-        fosu::internal::try_parse_timing_point_fast(a, b, buf, (size_t)len);
+        fosu::internal::parse_common_timing_point(buf, buf + len, 0);
     if (!point)
       continue;
     ++accepted;
@@ -369,7 +367,7 @@ static void test_fuzz_timing_point() {
     }
   }
   printf("  timing fuzz: fast path accepted %zu lines\n", accepted);
-  CHECK(accepted > 80000);
+  CHECK(accepted > 40000);
 }
 
 // Generate a value that renders with exactly `digits` decimal digits.

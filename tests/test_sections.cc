@@ -827,40 +827,34 @@ static void test_timing_integer_widths() {
   }
 }
 
-static void test_masked_timing_fallback() {
-  // Exercise the general numeric rules, not just the fast editor shape.
+static void test_common_timing_fallback() {
+  // Unusual spellings must either be left to the general parser or agree
+  // with it exactly.
   for (const std::string line :
        {"-1.5,500", "0,NaN,4,0,0,100,0,0", "0,500,0meter,0,0,100,1,0",
         "0,500,4,0,0,100,1anything,0,ignored", " 1 , 500 , 4 ,0,0,100,1,0",
         "0,500,4,0,0,100,1,", "0,500,,0,0,100,1,0", "0,500,4,0,0,100,1,bad",
-        "0,NaN,4,0,0,100,1,0", "bad,500", "0,500,"}) {
-    for (size_t length : {line.size(), size_t(63), size_t(64)}) {
-      const std::string text = line + std::string(length - line.size(), ' ');
-      const auto        input = fosu_test::padded(text + ",outside\n");
-      const char*       p = input.data();
-      uint64_t          commas = 0;
-      for (size_t i = 0; i < text.size(); ++i)
-        if (p[i] == ',')
-          commas |= 1ull << i;
-      const auto expected =
-          fosu::internal::parse_timing_point(p, p + text.size());
-      const auto actual =
-          fosu::internal::parse_timing_point<true>(p, p + text.size(), commas);
-      CHECK_EQ(actual.has_value(), expected.has_value());
-      if (actual && expected) {
-        const auto& masked = *actual;
-        const auto& scalar = *expected;
-        CHECK_EQ(masked.time, scalar.time);
-        CHECK(
-            masked.beat_length == scalar.beat_length ||
-            (std::isnan(masked.beat_length) && std::isnan(scalar.beat_length)));
-        CHECK_EQ(masked.meter, scalar.meter);
-        CHECK_EQ(masked.sample_set, scalar.sample_set);
-        CHECK_EQ(masked.sample_index, scalar.sample_index);
-        CHECK_EQ(masked.volume, scalar.volume);
-        CHECK_EQ(masked.uninherited, scalar.uninherited);
-        CHECK_EQ(masked.effects, scalar.effects);
-      }
+        "0,NaN,4,0,0,100,1,0", "bad,500", "0,500,", "0,500,4,0,0,100,10,0",
+        "0,+500,4,0,0,100,1,0", "0,1e3,4,0,0,100,1,0", "0,500,0,0,0,100,1,0",
+        "0,3000000000,4,0,0,100,1,0", "0,500,4,9,0,100,1,0"}) {
+    const auto  input = fosu_test::padded(line + ",outside\n");
+    const char* p = input.data();
+    const auto  expected =
+        fosu::internal::parse_timing_point(p, p + line.size());
+    const auto actual =
+        fosu::internal::parse_common_timing_point(p, p + line.size(), 0);
+    if (!actual)
+      continue;
+    CHECK(expected.has_value());
+    if (expected) {
+      CHECK_EQ(actual->time, expected->time);
+      CHECK_EQ(actual->beat_length, expected->beat_length);
+      CHECK_EQ(actual->meter, expected->meter);
+      CHECK_EQ(actual->sample_set, expected->sample_set);
+      CHECK_EQ(actual->sample_index, expected->sample_index);
+      CHECK_EQ(actual->volume, expected->volume);
+      CHECK_EQ(actual->uninherited, expected->uninherited);
+      CHECK_EQ(actual->effects, expected->effects);
     }
   }
 }
@@ -1195,7 +1189,7 @@ int main() {
   test_event_filename_boundaries();
   test_section_skip_boundaries();
   test_long_event_lines();
-  test_masked_timing_fallback();
+  test_common_timing_fallback();
   test_timing_integer_widths();
   test_exact_keys_and_event_aliases();
   test_malformed_events();

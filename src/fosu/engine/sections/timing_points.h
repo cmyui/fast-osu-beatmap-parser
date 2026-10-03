@@ -12,95 +12,22 @@
 
 namespace fosu::internal {
 
-#if FOSU_SIMD
-// Each point is parsed into a local value and then copied into the beatmap
-// arena.
-inline const char* parse_timing_points_section_simd(Beatmap&    beatmap,
-                                                    size_t&     point_count,
-                                                    const char* p,
-                                                    const char* file_end,
-                                                    i32         time_offset) {
-  const ByteVector comma_value = broadcast_byte<','>();
-  u32              malformed = 0;
-
-  while (p < file_end) {
-    const Bytes32 first = load32(p);
-    const Bytes32 second = load32(p + 32);
-    const u64     endings = line_end_mask32(first) |
-                            static_cast<u64>(line_end_mask32(second)) << 32;
-    const char*   line_end =
-        endings ? p + trailing_zeros(endings) : find_line_end(p + 64, file_end);
-    const char* next_line = after_line_ending(line_end, file_end);
-    const auto  length = static_cast<size_t>(line_end - p);
-    const u64   line_mask = length >= 64 ? ~0ull : ((1ull << length) - 1);
-    const u64   commas =
-        (equal_mask32(first, comma_value) |
-         static_cast<u64>(equal_mask32(second, comma_value)) << 32) &
-        line_mask;
-
-    if (length - 15 <= 64 - 15) [[likely]] {
-      const u64 nondigits = (nondigit_mask32(first) |
-                             static_cast<u64>(nondigit_mask32(second)) << 32) &
-                            line_mask;
-      if (const auto point = try_parse_timing_point_fast_masked(
-              commas, nondigits, p, length, time_offset)) {
-        beatmap.timing_points[point_count++] = *point;
-        p = next_line;
-        continue;
-      }
-    }
-
-    const char c = *p;
-    if (c == '\r' || c == '\n') {
-      ++p;
-      continue;
-    }
-    if (c == '[' && section_header_line(p, line_end))
-      break;
-    if (!ignored_line(p, line_end)) {
-      const auto point =
-          length <= 64
-              ? parse_timing_point<true>(p, line_end, commas, time_offset)
-              : parse_timing_point(p, line_end, 0, time_offset);
-      if (point) {
-        beatmap.timing_points[point_count++] = *point;
-      } else [[unlikely]]
-        ++malformed;
-    }
-    p = next_line;
-  }
-
-  beatmap.stats.malformed_lines += malformed;
-  return p;
-}
-#endif
-
-inline const char* parse_timing_points_section_scalar(Beatmap&    beatmap,
-                                                      size_t&     point_count,
-                                                      const char* p,
-                                                      const char* file_end,
-                                                      i32         time_offset) {
-  return for_each_section_line(p, file_end, [&](std::string_view line) {
-    if (const auto point = parse_timing_point(
-            line.data(), line.data() + line.size(), 0, time_offset)) {
-      beatmap.timing_points[point_count++] = *point;
-    } else
-      ++beatmap.stats.malformed_lines;
-  });
-}
-
 inline const char* parse_timing_points_section(Beatmap&    beatmap,
                                                size_t&     point_count,
                                                const char* p,
                                                const char* file_end,
                                                i32         time_offset = 0) {
-#if FOSU_SIMD
-  return parse_timing_points_section_simd(beatmap, point_count, p, file_end,
-                                          time_offset);
-#else
-  return parse_timing_points_section_scalar(beatmap, point_count, p, file_end,
-                                            time_offset);
-#endif
+  return for_each_section_line(p, file_end, [&](std::string_view line) {
+    const char* begin = line.data();
+    const char* end = begin + line.size();
+    auto        point = parse_common_timing_point(begin, end, time_offset);
+    if (!point) [[unlikely]]
+      point = parse_timing_point(begin, end, time_offset);
+    if (point)
+      beatmap.timing_points[point_count++] = *point;
+    else [[unlikely]]
+      ++beatmap.stats.malformed_lines;
+  });
 }
 
 }  // namespace fosu::internal

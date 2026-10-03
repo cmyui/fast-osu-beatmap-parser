@@ -342,24 +342,20 @@ static void test_failed_parse_resets_and_parser_remains_reusable() {
 }
 
 static void test_arena_interface() {
-  fosu::Arena* arena = fosu::arena_alloc({
-      .reserve_size = 64u << 10,
-      .commit_size = 4u << 10,
-  });
+  fosu::Arena* arena = fosu::arena_alloc(256u << 10);
   CHECK(arena != nullptr);
-  CHECK(reinterpret_cast<uintptr_t>(arena) % fosu::kCacheLineSize == 0);
-  CHECK(fosu::arena_push(arena, 1, fosu::kMaxArenaAlignment * 2) == nullptr);
   const size_t initial = fosu::arena_pos(arena);
   auto*        first = fosu::arena_push_array<uint32_t>(arena, 16);
   CHECK(first != nullptr);
+  CHECK(reinterpret_cast<uintptr_t>(first) % alignof(uint32_t) == 0);
   size_t checkpoint;
   {
     const fosu::TempArena temp{arena};
     checkpoint = temp.position();
+    // Commits beyond the first step; the reservation still bounds pushes.
     CHECK(fosu::arena_push(arena, 96u << 10, alignof(uint64_t)) != nullptr);
-    CHECK(arena->current != arena);
+    CHECK(fosu::arena_push(arena, 256u << 10, 1) == nullptr);
   }
-  CHECK(arena->current == arena);
   CHECK_EQ(fosu::arena_pos(arena), checkpoint);
   fosu::arena_clear(arena);
   CHECK_EQ(fosu::arena_pos(arena), initial);

@@ -233,24 +233,7 @@ inline const char* parse_hitobjects_section_simd(
     const auto  length = static_cast<size_t>(line_end - p);
     u32         p1, p2, prefix_end, hitsound_length, mask_index;
     bool        common_layout;
-    // Common editor prefixes: ddd,ddd,ddddd,d,d and ddd,ddd,dddddd,d,d.
-    // Match every digit boundary and comma before using fixed shuffle masks.
-    if ((nondigits & 0x3ffffu) == 0x2a088u && (commas & 0xffffu) == 0xa088u) {
-      p1 = 7;
-      p2 = 13;
-      prefix_end = 17;
-      hitsound_length = 1;
-      mask_index = kFiveDigitTimeMaskIndex;
-      common_layout = true;
-    } else if ((nondigits & 0x7ffffu) == 0x54088u &&
-               (commas & 0x1ffffu) == 0x14088u) {
-      p1 = 7;
-      p2 = 14;
-      prefix_end = 18;
-      hitsound_length = 1;
-      mask_index = kSixDigitTimeMaskIndex;
-      common_layout = true;
-    } else {
+    {
       const u32 m1 = nondigits & (nondigits - 1);
       const u32 m2 = m1 & (m1 - 1);
       const u32 m3 = m2 & (m2 - 1);
@@ -302,13 +285,7 @@ inline const char* parse_hitobjects_section_simd(
         return _mm256_shuffle_epi8(_mm256_permutevar8x32_epi32(digits, perm),
                                    shuf);
       };
-      __m256i placed;
-      if (mask_index == kFiveDigitTimeMaskIndex)
-        placed = place_digits(kLaneMasks[kFiveDigitTimeMaskIndex]);
-      else if (mask_index == kSixDigitTimeMaskIndex)
-        placed = place_digits(kLaneMasks[kSixDigitTimeMaskIndex]);
-      else
-        placed = place_digits(kLaneMasks[mask_index]);
+      const __m256i placed = place_digits(kLaneMasks[mask_index]);
       const __m256i pair_weights = _mm256_setr_epi8(
           0, 100, 10, 1, 0, 100, 10, 1, 0, 100, 10, 1, 0, 0, 10, 1, 0, 0, 10, 1,
           0, 0, 10, 1, 10, 1, 10, 1, 10, 1, 10, 1);

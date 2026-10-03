@@ -11,131 +11,67 @@
 
 namespace fosu {
 
-#if defined(__APPLE__) && defined(__aarch64__)
-inline constexpr size_t kCacheLineSize = 128;
-#else
-inline constexpr size_t kCacheLineSize = 64;
-#endif
-
-inline constexpr size_t kDefaultArenaReserve = size_t{64} << 20;
-inline constexpr size_t kDefaultArenaCommit = size_t{64} << 10;
-inline constexpr size_t kMaxArenaPush = size_t{1} << 46;
-inline constexpr size_t kMaxArenaAlignment = size_t{1} << 12;
+// An arena is one virtual address reservation followed by a bump pointer.
+// Pages are committed only as the position first reaches them, so the
+// reservation costs address space, not memory. Pushes beyond it fail.
+inline constexpr size_t kArenaReserve = size_t{1} << 30;
+inline constexpr size_t kArenaCommitStep = size_t{64} << 10;
 
 struct Arena {
-  Arena* prev;
-  Arena* current;
-  size_t base_pos;
-  size_t reserve_size;
-  size_t commit_size;
-  size_t pos;
+  size_t reserved;
   size_t committed;
-};
-
-struct ArenaParams {
-  size_t reserve_size;
-  size_t commit_size;
+  size_t pos;
 };
 
 constexpr size_t align_up(size_t value, size_t alignment) {
   return (value + alignment - 1) & ~(alignment - 1);
 }
 
-constexpr size_t round_up(size_t value, size_t multiple) {
-  return ((value + multiple - 1) / multiple) * multiple;
-}
+inline constexpr size_t kArenaHeaderSize = align_up(sizeof(Arena), 64);
 
-inline constexpr size_t kArenaHeaderSize =
-    align_up(sizeof(Arena), kCacheLineSize);
-
-inline bool arena_commit_to(Arena* block, size_t new_pos) {
-  if (new_pos <= block->committed)
-    return true;
-
-  const size_t target =
-      std::min(round_up(new_pos, block->commit_size), block->reserve_size);
-  const size_t amount = target - block->committed;
-  auto*        start = reinterpret_cast<u8*>(block) + block->committed;
-  if (!internal::os_commit(start, amount))
-    return false;
-  block->committed = target;
-  return true;
-}
-
-inline Arena* arena_alloc(ArenaParams params) {
-  const size_t page_size = internal::os_page_size();
-  if (page_size == 0 ||
-      params.reserve_size > std::numeric_limits<size_t>::max() - page_size ||
-      params.commit_size > std::numeric_limits<size_t>::max() - page_size) {
+inline Arena* arena_alloc(size_t reserve = kArenaReserve) {
+  void* memory = internal::os_reserve(reserve);
+  if (!memory)
+    return nullptr;
+  if (!internal::os_commit(memory, kArenaCommitStep)) {
+    internal::os_release(memory, reserve);
     return nullptr;
   }
-  const size_t minimum = round_up(kArenaHeaderSize, page_size);
-  const size_t reserve_size =
-      round_up(std::max(params.reserve_size, minimum), page_size);
-  const size_t commit_size = std::min(
-      round_up(std::max(params.commit_size, minimum), page_size), reserve_size);
-  void* memory = internal::os_reserve(reserve_size);
-  if (!memory || !internal::os_commit(memory, commit_size)) {
-    if (memory)
-      internal::os_release(memory, reserve_size);
-    return nullptr;
-  }
-
-  auto* arena = ::new (memory) Arena{
-      .prev = nullptr,
-      .current = nullptr,
-      .base_pos = 0,
-      .reserve_size = reserve_size,
-      .commit_size = commit_size,
+  return ::new (memory) Arena{
+      .reserved = reserve,
+      .committed = kArenaCommitStep,
       .pos = kArenaHeaderSize,
-      .committed = commit_size,
   };
-  arena->current = arena;
-  return arena;
 }
 
-inline Arena* arena_alloc() {
-  return arena_alloc({
-      .reserve_size = kDefaultArenaReserve,
-      .commit_size = kDefaultArenaCommit,
-  });
+inline void arena_release(Arena* arena) {
+  if (arena)
+    internal::os_release(arena, arena->reserved);
 }
 
 inline size_t arena_pos(const Arena* arena) {
-  if (!arena)
-    return 0;
-  return arena->current->base_pos + arena->current->pos;
+  return arena ? arena->pos : 0;
 }
 
+// Returns nullptr when the arena is missing or the reservation is exhausted.
+// alignment must be a power of two.
 inline void* arena_push(Arena* arena, size_t size, size_t alignment) {
-  if (!arena || size > kMaxArenaPush || alignment == 0 ||
-      alignment > kMaxArenaAlignment || (alignment & (alignment - 1)) != 0 ||
-      size > std::numeric_limits<size_t>::max() - alignment) {
+  if (!arena)
     return nullptr;
-  }
-
-  Arena* current = arena->current;
-  size_t pos = align_up(current->pos, alignment);
-  if (pos > current->reserve_size || size > current->reserve_size - pos) {
-    Arena* block = arena_alloc({
-        .reserve_size = std::max(current->reserve_size,
-                                 kArenaHeaderSize + alignment + size),
-        .commit_size = current->commit_size,
-    });
-    if (!block)
+  const size_t pos = align_up(arena->pos, alignment);
+  if (pos > arena->reserved || size > arena->reserved - pos)
+    return nullptr;
+  const size_t end = pos + size;
+  if (end > arena->committed) {
+    const size_t target =
+        std::min(align_up(end, kArenaCommitStep), arena->reserved);
+    auto* start = reinterpret_cast<u8*>(arena) + arena->committed;
+    if (!internal::os_commit(start, target - arena->committed))
       return nullptr;
-    block->prev = current;
-    block->base_pos = current->base_pos + current->reserve_size;
-    arena->current = current = block;
-    pos = align_up(current->pos, alignment);
+    arena->committed = target;
   }
-
-  const size_t new_pos = pos + size;
-  if (!arena_commit_to(current, new_pos))
-    return nullptr;
-  void* result = reinterpret_cast<u8*>(current) + pos;
-  current->pos = new_pos;
-  return result;
+  arena->pos = end;
+  return reinterpret_cast<u8*>(arena) + pos;
 }
 
 template <typename T>
@@ -147,34 +83,9 @@ inline T* arena_push_array(Arena* arena, size_t count) {
   return static_cast<T*>(arena_push(arena, sizeof(T) * count, alignof(T)));
 }
 
-inline void arena_release(Arena* arena) {
-  if (!arena)
-    return;
-  for (Arena* block = arena->current; block;) {
-    Arena*       prev = block->prev;
-    const size_t reserve_size = block->reserve_size;
-    block->~Arena();
-    internal::os_release(block, reserve_size);
-    block = prev;
-  }
-}
-
 inline void arena_pop_to(Arena* arena, size_t pos) {
-  if (!arena)
-    return;
-  const size_t target = std::max(kArenaHeaderSize, pos);
-  Arena*       current = arena->current;
-  while (current->prev && current->base_pos >= target) {
-    Arena*       prev = current->prev;
-    const size_t reserve_size = current->reserve_size;
-    current->~Arena();
-    internal::os_release(current, reserve_size);
-    current = prev;
-  }
-  arena->current = current;
-  const size_t new_pos =
-      std::clamp(target - current->base_pos, kArenaHeaderSize, current->pos);
-  current->pos = new_pos;
+  if (arena)
+    arena->pos = std::clamp(pos, kArenaHeaderSize, arena->pos);
 }
 
 inline void arena_clear(Arena* arena) {

@@ -79,74 +79,7 @@ inline constexpr u64 kPow10u[9] = {
 };
 inline constexpr u64 kMaxExactDoubleInteger = 1ull << 53;
 
-// Fast decimal parse for the values that appear in .osu files. Digit runs
-// are consumed 8 at a time with SWAR conversion instead of byte loops.
-// Values with exponents or more than 18 significant digits fall back to
-// a bounded, locale-independent conversion.
-template <auto Fallback>
-inline const char* parse_double_impl(const char* p, const char* end, f64& out) {
-  const char* start = p;
-  bool        neg = false;
-  if (p < end && (*p == '-' || *p == '+')) {
-    neg = *p == '-';
-    ++p;
-  }
-  u64  mant = 0;
-  i32  digits = 0;
-  i32  frac = 0;
-  bool any = false;
-  for (;;) {
-    u32 run = digit_run8(p);
-    if (run > static_cast<u64>(end - p))
-      run = static_cast<u32>(end - p);
-    if (!run)
-      break;
-    any = true;
-    if (digits + static_cast<i32>(run) > 18) {
-      return Fallback(start, end, out);
-    }
-    mant = mant * kPow10u[run] + swar_parse_u64(p, run);
-    digits += static_cast<i32>(run);
-    p += run;
-    if (run < 8)
-      break;
-  }
-  if (p < end && *p == '.') {
-    ++p;
-    for (;;) {
-      u32 run = digit_run8(p);
-      if (run > static_cast<u64>(end - p))
-        run = static_cast<u32>(end - p);
-      if (!run)
-        break;
-      any = true;
-      if (digits + static_cast<i32>(run) > 18) {
-        return Fallback(start, end, out);
-      }
-      mant = mant * kPow10u[run] + swar_parse_u64(p, run);
-      digits += static_cast<i32>(run);
-      frac += static_cast<i32>(run);
-      p += run;
-      if (run < 8)
-        break;
-    }
-  }
-  if (!any)
-    return Fallback(start, end, out);
-  if (p < end && (*p == 'e' || *p == 'E')) {
-    return Fallback(start, end, out);
-  }
-  // Rounding an inexact integer mantissa before division can move the
-  // result by one ULP. The fallback rounds the original decimal once.
-  if (mant > kMaxExactDoubleInteger)
-    return Fallback(start, end, out);
-  f64 v = static_cast<f64>(mant);
-  if (frac)
-    v /= kPow10[frac];
-  out = neg ? -v : v;
-  return p;
-}
-
+// Locale-independent decimal parse that also accepts a leading '+'.
 inline const char* bounded_double(const char* start,
                                   const char* end,
                                   f64&        value) {
@@ -167,7 +100,7 @@ inline const char* bounded_double(const char* start,
 }
 
 inline const char* parse_double(const char* p, const char* end, f64& out) {
-  const char* q = parse_double_impl<bounded_double>(p, end, out);
+  const char* q = bounded_double(p, end, out);
   return q != p && std::isfinite(out) ? q : p;
 }
 
@@ -201,7 +134,7 @@ inline const char* parse_osu_double(const char* p,
                                     f64&        out,
                                     f64         limit = INT32_MAX) {
   const char* first = skip_numeric_space(p, end);
-  const char* q = parse_double_impl<bounded_double>(first, end, out);
+  const char* q = bounded_double(first, end, out);
   // One absolute-value bound also rejects infinities and NaN.
   if (q == first || !(std::abs(out) <= limit)) [[unlikely]]
     return p;

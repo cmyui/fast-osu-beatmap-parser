@@ -13,6 +13,7 @@
 #include <fosu/stacking.h>
 #include <fosu/types.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstddef>
 #include <cstring>
@@ -33,19 +34,56 @@ inline bool push_span(Arena* arena, std::span<T>& out, size_t capacity) {
   return values;
 }
 
-inline bool prealloc_beatmap_arrays(Arena* arena, Beatmap& beatmap, size_t n) {
-  auto bound = [n](std::string_view shortest) {
-    return n / shortest.size() + 1;
-  };
-  return push_span(arena, beatmap.breaks, bound("2,0,0")) &&
-         push_span(arena, beatmap.combo_colours, bound("Combo1:0,0,0")) &&
+struct ByteCounts {
+  size_t lines = 1;  // line endings + 1
+  size_t pipes = 0;
+  size_t commas = 0;
+};
+
+// One pass with byte-wide counters per lane, flushed before they can
+// overflow, so compilers vectorize it.
+inline ByteCounts count_bytes(std::span<const char> input) {
+  ByteCounts  counts;
+  const char* p = input.data();
+  size_t      n = input.size();
+  while (n >= 32) {
+    u8           lines[32] = {}, pipes[32] = {}, commas[32] = {};
+    const size_t blocks = std::min<size_t>(n / 32, 255);
+    for (size_t b = 0; b < blocks; ++b, p += 32, n -= 32)
+      for (int i = 0; i < 32; ++i) {
+        lines[i] += (p[i] == '\n') | (p[i] == '\r');
+        pipes[i] += p[i] == '|';
+        commas[i] += p[i] == ',';
+      }
+    for (int i = 0; i < 32; ++i) {
+      counts.lines += lines[i];
+      counts.pipes += pipes[i];
+      counts.commas += commas[i];
+    }
+  }
+  for (; n; ++p, --n) {
+    counts.lines += (*p == '\n') | (*p == '\r');
+    counts.pipes += *p == '|';
+    counts.commas += *p == ',';
+  }
+  return counts;
+}
+
+// A record is at least one line, so the line count bounds the per-line
+// arrays. Slider points and segments each start with '|'.
+inline bool prealloc_beatmap_arrays(Arena*                arena,
+                                    Beatmap&              beatmap,
+                                    std::span<const char> input) {
+  const auto [lines, pipes, commas] = count_bytes(input);
+  return push_span(arena, beatmap.breaks, lines) &&
+         push_span(arena, beatmap.combo_colours, lines) &&
          // At least three, for the default presets:
-         push_span(arena, beatmap.velocity_presets, bound("0,") + 2) &&
-         push_span(arena, beatmap.timing_points, bound("0,0")) &&
-         push_span(arena, beatmap.hit_objects, bound("0,0,0,1,0")) &&
-         push_span(arena, beatmap.sliders, bound("0,0,0,2,0,L,0")) &&
-         push_span(arena, beatmap.slider_segments, bound("|L|0:0")) &&
-         push_span(arena, beatmap.slider_points, bound("|0:0"));
+         push_span(arena, beatmap.velocity_presets, commas + 3) &&
+         push_span(arena, beatmap.timing_points, lines) &&
+         push_span(arena, beatmap.hit_objects, lines) &&
+         push_span(arena, beatmap.sliders, lines) &&
+         push_span(arena, beatmap.slider_segments, pipes) &&
+         push_span(arena, beatmap.slider_points, pipes);
 }
 
 }  // namespace internal
@@ -93,8 +131,8 @@ class Parser {
  private:
   Beatmap* parse_input(std::span<const char> input,
                        ParseOptions          opts) noexcept {
-    if (!input.empty() && !internal::prealloc_beatmap_arrays(
-                              result_arena_, beatmap_, input.size())) {
+    if (!input.empty() &&
+        !internal::prealloc_beatmap_arrays(result_arena_, beatmap_, input)) {
       reset_working_state();
       return nullptr;
     }
