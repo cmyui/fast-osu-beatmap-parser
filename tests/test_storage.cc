@@ -347,7 +347,6 @@ static void test_arena_interface() {
   fosu::Arena* arena = fosu::arena_alloc({
       .reserve_size = 64u << 10,
       .commit_size = 4u << 10,
-      .flags = fosu::ArenaFlagChain,
   });
   CHECK(arena != nullptr);
   CHECK(reinterpret_cast<uintptr_t>(arena) % fosu::kCacheLineSize == 0);

@@ -153,8 +153,8 @@ position relative to the head. Native code exposes `Beatmap.slider_events`,
 indexed by slider. Without the option, events are empty. These are path events
 using the decoded slider's timing, not a converted ruleset's nested hitobjects:
 no samples or catch conversion.
-Expansion beyond 1,048,576 events per map raises `MemoryError` rather than
-silently dropping events.
+Expansion beyond 1,048,576 events per map fails the parse with `ValueError`
+rather than silently dropping events.
 
 `apply_stacking=True` applies unmodded osu!standard stacking after parsing,
 including the pre-v6 algorithm. Hit-object x/y and absolute slider control points

@@ -22,10 +22,6 @@ inline constexpr size_t kDefaultArenaCommit = size_t{64} << 10;
 inline constexpr size_t kMaxArenaPush = size_t{1} << 46;
 inline constexpr size_t kMaxArenaAlignment = size_t{1} << 12;
 
-enum ArenaFlags : u32 {
-  ArenaFlagChain = 1u << 0,
-};
-
 struct Arena {
   Arena* prev;
   Arena* current;
@@ -34,13 +30,11 @@ struct Arena {
   size_t commit_size;
   size_t pos;
   size_t committed;
-  u32    flags;
 };
 
 struct ArenaParams {
   size_t reserve_size;
   size_t commit_size;
-  u32    flags;
 };
 
 constexpr size_t align_up(size_t value, size_t alignment) {
@@ -95,7 +89,6 @@ inline Arena* arena_alloc(ArenaParams params) {
       .commit_size = commit_size,
       .pos = kArenaHeaderSize,
       .committed = commit_size,
-      .flags = params.flags,
   };
   arena->current = arena;
   return arena;
@@ -105,7 +98,6 @@ inline Arena* arena_alloc() {
   return arena_alloc({
       .reserve_size = kDefaultArenaReserve,
       .commit_size = kDefaultArenaCommit,
-      .flags = ArenaFlagChain,
   });
 }
 
@@ -125,14 +117,10 @@ inline void* arena_push(Arena* arena, size_t size, size_t alignment) {
   Arena* current = arena->current;
   size_t pos = align_up(current->pos, alignment);
   if (pos > current->reserve_size || size > current->reserve_size - pos) {
-    if (!(current->flags & ArenaFlagChain))
-      return nullptr;
-
     Arena* block = arena_alloc({
         .reserve_size = std::max(current->reserve_size,
                                  kArenaHeaderSize + alignment + size),
         .commit_size = current->commit_size,
-        .flags = current->flags,
     });
     if (!block)
       return nullptr;
