@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <string_view>
 
 static fosu::Beatmap must_parse(fosu::Parser&      parser,
                                 std::string_view   input,

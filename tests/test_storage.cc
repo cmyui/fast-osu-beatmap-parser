@@ -17,14 +17,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
-#include <ios>
 #include <limits>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 
 static void test_reparse_reuses_arena_memory() {
   auto input = std::string("[HitObjects]\n16,32,100,1,0\n32,64,200,1,0\n");
