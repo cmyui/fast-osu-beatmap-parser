@@ -33,7 +33,7 @@ inline bool push_span(Arena* arena, std::span<T>& out, size_t capacity) {
   return values;
 }
 
-inline bool allocate_beatmap_arrays(Arena* arena, Beatmap& beatmap, size_t n) {
+inline bool prealloc_beatmap_arrays(Arena* arena, Beatmap& beatmap, size_t n) {
   auto bound = [n](std::string_view shortest) {
     return n / shortest.size() + 1;
   };
@@ -93,7 +93,7 @@ class Parser {
  private:
   Beatmap* parse_input(std::span<const char> input,
                        ParseOptions          opts) noexcept {
-    if (!input.empty() && !internal::allocate_beatmap_arrays(
+    if (!input.empty() && !internal::prealloc_beatmap_arrays(
                               result_arena_, beatmap_, input.size())) {
       reset_working_state();
       return nullptr;
