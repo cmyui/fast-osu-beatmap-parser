@@ -2,6 +2,7 @@
 #include <fosu/beatmap.h>
 #include <fosu/bindings/records.h>
 #include <fosu/compiler.h>
+#include <fosu/engine/parsing_engine.h>
 #include <fosu/engine/runtime/loader.h>
 #include <fosu/enums.h>
 #include <fosu/mods.h>
