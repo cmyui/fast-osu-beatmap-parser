@@ -69,7 +69,7 @@ class Parser {
   }
 
   Beatmap* parse(std::string_view input, ParseOptions opts = {}) noexcept {
-    reset();
+    reset_working_state();
     if (invalid_options(opts))
       return nullptr;
     char* buffer = reserve_input(input.size());
@@ -81,7 +81,7 @@ class Parser {
   }
 
   Beatmap* parse_file(const char* path, ParseOptions opts = {}) noexcept {
-    reset();
+    reset_working_state();
     if (invalid_options(opts))
       return nullptr;
     const std::span<const char> input = load_file(path);
@@ -95,12 +95,12 @@ class Parser {
                        ParseOptions          opts) noexcept {
     if (!input.empty() && !internal::allocate_beatmap_arrays(
                               result_arena_, beatmap_, input.size())) {
-      reset();
+      reset_working_state();
       return nullptr;
     }
     engine_->parse_document(input, beatmap_, opts);
     if (!post_process(opts)) {
-      reset();
+      reset_working_state();
       return nullptr;
     }
     return &beatmap_;
@@ -190,7 +190,7 @@ class Parser {
     return buffer;
   }
 
-  void reset() noexcept {
+  void reset_working_state() noexcept {
     arena_clear(result_arena_);
     arena_clear(scratch_arena_);
     beatmap_ = {};
