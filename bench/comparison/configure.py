@@ -34,6 +34,13 @@ for backend in ("avx2", "scalar"):
         ("bytes", "file", "visit"),
         {"FOSU_BACKEND": backend},
     )
+    add(
+        f"fosu-python-{backend}-reused",
+        source,
+        [*python, "fosu"],
+        ("bytes", "file", "visit"),
+        {"FOSU_BACKEND": backend, "FOSU_BENCH_PARSER": "reused"},
+    )
 add("slider", "0.8.4", [*python, "slider"], ("bytes", "file", "visit"))
 variants[-1]["modes"] = [0, 1, 2]  # Measured mania corpus support is incomplete.
 add("osupyparser", "1.0.7", [*python, "osupyparser"], ("file",))
@@ -62,6 +69,7 @@ for name, version in (("osu-parser", "0.3.3"), ("osu-parsers", "4.1.7")):
     )
 for backend in ("avx2", "scalar"):
     add(f"fosu-cpp-{backend}", source, [build / f"native-{backend}"])
+    add(f"fosu-cpp-{backend}-reused", source, [build / f"native-{backend}", "reused"])
 (build / "variants.json").write_text(
     json.dumps(
         {

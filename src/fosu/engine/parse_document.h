@@ -15,6 +15,7 @@
 #include <fosu/engine/sections/hit_objects.h>
 #include <fosu/engine/sections/metadata.h>
 #include <fosu/engine/sections/timing_points.h>
+#include <fosu/format.h>
 #include <fosu/parse_options.h>
 #include <fosu/types.h>
 
@@ -50,23 +51,16 @@ inline const char* parse_preamble(Beatmap&    beatmap,
   });
 }
 
-// Compiled once per engine ISA. Each section consumes its body and returns
-// the next header or EOF; framing and scalar fallbacks stay inside the section.
-// Input has kBufferPadding readable zero bytes; string views refer into it.
-inline void parse_document(std::span<const char> input,
-                           Beatmap&              beatmap,
-                           ParseOptions          options) noexcept {
-  size_t velocity_preset_count = 0;
-  bool   velocity_presets_seen = false;
-  if (input.empty()) {
-    if ((options.sections & kSectionEditor) &&
-        beatmap.velocity_presets.size() >= 3)
-      set_default_velocity_presets(beatmap);
-    return;
-  }
-  const char*        end = input.data() + input.size();
-  const char*        p = parse_preamble(beatmap, input.data(), end);
-  const i32          time_offset = beatmap.format_version < 5 ? 24 : 0;
+// Parses every section after the preamble, with the map's format rules fixed
+// at compile time. Each section consumes its body and returns the next header
+// or EOF; framing and scalar fallbacks stay inside the section.
+template <Format F>
+void parse_sections(const char*  p,
+                    const char*  end,
+                    Beatmap&     beatmap,
+                    ParseOptions options,
+                    size_t&      velocity_preset_count,
+                    bool&        velocity_presets_seen) {
   size_t             break_count = 0, colour_count = 0, timing_point_count = 0;
   HitObjectCounts    counts;
   std::optional<f64> approach_rate;
@@ -87,11 +81,11 @@ inline void parse_document(std::span<const char> input,
 
     switch (section) {
       case Section::General:
-        p = parse_general_section(beatmap, p, end);
+        p = parse_general_section<F>(beatmap, p, end);
         break;
       case Section::Editor:
-        p = parse_editor_section(beatmap, velocity_preset_count,
-                                 velocity_presets_seen, p, end);
+        p = parse_editor_section<F>(beatmap, velocity_preset_count,
+                                    velocity_presets_seen, p, end);
         break;
       case Section::Metadata:
         p = parse_metadata_section(beatmap, p, end);
@@ -100,17 +94,16 @@ inline void parse_document(std::span<const char> input,
         p = parse_difficulty_section(beatmap, approach_rate, p, end);
         break;
       case Section::Events:
-        p = parse_events_section(beatmap, break_count, p, end, time_offset);
+        p = parse_events_section<F>(beatmap, break_count, p, end);
         break;
       case Section::TimingPoints:
-        p = parse_timing_points_section(beatmap, timing_point_count, p, end,
-                                        time_offset);
+        p = parse_timing_points_section<F>(beatmap, timing_point_count, p, end);
         break;
       case Section::Colours:
         p = parse_colours_section(beatmap, colour_count, p, end);
         break;
       case Section::HitObjects:
-        p = parse_hitobjects_section(beatmap, counts, p, end, time_offset);
+        p = parse_hitobjects_section<F>(beatmap, counts, p, end);
         break;
       case Section::None:
       case Section::Unknown:
@@ -137,6 +130,28 @@ inline void parse_document(std::span<const char> input,
   beatmap.slider_points = beatmap.slider_points.first(counts.slider_points);
   beatmap.velocity_presets =
       beatmap.velocity_presets.first(velocity_preset_count);
+}
+
+// Compiled once per engine ISA. The format version is read first and selects
+// the parse for that format.
+// Input has kBufferPadding readable zero bytes; string views refer into it.
+inline void parse_document(std::span<const char> input,
+                           Beatmap&              beatmap,
+                           ParseOptions          options) noexcept {
+  size_t velocity_preset_count = 0;
+  bool   velocity_presets_seen = false;
+  if (input.empty()) {
+    if ((options.sections & kSectionEditor) &&
+        beatmap.velocity_presets.size() >= 3)
+      set_default_velocity_presets(beatmap);
+    return;
+  }
+  const char* end = input.data() + input.size();
+  const char* p = parse_preamble(beatmap, input.data(), end);
+  with_format(beatmap.format_version, [&]<Format F>() {
+    parse_sections<F>(p, end, beatmap, options, velocity_preset_count,
+                      velocity_presets_seen);
+  });
 }
 
 // The ISA this code was compiled for, not a runtime choice based on the host

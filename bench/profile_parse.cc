@@ -4,9 +4,6 @@
 // parse, including destruction) or reuse (one retained result).
 //
 //   profile_parse corpus limit rounds fresh|reuse [sections-mask]
-// Configure with FOSU_ARENA_TELEMETRY=ON to report result/scratch high-water
-// marks.
-#include <fosu/io.h>
 #include <fosu/parse_options.h>
 #include <fosu/parser.h>
 #include <fosu/types.h>
@@ -18,41 +15,20 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <ios>
+#include <iterator>
 #include <ratio>
 #include <string>
 #include <sys/resource.h>
 #include <vector>
 
-#if defined(FOSU_ARENA_TELEMETRY)
-struct ArenaMetricSummary {
-  size_t peak_used_bytes = 0;
-  size_t peak_committed_bytes = 0;
-  size_t commit_calls = 0;
-  size_t chained_blocks = 0;
-
-  void observe(fosu::ArenaMetrics metrics) {
-    peak_used_bytes = std::max(peak_used_bytes, metrics.peak_used_bytes);
-    peak_committed_bytes =
-        std::max(peak_committed_bytes, metrics.peak_committed_bytes);
-    commit_calls += metrics.commit_calls;
-    chained_blocks += metrics.chained_blocks;
-  }
-};
-
-static void reset_arena_metrics(fosu::Parser& parser) {
-  const auto storage = fosu::internal::parser_storage(parser);
-  fosu::arena_reset_metrics(storage.result_arena);
-  fosu::arena_reset_metrics(storage.scratch_arena);
+// Benchmarks parse resident bytes, so file contents are read before timing.
+static bool read_file(const char* path, std::string& out) {
+  std::ifstream file(path, std::ios::binary);
+  out.assign(std::istreambuf_iterator<char>(file), {});
+  return !file.bad() && file.is_open();
 }
-
-static void observe_arena_metrics(fosu::Parser&       parser,
-                                  ArenaMetricSummary& result,
-                                  ArenaMetricSummary& scratch) {
-  const auto storage = fosu::internal::parser_storage(parser);
-  result.observe(fosu::arena_metrics(storage.result_arena));
-  scratch.observe(fosu::arena_metrics(storage.scratch_arena));
-}
-#endif
 
 static long faults() {
   rusage ru;
@@ -83,24 +59,17 @@ int main(int argc, char** argv) {
   const uint32_t sections =
       argc > 5 ? static_cast<uint32_t>(strtoul(argv[5], nullptr, 0))
                : fosu::kAllSections;
-  std::vector<fosu::FileBuffer> inputs;
-  size_t                        bytes = 0;
+  std::vector<std::string> inputs(limit);
+  size_t                   bytes = 0;
   for (size_t i = 0; i < limit; ++i) {
-    inputs.push_back(
-        fosu::read_file_padded(files[i * files.size() / limit].c_str()));
-    if (!inputs.back())
+    if (!read_file(files[i * files.size() / limit].c_str(), inputs[i]))
       return 1;
-    bytes += inputs.back().size;
+    bytes += inputs[i].size();
   }
   fosu::Parser retained;
-#if defined(FOSU_ARENA_TELEMETRY)
-  ArenaMetricSummary result_metrics;
-  ArenaMetricSummary scratch_metrics;
-  reset_arena_metrics(retained);
-#endif
-  size_t objects = 0;
-  double best = 1e30, total = 0;
-  long   fault_total = 0;
+  size_t       objects = 0;
+  double       best = 1e30, total = 0;
+  long         fault_total = 0;
   for (fosu::i32 r = 0; r < rounds; ++r) {
     const long f0 = faults();
     const auto t0 = std::chrono::steady_clock::now();
@@ -109,23 +78,17 @@ int main(int argc, char** argv) {
         auto parsed = retained.parse(in, {.sections = sections});
         if (!parsed)
           return 1;
-        const auto& beatmap = *parsed.value();
+        const auto& beatmap = *parsed;
         __asm__ volatile("" : : "g"(&beatmap) : "memory");
         objects += beatmap.hit_objects.size();
       } else {
         fosu::Parser parser;
-#if defined(FOSU_ARENA_TELEMETRY)
-        reset_arena_metrics(parser);
-#endif
-        auto parsed = parser.parse(in, {.sections = sections});
+        auto         parsed = parser.parse(in, {.sections = sections});
         if (!parsed)
           return 1;
-        const auto& beatmap = *parsed.value();
+        const auto& beatmap = *parsed;
         __asm__ volatile("" : : "g"(&beatmap) : "memory");
         objects += beatmap.hit_objects.size();
-#if defined(FOSU_ARENA_TELEMETRY)
-        observe_arena_metrics(parser, result_metrics, scratch_metrics);
-#endif
       }
     }
     const double us = std::chrono::duration<double, std::micro>(
@@ -142,18 +105,5 @@ int main(int argc, char** argv) {
       limit, bytes, rounds, reuse ? "reuse" : "fresh", sections, best,
       best / limit, bytes / best, total / rounds, objects,
       (double)fault_total / rounds);
-#if defined(FOSU_ARENA_TELEMETRY)
-  if (reuse)
-    observe_arena_metrics(retained, result_metrics, scratch_metrics);
-  auto print_metrics = [](const char* name, const ArenaMetricSummary& metrics) {
-    printf(
-        "%s arena: peak used %zu bytes, peak committed %zu bytes, commits %zu, "
-        "chained blocks %zu\n",
-        name, metrics.peak_used_bytes, metrics.peak_committed_bytes,
-        metrics.commit_calls, metrics.chained_blocks);
-  };
-  print_metrics("result", result_metrics);
-  print_metrics("scratch", scratch_metrics);
-#endif
   return 0;
 }

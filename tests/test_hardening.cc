@@ -2,29 +2,30 @@
 #include <fosu/engine/hit_objects/samples.h>
 #include <fosu/engine/parse_document.h>
 #include <fosu/engine/parsing/numbers.h>
-#include <fosu/io.h>
 #include <fosu/parse_options.h>
 #include <fosu/parser.h>
 #include <fosu/types.h>
 #include <tests/support/canonical_dump.h>
 #include <tests/support/scalar_engine.h>
+#include <tests/support/test.h>
 
 #include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <string_view>
 
-static fosu::Beatmap must_parse(fosu::Parser&           parser,
-                                const fosu::FileBuffer& input,
-                                fosu::ParseOptions      options = {}) {
+static fosu::Beatmap must_parse(fosu::Parser&      parser,
+                                std::string_view   input,
+                                fosu::ParseOptions options = {}) {
   auto parsed = parser.parse(input, options);
   assert(parsed);
-  return *parsed.value();
+  return *parsed;
 }
 
 static void check(const std::string& text) {
-  auto         input = fosu::make_padded(text);
+  auto         input = std::string(text);
   fosu::Parser scalar_parser(fosu_test::scalar_engine());
   fosu::Parser simd_parser;
   auto         scalar = must_parse(scalar_parser, input);
@@ -37,8 +38,7 @@ static void check(const std::string& text) {
   assert(a == b);
 }
 
-int main() {
-  fosu::Parser parser;
+static void test_short_sample_shape() {
   // The short sample shortcut must reject every non-digit/separator byte,
   // including high-bit bytes. Full parsing may accept other spellings via
   // its bounded fallback; all representations must still agree.
@@ -46,13 +46,16 @@ int main() {
     for (unsigned byte = 0; byte < 256; ++byte) {
       std::string sample = "0:1:2:3:";
       sample[pos] = static_cast<char>(byte);
-      auto       padded = fosu::make_padded(sample);
+      const auto padded = fosu_test::padded(sample);
       const bool exact_shape =
           pos % 2 ? byte == ':' : byte >= '0' && byte <= '9';
-      assert(fosu::internal::short_sample(padded.data.get()) == exact_shape);
+      assert(fosu::internal::short_sample(padded.data()) == exact_shape);
       check("[HitObjects]\n1,2,3,1,0," + sample);
     }
   }
+}
+
+static void test_circle_type_precedence() {
   // Circle precedence applies even when slider/spinner/hold bits are set.
   for (fosu::i32 type : {1, 3, 9, 129, 255}) {
     const std::string line =
@@ -60,20 +63,31 @@ int main() {
     for (const std::string ending : {"", "\n", "\r\n"})
       check(line + ending);
   }
-  auto empty = parser.parse(nullptr, 0);
-  assert(empty && empty.value()->hit_objects.empty());
-  assert(must_parse(parser, fosu::make_padded({})).hit_objects.empty());
-  auto embedded = fosu::make_padded(
+}
+
+static void test_empty_input() {
+  fosu::Parser parser;
+  auto         empty = parser.parse("");
+  assert(empty && empty->hit_objects.empty());
+  assert(must_parse(parser, "").hit_objects.empty());
+}
+
+static void test_section_header_inside_value() {
+  fosu::Parser parser;
+  auto         embedded = std::string(
       "[Metadata]\nTitle:[HitObjects]\n1,2,3,1,0\n[HitObjects]\n1,2,4,1,0\n");
   auto selected =
       must_parse(parser, embedded, {.sections = fosu::kSectionHitObjects});
   assert(selected.hit_objects.size() == 1 && selected.hit_objects[0].time == 4);
+}
+
+static void test_combo_state_across_malformed_lines() {
   // Only accepted objects carry combo state across malformed lines and
   // repeated HitObjects sections, including after a scalar-prefix spinner.
   for (bool simd : {false, true}) {
     fosu::Parser combo_parser(simd ? fosu::internal::compiled_engine
                                    : fosu_test::scalar_engine());
-    auto         input = fosu::make_padded(
+    auto         input = std::string(
         "[HitObjects]\n256,192,100,8,0,150\n0,0,160,8,0,bad\n"
         "[Metadata]\nTitle:gap\n[HitObjects]\n"
         "100,100,200,1,0\n101,100,201,1,0\n"
@@ -85,17 +99,27 @@ int main() {
     assert(!map.hit_objects[2].new_combo);
     assert(map.hit_objects[4].new_combo);
   }
-  auto point_input =
-      fosu::make_padded("[HitObjects]\n1,2,3,2,0,B|1:2.5|3:4e1,1,10\n");
+}
+
+static void test_slider_point_numbers() {
+  fosu::Parser parser;
+  auto         point_input =
+      std::string("[HitObjects]\n1,2,3,2,0,B|1:2.5|3:4e1,1,10\n");
   auto points = must_parse(parser, point_input);
   assert(points.sliders.size() == 1 && points.slider_points.size() == 2);
   assert(points.slider_points[0].y == 2 && points.slider_points[1].y == 40);
+}
+
+static void test_comments_and_blank_lines() {
   check(
       "[TimingPoints]\n\r\r// comment\n0,500\n[HitObjects]\n\r\r// "
       "comment\n1,2,3,1,0");
   check("[Events]\n\n \n\t// comment\n");
   check("[HitObjects]\n0,2,3,3,0\r,");
   check("[HitObjects]\n1,2,3,2,0,B|1:2\v|3:4,1,10");
+}
+
+static void test_slider_tail_shapes() {
   // Slider tails: editor shapes, fields split at commas, spaces, trailing
   // commas, wide repeats, long tails and sample text with further commas
   // must agree between the scalar, mask-indexed and sequential parsers.
@@ -133,29 +157,38 @@ int main() {
           "\n1,2,3,1,0\n");
     check(std::string("[HitObjects]\n256,192,1000,2,0,") + tail + "\r\n");
   }
-  {
-    auto input = fosu::make_padded(
-        "[HitObjects]\n1,2,3,2,0,L|1:2,1,100,0|0,0:0|0:0,0:0:0:0:a,b\n");
-    auto m = must_parse(parser, input);
-    assert(m.hit_objects.size() == 1 &&
-           m.hit_objects[0].hit_sample == "0:0:0:0:a");
-  }
+}
+
+static void test_slider_sample_with_commas() {
+  fosu::Parser parser;
+  auto         input = std::string(
+      "[HitObjects]\n1,2,3,2,0,L|1:2,1,100,0|0,0:0|0:0,0:0:0:0:a,b\n");
+  auto m = must_parse(parser, input);
+  assert(m.hit_objects.size() == 1 &&
+         m.hit_objects[0].hit_sample == "0:0:0:0:a");
+}
+
+static void test_near_integer_decimals() {
+  fosu::Parser parser;
   for (const std::string decimal :
        {"111.99999999999987", "999.9999999999999", "99999.9999999999999"}) {
     const std::string text =
         "[TimingPoints]\n0,100.0000000000000,4,2,1,100,1,0\n1," + decimal +
         ",4,2,1,100,1,0\n[HitObjects]\n1,2,3,2,0,B|1:2,1," + decimal;
     check(text);
-    auto         input = fosu::make_padded(text);
+    auto         input = std::string(text);
     auto         map = must_parse(parser, input);
     const double expected = strtod(decimal.c_str(), nullptr);
     assert(map.timing_points[1].beat_length == expected);
     assert(map.sliders[0].length == expected);
   }
+}
+
+static void test_unusual_numeric_values() {
   for (bool simd : {false, true}) {
     fosu::Parser parser(simd ? fosu::internal::compiled_engine
                              : fosu_test::scalar_engine());
-    auto         input = fosu::make_padded(
+    auto         input = std::string(
         "[Metadata]\nTitle:real\nTitlX:wrong\nBeatmapID:-9223372036854775808\n"
         "[MetadataFake]\nTitle:wrong\n[Difficulty]\nApproachRate:1e309\n"
         "[TimingPoints]\n0,500\n1,NaN,4,2,1,100,0,0\n2,NaN,4,2,1,100,1,0\n"
@@ -175,6 +208,9 @@ int main() {
     assert(m.breaks.size() == 1 && m.breaks[0].start == 1.25 &&
            m.breaks[0].end == 9.75);
   }
+}
+
+static void test_long_digit_truncations() {
   // Long digit runs used to execute shifts by >= the operand width in SIMD
   // slider parsing. Vary every truncation point, including EOF without LF.
   for (const std::string& line :
@@ -186,17 +222,40 @@ int main() {
     for (size_t size = 0; size <= line.size(); ++size)
       check(line.substr(0, size));
   }
+}
+
+static void test_integer_overflow_beatmap_id() {
   for (const std::string number :
        {"9223372036854775807", "9223372036854775808", "18446744073709551615",
         "99999999999999999999999999999"}) {
     check("[Metadata]\nBeatmapID:" + number);
     check("[Metadata]\nBeatmapID:-" + number);
   }
+}
+
+static void test_parse_double_respects_end() {
   // Explicit logical end must bound the slow numeric fallback too.
-  auto        input = fosu::make_padded("1.234567890123456789e2junk");
+  const auto  input = fosu_test::padded("1.234567890123456789e2junk");
   double      value;
-  const char* start = input.data.get();
+  const char* start = input.data();
   assert(fosu::internal::parse_double(start, start + 20, value) <= start + 20);
+}
+
+int main() {
+  test_short_sample_shape();
+  test_circle_type_precedence();
+  test_empty_input();
+  test_section_header_inside_value();
+  test_combo_state_across_malformed_lines();
+  test_slider_point_numbers();
+  test_comments_and_blank_lines();
+  test_slider_tail_shapes();
+  test_slider_sample_with_commas();
+  test_near_integer_decimals();
+  test_unusual_numeric_values();
+  test_long_digit_truncations();
+  test_integer_overflow_beatmap_id();
+  test_parse_double_respects_end();
   puts(
       "Hardening: numeric boundaries, fractional times, NaN, framing and path "
       "parity "

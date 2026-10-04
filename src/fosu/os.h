@@ -12,20 +12,9 @@
 #include <windows.h>
 #else
 #include <sys/mman.h>
-#include <unistd.h>
 #endif
 
 namespace fosu::internal {
-
-inline size_t os_page_size() {
-#if defined(_WIN32)
-  SYSTEM_INFO info;
-  GetSystemInfo(&info);
-  return info.dwPageSize;
-#else
-  return static_cast<size_t>(sysconf(_SC_PAGESIZE));
-#endif
-}
 
 inline void* os_reserve(size_t size) {
 #if defined(_WIN32)

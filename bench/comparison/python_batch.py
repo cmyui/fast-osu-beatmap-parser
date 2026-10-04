@@ -28,6 +28,8 @@ def main():
     python_names = {
         "fosu-python-avx2",
         "fosu-python-scalar",
+        "fosu-python-avx2-reused",
+        "fosu-python-scalar-reused",
         "slider",
         "osupyparser",
     }

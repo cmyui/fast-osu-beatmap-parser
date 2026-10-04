@@ -1,5 +1,7 @@
 #pragma once
 
+#include "fosu/format.h"
+
 #include <fosu/beatmap.h>
 #include <fosu/engine/parsing/lines.h>
 #include <fosu/engine/primitives/byte_scan.h>
@@ -7,100 +9,56 @@
 #include <fosu/engine/timing_points/point.h>
 #include <fosu/types.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <string_view>
 
 namespace fosu::internal {
 
-#if FOSU_SIMD
-// Each point is parsed into a local value and then copied into the beatmap
-// arena.
-inline const char* parse_timing_points_section_simd(Beatmap&    beatmap,
-                                                    size_t&     point_count,
-                                                    const char* p,
-                                                    const char* file_end,
-                                                    i32         time_offset) {
-  const ByteVector comma_value = broadcast_byte<','>();
-  u32              malformed = 0;
-
+template <Format F>
+const char* parse_timing_points_section(Beatmap&    beatmap,
+                                        size_t&     point_count,
+                                        const char* p,
+                                        const char* file_end) {
+  u32 time_digits = 1;
   while (p < file_end) {
-    const Bytes32 first = load32(p);
-    const Bytes32 second = load32(p + 32);
-    const u64     endings = line_end_mask32(first) |
-                            static_cast<u64>(line_end_mask32(second)) << 32;
-    const char*   line_end =
-        endings ? p + trailing_zeros(endings) : find_line_end(p + 64, file_end);
-    const char* next_line = after_line_ending(line_end, file_end);
-    const auto  length = static_cast<size_t>(line_end - p);
-    const u64   line_mask = length >= 64 ? ~0ull : ((1ull << length) - 1);
-    const u64   commas =
-        (equal_mask32(first, comma_value) |
-         static_cast<u64>(equal_mask32(second, comma_value)) << 32) &
-        line_mask;
-
-    if (length - 15 <= 64 - 15) [[likely]] {
-      const u64 nondigits = (nondigit_mask32(first) |
-                             static_cast<u64>(nondigit_mask32(second)) << 32) &
-                            line_mask;
-      if (const auto point = try_parse_timing_point_fast_masked(
-              commas, nondigits, p, length, time_offset)) {
-        beatmap.timing_points[point_count++] = *point;
-        p = next_line;
-        continue;
-      }
+    TimingPoint point;
+#if FOSU_SIMD
+    // The next row's address comes from one load, not from this row's fields.
+    // A common row has 15 to 40 bytes, so its ending is in p[8, 40).
+    const char* next_line = after_line_ending(
+        std::min(p + 8 + first_line_end32(load32(p + 8)), file_end), file_end);
+    if (parse_common_timing_point<F>(p, file_end, time_digits, point)) {
+      beatmap.timing_points[point_count++] = point;
+      p = next_line;
+      continue;
     }
-
-    const char c = *p;
-    if (c == '\r' || c == '\n') {
+#else
+    if (const char* next =
+            parse_common_timing_point<F>(p, file_end, time_digits, point)) {
+      beatmap.timing_points[point_count++] = point;
+      p = next;
+      continue;
+    }
+#endif
+    // Blank lines, comments, a section header, or another spelling.
+    if (*p == '\r' || *p == '\n') {
       ++p;
       continue;
     }
-    if (c == '[' && section_header_line(p, line_end))
+    const auto  line = read_line(p, file_end);
+    const char* line_end = p + line.text.size();
+    if (section_header_line(p, line_end))
       break;
     if (!ignored_line(p, line_end)) {
-      const auto point =
-          length <= 64
-              ? parse_timing_point<true>(p, line_end, commas, time_offset)
-              : parse_timing_point(p, line_end, 0, time_offset);
-      if (point) {
-        beatmap.timing_points[point_count++] = *point;
-      } else [[unlikely]]
-        ++malformed;
+      if (const auto general = parse_timing_point<F>(p, line_end))
+        beatmap.timing_points[point_count++] = *general;
+      else [[unlikely]]
+        ++beatmap.stats.malformed_lines;
     }
-    p = next_line;
+    p = line.next;
   }
-
-  beatmap.stats.malformed_lines += malformed;
   return p;
-}
-#endif
-
-inline const char* parse_timing_points_section_scalar(Beatmap&    beatmap,
-                                                      size_t&     point_count,
-                                                      const char* p,
-                                                      const char* file_end,
-                                                      i32         time_offset) {
-  return for_each_section_line(p, file_end, [&](std::string_view line) {
-    if (const auto point = parse_timing_point(
-            line.data(), line.data() + line.size(), 0, time_offset)) {
-      beatmap.timing_points[point_count++] = *point;
-    } else
-      ++beatmap.stats.malformed_lines;
-  });
-}
-
-inline const char* parse_timing_points_section(Beatmap&    beatmap,
-                                               size_t&     point_count,
-                                               const char* p,
-                                               const char* file_end,
-                                               i32         time_offset = 0) {
-#if FOSU_SIMD
-  return parse_timing_points_section_simd(beatmap, point_count, p, file_end,
-                                          time_offset);
-#else
-  return parse_timing_points_section_scalar(beatmap, point_count, p, file_end,
-                                            time_offset);
-#endif
 }
 
 }  // namespace fosu::internal

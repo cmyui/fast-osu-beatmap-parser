@@ -79,74 +79,38 @@ inline constexpr u64 kPow10u[9] = {
 };
 inline constexpr u64 kMaxExactDoubleInteger = 1ull << 53;
 
-// Fast decimal parse for the values that appear in .osu files. Digit runs
-// are consumed 8 at a time with SWAR conversion instead of byte loops.
-// Values with exponents or more than 18 significant digits fall back to
-// a bounded, locale-independent conversion.
-template <auto Fallback>
-inline const char* parse_double_impl(const char* p, const char* end, f64& out) {
-  const char* start = p;
-  bool        neg = false;
-  if (p < end && (*p == '-' || *p == '+')) {
-    neg = *p == '-';
-    ++p;
+// A decimal with at most 8 integer and 17 total digits whose value is below
+// 2^53. The digits form an exact integer and 10^fraction is an exact double, so
+// one IEEE division rounds exactly as a full decimal conversion would.
+inline const char* parse_short_decimal(const char* p, f64& out) {
+  const bool negative = *p == '-';
+  p += negative;
+  const u32 integer_digits = digit_run8(p);
+  if (integer_digits - 1 > 7)
+    return nullptr;
+  u64 mantissa = swar_parse_u64(p, integer_digits);
+  p += integer_digits;
+  u32 fraction_digits = 0;
+  if (*p == '.') {
+    const u32 first = digit_run8(++p);
+    const u32 second = first == 8 ? digit_run8(p + 8) : 0;
+    fraction_digits = first + second;
+    if (!first || integer_digits + fraction_digits > 17)
+      return nullptr;
+    mantissa = mantissa * kPow10u[first] + swar_parse_u64(p, first);
+    if (second)
+      mantissa = mantissa * kPow10u[second] + swar_parse_u64(p + 8, second);
+    p += fraction_digits;
   }
-  u64  mant = 0;
-  i32  digits = 0;
-  i32  frac = 0;
-  bool any = false;
-  for (;;) {
-    u32 run = digit_run8(p);
-    if (run > static_cast<u64>(end - p))
-      run = static_cast<u32>(end - p);
-    if (!run)
-      break;
-    any = true;
-    if (digits + static_cast<i32>(run) > 18) {
-      return Fallback(start, end, out);
-    }
-    mant = mant * kPow10u[run] + swar_parse_u64(p, run);
-    digits += static_cast<i32>(run);
-    p += run;
-    if (run < 8)
-      break;
-  }
-  if (p < end && *p == '.') {
-    ++p;
-    for (;;) {
-      u32 run = digit_run8(p);
-      if (run > static_cast<u64>(end - p))
-        run = static_cast<u32>(end - p);
-      if (!run)
-        break;
-      any = true;
-      if (digits + static_cast<i32>(run) > 18) {
-        return Fallback(start, end, out);
-      }
-      mant = mant * kPow10u[run] + swar_parse_u64(p, run);
-      digits += static_cast<i32>(run);
-      frac += static_cast<i32>(run);
-      p += run;
-      if (run < 8)
-        break;
-    }
-  }
-  if (!any)
-    return Fallback(start, end, out);
-  if (p < end && (*p == 'e' || *p == 'E')) {
-    return Fallback(start, end, out);
-  }
-  // Rounding an inexact integer mantissa before division can move the
-  // result by one ULP. The fallback rounds the original decimal once.
-  if (mant > kMaxExactDoubleInteger)
-    return Fallback(start, end, out);
-  f64 v = static_cast<f64>(mant);
-  if (frac)
-    v /= kPow10[frac];
-  out = neg ? -v : v;
+  // A run of eight digits may continue past what was read.
+  if (is_digit(*p) || mantissa > kMaxExactDoubleInteger)
+    return nullptr;
+  const f64 magnitude = static_cast<f64>(mantissa) / kPow10[fraction_digits];
+  out = negative ? -magnitude : magnitude;
   return p;
 }
 
+// Locale-independent decimal parse that also accepts a leading '+'.
 inline const char* bounded_double(const char* start,
                                   const char* end,
                                   f64&        value) {
@@ -158,6 +122,14 @@ inline const char* bounded_double(const char* start,
     if (p < end && (*p == '+' || *p == '-'))
       return start;
   }
+  // Most values are short decimals; anything longer, exponents, and digits
+  // running past `end` take the full conversion.
+  f64 short_value;
+  if (const char* q = parse_short_decimal(p, short_value);
+      q && q <= end && (q == end || (*q != 'e' && *q != 'E'))) {
+    value = short_value;
+    return q;
+  }
   const auto r = fast_float::from_chars(p, end, value);
   // .NET's numeric parser accepts underflow rounded to signed zero.
   return r.ec == std::errc() ||
@@ -167,7 +139,7 @@ inline const char* bounded_double(const char* start,
 }
 
 inline const char* parse_double(const char* p, const char* end, f64& out) {
-  const char* q = parse_double_impl<bounded_double>(p, end, out);
+  const char* q = bounded_double(p, end, out);
   return q != p && std::isfinite(out) ? q : p;
 }
 
@@ -201,7 +173,7 @@ inline const char* parse_osu_double(const char* p,
                                     f64&        out,
                                     f64         limit = INT32_MAX) {
   const char* first = skip_numeric_space(p, end);
-  const char* q = parse_double_impl<bounded_double>(first, end, out);
+  const char* q = bounded_double(first, end, out);
   // One absolute-value bound also rejects infinities and NaN.
   if (q == first || !(std::abs(out) <= limit)) [[unlikely]]
     return p;

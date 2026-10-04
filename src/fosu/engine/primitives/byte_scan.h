@@ -23,6 +23,12 @@ inline u32 first_line_end32(Bytes32 bytes) {
     return first;
   return 16 + first_line_end16(bytes.val[1]);
 }
+#elif FOSU_SIMD
+// Offset of the first line ending in 32 bytes, or 32 without one.
+inline u32 first_line_end32(Bytes32 bytes) {
+  const u32 endings = line_end_mask32(bytes);
+  return endings ? static_cast<u32>(trailing_zeros(endings)) : 32;
+}
 #endif
 
 // Input belongs to the parser's padded buffer. Matches are bounded by end,

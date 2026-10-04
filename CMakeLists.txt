@@ -7,7 +7,7 @@ if(NOT CMAKE_HOST_WIN32)
   set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g" CACHE STRING "Debug C++ flags")
 endif()
 
-project(fosu VERSION 0.5.2 LANGUAGES C CXX)
+project(fosu VERSION 0.6.0 LANGUAGES C CXX)
 include(CTest)
 include(GNUInstallDirs)
 
@@ -22,7 +22,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(FOSU_ISA auto CACHE STRING "Native targets: auto, scalar, avx2, neon")
 set_property(CACHE FOSU_ISA PROPERTY STRINGS auto scalar avx2 neon)
 option(FOSU_SANITIZE "Enable address, undefined and float-cast sanitizers" OFF)
-option(FOSU_ARENA_TELEMETRY "Instrument arena use in the profiling driver" OFF)
 set(_python OFF)
 if(SKBUILD)
   set(_python ON)
@@ -85,6 +84,7 @@ target_sources(fosu_headers INTERFACE FILE_SET HEADERS BASE_DIRS src FILES
   src/fosu/beatmap_header.h
   src/fosu/compiler.h
   src/fosu/enums.h
+  src/fosu/format.h
   src/fosu/io.h
   src/fosu/legacy_rules.h
   src/fosu/mods.h
@@ -97,7 +97,6 @@ target_sources(fosu_headers INTERFACE FILE_SET HEADERS BASE_DIRS src FILES
   src/fosu/os.h
   src/fosu/parse_options.h
   src/fosu/parser.h
-  src/fosu/result.h
   src/fosu/runtime.h
   src/fosu/types.h
   src/fosu/engine/hit_objects/common_fields.h
@@ -212,8 +211,7 @@ function(fosu_dispatch target product)
   target_link_libraries(${target} PRIVATE ${CMAKE_DL_LIBS})
   target_compile_definitions(${target} PRIVATE
     FOSU_DEFAULT_BACKEND="${FOSU_ISA}"
-    FOSU_ENGINE_SUFFIX="${CMAKE_SHARED_LIBRARY_SUFFIX}"
-    FOSU_MANAGED_ARENA_CLEANUP)
+    FOSU_ENGINE_SUFFIX="${CMAKE_SHARED_LIBRARY_SUFFIX}")
   set_target_properties(${target} PROPERTIES
     CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
   set(variant "")

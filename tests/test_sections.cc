@@ -1,10 +1,11 @@
+#include "fosu/format.h"
+
 #include <fosu/beatmap.h>
 #include <fosu/engine/parse_document.h>
 #include <fosu/engine/primitives/byte_scan.h>
 #include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/engine/timing_points/point.h>
 #include <fosu/enums.h>
-#include <fosu/io.h>
 #include <fosu/parse_options.h>
 #include <fosu/parser.h>
 #include <fosu/types.h>
@@ -657,7 +658,7 @@ static void test_omitted_sections_use_defaults() {
 }
 
 static void test_difficulty_selection_skips_other_sections() {
-  auto input = fosu::make_padded(
+  auto input = std::string(
       "[Metadata]\nTitle:Unrequested\n"
       "[Difficulty]\nHPDrainRate:3\nCircleSize:4\nOverallDifficulty:"
       "7\nApproachRate:8\n"
@@ -680,7 +681,7 @@ static void test_difficulty_selection_skips_other_sections() {
 }
 
 static void test_metadata_and_difficulty_selection() {
-  auto input = fosu::make_padded(
+  auto input = std::string(
       "[General]\nAudioFilename:unrequested.mp3\n"
       "[Metadata]\nTitle:Selected metadata\nBeatmapID:42\n"
       "[Difficulty]\nOverallDifficulty:6\n"
@@ -701,7 +702,7 @@ static void test_metadata_and_difficulty_selection() {
 }
 
 static void test_hitobject_selection_skips_preceding_sections() {
-  auto input = fosu::make_padded(
+  auto input = std::string(
       "[Metadata]\nTitle:Skipped metadata\n"
       "[TimingPoints]\n100,400\n"
       "[HitObjects]\n32,48,3000,1,2\n256,192,4000,8,0,5000\n");
@@ -721,7 +722,7 @@ static void test_hitobject_selection_skips_preceding_sections() {
 }
 
 static void test_selected_missing_section_uses_defaults() {
-  auto input = fosu::make_padded(
+  auto input = std::string(
       "[Metadata]\nTitle:No difficulty section\n"
       "[HitObjects]\n96,64,6000,1,0\n");
   for (bool simd : {false, true}) {
@@ -739,7 +740,7 @@ static void test_selected_missing_section_uses_defaults() {
 }
 
 static void test_all_section_mask_matches_default() {
-  auto input = fosu::make_padded(
+  auto input = std::string(
       "[General]\nMode:3\n"
       "[Metadata]\nTitle:Explicit all sections\n"
       "[Events]\n2,100.25,200.75\n"
@@ -810,7 +811,7 @@ static void test_timing_integer_widths() {
     for (bool simd : {false, true}) {
       fosu::Parser parser(simd ? fosu::internal::compiled_engine
                                : fosu_test::scalar_engine());
-      const auto& map = require_parse(parser.parse(input.data(), input.size()));
+      const auto&  map = require_parse(parser.parse(input));
       CHECK_EQ(map.timing_points.size(), 1u);
       CHECK_EQ(map.stats.malformed_lines, 0u);
       if (map.timing_points.size() != 1)
@@ -828,39 +829,62 @@ static void test_timing_integer_widths() {
   }
 }
 
-static void test_masked_timing_fallback() {
-  // Exercise the general numeric rules, not just the fast editor shape.
-  for (const std::string line :
-       {"-1.5,500", "0,NaN,4,0,0,100,0,0", "0,500,0meter,0,0,100,1,0",
-        "0,500,4,0,0,100,1anything,0,ignored", " 1 , 500 , 4 ,0,0,100,1,0",
-        "0,500,4,0,0,100,1,", "0,500,,0,0,100,1,0", "0,500,4,0,0,100,1,bad",
-        "0,NaN,4,0,0,100,1,0", "bad,500", "0,500,"}) {
-    for (size_t length : {line.size(), size_t(63), size_t(64)}) {
-      const std::string text = line + std::string(length - line.size(), ' ');
-      const auto        input = fosu::make_padded(text + ",outside\n");
-      const char*       p = input.data.get();
-      uint64_t          commas = 0;
-      for (size_t i = 0; i < text.size(); ++i)
-        if (p[i] == ',')
-          commas |= 1ull << i;
-      const auto expected =
-          fosu::internal::parse_timing_point(p, p + text.size());
-      const auto actual =
-          fosu::internal::parse_timing_point<true>(p, p + text.size(), commas);
-      CHECK_EQ(actual.has_value(), expected.has_value());
-      if (actual && expected) {
-        const auto& masked = *actual;
-        const auto& scalar = *expected;
-        CHECK_EQ(masked.time, scalar.time);
-        CHECK(
-            masked.beat_length == scalar.beat_length ||
-            (std::isnan(masked.beat_length) && std::isnan(scalar.beat_length)));
-        CHECK_EQ(masked.meter, scalar.meter);
-        CHECK_EQ(masked.sample_set, scalar.sample_set);
-        CHECK_EQ(masked.sample_index, scalar.sample_index);
-        CHECK_EQ(masked.volume, scalar.volume);
-        CHECK_EQ(masked.uninherited, scalar.uninherited);
-        CHECK_EQ(masked.effects, scalar.effects);
+static void test_common_timing_fallback() {
+  // Unusual spellings must either be left to the general parser or agree
+  // with it exactly.
+  for (const std::string line : {"-1.5,500",
+                                 "0,NaN,4,0,0,100,0,0",
+                                 "0,500,0meter,0,0,100,1,0",
+                                 "0,500,4,0,0,100,1anything,0,ignored",
+                                 " 1 , 500 , 4 ,0,0,100,1,0",
+                                 "0,500,4,0,0,100,1,",
+                                 "0,500,,0,0,100,1,0",
+                                 "0,500,4,0,0,100,1,bad",
+                                 "0,NaN,4,0,0,100,1,0",
+                                 "bad,500",
+                                 "0,500,",
+                                 "0,500,4,0,0,100,10,0",
+                                 "0,+500,4,0,0,100,1,0",
+                                 "0,1e3,4,0,0,100,1,0",
+                                 "0,500,0,0,0,100,1,0",
+                                 "0,3000000000,4,0,0,100,1,0",
+                                 "0,500,4,9,0,100,1,0",
+                                 "12345,-100,4,2,1,60,0,0",
+                                 "12345,-1000,4,2,1,60,0,0",
+                                 "12345,-100.5,4,2,1,60,0,0",
+                                 "123,-66.6666666666667,4,2,12,100,0,1",
+                                 "123,333.333333333333,4,1,0,5,1,0",
+                                 "123,0.1,4,1,0,5,1,0",
+                                 "123,12345678.12345678,4,1,0,5,1,0",
+                                 "123,1.,4,1,0,5,1,0",
+                                 "123,-0,4,1,0,5,1,0",
+                                 "123,9007199254740993,4,1,0,5,1,0",
+                                 "123,9.007199254740993,4,1,0,5,1,0"}) {
+    const auto  input = fosu_test::padded(line + ",outside\n");
+    const char* p = input.data();
+    const auto  expected =
+        fosu::internal::parse_timing_point<fosu::kStableFormat>(
+            p, p + line.size());
+    // The time width carried from a previous row must not change the result.
+    for (uint32_t carried = 1; carried <= 8; ++carried) {
+      uint32_t          time_digits = carried;
+      fosu::TimingPoint actual;
+      const char*       next =
+          fosu::internal::parse_common_timing_point<fosu::kStableFormat>(
+              p, p + line.size(), time_digits, actual);
+      if (!next)
+        continue;
+      CHECK_EQ(next, p + line.size());
+      CHECK(expected.has_value());
+      if (expected) {
+        CHECK_EQ(actual.time, expected->time);
+        CHECK_EQ(actual.beat_length, expected->beat_length);
+        CHECK_EQ(actual.meter, expected->meter);
+        CHECK_EQ(actual.sample_set, expected->sample_set);
+        CHECK_EQ(actual.sample_index, expected->sample_index);
+        CHECK_EQ(actual.volume, expected->volume);
+        CHECK_EQ(actual.uninherited, expected->uninherited);
+        CHECK_EQ(actual.effects, expected->effects);
       }
     }
   }
@@ -877,8 +901,8 @@ static void test_byte_scan_boundaries() {
         text[alignment + length] = Delimiter;
         if (position < length)
           text[alignment + position] = Delimiter;
-        const auto  input = fosu::make_padded(text);
-        const char* p = input.data.get() + alignment;
+        const auto  input = fosu_test::padded(text);
+        const char* p = input.data() + alignment;
         CHECK_EQ(fosu::internal::find_byte<Delimiter>(p, p + length),
                  p + position);
       }
@@ -897,8 +921,8 @@ static void check_line_end_scan_boundaries() {
         text[alignment + length] = Ending;
         if (position < length)
           text[alignment + position] = Ending;
-        const auto  input = fosu::make_padded(text);
-        const char* p = input.data.get() + alignment;
+        const auto  input = fosu_test::padded(text);
+        const char* p = input.data() + alignment;
         CHECK_EQ(fosu::internal::find_line_end(p, p + length), p + position);
       }
     }
@@ -935,13 +959,12 @@ static void test_section_skip_boundaries() {
       const std::string text =
           "[Unknown]\nvalue:" + std::string(padding, 'x') +
           "[Metadata]\nTitle:ignored\n[Metadata]\nTitle:retained";
-      auto& map = require_parse(parser.parse(
-          text.data(), text.size(), {.sections = fosu::kSectionMetadata}));
+      auto& map = require_parse(
+          parser.parse(text, {.sections = fosu::kSectionMetadata}));
       CHECK_EQ(map.title, "retained");
       const std::string missing = "[Unknown]\nvalue:[Metadata]";
-      auto&             empty =
-          require_parse(parser.parse(missing.data(), missing.size(),
-                                     {.sections = fosu::kSectionMetadata}));
+      auto&             empty = require_parse(
+          parser.parse(missing, {.sections = fosu::kSectionMetadata}));
       CHECK(empty.title.empty());
     }
   }
@@ -1197,7 +1220,7 @@ int main() {
   test_event_filename_boundaries();
   test_section_skip_boundaries();
   test_long_event_lines();
-  test_masked_timing_fallback();
+  test_common_timing_fallback();
   test_timing_integer_widths();
   test_exact_keys_and_event_aliases();
   test_malformed_events();

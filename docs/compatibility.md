@@ -78,17 +78,15 @@ rules using only the selected data; omitted events cannot contribute breaks,
 and omitted General metadata leaves the mode at its default.
 
 Inputs are bounded by the process address space rather than an arbitrary format
-limit. Sizes that cannot fit together with the parser's readable padding return
-`ErrorCode::InputTooLarge`; `make_padded` returns an empty `FileBuffer`, and
-`read_into` returns failure with `errno=EFBIG`.
+limit. Sizes that cannot fit together with the parser's readable padding fail the
+parse; `parse_file` also sets `errno=EFBIG`.
 Output arrays and temporary allocations can exceed the source size. This is
 not a strict memory or CPU quota, particularly for consumer geometry code.
 
-The C++ parser copies pointer inputs into its working arena and appends the 128
+The C++ parser copies its input into its working arena and appends the 128
 readable zero bytes required by its fast paths. Callers therefore need only
-provide the exact logical byte range. Parser allocation failures become
-`ErrorCode::AllocationFailure` or Python `MemoryError`
-at the respective API boundary.
+provide the exact logical byte range. Parser allocation failures return
+`nullptr` in C++ and raise `ValueError` in Python.
 
 The test suite checks malformed bytes with ASan, UBSan and differential fuzzing.
 These are evidence about tested behavior, not a sandbox or a claim that all

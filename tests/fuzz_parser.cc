@@ -1,6 +1,5 @@
 // libFuzzer + ASan/UBSan: exercise full files and force arbitrary bytes through
 // the hit-object and timing-point parsers, comparing all materialized fields.
-#include <fosu/io.h>
 #include <fosu/parse_options.h>
 #include <fosu/parser.h>
 #include <tests/support/canonical_dump.h>
@@ -13,18 +12,15 @@
 #include <string_view>
 
 static void check(std::string_view data, fosu::ParseOptions options) {
-  auto         input = fosu::make_padded(data);
   fosu::Parser scalar_parser(fosu_test::scalar_engine());
   fosu::Parser simd_parser;
-  auto         scalar = scalar_parser.parse(input, options);
-  auto         simd = simd_parser.parse(input, options);
+  auto*        scalar = scalar_parser.parse(data, options);
+  auto*        simd = simd_parser.parse(data, options);
   assert(bool(scalar) == bool(simd));
-  if (!scalar) {
-    assert(scalar.error().code == simd.error().code);
+  if (!scalar)
     return;
-  }
-  auto a = *scalar.value();
-  auto b = *simd.value();
+  auto a = *scalar;
+  auto b = *simd;
   a.stats.fast_path_lines = a.stats.slow_path_lines = 0;
   b.stats.fast_path_lines = b.stats.slow_path_lines = 0;
   std::string x, y;

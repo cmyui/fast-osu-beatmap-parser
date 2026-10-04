@@ -18,14 +18,16 @@ static_assert(*collisions.find("liquid") == 2);
 static_assert(*collisions.find("") == 3);
 static_assert(collisions.find("Costarring") == nullptr);
 
-int main() {
+static void test_runtime_lookup_misses() {
   constexpr auto single = make_string_lookup<int>({{"costarring", 1}});
   assert(single.find("liquid") == nullptr);
   for (const auto key : {"cost", "costarring-extra", "unknown"})
     assert(collisions.find(key) == nullptr);
   assert(*collisions.find("costarring") == 1);
   assert(*collisions.find("liquid") == 2);
+}
 
+static void test_function_pointer_values() {
   constexpr auto handlers = make_string_lookup<int (*)()>({
       {"one",
        +[] {
@@ -37,4 +39,9 @@ int main() {
        }},
   });
   assert((*handlers.find("two"))() == 2);
+}
+
+int main() {
+  test_runtime_lookup_misses();
+  test_function_pointer_values();
 }

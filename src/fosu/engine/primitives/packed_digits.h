@@ -29,16 +29,26 @@ inline u64 load_u64_le(const char* p) {
   return v;
 }
 
-// Number of leading ASCII digits in the next 8 bytes (0..8). A byte is a
-// digit iff its high nibble is 3 and adding 6 doesn't change that (which
-// rules out ':'..'?'). The +6 carry can only corrupt classification of
-// bytes *after* a non-digit byte, which tzcnt never reaches.
-inline u32 digit_run8(const char* p) {
+// Nonzero bytes mark the non-digits among the next 8 bytes, exactly up to
+// and including the first one. A byte is a digit iff its high nibble is 3 and
+// adding 6 doesn't change that (which rules out ':'..'?'). The +6 carry can
+// only corrupt classification of bytes *after* a non-digit byte.
+inline u64 nondigit_bytes8(const char* p) {
   const u64     chunk = load_u64_le(p);
   constexpr u64 kHi = 0xF0F0F0F0F0F0F0F0ull;
   constexpr u64 kThrees = 0x3030303030303030ull;
-  const u64 nondigit = (((chunk & kHi) ^ kThrees) |
-                        (((chunk + 0x0606060606060606ull) & kHi) ^ kThrees));
+  return ((chunk & kHi) ^ kThrees) |
+         (((chunk + 0x0606060606060606ull) & kHi) ^ kThrees);
+}
+
+// Whether the next `n` (1..8) bytes are all digits.
+inline bool leading_digits(const char* p, u32 n) {
+  return !(nondigit_bytes8(p) & (~0ull >> (64 - 8 * n)));
+}
+
+// Number of leading ASCII digits in the next 8 bytes (0..8).
+inline u32 digit_run8(const char* p) {
+  const u64 nondigit = nondigit_bytes8(p);
   if (nondigit == 0)
     return 8;
 #if defined(_MSC_VER)
@@ -58,17 +68,6 @@ inline u32 swar_parse_u32(const char* p, u32 len) {
   c <<= 8 * (4 - len);
   c = (c * 2561u) >> 8;                        //   10*256 + 1
   return ((c & 0x00FF00FF) * 6553601u) >> 16;  // 100*65536 + 1
-}
-
-// swar_parse_u64 with the shift made defined for ANY len (result is
-// garbage outside 1..8; speculative callers discard it via a validity
-// predicate). The &63 matches shlx hardware masking and costs nothing.
-inline u64 swar_parse_u64_safe(const char* p, u32 len) {
-  u64 c = load_u64_le(p) & 0x0F0F0F0F0F0F0F0Full;
-  c <<= (8 * (8 - len)) & 63;
-  c = (c * 2561ull) >> 8;
-  c = ((c & 0x00FF00FF00FF00FFull) * 6553601ull) >> 16;
-  return ((c & 0x0000FFFF0000FFFFull) * 42949672960001ull) >> 32;
 }
 
 // Convert `len` (1..8) leading digits at `p`.

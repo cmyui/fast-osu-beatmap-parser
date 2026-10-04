@@ -17,17 +17,17 @@ EXPORT void fosu_bench_parse(void*       p,
                              int         reuse) {
   if (reuse) {
     auto& parser = *static_cast<Result*>(p);
-    auto  parsed = parser.parse(data, size);
+    auto  parsed = parser.parse({data, size});
     if (!parsed)
       std::abort();
-    const auto& bm = *parsed.value();
+    const auto& bm = *parsed;
     __asm__ volatile("" : : "g"(&bm) : "memory");
   } else {
     Result parser;
-    auto   parsed = parser.parse(data, size);
+    auto   parsed = parser.parse({data, size});
     if (!parsed)
       std::abort();
-    const auto& bm = *parsed.value();
+    const auto& bm = *parsed;
     __asm__ volatile("" : : "g"(&bm) : "memory");
   }
 }

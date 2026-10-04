@@ -24,7 +24,6 @@
 #include <fosu/beatmap.h>
 #include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/enums.h>
-#include <fosu/result.h>
 #include <fosu/slider_path.h>
 #include <fosu/types.h>
 
@@ -424,9 +423,9 @@ inline bool calculate_lazer_slider_distance(
   return true;
 }
 
-inline Result<f64> slider_distance(const Beatmap&   map,
-                                   const HitObject& object,
-                                   Arena*           arena) {
+inline f64 slider_distance(const Beatmap&   map,
+                           const HitObject& object,
+                           Arena*           arena) {
   const auto& slider = map.sliders[object.slider];
   const auto  control_points =
       map.slider_points.subspan(slider.point_begin, slider.point_count);
@@ -443,7 +442,7 @@ inline Result<f64> slider_distance(const Beatmap&   map,
   const TempArena temp{arena};
   auto* points = arena_push_array<CurvePoint>(arena, control_points.size() + 1);
   if (!points)
-    return Error{ErrorCode::AllocationFailure};
+    return 0.f;
   points[0] = {};
   for (size_t i = 0; i < control_points.size(); ++i)
     points[i + 1] = {static_cast<f32>(control_points[i].x - object.x),
@@ -456,12 +455,12 @@ inline Result<f64> slider_distance(const Beatmap&   map,
         map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
     if (!calculate_lazer_slider_distance(relative_points, segments,
                                          slider.curve_type, distance, arena)) {
-      return Error{ErrorCode::AllocationFailure};
+      return 0.f;
     }
   } else {
     if (!calculate_legacy_slider_distance(relative_points, slider.curve_type,
                                           distance, arena)) {
-      return Error{ErrorCode::AllocationFailure};
+      return 0.f;
     }
   }
   // A missing/zero declared length uses the natural path. Otherwise osu! trims
@@ -594,10 +593,10 @@ inline bool calculate_lazer_slider_curve(std::span<const CurvePoint>   points,
   return true;
 }
 
-inline Result<SliderPath> calculate_slider_path(const Beatmap&   map,
-                                                const HitObject& object,
-                                                Arena*           result_arena,
-                                                Arena* scratch_arena) {
+inline std::optional<SliderPath> calculate_slider_path(const Beatmap&   map,
+                                                       const HitObject& object,
+                                                       Arena* result_arena,
+                                                       Arena* scratch_arena) {
   const auto& slider = map.sliders[object.slider];
   const auto  control_points =
       map.slider_points.subspan(slider.point_begin, slider.point_count);
@@ -605,7 +604,7 @@ inline Result<SliderPath> calculate_slider_path(const Beatmap&   map,
   auto*           points =
       arena_push_array<CurvePoint>(scratch_arena, control_points.size() + 1);
   if (!points)
-    return Error{ErrorCode::AllocationFailure};
+    return std::nullopt;
   points[0] = {};
   for (size_t i = 0; i < control_points.size(); ++i)
     points[i + 1] = {static_cast<f32>(control_points[i].x - object.x),
@@ -623,18 +622,18 @@ inline Result<SliderPath> calculate_slider_path(const Beatmap&   map,
     if (!calculate_lazer_slider_curve(relative_points, segments,
                                       slider.curve_type, curve,
                                       scratch_arena)) {
-      return Error{ErrorCode::AllocationFailure};
+      return std::nullopt;
     }
   } else {
     if (!calculate_legacy_slider_curve(relative_points, slider.curve_type,
                                        curve, scratch_arena)) {
-      return Error{ErrorCode::AllocationFailure};
+      return std::nullopt;
     }
   }
   auto* output = arena_push_array<PathPoint>(result_arena, curve.count);
   auto* lengths = arena_push_array<f64>(result_arena, curve.count);
   if (!output || !lengths)
-    return Error{ErrorCode::AllocationFailure};
+    return std::nullopt;
   curve.copy_to(output);
   lengths[0] = 0;
   for (size_t i = 1; i < curve.count; ++i)

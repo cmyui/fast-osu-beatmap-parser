@@ -9,6 +9,7 @@
 #include <fosu/engine/parsing/string_lookup.h>
 #include <fosu/engine/primitives/byte_scan.h>
 #include <fosu/enums.h>
+#include <fosu/format.h>
 #include <fosu/types.h>
 
 #include <cstddef>
@@ -85,20 +86,22 @@ inline bool parse_skin_sprites(BeatmapHeader& header, std::string_view input) {
   return true;
 }
 
-inline bool parse_preview_time(BeatmapHeader& header, std::string_view input) {
+template <Format F>
+bool parse_preview_time(BeatmapHeader& header, std::string_view input) {
   const auto time = parse_field_integer(input);
   if (!time)
     return false;
-  const i32 offset = header.format_version < 5 && *time != -1 ? 24 : 0;
+  const i32 offset = *time != -1 ? F.time_offset : 0;
   header.preview_time = static_cast<i32>(static_cast<u32>(*time) + offset);
   return true;
 }
 
+template <Format F>
 inline constexpr auto kGeneralFields = make_string_lookup<FieldParser>({
     {"AudioFilename", assign_field_text<&BeatmapHeader::audio_filename>},
     {"AudioLeadIn",
      assign_field_value<&BeatmapHeader::audio_lead_in, parse_field_integer>},
-    {"PreviewTime", parse_preview_time},
+    {"PreviewTime", parse_preview_time<F>},
     {"CountdownOffset",
      assign_field_value<&BeatmapHeader::countdown_offset, parse_field_integer>},
     {"Countdown",
@@ -128,10 +131,11 @@ inline constexpr auto kGeneralFields = make_string_lookup<FieldParser>({
     {"SkinPreference", assign_field_text<&BeatmapHeader::skin_preference>},
 });
 
-inline const char* parse_general_section(Beatmap&    beatmap,
-                                         const char* p,
-                                         const char* end) {
-  return parse_key_value_section(beatmap, kGeneralFields, p, end);
+template <Format F>
+const char* parse_general_section(Beatmap&    beatmap,
+                                  const char* p,
+                                  const char* end) {
+  return parse_key_value_section(beatmap, kGeneralFields<F>, p, end);
 }
 
 }  // namespace fosu::internal

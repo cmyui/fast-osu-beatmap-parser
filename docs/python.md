@@ -36,28 +36,48 @@ for note in beatmap.hit_objects:
 memoryview, and arrays. Non-bytes buffers are copied to an immutable snapshot;
 encode text explicitly.
 
-Inputs are bounded by available address space. Allocation failures raise
-`MemoryError`, and file failures raise `OSError`. Native parsing
-releases the GIL; Python value construction holds it. Concurrent calls return
-independent results. Malformed records are skipped and counted in
-`beatmap.stats.malformed_lines`; success does not certify playability.
+File failures raise `OSError`; other parse failures, including invalid
+options and inputs too large to allocate, raise `ValueError`. Native parsing
+releases the GIL; Python value construction holds it. Malformed records are
+skipped and counted in `beatmap.stats.malformed_lines`; success does not
+certify playability.
+
+`parse` and `parse_file` allocate native memory for each call. To parse many
+maps, reuse a `fosu.Parser`, which keeps that memory until the parser is
+garbage-collected:
+
+```python
+parser = fosu.Parser()
+maps = [parser.parse_file(path) for path in paths]
+```
+
+Its `parse` and `parse_file` methods take the same arguments as the module
+functions. Results are detached, so later calls never change earlier results.
+One parser handles one call at a time; a concurrent call raises
+`RuntimeError`. Use one parser per thread.
 
 ## Performance
 
-FOSU 0.5.0 (`798b810`), measured on 2026-09-20 using CPython 3.12.14 on an
+FOSU 0.6.0 (`cf9350e`), measured on 2026-10-04 using CPython 3.12.14 on an
 Intel Core i7-8700 under Linux/WSL2. All rows use the same 1,004 mutually accepted
 all-mode maps. Times include eager result construction and release; lower is
 better. Warm-file measurements include opening and reading page-cached files.
 
 | Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---:|---:|
-| FOSU AVX2 | 165.1 | 174.7 |
-| FOSU scalar | 224.4 | 231.6 |
-| OsuPyParser 1.0.7 | Unsupported | 4,418.2 |
+| FOSU AVX2, reused `fosu.Parser` | 164.3 | 174.1 |
+| FOSU scalar, reused `fosu.Parser` | 223.7 | 233.0 |
+| FOSU AVX2, `fosu.parse` per call | 269.5 | 279.9 |
+| FOSU scalar, `fosu.parse` per call | 328.3 | 340.0 |
+| OsuPyParser 1.0.7 | Unsupported | 4,477.7 |
+
+A `fosu.Parser` keeps its memory between calls. The module functions create a
+new parser per call, which also reserves that memory and takes a page fault on
+the first write to each page; keep a `Parser` when parsing many maps.
 
 Figures are medians of complete passes, not fastest individual parses. Six
 passes per API were collected; passes more than 5% above their API's unfiltered
-median are excluded as presumed interference, leaving five or six per result.
+median are excluded as presumed interference; one was excluded from this table.
 The parsers expose different models: OsuPyParser also performs derived-statistic
 work. See the [comparison and measured variation](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/docs/comparison.md)
 for result contracts, or the [feature-cost tables](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/docs/performance.md)
@@ -139,8 +159,8 @@ position relative to the head. Native code exposes `Beatmap.slider_events`,
 indexed by slider. Without the option, events are empty. These are path events
 using the decoded slider's timing, not a converted ruleset's nested hitobjects:
 no samples or catch conversion.
-Expansion beyond 1,048,576 events per map raises `MemoryError` rather than
-silently dropping events.
+Expansion beyond 1,048,576 events per map fails the parse with `ValueError`
+rather than silently dropping events.
 
 `apply_stacking=True` applies unmodded osu!standard stacking after parsing,
 including the pre-v6 algorithm. Hit-object x/y and absolute slider control points

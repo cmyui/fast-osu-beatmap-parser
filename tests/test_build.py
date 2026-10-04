@@ -36,8 +36,8 @@ add_executable(runtime runtime.cc)
 target_link_libraries(runtime PRIVATE fosu::fosu)
 """)
     (root / "main.cc").write_text("""#include <fosu/parser.h>
-int main() { fosu::Parser parser; auto result = parser.parse(nullptr, 0);
-return !result || !result.value()->hit_objects.empty(); }
+int main() { fosu::Parser parser; const auto* result = parser.parse({});
+return !result || !result->hit_objects.empty(); }
 """)
     (root / "runtime.cc").write_text("""#include <fosu/parser.h>
 #include <fosu/runtime.h>
@@ -46,8 +46,8 @@ int main() {
     const auto* engine = fosu::runtime_engine(); if (!engine) return 1;
     fosu::Parser parser(*engine);
     const char data[] = "[HitObjects]\\n1,2,3,1,0\\n";
-    auto result = parser.parse(data, sizeof(data)-1);
-    if (!result || result.value()->hit_objects.size() != 1) return 2;
+    const auto* result = parser.parse({data, sizeof(data)-1});
+    if (!result || result->hit_objects.size() != 1) return 2;
     puts(engine->kind == fosu::EngineKind::Scalar ? "scalar" :
          engine->kind == fosu::EngineKind::Avx2 ? "avx2" : "neon");
 }

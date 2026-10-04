@@ -1,6 +1,6 @@
 #pragma once
 // Private, versioned comparison stream. Keep floating-point bits, pool indices
-// and optional results; tests/support/decode.py reads the same layout.
+// and optional results.
 
 #include <fosu/beatmap.h>
 #include <fosu/types.h>

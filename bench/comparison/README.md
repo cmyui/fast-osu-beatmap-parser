@@ -71,8 +71,8 @@ mixed-mode cohort for every remaining Python API.
 
 ### Geometry-ready Python comparison
 
-Use a standard-only corpus and retain only `fosu-python-avx2`,
-`fosu-python-scalar` and `slider` in a copy of `variants.json`. Set
+Use a standard-only corpus and retain only the `fosu-python-*` variants and
+`slider` in a copy of `variants.json`. Set
 `FOSU_BENCH_PROFILE=geometry` in each FOSU variant's environment. This makes
 FOSU calculate slider end times and paths; slider already calculates end times
 and constructs curve objects during its normal parse. Stacking remains disabled
@@ -134,8 +134,10 @@ The following describes the supplementary interleaved `run.py` experiment:
   these measurements are distinct from isolated tight-loop benchmarks.
 - `bytes`: decode resident input, read the object count, and release the result.
   Required UTF-8 conversion, native boundary copies, allocation and immediate
-  cleanup are inside the timer. No result is cached between calls. Native
-  parsers are freshly constructed; libraries' normal internal pools remain on.
+  cleanup are inside the timer. No result is cached between calls. Libraries'
+  normal internal pools remain on. FOSU variants construct a new parser per
+  call; `fosu-*-reused` variants keep one parser per worker
+  (`FOSU_BENCH_PARSER=reused` in Python, the `reused` argument natively).
 - `file`: the library's public file API, including opening/reading/closing a
   **warm page-cache** file. This is not cold disk performance. Published
   OsuPyParser only offers this input boundary; no artificial bytes API is added.

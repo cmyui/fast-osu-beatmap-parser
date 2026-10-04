@@ -1,6 +1,5 @@
 // Complete scalar/SIMD/record-layout equivalence on an existing local corpus.
 // Run with sanitizers; map contents and identifiers never leave the host.
-#include <fosu/io.h>
 #include <fosu/parser.h>
 #include <tests/support/canonical_dump.h>
 #include <tests/support/scalar_engine.h>
@@ -9,7 +8,9 @@
 #include <cstddef>
 #include <dlfcn.h>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 int main(int argc, char** argv) {
   if (argc < 2 || argc > 3)
@@ -30,20 +31,21 @@ int main(int argc, char** argv) {
        std::filesystem::recursive_directory_iterator(argv[1])) {
     if (entry.path().extension() != ".osu")
       continue;
-    auto input = fosu::read_file_padded(entry.path().c_str());
-    if (!input) {
+    std::ifstream     file(entry.path(), std::ios::binary);
+    const std::string input(std::istreambuf_iterator<char>(file), {});
+    if (!file.is_open() || file.bad()) {
       std::cerr << "input read failed at file " << files << '\n';
       return 1;
     }
-    auto scalar =
+    auto* scalar =
         scalar_parser.parse(input, {.calculate_slider_end_times = true});
-    auto simd = simd_parser.parse(input, {.calculate_slider_end_times = true});
+    auto* simd = simd_parser.parse(input, {.calculate_slider_end_times = true});
     if (!scalar || !simd) {
       std::cerr << "parse failed at file " << files << '\n';
       return 1;
     }
-    auto a = *scalar.value();
-    auto b = *simd.value();
+    auto a = *scalar;
+    auto b = *simd;
     a.stats.fast_path_lines = a.stats.slow_path_lines = 0;
     b.stats.fast_path_lines = b.stats.slow_path_lines = 0;
     std::string x, y;
@@ -55,14 +57,14 @@ int main(int argc, char** argv) {
     }
     if (oracle) {
       std::string expected;
-      oracle(input.data.get(), input.size, expected);
+      oracle(input.data(), input.size(), expected);
       if (x != expected) {
         std::cerr << "numeric oracle mismatch at file " << files << '\n';
         return 1;
       }
     }
     ++files;
-    bytes += input.size;
+    bytes += input.size();
     objects += a.hit_objects.size();
     malformed += a.stats.malformed_lines;
     if (files % 2000 == 0)

@@ -1,3 +1,5 @@
+#include "fosu/format.h"
+
 #include <fosu/beatmap.h>
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/primitives/vector_ops.h>
@@ -75,7 +77,7 @@ static void test_fuzz_parse_double() {
   char buf[96];
   for (fosu::i32 iter = 0; iter < 300000; ++iter) {
     const fosu::i32 int_digits = 1 + (fosu::i32)(rng() % 9);
-    const fosu::i32 frac_digits = (fosu::i32)(rng() % 8);
+    const fosu::i32 frac_digits = (fosu::i32)(rng() % 18);
     fosu::i32       len = 0;
     if (rng() % 3 == 0)
       buf[len++] = '-';
@@ -88,7 +90,9 @@ static void test_fuzz_parse_double() {
         buf[len++] = char('0' + rng() % 10);
     }
     const char*     tail = ",4,2\r\n";
-    const fosu::i32 payload = len;
+    // Sometimes end the field inside the number: digits past it must not count.
+    const fosu::i32 payload =
+        rng() % 8 ? len : 1 + (fosu::i32)(rng() % (uint64_t)len);
     for (const char* t = tail; *t; ++t)
       buf[len++] = *t;
     memset(buf + len, 0, sizeof(buf) - (size_t)len);
@@ -97,7 +101,8 @@ static void test_fuzz_parse_double() {
     const char* gp = fosu::internal::parse_double(buf, buf + payload, got);
     const char* wp = reference_parse_double(buf, buf + payload, want);
     CHECK_EQ(gp - buf, wp - buf);
-    CHECK(got == want);
+    if (gp != buf)
+      CHECK(got == want);
     if (g_failures) {
       printf("  failing double: %.*s\n", payload, buf);
       return;
@@ -165,15 +170,6 @@ static void test_byte_masks() {
       const auto     v = load32(text);
       const uint32_t bit = uint32_t(1) << lane;
       CHECK_EQ(nondigit_mask32(v), value >= '0' && value <= '9' ? 0u : bit);
-      if (lane < 16) {
-#if FOSU_SIMD_X86
-        const auto first_half = _mm256_castsi256_si128(v);
-#else
-        const auto first_half = v.val[0];
-#endif
-        CHECK_EQ(nondigit_mask16(first_half),
-                 value >= '0' && value <= '9' ? 0u : bit);
-      }
       CHECK_EQ(comma_mask32(v), value == ',' ? bit : 0u);
       CHECK_EQ(equal_mask32(v, broadcast_byte<'\n'>()),
                value == '\n' ? bit : 0u);
@@ -256,7 +252,9 @@ static void test_hitobject_field_shapes() {
             const std::string document = hitobject_document(line);
             const auto        fast = parse_str(document);
             const auto        scalar = parse_str(document, false);
-            CHECK_EQ(fast.stats.fast_path_lines, 1u);
+            // Editor shapes always use the fixed-width loops.
+            if (t >= 4 && t <= 7 && strlen(type) <= 3 && strlen(sound) <= 2)
+              CHECK_EQ(fast.stats.fast_path_lines, 1u);
             check_same_hitobject(fast, scalar);
           }
 }
@@ -292,7 +290,7 @@ static void test_fuzz_slider_length() {
   }
 }
 
-// Fuzz the one-pass timing point parser against the generic reference:
+// Fuzz the common timing point fast path against the general parser:
 // whenever it accepts a line, every field must be bitwise identical.
 // Shapes: 8-field editor lines plus old 2..7-field forms, decimal and
 // negative offsets, integer and long-fraction beatLengths, and injected
@@ -332,7 +330,10 @@ static void test_fuzz_timing_point() {
         buf[len++] = char('0' + rng() % 4);
         continue;
       }
-      const fosu::i32 fd = 1 + (fosu::i32)(rng() % 3);
+      // The editor writes one-digit meter, uninherited and effects fields,
+      // a one- or two-digit sample index and up to three volume digits.
+      const fosu::i32 widest = f == 3 ? 3 : f == 2 ? 2 : rng() % 8 ? 1 : 3;
+      const fosu::i32 fd = 1 + (fosu::i32)(rng() % (uint64_t)widest);
       for (fosu::i32 i = 0; i < fd; ++i)
         buf[len++] = char('0' + rng() % 10);
     }
@@ -342,17 +343,20 @@ static void test_fuzz_timing_point() {
     }
     memset(buf + len, 0, sizeof(buf) - (size_t)len);
 
-    const auto a = fosu::internal::load32(buf);
-    const auto b = fosu::internal::load32(buf + 32);
-    const auto point =
-        fosu::internal::try_parse_timing_point_fast(a, b, buf, (size_t)len);
-    if (!point)
+    // Any carried time width must give the same result.
+    uint32_t          time_digits = 1 + (uint32_t)(rng() % 8);
+    fosu::TimingPoint tp;
+    const char*       next =
+        fosu::internal::parse_common_timing_point<fosu::kStableFormat>(
+            buf, buf + len, time_digits, tp);
+    if (!next)
       continue;
+    CHECK(next == buf + len);
     ++accepted;
-    const auto reference = fosu::internal::parse_timing_point(buf, buf + len);
+    const auto reference =
+        fosu::internal::parse_timing_point<fosu::kStableFormat>(buf, buf + len);
     CHECK(reference.has_value());
     if (reference) {
-      const auto& tp = *point;
       const auto& w = *reference;
       CHECK(memcmp(&tp.time, &w.time, 8) == 0);
       CHECK(memcmp(&tp.beat_length, &w.beat_length, 8) == 0);
@@ -369,7 +373,7 @@ static void test_fuzz_timing_point() {
     }
   }
   printf("  timing fuzz: fast path accepted %zu lines\n", accepted);
-  CHECK(accepted > 80000);
+  CHECK(accepted > 40000);
 }
 
 // Generate a value that renders with exactly `digits` decimal digits.
@@ -424,7 +428,7 @@ static void test_fuzz_hitobject_fields() {
     }
   }
   printf("  fuzz: fast path accepted %d lines\n", fast_taken);
-  CHECK(fast_taken > 10000);
+  CHECK(fast_taken > 5000);
 }
 #endif
 

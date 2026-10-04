@@ -60,25 +60,26 @@ inline bool valid_sample(std::string_view sample, bool banks_only = false) {
   return true;  // The fifth field is an arbitrary filename.
 }
 
+// The editor's edge sets for an unrepeated slider: "d:d|d:d".
+inline bool short_edge_sets(const char* p) {
+#if FOSU_SIMD_X86
+  const __m128i text = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(p));
+  const __m128i biased =
+      _mm_add_epi8(text, _mm_set_epi64x(0, 0x0050465004504650ull));
+  const __m128i invalid = _mm_cmpgt_epi8(biased, _mm_set1_epi16(-32631));
+  return (_mm_movemask_epi8(invalid) & 0x7f) == 0;
+#else
+  const u64 text = load_u64_le(p);
+  return (text & 0x0000ff00ff00ff00ull) == 0x00003a007c003a00ull &&
+         four_sample_digits(text);
+#endif
+}
+
 inline bool valid_edge_sets(std::string_view sets, i32 slides) {
   if (sets.empty())
     return true;
-  if (sets.size() == 7) {
-#if FOSU_SIMD_X86
-    const __m128i text =
-        _mm_loadl_epi64(reinterpret_cast<const __m128i*>(sets.data()));
-    const __m128i biased =
-        _mm_add_epi8(text, _mm_set_epi64x(0, 0x0050465004504650ull));
-    const __m128i invalid = _mm_cmpgt_epi8(biased, _mm_set1_epi16(-32631));
-    if ((_mm_movemask_epi8(invalid) & 0x7f) == 0)
-      return true;
-#else
-    const u64 text = load_u64_le(sets.data());
-    if ((text & 0x0000ff00ff00ff00ull) == 0x00003a007c003a00ull &&
-        four_sample_digits(text))
-      return true;
-#endif
-  }
+  if (sets.size() == 7 && short_edge_sets(sets.data()))
+    return true;
   const char* p = sets.data();
   const char* end = p + sets.size();
   const i32   nodes = (slides > 0 ? slides : 1) + 1;
