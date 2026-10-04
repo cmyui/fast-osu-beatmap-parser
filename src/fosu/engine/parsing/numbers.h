@@ -102,7 +102,8 @@ inline const char* parse_short_decimal(const char* p, f64& out) {
       mantissa = mantissa * kPow10u[second] + swar_parse_u64(p + 8, second);
     p += fraction_digits;
   }
-  if (mantissa > kMaxExactDoubleInteger)
+  // A run of eight digits may continue past what was read.
+  if (is_digit(*p) || mantissa > kMaxExactDoubleInteger)
     return nullptr;
   const f64 magnitude = static_cast<f64>(mantissa) / kPow10[fraction_digits];
   out = negative ? -magnitude : magnitude;
@@ -120,6 +121,14 @@ inline const char* bounded_double(const char* start,
     ++p;
     if (p < end && (*p == '+' || *p == '-'))
       return start;
+  }
+  // Most values are short decimals; anything longer, exponents, and digits
+  // running past `end` take the full conversion.
+  f64 short_value;
+  if (const char* q = parse_short_decimal(p, short_value);
+      q && q <= end && (q == end || (*q != 'e' && *q != 'E'))) {
+    value = short_value;
+    return q;
   }
   const auto r = fast_float::from_chars(p, end, value);
   // .NET's numeric parser accepts underflow rounded to signed zero.

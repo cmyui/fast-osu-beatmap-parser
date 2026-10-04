@@ -77,7 +77,7 @@ static void test_fuzz_parse_double() {
   char buf[96];
   for (fosu::i32 iter = 0; iter < 300000; ++iter) {
     const fosu::i32 int_digits = 1 + (fosu::i32)(rng() % 9);
-    const fosu::i32 frac_digits = (fosu::i32)(rng() % 8);
+    const fosu::i32 frac_digits = (fosu::i32)(rng() % 18);
     fosu::i32       len = 0;
     if (rng() % 3 == 0)
       buf[len++] = '-';
@@ -90,7 +90,9 @@ static void test_fuzz_parse_double() {
         buf[len++] = char('0' + rng() % 10);
     }
     const char*     tail = ",4,2\r\n";
-    const fosu::i32 payload = len;
+    // Sometimes end the field inside the number: digits past it must not count.
+    const fosu::i32 payload =
+        rng() % 8 ? len : 1 + (fosu::i32)(rng() % (uint64_t)len);
     for (const char* t = tail; *t; ++t)
       buf[len++] = *t;
     memset(buf + len, 0, sizeof(buf) - (size_t)len);
@@ -99,7 +101,8 @@ static void test_fuzz_parse_double() {
     const char* gp = fosu::internal::parse_double(buf, buf + payload, got);
     const char* wp = reference_parse_double(buf, buf + payload, want);
     CHECK_EQ(gp - buf, wp - buf);
-    CHECK(got == want);
+    if (gp != buf)
+      CHECK(got == want);
     if (g_failures) {
       printf("  failing double: %.*s\n", payload, buf);
       return;
@@ -167,15 +170,6 @@ static void test_byte_masks() {
       const auto     v = load32(text);
       const uint32_t bit = uint32_t(1) << lane;
       CHECK_EQ(nondigit_mask32(v), value >= '0' && value <= '9' ? 0u : bit);
-      if (lane < 16) {
-#if FOSU_SIMD_X86
-        const auto first_half = _mm256_castsi256_si128(v);
-#else
-        const auto first_half = v.val[0];
-#endif
-        CHECK_EQ(nondigit_mask16(first_half),
-                 value >= '0' && value <= '9' ? 0u : bit);
-      }
       CHECK_EQ(comma_mask32(v), value == ',' ? bit : 0u);
       CHECK_EQ(equal_mask32(v, broadcast_byte<'\n'>()),
                value == '\n' ? bit : 0u);

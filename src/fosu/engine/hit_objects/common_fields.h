@@ -138,12 +138,10 @@ inline constexpr auto kLaneMasks = make_lane_masks();
 // reference so callees use them as memory operands instead of rebuilding
 // them per call.
 struct HitObjectParseConstants {
-  __m256i comma, colon, pipe, zero;
+  __m256i comma, zero;
   __m128i pair_weights, word_weights;  // slider point digit weights
   HitObjectParseConstants()
       : comma(broadcast_byte<','>()),
-        colon(broadcast_byte<':'>()),
-        pipe(broadcast_byte<'|'>()),
         zero(broadcast_byte<'0'>()),
         pair_weights(
             _mm_setr_epi8(10, 1, 10, 1, 10, 1, 10, 1, 0, 0, 0, 0, 0, 0, 0, 0)),
@@ -152,8 +150,7 @@ struct HitObjectParseConstants {
 
 #elif FOSU_SIMD_NEON
 struct HitObjectParseConstants {
-  ByteVector comma = broadcast_byte<','>(), colon = broadcast_byte<':'>(),
-             pipe = broadcast_byte<'|'>(), zero = broadcast_byte<'0'>();
+  ByteVector comma = broadcast_byte<','>(), zero = broadcast_byte<'0'>();
 };
 
 // TBL directly addresses both 16-byte input registers. No lane permutation

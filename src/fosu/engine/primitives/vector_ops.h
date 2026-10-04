@@ -70,11 +70,6 @@ inline u32 nondigit_mask32(Bytes32 v) {
   return static_cast<u32>(_mm256_movemask_epi8(_mm256_cmpgt_epi8(
       _mm256_add_epi8(v, broadcast_byte<80>()), broadcast_byte<137>())));
 }
-inline u32 nondigit_mask16(__m128i v) {
-  return static_cast<u32>(_mm_movemask_epi8(_mm_cmpgt_epi8(
-      _mm_add_epi8(v, _mm256_castsi256_si128(broadcast_byte<80>())),
-      _mm256_castsi256_si128(broadcast_byte<137>()))));
-}
 #elif FOSU_SIMD_NEON
 using ByteVector = uint8x16_t;
 using Bytes32 = uint8x16x2_t;
