@@ -1,5 +1,6 @@
 #pragma once
 
+#include <fosu/compiler.h>
 #include <fosu/types.h>
 
 #include <algorithm>
@@ -10,12 +11,7 @@
 namespace fosu {
 
 // Keep the official implementation's separate single-precision operations.
-#if defined(__clang__)
-#pragma clang fp contract(off)
-#elif defined(__GNUC__)
-#pragma GCC push_options
-#pragma GCC optimize("fp-contract=off")
-#endif
+FOSU_FP_CONTRACT_OFF_BEGIN
 
 // Subpixel coordinates relative to the slider head, in osu! playfield pixels.
 struct PathPoint {
@@ -43,24 +39,32 @@ struct SliderPath {
 inline PathPoint slider_position_at(const SliderPath& path, f64 progress) {
   if (path.points.empty())
     return {};
-  const f64  distance = std::clamp(progress, 0.0, 1.0) * path.distance();
-  const auto found = std::lower_bound(path.cumulative_lengths.begin(),
-                                      path.cumulative_lengths.end(), distance);
-  const auto i = static_cast<size_t>(found - path.cumulative_lengths.begin());
+  const auto& lengths = path.cumulative_lengths;
+  const f64   distance = std::clamp(progress, 0.0, 1.0) * path.distance();
+  // The first length not below distance. Heads, tails and repeats sit at the
+  // path's ends, so search only between them.
+  size_t      i = 0;
+  if (progress >= 1 && !lengths.empty()) {
+    i = lengths.size() - 1;
+    while (i && lengths[i - 1] >= distance)
+      --i;
+  } else if (progress > 0) {
+    i = static_cast<size_t>(
+        std::lower_bound(lengths.begin(), lengths.end(), distance) -
+        lengths.begin());
+  }
   if (!i)
     return path.points.front();
   if (i >= path.points.size())
     return path.points.back();
-  const f64 start = path.cumulative_lengths[i - 1];
-  const f64 length = path.cumulative_lengths[i] - start;
+  const f64 start = lengths[i - 1];
+  const f64 length = lengths[i] - start;
   if (std::abs(length) < 1e-7)
     return path.points[i - 1];
   return path.points[i - 1] + (path.points[i] - path.points[i - 1]) *
                                   static_cast<f32>((distance - start) / length);
 }
 
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC pop_options
-#endif
+FOSU_FP_CONTRACT_OFF_END
 
 }  // namespace fosu

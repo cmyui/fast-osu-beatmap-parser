@@ -58,26 +58,26 @@ One parser handles one call at a time; a concurrent call raises
 
 ## Performance
 
-FOSU 0.6.0 (`cf9350e`), measured on 2026-10-04 using CPython 3.12.14 on an
-Intel Core i7-8700 under Linux/WSL2. All rows use the same 1,004 mutually accepted
-all-mode maps. Times include eager result construction and release; lower is
-better. Warm-file measurements include opening and reading page-cached files.
+FOSU commit `7ea3961` (after 0.6.0), measured on 2026-10-04 using CPython
+3.12.14 on an Intel Core i7-8700 under Linux/WSL2. All rows use the same 1,004
+mutually accepted all-mode maps. Times include eager result construction and
+release; lower is better. Warm-file measurements include opening and reading
+page-cached files.
 
 | Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---:|---:|
-| FOSU AVX2, reused `fosu.Parser` | 164.3 | 174.1 |
-| FOSU scalar, reused `fosu.Parser` | 223.7 | 233.0 |
-| FOSU AVX2, `fosu.parse` per call | 269.5 | 279.9 |
-| FOSU scalar, `fosu.parse` per call | 328.3 | 340.0 |
-| OsuPyParser 1.0.7 | Unsupported | 4,477.7 |
+| FOSU AVX2, reused `fosu.Parser` | 162.8 | 174.5 |
+| FOSU scalar, reused `fosu.Parser` | 219.0 | 227.0 |
+| FOSU AVX2, `fosu.parse` per call | 265.0 | 277.2 |
+| FOSU scalar, `fosu.parse` per call | 324.4 | 334.2 |
+| OsuPyParser 1.0.7 | Unsupported | 4,418.9 |
 
 A `fosu.Parser` keeps its memory between calls. The module functions create a
 new parser per call, which also reserves that memory and takes a page fault on
 the first write to each page; keep a `Parser` when parsing many maps.
 
-Figures are medians of complete passes, not fastest individual parses. Six
-passes per API were collected; passes more than 5% above their API's unfiltered
-median are excluded as presumed interference; one was excluded from this table.
+Figures are the fastest of six complete passes per API, not fastest individual
+parses: every pass keeps the garbage collection its parsing causes.
 The parsers expose different models: OsuPyParser also performs derived-statistic
 work. See the [comparison and measured variation](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/docs/comparison.md)
 for result contracts, or the [feature-cost tables](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/docs/performance.md)

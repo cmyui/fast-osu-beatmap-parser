@@ -41,7 +41,7 @@ mostly operating-system work, and it is larger on Linux than on macOS.
 
 ## Current feature costs
 
-Measured on 2026-10-04 from FOSU 0.6.0 (`cf9350e`). The performance profile
+Measured on 2026-10-04 from FOSU commit `7ea3961` (after 0.6.0). The performance profile
 contains 1,024 entries (986 unique beatmaps), 256 per mode and 46,029,610 bytes.
 Repeated entries are deliberate products of the stratified selection. Input is
 resident in memory. Python rows include the complete detached Python result and
@@ -52,12 +52,12 @@ The corpus SHA-256 is
 
 Each run reports the arithmetic mean of the fastest sample for every corpus
 entry. Native uses five samples and Python three; profile and parser-lifetime
-order rotate per entry. Each cell is the median of five measured runs after one
-discarded warm-up run, reversing backend order between runs. Each parser
-lifetime is timed in its own process. On this corpus, the slowest and fastest of
-a cell's five runs differ by at most 4.5% on Intel and 3.3% on M3. This is a
-lower-envelope feature-cost comparison, not a latency percentile. Microseconds
-per map; lower is better.
+order rotate per entry. Each cell is the fastest of five measured runs after one
+discarded warm-up run, reversing backend order between runs; interference only
+adds time. Each parser lifetime is timed in its own process. On this corpus, the
+slowest of a cell's five runs is at most 9.1% slower than its fastest on Intel
+and 4.4% on M3. This is a lower-envelope feature-cost comparison, not a latency
+percentile. Microseconds per map; lower is better.
 
 ### Intel Core i7-8700, Linux x86-64 under WSL2
 
@@ -70,29 +70,29 @@ Reused parser:
 
 | Profile | C++ AVX2 | C++ scalar | Python AVX2 | Python scalar |
 |---|---:|---:|---:|---:|
-| Decode | 28.1 | 84.0 | 157.5 | 210.4 |
-| Hit objects only | 24.1 | 79.8 | 144.1 | 197.7 |
-| End times | 30.3 | 86.3 | 159.7 | 212.7 |
-| Paths | 45.9 | 101.8 | 249.6 | 304.0 |
-| Geometry | 47.4 | 103.3 | 249.0 | 303.1 |
-| Events | 53.9 | 110.5 | 314.0 | 372.8 |
-| Stacking | 46.2 | 102.5 | 241.7 | 295.8 |
-| Gameplay | 58.5 | 115.3 | 334.2 | 395.8 |
-| Double time | 29.6 | 85.5 | 160.3 | 212.7 |
+| Decode | 28.0 | 83.5 | 154.7 | 209.6 |
+| Hit objects only | 24.0 | 79.4 | 141.9 | 196.9 |
+| End times | 30.3 | 86.0 | 157.0 | 211.8 |
+| Paths | 42.0 | 97.9 | 245.0 | 297.0 |
+| Geometry | 43.4 | 99.3 | 245.0 | 297.1 |
+| Events | 48.4 | 104.6 | 306.4 | 359.1 |
+| Stacking | 41.9 | 98.0 | 236.0 | 289.0 |
+| Gameplay | 51.7 | 108.2 | 327.0 | 376.6 |
+| Double time | 29.5 | 85.0 | 157.3 | 212.1 |
 
 New parser per call:
 
 | Profile | C++ AVX2 | C++ scalar | Python AVX2 | Python scalar |
 |---|---:|---:|---:|---:|
-| Decode | 108.6 | 165.6 | 253.1 | 307.7 |
-| Hit objects only | 99.7 | 156.9 | 234.2 | 288.3 |
-| End times | 111.3 | 168.8 | 256.1 | 309.9 |
-| Paths | 134.9 | 191.9 | 358.7 | 413.1 |
-| Geometry | 136.9 | 193.8 | 358.4 | 412.5 |
-| Events | 152.6 | 209.7 | 434.3 | 487.4 |
-| Stacking | 133.6 | 190.4 | 346.3 | 400.9 |
-| Gameplay | 158.3 | 215.8 | 457.5 | 511.7 |
-| Double time | 110.4 | 167.2 | 256.3 | 310.3 |
+| Decode | 108.2 | 163.9 | 251.3 | 304.6 |
+| Hit objects only | 99.1 | 155.6 | 232.9 | 286.2 |
+| End times | 111.1 | 167.0 | 254.3 | 307.5 |
+| Paths | 130.4 | 186.6 | 352.3 | 405.2 |
+| Geometry | 132.3 | 188.7 | 353.0 | 404.4 |
+| Events | 146.4 | 202.8 | 424.6 | 474.9 |
+| Stacking | 128.8 | 185.3 | 341.7 | 392.5 |
+| Gameplay | 150.7 | 207.6 | 446.6 | 498.0 |
+| Double time | 109.9 | 165.6 | 254.8 | 307.3 |
 
 ### Apple M3 Max, macOS AArch64
 
@@ -102,29 +102,29 @@ Reused parser:
 
 | Profile | C++ NEON | C++ scalar | Python NEON | Python scalar |
 |---|---:|---:|---:|---:|
-| Decode | 18.7 | 53.6 | 106.5 | 141.3 |
-| Hit objects only | 16.6 | 50.5 | 98.5 | 132.2 |
-| End times | 19.7 | 54.6 | 107.5 | 142.5 |
-| Paths | 28.7 | 63.7 | 173.6 | 207.9 |
-| Geometry | 29.2 | 64.3 | 173.1 | 207.4 |
-| Events | 31.2 | 66.3 | 215.4 | 249.1 |
-| Stacking | 27.8 | 62.9 | 164.7 | 199.1 |
-| Gameplay | 32.9 | 67.9 | 230.3 | 263.7 |
-| Double time | 19.2 | 54.1 | 107.5 | 142.3 |
+| Decode | 18.7 | 53.5 | 106.1 | 141.0 |
+| Hit objects only | 16.6 | 50.4 | 98.2 | 131.8 |
+| End times | 19.7 | 54.5 | 107.2 | 142.1 |
+| Paths | 25.6 | 60.4 | 170.3 | 204.5 |
+| Geometry | 26.2 | 61.0 | 169.8 | 203.8 |
+| Events | 27.9 | 62.7 | 211.4 | 244.9 |
+| Stacking | 25.1 | 59.9 | 161.5 | 195.6 |
+| Gameplay | 29.3 | 64.1 | 226.0 | 259.1 |
+| Double time | 19.2 | 54.1 | 107.2 | 141.8 |
 
 New parser per call:
 
 | Profile | C++ NEON | C++ scalar | Python NEON | Python scalar |
 |---|---:|---:|---:|---:|
-| Decode | 38.2 | 72.2 | 128.7 | 162.9 |
-| Hit objects only | 35.2 | 68.3 | 119.7 | 153.2 |
-| End times | 39.4 | 73.5 | 129.7 | 164.1 |
-| Paths | 49.7 | 83.8 | 197.0 | 232.2 |
-| Geometry | 50.4 | 84.4 | 196.7 | 231.3 |
-| Events | 53.8 | 87.8 | 240.2 | 274.8 |
-| Stacking | 48.6 | 82.6 | 188.1 | 222.7 |
-| Gameplay | 55.7 | 89.8 | 254.7 | 289.6 |
-| Double time | 38.7 | 72.7 | 129.5 | 164.0 |
+| Decode | 37.5 | 72.1 | 125.6 | 160.9 |
+| Hit objects only | 34.4 | 68.1 | 116.8 | 151.3 |
+| End times | 38.5 | 73.4 | 126.7 | 162.2 |
+| Paths | 45.7 | 80.5 | 191.1 | 226.5 |
+| Geometry | 46.4 | 81.1 | 190.7 | 226.2 |
+| Events | 49.5 | 84.2 | 232.9 | 268.8 |
+| Stacking | 44.9 | 79.6 | 181.8 | 217.5 |
+| Gameplay | 51.2 | 85.8 | 247.2 | 283.5 |
+| Double time | 38.0 | 72.6 | 126.7 | 162.1 |
 
 Small negative option costs in Python are measurement noise around eager result
 construction. Paths and especially events dominate the optional work.
@@ -139,61 +139,61 @@ feature matrix.
 
 The corpus averages substantially smaller files and has a different mode mix.
 Compare feature costs within this table; do not use its absolute values to claim
-that v128 parsing is faster than legacy parsing. Its runs are short, so a single
-disturbed run moves further: a cell's five runs differ by up to 7%.
+that v128 parsing is faster than legacy parsing. A cell's slowest run
+is up to 5% slower than its fastest.
 
 Reused parser:
 
 | Profile | x86 C++ AVX2 | x86 C++ scalar | x86 Python AVX2 | x86 Python scalar | M3 C++ NEON | M3 C++ scalar | M3 Python NEON | M3 Python scalar |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Decode | 24.0 | 55.3 | 97.6 | 125.9 | 18.2 | 39.3 | 69.4 | 89.8 |
-| Hit objects only | 19.7 | 50.9 | 86.4 | 115.1 | 15.8 | 36.2 | 61.9 | 81.2 |
-| End times | 24.3 | 55.6 | 98.5 | 126.6 | 18.3 | 39.4 | 69.6 | 90.0 |
-| Paths | 26.2 | 57.5 | 110.6 | 137.9 | 19.4 | 40.5 | 77.4 | 97.6 |
-| Geometry | 26.5 | 57.9 | 109.4 | 137.1 | 19.6 | 40.7 | 77.1 | 97.5 |
-| Events | 27.4 | 58.9 | 117.1 | 146.0 | 19.8 | 40.9 | 82.5 | 102.7 |
-| Stacking | 26.7 | 58.2 | 111.3 | 139.3 | 19.6 | 40.7 | 78.7 | 99.0 |
-| Gameplay | 28.1 | 59.8 | 122.1 | 150.7 | 20.1 | 41.2 | 85.5 | 105.5 |
-| Double time | 24.7 | 56.0 | 99.0 | 127.1 | 18.5 | 39.6 | 69.7 | 90.2 |
+| Decode | 23.8 | 54.7 | 95.5 | 124.8 | 18.0 | 39.2 | 68.8 | 89.8 |
+| Hit objects only | 19.6 | 50.5 | 84.2 | 113.4 | 15.7 | 35.9 | 61.4 | 81.1 |
+| End times | 24.2 | 55.1 | 96.5 | 125.5 | 18.2 | 39.3 | 69.3 | 89.8 |
+| Paths | 25.7 | 56.7 | 106.7 | 135.4 | 19.0 | 40.1 | 76.7 | 97.0 |
+| Geometry | 26.1 | 56.9 | 106.4 | 135.5 | 19.1 | 40.3 | 76.4 | 96.9 |
+| Events | 26.7 | 57.7 | 113.8 | 142.1 | 19.4 | 40.5 | 81.7 | 102.2 |
+| Stacking | 26.1 | 57.1 | 108.0 | 136.7 | 19.1 | 40.3 | 77.7 | 98.3 |
+| Gameplay | 27.2 | 58.3 | 118.7 | 147.0 | 19.6 | 40.7 | 84.6 | 105.1 |
+| Double time | 24.6 | 55.5 | 96.8 | 126.3 | 18.4 | 39.5 | 69.2 | 90.2 |
 
 New parser per call:
 
 | Profile | x86 C++ AVX2 | x86 C++ scalar | x86 Python AVX2 | x86 Python scalar | M3 C++ NEON | M3 C++ scalar | M3 Python NEON | M3 Python scalar |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Decode | 85.9 | 116.5 | 171.8 | 201.4 | 33.1 | 54.3 | 85.3 | 106.5 |
-| Hit objects only | 76.4 | 107.3 | 153.7 | 184.0 | 29.8 | 50.3 | 76.6 | 98.0 |
-| End times | 86.5 | 117.1 | 173.6 | 201.9 | 33.2 | 54.4 | 85.4 | 107.0 |
-| Paths | 89.1 | 119.9 | 184.6 | 214.1 | 34.3 | 55.6 | 92.6 | 115.1 |
-| Geometry | 89.9 | 120.7 | 184.4 | 214.6 | 34.6 | 55.9 | 93.0 | 115.4 |
-| Events | 91.4 | 122.2 | 193.8 | 224.0 | 35.1 | 56.4 | 98.5 | 120.8 |
-| Stacking | 89.8 | 120.4 | 186.4 | 216.4 | 34.7 | 55.7 | 94.4 | 116.8 |
-| Gameplay | 92.6 | 123.3 | 198.5 | 227.9 | 35.5 | 56.5 | 101.1 | 124.0 |
-| Double time | 86.9 | 117.0 | 173.0 | 201.7 | 33.5 | 54.6 | 85.3 | 107.5 |
+| Decode | 85.0 | 115.9 | 168.5 | 199.3 | 32.4 | 53.5 | 84.8 | 106.4 |
+| Hit objects only | 75.5 | 106.8 | 151.7 | 181.8 | 29.1 | 49.2 | 76.7 | 97.1 |
+| End times | 85.5 | 116.6 | 170.3 | 199.4 | 32.5 | 53.8 | 85.1 | 106.7 |
+| Paths | 87.7 | 119.1 | 181.9 | 212.0 | 33.4 | 54.6 | 92.5 | 114.1 |
+| Geometry | 88.4 | 119.6 | 181.3 | 211.0 | 33.5 | 54.9 | 92.6 | 114.2 |
+| Events | 89.9 | 121.2 | 190.0 | 220.8 | 34.0 | 55.2 | 97.9 | 119.4 |
+| Stacking | 88.2 | 119.7 | 183.7 | 213.4 | 33.5 | 54.9 | 93.9 | 115.2 |
+| Gameplay | 90.9 | 122.2 | 195.2 | 226.3 | 34.5 | 55.5 | 100.7 | 122.6 |
+| Double time | 85.3 | 116.9 | 170.7 | 200.6 | 32.6 | 53.8 | 85.6 | 106.8 |
 
 ## Standard gameplay and mods
 
 HR is currently supported for standard and taiko, so the combined-mod profile is
 reported on the 256-entry standard subset (255 unique beatmaps, 10,347,075 bytes).
-`Full HR+DT` enables events and stacking in addition to both mods. A cell's five
-runs differ by up to 7.3%.
+`Full HR+DT` enables events and stacking in addition to both mods. A cell's
+slowest run is up to 3.6% slower than its fastest.
 
 Reused parser:
 
 | Profile | x86 C++ AVX2 | x86 Python AVX2 | ARM C++ NEON | ARM Python NEON |
 |---|---:|---:|---:|---:|
-| Decode | 26.1 | 192.3 | 16.2 | 122.8 |
-| DT | 26.6 | 188.9 | 16.5 | 122.4 |
-| HR+DT | 27.2 | 187.7 | 16.9 | 122.2 |
-| Full HR+DT | 113.0 | 660.0 | 58.8 | 440.3 |
+| Decode | 26.1 | 191.6 | 16.2 | 121.1 |
+| DT | 26.6 | 189.7 | 16.5 | 120.9 |
+| HR+DT | 27.2 | 187.1 | 16.9 | 120.9 |
+| Full HR+DT | 93.8 | 638.0 | 46.8 | 419.7 |
 
 New parser per call:
 
 | Profile | x86 C++ AVX2 | x86 Python AVX2 | ARM C++ NEON | ARM Python NEON |
 |---|---:|---:|---:|---:|
-| Decode | 106.0 | 286.2 | 35.0 | 145.0 |
-| DT | 106.1 | 285.0 | 35.1 | 144.9 |
-| HR+DT | 106.8 | 281.3 | 35.5 | 144.6 |
-| Full HR+DT | 236.5 | 816.9 | 85.2 | 468.6 |
+| Decode | 104.2 | 283.6 | 34.7 | 143.7 |
+| DT | 104.7 | 280.4 | 35.0 | 143.1 |
+| HR+DT | 105.0 | 277.9 | 35.5 | 143.2 |
+| Full HR+DT | 214.3 | 787.0 | 72.9 | 452.5 |
 
 ## Reproduce FOSU measurements
 
@@ -216,8 +216,8 @@ creates a new parser per call. Time them in separate processes; a fresh parser
 maps and unmaps its memory every call, which also slows interleaved
 reused-parser calls on Linux. Repeat into separate CSV files, discarding the
 first run as a warm-up and reversing backend order between runs, then take the
-median of each workload's `mean_file_min_us`. Retain all run values to report
-their spread; do not substitute the minimum of the complete runs.
+minimum of each workload's `mean_file_min_us`: the fastest complete run. Retain
+all run values to report their spread.
 
 For standard-only HR profiles, pass a standard-only directory and replace
 `all-modes` with `standard` or `--suite all-modes` with `--suite standard`.

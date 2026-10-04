@@ -27,7 +27,7 @@ python3 bench/comparison/report.py "$b/smoke.jsonl" "$b/smoke-summary.json"
 
 # No builds or competing benchmarks while this runs.
 taskset -c 3 "$b/venv/bin/python" bench/comparison/run.py /path/to/corpus \
-  "$b/variants.json" "$b/results.jsonl" --warmup 64 --rounds 2 --reps 1 \
+  "$b/variants.json" "$b/results.jsonl" --warmup 64 --rounds 4 --reps 1 \
   --corpus-manifest /path/to/manifest.csv
 python3 bench/comparison/report.py "$b/results.jsonl" "$b/summary.json"
 
@@ -91,7 +91,7 @@ expanding to more maps because fewer libraries are participating:
 
 ```sh
 taskset -c 3 "$b/venv/bin/python" bench/comparison/run.py /path/to/corpus \
-  "$b/variants.json" "$b/refresh.jsonl" --warmup 64 --rounds 2 --reps 1
+  "$b/variants.json" "$b/refresh.jsonl" --warmup 64 --rounds 4 --reps 1
 python3 bench/comparison/report.py "$b/refresh.jsonl" "$b/refresh-summary.json" \
   --cohorts /path/to/original-summary.json
 taskset -c 3 "$b/venv/bin/python" bench/comparison/python_batch.py /path/to/corpus \
@@ -100,38 +100,38 @@ taskset -c 3 "$b/venv/bin/python" bench/comparison/python_batch.py /path/to/corp
 
 The reporter rejects a changed corpus or any new failure/count mismatch within
 the fixed cohort. It records the original report's hash. Keep the new evidence
-separate and disclose retained competitor measurements: a FOSU-only interleaved
-run has different cache interference from the multi-runtime sweep, even though
-the timed API, corpus and summary statistic are unchanged.
+separate and disclose which competitor measurements were retained from the
+original run.
 
 ## Measurement contract
 
-The Python headline uses `python_batch.py`, not the interleaved per-call means.
+The Python headline uses `python_batch.py`, not `run.py`'s per-call means.
 For the published refresh, discard one warm-up invocation, then run three more
 invocations into separate reports. For each library/API/cohort, collect the six
-`pass_mean_us` values, exclude complete passes greater than 1.05 times their
-unfiltered median, and report the retained median and minimum–maximum range.
-Keep the rejected passes in the raw evidence and disclose the exclusion count.
-This one-sided rule assumes slow interference; it does not identify its cause.
-Do not apply it to individual maps, GC events, or the two-pass native sweep.
+`pass_mean_us` values and report the fastest pass with the minimum–maximum range.
+Host interference only adds time, so the fastest complete pass is the closest
+observation of what the library itself costs. Never take minimums of individual
+maps: a whole pass keeps the garbage collection and JIT compilation its library
+causes.
 Each library/API/pass gets a fresh process, preloads the common Python cohort,
 warms on 64 maps three times, then times one complete loop. Normal GC and loop
 bookkeeping are included. Imports, preload, warmup and process teardown are
 excluded. All per-map object counts must agree across batches. The second pass
 reverses API order; both pass times and the cohort fingerprint are retained.
-Bytes and file workloads never warm one another in the same process. The
-interleaved experiment exposed a substantial order effect between those calls;
-its Python measurements remain available as evidence, not the headline.
+Bytes and file workloads never warm one another in the same process. `run.py`
+runs every workload of a library in one worker, so its Python measurements are
+evidence, not the headline.
 
-The following describes the supplementary interleaved `run.py` experiment:
+The following describes the `run.py` worker sweep behind the native and
+cross-language table:
 
 - Persistent, independent worker processes inherit the driver's CPU affinity.
   Imports, JIT warm-up, JSON IPC, input pre-reading, and report serialization
   are outside the timer. Each worker warms on 64 evenly spaced maps, three
-  parses each. File order is sorted; worker/workload order rotates per map and
-  reverses in the second pass.
-  Interleaving separate runtimes does not keep each runtime's CPU caches hot;
-  these measurements are distinct from isolated tight-loop benchmarks.
+  parses each. Each worker/workload job then parses the whole sorted corpus on
+  its own in every pass, and job order reverses every other pass. A job's calls
+  follow only its own calls, so every library runs with its own caches and
+  branch history equally warm.
 - `bytes`: decode resident input, read the object count, and release the result.
   Required UTF-8 conversion, native boundary copies, allocation and immediate
   cleanup are inside the timer. No result is cached between calls. Libraries'
@@ -157,9 +157,11 @@ The following describes the supplementary interleaved `run.py` experiment:
   Restarts are disclosed in coverage; subsequent calls must warm the new process
   naturally. Unexpected protocol errors abort the run. Incomplete runs cannot
   produce a publishable report.
-- Means use all samples on each table's common cohort, with equal weight per
-  map. Throughput is total cohort bytes divided by total measured time. Per-pass
-  means expose run variation; they are not confidence intervals. The reporter
+- Each pass mean uses all of that pass's samples on the table's common cohort,
+  with equal weight per map. Publish the fastest pass mean with the range of
+  all passes, for the reason given for the Python batches above. Throughput is
+  total cohort bytes divided by total measured time. The range exposes run
+  variation; it is not a confidence interval. The reporter
   also preserves full-corpus failures and count/checksum disagreements.
 
 Matching counts (and the traversal checksum) are only a basic sanity check.

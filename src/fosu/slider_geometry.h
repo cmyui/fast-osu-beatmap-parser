@@ -22,14 +22,14 @@
 
 #include <fosu/arena.h>
 #include <fosu/beatmap.h>
-#include <fosu/engine/primitives/vector_ops.h>
+#include <fosu/compiler.h>
 #include <fosu/enums.h>
 #include <fosu/slider_path.h>
 #include <fosu/types.h>
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
+#include <cstddef>
 #include <iterator>
 #include <numbers>
 #include <optional>
@@ -38,12 +38,7 @@
 namespace fosu::internal {
 
 // Match the official decoder's separate single-precision operations.
-#if defined(__clang__)
-#pragma clang fp contract(off)
-#elif defined(__GNUC__)
-#pragma GCC push_options
-#pragma GCC optimize("fp-contract=off")
-#endif
+FOSU_FP_CONTRACT_OFF_BEGIN
 
 // osu! computes curve geometry in single precision, relative to the slider
 // head.
@@ -77,46 +72,17 @@ inline void subdivide_bezier(std::span<const CurvePoint> points,
                              CurvePoint*                 right,
                              CurvePoint*                 midpoints) {
   const size_t count = points.size();
-  if (count == 4) {
-    const auto a = (points[0] + points[1]) * 0.5f;
-    const auto b = (points[1] + points[2]) * 0.5f;
-    const auto c = (points[2] + points[3]) * 0.5f;
-    const auto d = (a + b) * 0.5f;
-    const auto e = (b + c) * 0.5f;
-    const auto f = (d + e) * 0.5f;
-    left[0] = points[0];
-    left[1] = a;
-    left[2] = d;
-    left[3] = f;
-    right[0] = f;
-    right[1] = e;
-    right[2] = c;
-    right[3] = points[3];
-    return;
-  }
   std::copy(points.begin(), points.end(), midpoints);
   for (size_t i = 0; i < count; ++i) {
     left[i] = midpoints[0];
     right[count - i - 1] = midpoints[count - i - 1];
-#if FOSU_SIMD_NEON && defined(__clang__)
-    static_assert(sizeof(CurvePoint) == 2 * sizeof(f32));
-    const size_t remaining = count - i - 1;
-    size_t       j = 0;
-    // Read both neighboring pairs before replacing either midpoint.
-    for (; j + 1 < remaining; j += 2) {
-      float32x4_t current, next;
-      std::memcpy(&current, midpoints + j, sizeof(current));
-      std::memcpy(&next, midpoints + j + 1, sizeof(next));
-      const auto averaged = vmulq_n_f32(vaddq_f32(current, next), 0.5f);
-      std::memcpy(midpoints + j, &averaged, sizeof(averaged));
-    }
-    for (; j < remaining; ++j)
-      midpoints[j] = (midpoints[j] + midpoints[j + 1]) * 0.5f;
-#else
     for (size_t j = 0; j < count - i - 1; ++j)
       midpoints[j] = (midpoints[j] + midpoints[j + 1]) * 0.5f;
-#endif
   }
+}
+
+inline bool flat_enough(CurvePoint a, CurvePoint b, CurvePoint c) {
+  return !((a - b * 2 + c).squared_length() > 0.25f);
 }
 
 template <typename Curve>
@@ -167,12 +133,79 @@ inline bool bspline_distance(std::span<const CurvePoint> points,
                          arena);
 }
 
+// Quadratic and cubic segments, most of a slider's Bézier pieces, run the
+// same subdivision with their points in registers and the pending right
+// halves on the stack.
+template <typename Curve>
+inline bool quadratic_bezier_distance(const CurvePoint* points,
+                                      Curve&            distance) {
+  struct Quadratic {
+    CurvePoint p0, p1, p2;
+  };
+  Quadratic pending[64];
+  size_t    depth = 0;
+  Quadratic w{points[0], points[1], points[2]};
+  for (;;) {
+    const auto a = (w.p0 + w.p1) * 0.5f, b = (w.p1 + w.p2) * 0.5f;
+    const auto c = (a + b) * 0.5f;
+    if (flat_enough(w.p0, w.p1, w.p2)) {
+      distance.append(w.p0);
+      distance.append((a + c * 2 + b) * 0.25f);
+      if (!depth)
+        break;
+      w = pending[--depth];
+    } else {
+      if (depth == std::size(pending))
+        return false;
+      pending[depth++] = {c, b, w.p2};
+      w = {w.p0, a, c};
+    }
+  }
+  distance.append(points[2]);
+  return true;
+}
+
+template <typename Curve>
+inline bool cubic_bezier_distance(const CurvePoint* points, Curve& distance) {
+  struct Cubic {
+    CurvePoint p0, p1, p2, p3;
+  };
+  Cubic  pending[64];
+  size_t depth = 0;
+  Cubic  w{points[0], points[1], points[2], points[3]};
+  for (;;) {
+    const auto a = (w.p0 + w.p1) * 0.5f, b = (w.p1 + w.p2) * 0.5f,
+               c = (w.p2 + w.p3) * 0.5f;
+    const auto d = (a + b) * 0.5f, e = (b + c) * 0.5f;
+    const auto f = (d + e) * 0.5f;
+    if (flat_enough(w.p0, w.p1, w.p2) && flat_enough(w.p1, w.p2, w.p3)) {
+      distance.append(w.p0);
+      distance.append((a + d * 2 + f) * 0.25f);
+      distance.append((f + e * 2 + c) * 0.25f);
+      if (!depth)
+        break;
+      w = pending[--depth];
+    } else {
+      if (depth == std::size(pending))
+        return false;
+      pending[depth++] = {f, e, c, w.p3};
+      w = {w.p0, a, d, f};
+    }
+  }
+  distance.append(points[3]);
+  return true;
+}
+
 template <typename Curve>
 inline bool bezier_distance(std::span<const CurvePoint> points,
                             Curve&                      distance,
                             Arena*                      arena) {
   const size_t count = points.size();
-  auto*        work = arena_push_array<CurvePoint>(arena, count * 4);
+  if (count == 3)
+    return quadratic_bezier_distance(points.data(), distance);
+  if (count == 4)
+    return cubic_bezier_distance(points.data(), distance);
+  auto* work = arena_push_array<CurvePoint>(arena, count * 4);
   if (!work)
     return false;
   auto* left = work + count;
@@ -187,7 +220,7 @@ inline bool bezier_distance(std::span<const CurvePoint> points,
   for (;;) {
     bool flat = true;
     for (size_t i = 1; i + 1 < count; ++i) {
-      if ((work[i - 1] - work[i] * 2 + work[i + 1]).squared_length() > 0.25f) {
+      if (!flat_enough(work[i - 1], work[i], work[i + 1])) {
         flat = false;
         break;
       }
@@ -471,58 +504,40 @@ inline f64 slider_distance(const Beatmap&   map,
   return distance.length;
 }
 
-struct CurveVertexChunk {
-  static constexpr size_t capacity = 64;
-
-  CurveVertexChunk*       next = nullptr;
-  size_t                  count = 0;
-  CurvePoint              points[capacity];
-};
-
+// The vertices are the result arena's newest allocation: nothing else is
+// pushed there until the path is complete, so each growth step extends the
+// array in place.
 struct CurveVertices {
-  Arena*            arena;
-  CurveVertexChunk* first = nullptr;
-  CurveVertexChunk* last = nullptr;
-  size_t            count = 0;
-  CurvePoint        last_point{};
-  bool              first_in_segment = true;
-  bool              failed = false;
+  Arena*      arena;
+  CurvePoint* begin = nullptr;
+  CurvePoint* end = nullptr;
+  CurvePoint* capacity_end = nullptr;
+  bool        first_in_segment = true;
+  bool        failed = false;
 
   void begin_segment() { first_in_segment = true; }
 
-#if defined(__GNUC__) && !defined(__clang__)
-  // GCC otherwise calls this for every generated curve vertex.
-  [[gnu::always_inline]]
-#endif
-  void append(CurvePoint point) {
-    const bool shared = first_in_segment && count && last_point == point;
+  size_t count() const { return static_cast<size_t>(end - begin); }
+
+  FOSU_ALWAYS_INLINE void append(CurvePoint point) {
+    const bool shared = first_in_segment && end != begin && end[-1] == point;
     first_in_segment = false;
-    if (shared || failed)
+    if (shared || (end == capacity_end && !grow()))
       return;
-    if (!last || last->count == CurveVertexChunk::capacity) {
-      auto* chunk = arena_push_array<CurveVertexChunk>(arena, 1);
-      if (!chunk) {
-        failed = true;
-        return;
-      }
-      ::new (chunk) CurveVertexChunk;
-      if (last)
-        last->next = chunk;
-      else
-        first = chunk;
-      last = chunk;
-    }
-    last->points[last->count++] = point;
-    last_point = point;
-    ++count;
+    *end++ = point;
   }
 
-  void copy_to(CurvePoint* destination) const {
-    for (const auto* chunk = first; chunk; chunk = chunk->next) {
-      std::memcpy(destination, chunk->points,
-                  chunk->count * sizeof(CurvePoint));
-      destination += chunk->count;
+  FOSU_NOINLINE bool grow() {
+    const size_t added = begin ? count() : 64;
+    auto*        more = arena_push_array<CurvePoint>(arena, added);
+    if (!more || (begin && more != capacity_end)) {
+      failed = true;
+      return false;
     }
+    if (!begin)
+      begin = end = more;
+    capacity_end = more + added;
+    return true;
   }
 };
 
@@ -610,7 +625,7 @@ inline std::optional<SliderPath> calculate_slider_path(const Beatmap&   map,
     points[i + 1] = {static_cast<f32>(control_points[i].x - object.x),
                      static_cast<f32>(control_points[i].y - object.y)};
   const size_t  count = control_points.size() + 1;
-  CurveVertices curve{scratch_arena};
+  CurveVertices curve{result_arena};
   // The first typed control point is itself a one-vertex segment in osu!.
   // Circular approximation can produce a slightly different first vertex.
   if (count > 1 && points[0] != points[1])
@@ -630,15 +645,18 @@ inline std::optional<SliderPath> calculate_slider_path(const Beatmap&   map,
       return std::nullopt;
     }
   }
-  auto* output = arena_push_array<PathPoint>(result_arena, curve.count);
-  auto* lengths = arena_push_array<f64>(result_arena, curve.count);
-  if (!output || !lengths)
+  // Release the vertex array's unused capacity; the lengths follow it.
+  arena_pop_to(result_arena,
+               static_cast<size_t>(reinterpret_cast<u8*>(curve.end) -
+                                   reinterpret_cast<u8*>(result_arena)));
+  auto* output = curve.begin;
+  auto* lengths = arena_push_array<f64>(result_arena, curve.count());
+  if (!lengths)
     return std::nullopt;
-  curve.copy_to(output);
   lengths[0] = 0;
-  for (size_t i = 1; i < curve.count; ++i)
+  for (size_t i = 1; i < curve.count(); ++i)
     lengths[i] = lengths[i - 1] + (output[i] - output[i - 1]).length();
-  size_t    end = curve.count - 1;
+  size_t    end = curve.count() - 1;
   const f64 expected = slider.length;
   if (expected > 0 && end && expected != lengths[end] &&
       !(expected > lengths[end] && output[end] == output[end - 1])) {
@@ -678,7 +696,5 @@ inline bool set_slider_paths(Beatmap& map,
   return success;
 }
 
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC pop_options
-#endif
+FOSU_FP_CONTRACT_OFF_END
 }  // namespace fosu::internal

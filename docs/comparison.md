@@ -1,8 +1,8 @@
 # Public parser comparison
 
-All rows were measured on 2026-10-04 from FOSU 0.6.0 (`cf9350e`), using
-the fixed cohorts and timing protocols below. The native comparison uses the
-complete interleaved worker schedule. This comparison asks how long documented
+All rows were measured on 2026-10-04 from FOSU commit `7ea3961` (after 0.6.0), using
+the fixed cohorts and timing protocols below. The native comparison times one
+complete corpus pass per worker job. This comparison asks how long documented
 public APIs take to produce useful beatmap results. It does not pretend that
 every parser returns the same model.
 
@@ -60,17 +60,16 @@ Isolated complete-process batch passes on the 1,004-entry common cohort:
 Microseconds per map; lower is better.
 
 Each API has six passes from three independent two-pass runs after one discarded
-warm-up batch. Passes more than 5% above that API's unfiltered median are excluded
-as presumed interference. Values are the median and minimum–maximum range of
-the remaining five or six passes; see run stability below.
+warm-up batch. Values are the fastest pass and the minimum–maximum range of all
+six; see run stability below.
 
 | Python interface | Contract | Resident bytes | Warm file | Pass detail: bytes / file |
 |---|---|---:|---:|---|
-| FOSU AVX2, reused parser | Exact | 164.3 | 174.1 | 161.6–172.0 / 172.9–176.1 |
-| FOSU scalar, reused parser | Exact | 223.7 | 233.0 | 221.0–234.6 / 229.7–240.8 |
-| FOSU AVX2, `fosu.parse` per call | Exact | 269.5 | 279.9 | 267.4–271.8 / 278.2–286.1 |
-| FOSU scalar, `fosu.parse` per call | Exact | 328.3 | 340.0 | 319.7–332.2 / 338.8–352.5 |
-| OsuPyParser | Different | Unsupported | 4,477.7 | — / 4,434.3–4,525.3 |
+| FOSU AVX2, reused parser | Exact | 162.8 | 174.5 | 162.8–166.3 / 174.5–178.3 |
+| FOSU scalar, reused parser | Exact | 219.0 | 227.0 | 219.0–233.6 / 227.0–306.7 |
+| FOSU AVX2, `fosu.parse` per call | Exact | 265.0 | 277.2 | 265.0–274.3 / 277.2–283.5 |
+| FOSU scalar, `fosu.parse` per call | Exact | 324.4 | 334.2 | 324.4–333.5 / 334.2–340.1 |
+| OsuPyParser | Different | Unsupported | 4,418.9 | — / 4,418.9–4,474.3 |
 
 OsuPyParser has no published resident-input API.
 
@@ -82,12 +81,12 @@ work described in the next section.
 
 | Python interface | Contract | Resident bytes | Warm file |
 |---|---|---:|---:|
-| FOSU AVX2, reused parser | Exact | 169.9 | 180.0 |
-| FOSU scalar, reused parser | Exact | 210.1 | 224.1 |
-| FOSU AVX2, `fosu.parse` per call | Exact | 269.1 | 283.8 |
-| FOSU scalar, `fosu.parse` per call | Exact | 310.6 | 323.4 |
-| OsuPyParser | Different | Unsupported | 4,121.6 |
-| slider | Superset | 15,852.1 | 16,106.8 |
+| FOSU AVX2, reused parser | Exact | 170.5 | 178.7 |
+| FOSU scalar, reused parser | Exact | 210.1 | 219.0 |
+| FOSU AVX2, `fosu.parse` per call | Exact | 264.9 | 279.8 |
+| FOSU scalar, `fosu.parse` per call | Exact | 307.7 | 320.3 |
+| OsuPyParser | Different | Unsupported | 4,095.1 |
+| slider | Superset | 15,788.3 | 15,882.0 |
 
 Python result construction dominates these measurements, so the backend difference
 is smaller here than at the native parsing boundary.
@@ -103,11 +102,11 @@ and slider is accessed with `hit_objects(stacking=False)`.
 
 | Python interface | Execution model | Resident bytes | Warm file | Pass detail: bytes / file |
 |---|---|---:|---:|---|
-| FOSU AVX2, reused parser | Explicit geometry options | 460.7 | 476.9 | 453.6–473.7 / 464.3–481.1 |
-| FOSU scalar, reused parser | Explicit geometry options | 510.0 | 518.5 | 503.2–516.4 / 513.3–533.0 |
-| FOSU AVX2, `fosu.parse` per call | Explicit geometry options | 594.3 | 613.3 | 591.7–603.9 / 601.7–624.2 |
-| FOSU scalar, `fosu.parse` per call | Explicit geometry options | 633.7 | 650.2 | 627.4–648.3 / 639.3–676.5 |
-| slider | Geometry built during parse | 17,338.0 | 17,548.9 | 17,252.2–17,445.2 / 17,299.2–18,240.2 |
+| FOSU AVX2, reused parser | Explicit geometry options | 448.3 | 460.2 | 448.3–460.3 / 460.2–499.1 |
+| FOSU scalar, reused parser | Explicit geometry options | 496.1 | 509.2 | 496.1–536.0 / 509.2–524.4 |
+| FOSU AVX2, `fosu.parse` per call | Explicit geometry options | 574.9 | 583.0 | 574.9–585.0 / 583.0–604.2 |
+| FOSU scalar, `fosu.parse` per call | Explicit geometry options | 610.7 | 631.2 | 610.7–649.2 / 631.2–665.6 |
+| slider | Geometry built during parse | 17,369.1 | 17,365.6 | 17,369.1–17,458.8 / 17,365.6–17,836.2 |
 
 Eager Python construction and geometry work reduce the relative backend difference
 in this scenario; native feature costs are reported separately in
@@ -118,21 +117,23 @@ in this scenario; native feature costs are reported separately in
 Resident-input API latency over the 1,023-entry common all-mode cohort. Every
 runtime is a persistent worker, and each timed call creates a new result. FOSU's
 reused-parser rows keep one parser per worker; the others create one per call.
-Jobs rotate per map and reverse in pass two. This is an interleaved public-API
-comparison and is not directly comparable to the isolated Python batches.
+Each job parses the whole cohort on its own in every pass, and job order
+reverses every other pass. Each row is the fastest of four pass means, with
+the range of all four. This worker comparison uses a different cohort and
+harness from the Python batches; compare rows within this table.
 
-| Library / interface | Contract | Mean | Pass 1 / pass 2 |
+| Library / interface | Contract | Fastest pass | Pass range |
 |---|---|---:|---:|
-| FOSU C++ AVX2, reused parser | Exact | 44.5 | 40.0 / 49.0 |
-| FOSU C++ scalar, reused parser | Exact | 100.3 | 97.0 / 103.7 |
-| FOSU C++ AVX2, new parser per call | Exact | 150.4 | 167.1 / 133.8 |
-| FOSU C++ scalar, new parser per call | Exact | 197.2 | 201.1 / 193.4 |
-| rosu-map (Rust) | Closest structural scope | 646.8 | 646.4 / 647.2 |
-| Coosu (C#) | Different | 765.6 | 868.9 / 662.2 |
-| OsuParsers (C#) | Superset | 1,039.9 | 1,135.6 / 944.2 |
-| osu-parsers (TypeScript) | Different | 3,539.2 | 3,634.4 / 3,444.1 |
-| Official osu!lazer decoder (C#) | Superset | 4,132.1 | 4,488.0 / 3,776.2 |
-| osu-parser (JavaScript) | Superset | 15,973.3 | 16,321.9 / 15,624.8 |
+| FOSU C++ AVX2, reused parser | Exact | 34.4 | 34.4–35.6 |
+| FOSU C++ scalar, reused parser | Exact | 92.7 | 92.7–93.4 |
+| FOSU C++ AVX2, new parser per call | Exact | 125.7 | 125.7–128.2 |
+| FOSU C++ scalar, new parser per call | Exact | 185.8 | 185.8–195.4 |
+| rosu-map (Rust) | Closest structural scope | 602.1 | 602.1–608.3 |
+| Coosu (C#) | Different | 573.0 | 573.0–3,073.5 |
+| OsuParsers (C#) | Superset | 877.5 | 877.5–3,737.4 |
+| osu-parsers (TypeScript) | Different | 3,337.5 | 3,337.5–3,479.1 |
+| Official osu!lazer decoder (C#) | Superset | 3,403.3 | 3,403.3–11,898.4 |
+| osu-parser (JavaScript) | Superset | 15,312.9 | 15,312.9–16,014.9 |
 
 ## Coverage
 
@@ -160,7 +161,7 @@ GCC 15.2 and `-O3`; AVX2 uses `-march=x86-64-v3`, while scalar uses
 `-march=x86-64` and `FOSU_DISABLE_SIMD`. Python uses CPython 3.12.14.
 
 Python headlines use three independent two-pass runs after one discarded warm-up
-batch, applying the one-sided pass exclusion above before taking the median.
+batch and report the fastest pass.
 Each job receives a fresh process, preloads the common
 cohort, warms 64 evenly spaced entries three times, then times one complete pass.
 Pass two reverses job order. Parsing, required conversion, allocations, result
@@ -169,25 +170,28 @@ shutdown are not. Warm-file calls open, read and close files already in the OS
 page cache.
 
 The cross-language sweep keeps independent workers alive, warms each worker,
-rotates job order per entry and reverses it in pass two. Input preparation and
-JSON IPC are outside the timer. Managed runtimes keep normal GC behavior. A
-10-second request budget records a timeout as failure and restarts the worker.
+then times one complete pass per job, reversing job order every other pass.
+Input preparation and JSON IPC are outside the timer. Managed runtimes keep
+normal GC behavior. A 10-second request budget records a timeout as failure and
+restarts the worker.
 
 ## Run stability
 
 Builds finished before timing, workloads ran serially, and the host's
-one-minute load average was recorded at each step; it stayed between 0.5 and
-3.0. The one-sided Python rule excludes one of 180 complete passes, not
-individual slow maps or GC events. Its raw measurements are retained; an
-external cause is assumed for reporting, not established by the load logs.
-The first geometry phase varied in every library, slider included, so it was
-repeated; its results remain with the raw evidence.
+one-minute load average was recorded at each step; it stayed between 0.2 and
+3.0.
 
-Variation between the two interleaved passes is substantial for several rows
-(for example, Coosu's 868.9 versus 662.2 µs/map); these are observed pass
-means, not confidence bounds or evidence of an otherwise identical workload.
-That two-pass comparison has too few repetitions to classify whole-pass
-outliers reliably, so both are shown.
+Every table reports the fastest complete run or pass. Interference from the host
+only adds time, so the fastest pass is the closest observation of what each
+implementation can do. Passes are never split: each keeps the garbage
+collection and JIT compilation its library causes, and no individual map or
+pause is filtered out. All passes remain in the raw evidence.
+
+In the worker table, every row's slowest pass is within 5.2% of its fastest,
+except the three C# libraries: their first two passes are several times slower
+(Coosu: 2,438.7, 3,073.5, 576.1 and 573.0 µs/map), consistent with
+.NET's tiered JIT still compiling on the single pinned CPU. Their last two passes
+agree closely. Ranges are observed pass means, not confidence bounds.
 
 ## Reproduction
 

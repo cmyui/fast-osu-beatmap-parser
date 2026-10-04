@@ -1,4 +1,4 @@
-"""Rotate persistent parser workers on one CPU; preserve every result as JSONL."""
+"""Time parser workers on one CPU, one whole-corpus pass per job; keep JSONL."""
 
 import argparse
 import csv
@@ -171,10 +171,10 @@ with args.output.open("x") as out:
                 worker.request(path, worker.entry["workloads"][0], 3)
         jobs = [(w, kind) for w in workers for kind in w.entry["workloads"]]
         for round_id in range(args.rounds):
-            order = jobs if round_id % 2 == 0 else list(reversed(jobs))
-            for i, path in enumerate(files):
-                shift = i % len(order)
-                for worker, kind in order[shift:] + order[:shift]:
+            # Each job parses the whole corpus alone, so its calls never follow
+            # another library's; job order reverses every other round.
+            for worker, kind in jobs if round_id % 2 == 0 else reversed(jobs):
+                for path in files:
                     result = worker.request(path, kind, args.reps)
                     record = {
                         "round": round_id,
@@ -187,13 +187,12 @@ with args.output.open("x") as out:
                     if modes:
                         record["mode"] = modes[path.name]
                     out.write(json.dumps(record, allow_nan=False) + "\n")
-                if (i + 1) % 100 == 0:
-                    out.flush()
-                    print(
-                        f"round {round_id + 1}: {i + 1}/{len(files)}",
-                        file=sys.stderr,
-                        flush=True,
-                    )
+                out.flush()
+                print(
+                    f"round {round_id + 1}: {worker.entry['name']}/{kind}",
+                    file=sys.stderr,
+                    flush=True,
+                )
         metadata["complete"] = True
     finally:
         metadata["finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

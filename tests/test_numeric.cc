@@ -1,5 +1,6 @@
 #include "fosu/format.h"
 
+#include <fosu/arena.h>
 #include <fosu/beatmap.h>
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/primitives/vector_ops.h>
@@ -8,7 +9,6 @@
 #include <fosu/types.h>
 #include <tests/support/test.h>
 
-#include <algorithm>
 #include <bit>
 #include <cinttypes>  // IWYU pragma: keep (SIMD-only test)
 #include <cmath>
@@ -17,8 +17,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <span>
 #include <string>
 #include <string_view>  // IWYU pragma: keep (SIMD-only test)
+#include <vector>
 
 // Independent numeric oracle: libc conversion over a bounded copy, rather
 // than a second copy of the parser's mantissa arithmetic.
@@ -40,9 +42,56 @@ static uint64_t rng() {
   return z ^ (z >> 31);
 }
 
-static void test_bezier_subdivision() {
+// The official flattening, transcribed directly: split each piece in half
+// until it is flat, depth-first, then emit its start and smoothed midpoints.
+static std::vector<fosu::internal::CurvePoint> reference_bezier(
+    std::span<const fosu::internal::CurvePoint> points) {
   using fosu::internal::CurvePoint;
-  for (size_t count = 4; count <= 10; ++count) {
+  const size_t                         n = points.size();
+  std::vector<CurvePoint>              output;
+  std::vector<std::vector<CurvePoint>> pending{{points.begin(), points.end()}};
+  while (!pending.empty()) {
+    const auto parent = pending.back();
+    pending.pop_back();
+    bool flat = true;
+    for (size_t i = 1; i + 1 < n; ++i)
+      flat =
+          flat &&
+          !((parent[i - 1] - parent[i] * 2 + parent[i + 1]).squared_length() >
+            0.25f);
+    std::vector<CurvePoint> left(n), right(n), mid = parent;
+    for (size_t i = 0; i < n; ++i) {
+      left[i] = mid[0];
+      right[n - i - 1] = mid[n - i - 1];
+      for (size_t j = 0; j < n - i - 1; ++j)
+        mid[j] = (mid[j] + mid[j + 1]) * 0.5f;
+    }
+    if (flat) {
+      left.insert(left.end(), right.begin() + 1, right.end());
+      output.push_back(parent[0]);
+      for (size_t i = 1; i + 1 < n; ++i)
+        output.push_back((left[2 * i - 1] + left[2 * i] * 2 + left[2 * i + 1]) *
+                         0.25f);
+    } else {
+      pending.push_back(right);
+      pending.push_back(left);
+    }
+  }
+  output.push_back(points.back());
+  return output;
+}
+
+// Quadratic and cubic segments have their own code; every count must emit
+// exactly the official vertices.
+static void test_bezier_flattening() {
+  using fosu::internal::CurvePoint;
+  struct Recorded {
+    std::vector<CurvePoint> points;
+    void begin_segment() {}
+    void append(CurvePoint point) { points.push_back(point); }
+  };
+  fosu::Arena* arena = fosu::arena_alloc();
+  for (size_t count = 3; count <= 10; ++count) {
     for (fosu::i32 sample = 0; sample < 1000; ++sample) {
       CurvePoint points[10];
       for (size_t i = 0; i < count; ++i) {
@@ -53,22 +102,17 @@ static void test_bezier_subdivision() {
         };
         points[i] = {coordinate(), coordinate()};
       }
-      CurvePoint left[10], right[10], midpoints[10];
-      fosu::internal::subdivide_bezier({points, count}, left, right, midpoints);
-
-      CurvePoint expected_left[10], expected_right[10], work[10];
-      std::copy_n(points, count, work);
-      for (size_t i = 0; i < count; ++i) {
-        expected_left[i] = work[0];
-        expected_right[count - i - 1] = work[count - i - 1];
-        for (size_t j = 0; j < count - i - 1; ++j)
-          work[j] = (work[j] + work[j + 1]) * 0.5f;
-      }
-      CHECK(std::memcmp(left, expected_left, count * sizeof(CurvePoint)) == 0);
-      CHECK(std::memcmp(right, expected_right, count * sizeof(CurvePoint)) ==
-            0);
+      Recorded                          curve;
+      const fosu::TempArena             temp{arena};
+      const std::span<const CurvePoint> span{points, count};
+      CHECK(fosu::internal::bezier_distance(span, curve, arena));
+      const auto expected = reference_bezier(span);
+      CHECK(curve.points.size() == expected.size() &&
+            std::memcmp(curve.points.data(), expected.data(),
+                        expected.size() * sizeof(CurvePoint)) == 0);
     }
   }
+  fosu::arena_release(arena);
 }
 
 // Compare decimal conversion against libc, including significands that
@@ -447,6 +491,6 @@ int main() {
 #else
   puts("SIMD path: not built");
 #endif
-  test_bezier_subdivision();
+  test_bezier_flattening();
   return test_result();
 }

@@ -4,6 +4,7 @@
 
 #include <fosu/arena.h>
 #include <fosu/beatmap.h>
+#include <fosu/compiler.h>
 #include <fosu/slider_path.h>
 #include <fosu/types.h>
 
@@ -13,6 +14,8 @@
 #include <span>
 
 namespace fosu::internal {
+
+FOSU_FP_CONTRACT_OFF_BEGIN
 
 inline PathPoint object_position(const HitObject& object) {
   return {static_cast<f32>(object.x), static_cast<f32>(object.y)};
@@ -162,5 +165,7 @@ inline bool apply_stacking(Beatmap&             map,
   }
   return true;
 }
+
+FOSU_FP_CONTRACT_OFF_END
 
 }  // namespace fosu::internal
