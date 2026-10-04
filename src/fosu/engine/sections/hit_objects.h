@@ -25,7 +25,8 @@ namespace fosu::internal {
 
 // Everything after the "x,y,time,type,hitSound" prefix: slider params,
 // spinner/hold end times, or a trailing hit sample.
-FOSU_NOINLINE inline bool parse_hitobject_details(
+template <bool Lazer>
+FOSU_NOINLINE bool parse_hitobject_details(
     Beatmap&                       beatmap,
     HitObjectCounts&               counts,
     HitObject&                     object,
@@ -43,7 +44,8 @@ FOSU_NOINLINE inline bool parse_hitobject_details(
     }
     case HitObjectKind::Slider:
       return p < end && *p == ',' &&
-             parse_slider(beatmap, counts, object, p + 1, end, constants);
+             parse_slider_as<Lazer>(beatmap, counts, object, p + 1, end,
+                                    constants);
     case HitObjectKind::Spinner: {
       const auto details = parse_spinner_details(p, end);
       if (!details)
@@ -68,7 +70,8 @@ FOSU_NOINLINE inline bool parse_hitobject_details(
 
 // Lines the fast prefix does not accept: the scalar prefix parser handles
 // signed, decimal, spaced or wide fields; anything else is malformed.
-inline std::optional<HitObject> parse_hitobject_line_scalar(
+template <bool Lazer>
+std::optional<HitObject> parse_hitobject_line_scalar(
     Beatmap&                       beatmap,
     HitObjectCounts&               counts,
     const char*                    p,
@@ -103,7 +106,7 @@ inline std::optional<HitObject> parse_hitobject_line_scalar(
   if (next == p || (next < line_end && *next != ','))
     return std::nullopt;
 
-  if (beatmap.format_version < 128) {
+  if constexpr (!Lazer) {
     x = static_cast<f32>(static_cast<i32>(x));
     y = static_cast<f32>(static_cast<i32>(y));
   }
@@ -121,8 +124,8 @@ inline std::optional<HitObject> parse_hitobject_line_scalar(
       .combo_skip = 0,
       .hit_sample = {},
   };
-  if (!parse_hitobject_details(beatmap, counts, object, next, line_end,
-                               constants)) {
+  if (!parse_hitobject_details<Lazer>(beatmap, counts, object, next, line_end,
+                                      constants)) {
     return std::nullopt;
   }
   return object;
@@ -156,7 +159,8 @@ inline HitObject normalize_hitobject(HitObject object,
   return object;
 }
 
-inline const char* parse_hitobjects_section_scalar(
+template <bool Lazer>
+const char* parse_hitobjects_section_scalar(
     Beatmap&                       beatmap,
     HitObjectCounts&               counts,
     const char*                    p,
@@ -174,7 +178,7 @@ inline const char* parse_hitobjects_section_scalar(
       break;
     const char* following_line = after_line_ending(line_end, file_end);
     if (!ignored_line(p, line_end)) {
-      if (const auto object = parse_hitobject_line_scalar(
+      if (const auto object = parse_hitobject_line_scalar<Lazer>(
               beatmap, counts, p, line_end, constants)) {
         const bool preceding_was_spinner =
             counts.objects && (object->is_circle() || object->is_slider()) &&
@@ -197,6 +201,7 @@ inline const char* parse_hitobjects_section_scalar(
 #if FOSU_SIMD
 // Publishes an object whose x,y,time,type,hitSound prefix is decoded. `rest`
 // is everything after the prefix: empty, or starting with ','.
+template <bool Lazer>
 FOSU_ALWAYS_INLINE void accept_hitobject(
     Beatmap&                       beatmap,
     HitObjectCounts&               counts,
@@ -215,10 +220,11 @@ FOSU_ALWAYS_INLINE void accept_hitobject(
     if (rest_length)
       object.hit_sample = {rest + 1, 8};
   } else if (!(kind == HitObjectKind::Slider
-                   ? rest_length && parse_slider(beatmap, counts, object,
-                                                 rest + 1, line_end, constants)
-                   : parse_hitobject_details(beatmap, counts, object, rest,
-                                             line_end, constants)))
+                   ? rest_length &&
+                         parse_slider_as<Lazer>(beatmap, counts, object,
+                                                rest + 1, line_end, constants)
+                   : parse_hitobject_details<Lazer>(beatmap, counts, object,
+                                                    rest, line_end, constants)))
       [[unlikely]] {
     ++beatmap.stats.malformed_lines;
     return;
@@ -270,7 +276,7 @@ inline constexpr auto kPrefixLayouts = make_prefix_layouts<TimeDigits>();
 // y, 1-3 digit type and 1-2 digit hitSound. Times only grow through a map, so
 // one width usually covers a long run of lines. Returns at the first other
 // line.
-template <u32 TimeDigits>
+template <u32 TimeDigits, bool Lazer>
 FOSU_NOINLINE const char* parse_hitobjects_fixed_time(
     Beatmap&                       beatmap,
     HitObjectCounts&               counts,
@@ -359,21 +365,21 @@ FOSU_NOINLINE const char* parse_hitobjects_fixed_time(
         endings ? p + trailing_zeros(endings) : find_line_end(p + 32, file_end);
 #endif
     ++fast_lines;
-    accept_hitobject(beatmap, counts, constants, time_offset,
-                     preceding_was_spinner,
-                     HitObject{
-                         .x = static_cast<f32>(fields[0]),
-                         .y = static_cast<f32>(fields[1]),
-                         .type = fields[2],
-                         .hitsound = fields[3],
-                         .time = time,
-                         .end_time = 0,
-                         .slider = HitObject::kNoSlider,
-                         .new_combo = false,
-                         .combo_skip = 0,
-                         .hit_sample = {},
-                     },
-                     p + prefix_end, line_end);
+    accept_hitobject<Lazer>(beatmap, counts, constants, time_offset,
+                            preceding_was_spinner,
+                            HitObject{
+                                .x = static_cast<f32>(fields[0]),
+                                .y = static_cast<f32>(fields[1]),
+                                .type = fields[2],
+                                .hitsound = fields[3],
+                                .time = time,
+                                .end_time = 0,
+                                .slider = HitObject::kNoSlider,
+                                .new_combo = false,
+                                .combo_skip = 0,
+                                .hit_sample = {},
+                            },
+                            p + prefix_end, line_end);
     p = after_line_ending(line_end, file_end);
   }
   beatmap.stats.fast_path_lines += fast_lines;
@@ -381,7 +387,8 @@ FOSU_NOINLINE const char* parse_hitobjects_fixed_time(
   return p;
 }
 
-inline const char* parse_hitobjects_section_simd(
+template <bool Lazer>
+const char* parse_hitobjects_section_simd(
     Beatmap&                       beatmap,
     HitObjectCounts&               counts,
     const char*                    p,
@@ -393,20 +400,27 @@ inline const char* parse_hitobjects_section_simd(
       classify_hitobject_kind(beatmap.hit_objects[counts.objects - 1].type) ==
           HitObjectKind::Spinner;
   while (p < file_end) {
-    p = parse_hitobjects_fixed_time<1>(beatmap, counts, constants, time_offset,
-                                       preceding_was_spinner, p, file_end);
-    p = parse_hitobjects_fixed_time<2>(beatmap, counts, constants, time_offset,
-                                       preceding_was_spinner, p, file_end);
-    p = parse_hitobjects_fixed_time<3>(beatmap, counts, constants, time_offset,
-                                       preceding_was_spinner, p, file_end);
-    p = parse_hitobjects_fixed_time<4>(beatmap, counts, constants, time_offset,
-                                       preceding_was_spinner, p, file_end);
-    p = parse_hitobjects_fixed_time<5>(beatmap, counts, constants, time_offset,
-                                       preceding_was_spinner, p, file_end);
-    p = parse_hitobjects_fixed_time<6>(beatmap, counts, constants, time_offset,
-                                       preceding_was_spinner, p, file_end);
-    p = parse_hitobjects_fixed_time<7>(beatmap, counts, constants, time_offset,
-                                       preceding_was_spinner, p, file_end);
+    p = parse_hitobjects_fixed_time<1, Lazer>(
+        beatmap, counts, constants, time_offset, preceding_was_spinner, p,
+        file_end);
+    p = parse_hitobjects_fixed_time<2, Lazer>(
+        beatmap, counts, constants, time_offset, preceding_was_spinner, p,
+        file_end);
+    p = parse_hitobjects_fixed_time<3, Lazer>(
+        beatmap, counts, constants, time_offset, preceding_was_spinner, p,
+        file_end);
+    p = parse_hitobjects_fixed_time<4, Lazer>(
+        beatmap, counts, constants, time_offset, preceding_was_spinner, p,
+        file_end);
+    p = parse_hitobjects_fixed_time<5, Lazer>(
+        beatmap, counts, constants, time_offset, preceding_was_spinner, p,
+        file_end);
+    p = parse_hitobjects_fixed_time<6, Lazer>(
+        beatmap, counts, constants, time_offset, preceding_was_spinner, p,
+        file_end);
+    p = parse_hitobjects_fixed_time<7, Lazer>(
+        beatmap, counts, constants, time_offset, preceding_was_spinner, p,
+        file_end);
     if (p >= file_end)
       break;
     // A line no fixed-width loop accepts: blank lines, comments, a section
@@ -420,7 +434,7 @@ inline const char* parse_hitobjects_section_simd(
     if (c == '[' && section_header_line(p, line_end))
       break;
     if (!ignored_line(p, line_end)) {
-      if (const auto object = parse_hitobject_line_scalar(
+      if (const auto object = parse_hitobject_line_scalar<Lazer>(
               beatmap, counts, p, line_end, constants)) {
         const size_t count = counts.objects++;
         beatmap.hit_objects[count] = normalize_hitobject(
@@ -443,12 +457,19 @@ inline const char* parse_hitobjects_section(Beatmap&         beatmap,
                                             const char*      file_end,
                                             i32              time_offset = 0) {
   const HitObjectParseConstants constants;
+  // Stable (v127 and below) maps compile without lazer slider syntax.
 #if FOSU_SIMD
-  return parse_hitobjects_section_simd(beatmap, counts, p, file_end, constants,
-                                       time_offset);
+  return beatmap.format_version >= 128
+             ? parse_hitobjects_section_simd<true>(beatmap, counts, p, file_end,
+                                                   constants, time_offset)
+             : parse_hitobjects_section_simd<false>(
+                   beatmap, counts, p, file_end, constants, time_offset);
 #else
-  return parse_hitobjects_section_scalar(beatmap, counts, p, file_end,
-                                         constants, time_offset);
+  return beatmap.format_version >= 128
+             ? parse_hitobjects_section_scalar<true>(
+                   beatmap, counts, p, file_end, constants, time_offset)
+             : parse_hitobjects_section_scalar<false>(
+                   beatmap, counts, p, file_end, constants, time_offset);
 #endif
 }
 

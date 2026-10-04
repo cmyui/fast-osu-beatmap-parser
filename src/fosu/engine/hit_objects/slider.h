@@ -113,10 +113,10 @@ struct ParsedSliderPoint {
   const char* end;
 };
 
+template <bool Lazer>
 FOSU_ALWAYS_INLINE std::optional<ParsedSliderPoint> parse_slider_point(
     const char*                                     p,
     const char*                                     end,
-    bool                                            lazer,
     [[maybe_unused]] const HitObjectParseConstants& constants) {
 #if FOSU_SIMD
 #if FOSU_SIMD_X86
@@ -152,7 +152,7 @@ FOSU_ALWAYS_INLINE std::optional<ParsedSliderPoint> parse_slider_point(
     const char* next = parse_osu_float(coordinate, end, x, 131072);
     if (next == coordinate || next >= end || *next != ':')
       return std::nullopt;
-    if (!lazer)
+    if constexpr (!Lazer)
       x = static_cast<f32>(static_cast<i32>(x));
     coordinate = next;
   }
@@ -169,7 +169,7 @@ FOSU_ALWAYS_INLINE std::optional<ParsedSliderPoint> parse_slider_point(
     const char* next = parse_osu_float(coordinate, end, y, 131072);
     if (next == coordinate)
       return std::nullopt;
-    if (!lazer)
+    if constexpr (!Lazer)
       y = static_cast<f32>(static_cast<i32>(y));
     coordinate = next;
   }
@@ -333,7 +333,8 @@ FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
 // This is one parse transaction. Control points and completed lazer segments
 // are written into their arena arrays as they are accepted. Failures roll both
 // arrays back so rejected sliders leave no published data behind.
-FOSU_NOINLINE inline bool parse_slider(
+template <bool Lazer>
+FOSU_NOINLINE bool parse_slider_as(
     Beatmap&                                        beatmap,
     HitObjectCounts&                                counts,
     HitObject&                                      object,
@@ -343,7 +344,6 @@ FOSU_NOINLINE inline bool parse_slider(
   if (p >= end)
     return false;
 
-  const bool   lazer = beatmap.format_version >= 128;
   const size_t slider_point_begin = counts.slider_points;
   const size_t slider_segment_begin = counts.slider_segments;
 
@@ -377,7 +377,7 @@ FOSU_NOINLINE inline bool parse_slider(
 #endif
 
     const bool starts_segment =
-        lazer && p + 1 < end &&
+        Lazer && p + 1 < end &&
         (p[1] == 'B' || p[1] == 'C' || p[1] == 'L' || p[1] == 'P');
 
     CurveType          next_curve_type = current_curve_type;
@@ -411,7 +411,7 @@ FOSU_NOINLINE inline bool parse_slider(
       return false;
     }
 
-    const auto point = parse_slider_point(p, end, lazer, constants);
+    const auto point = parse_slider_point<Lazer>(p, end, constants);
     if (!point) {
       counts.slider_points = slider_point_begin;
       counts.slider_segments = slider_segment_begin;
@@ -549,7 +549,17 @@ FOSU_NOINLINE inline bool parse_slider(
   }
 
   std::string_view sound_fields[3];
-  if (p < end) {
+  // Most sliders end in the editor's unrepeated tail ",d|d,d:d|d:d,d:d:d:d:",
+  // which needs no field search or further validation.
+  const bool editor_tail = end - p == 21 && p[0] == ',' && is_digit(p[1]) &&
+                           p[2] == '|' && is_digit(p[3]) && p[4] == ',' &&
+                           short_edge_sets(p + 5) && p[12] == ',' &&
+                           short_sample(p + 13);
+  if (editor_tail) {
+    sound_fields[0] = {p + 1, 3};
+    sound_fields[1] = {p + 5, 7};
+    sound_fields[2] = {p + 13, 8};
+  } else if (p < end) {
     const char* sound_begin = p + 1;
 #if FOSU_SIMD
     const size_t span = static_cast<size_t>(end - sound_begin);
@@ -613,26 +623,29 @@ FOSU_NOINLINE inline bool parse_slider(
   const std::string_view edge_sounds = sound_fields[0];
   const std::string_view edge_sets = sound_fields[1];
   const std::string_view hit_sample = sound_fields[2];
-  if (!valid_sample(hit_sample, true) || !valid_edge_sets(edge_sets, slides)) {
+  if (!editor_tail && (!valid_sample(hit_sample, true) ||
+                       !valid_edge_sets(edge_sets, slides))) {
     counts.slider_points = slider_point_begin;
     counts.slider_segments = slider_segment_begin;
     return false;
   }
 
-  if (lazer && (has_explicit_segments || first_curve_degree)) {
-    if (counts.slider_segments == beatmap.slider_segments.size()) {
-      counts.slider_points = slider_point_begin;
-      counts.slider_segments = slider_segment_begin;
-      return false;
+  if constexpr (Lazer) {
+    if (has_explicit_segments || first_curve_degree) {
+      if (counts.slider_segments == beatmap.slider_segments.size()) {
+        counts.slider_points = slider_point_begin;
+        counts.slider_segments = slider_segment_begin;
+        return false;
+      }
+      beatmap.slider_segments[counts.slider_segments++] = {
+          .type = current_curve_type,
+          .degree = current_curve_degree,
+          .point_begin =
+              static_cast<u32>(segment_point_begin - slider_point_begin),
+          .point_count =
+              static_cast<u32>(counts.slider_points - segment_point_begin),
+      };
     }
-    beatmap.slider_segments[counts.slider_segments++] = {
-        .type = current_curve_type,
-        .degree = current_curve_degree,
-        .point_begin =
-            static_cast<u32>(segment_point_begin - slider_point_begin),
-        .point_count =
-            static_cast<u32>(counts.slider_points - segment_point_begin),
-    };
   }
 
   beatmap.sliders[counts.sliders] = {
@@ -640,7 +653,7 @@ FOSU_NOINLINE inline bool parse_slider(
       .point_count =
           static_cast<u32>(counts.slider_points - slider_point_begin),
       .segment_begin = static_cast<u32>(slider_segment_begin),
-      .segment_count = lazer ? static_cast<u32>(counts.slider_segments -
+      .segment_count = Lazer ? static_cast<u32>(counts.slider_segments -
                                                 slider_segment_begin)
                              : 0,
       .slides = std::max(1, slides),
