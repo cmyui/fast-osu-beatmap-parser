@@ -9,11 +9,9 @@
 #include <fosu/engine/primitives/packed_digits.h>
 #include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/engine/timing_points/beat_length.h>
+#include <fosu/format.h>
 #include <fosu/types.h>
 
-#include <algorithm>
-#include <array>
-#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <optional>
@@ -23,9 +21,8 @@ namespace fosu::internal {
 // Parse a timing point, including omitted legacy fields. A present field
 // must parse completely; NaN is meaningful only when inherited. Invalid
 // lines return nullopt.
-inline std::optional<TimingPoint> parse_timing_point(const char* p,
-                                                     const char* end,
-                                                     i32 time_offset = 0) {
+template <Format F>
+std::optional<TimingPoint> parse_timing_point(const char* p, const char* end) {
   f64         time, beat_length;
   const char* q = parse_osu_double(p, end, time);
   if (q == p || q >= end || *q != ',')
@@ -64,7 +61,7 @@ inline std::optional<TimingPoint> parse_timing_point(const char* p,
   if (!sample_set)
     return std::nullopt;
   return TimingPoint{
-      .time = time + time_offset,
+      .time = time + F.time_offset,
       .beat_length = beat_length,
       .meter = clamp_i32(rest[0]),
       .sample_set = *sample_set,
@@ -78,8 +75,10 @@ inline std::optional<TimingPoint> parse_timing_point(const char* p,
 // The editor's row: an unsigned integer time, a finite decimal beat length
 // and six small unsigned integers. Returns nullopt for anything else, which
 // the general parser then decides.
-FOSU_ALWAYS_INLINE std::optional<TimingPoint>
-parse_common_timing_point(const char* p, const char* end, i32 time_offset) {
+template <Format F>
+FOSU_ALWAYS_INLINE std::optional<TimingPoint> parse_common_timing_point(
+    const char* p,
+    const char* end) {
   const u32 time_digits = digit_run8(p);
   if (time_digits - 1 > 7 || p[time_digits] != ',')
     return std::nullopt;
@@ -110,7 +109,7 @@ parse_common_timing_point(const char* p, const char* end, i32 time_offset) {
   if (!sample_set)
     return std::nullopt;
   return TimingPoint{
-      .time = time + time_offset,
+      .time = time + F.time_offset,
       .beat_length = beat_length,
       .meter = static_cast<i32>(fields[0]),
       .sample_set = *sample_set,

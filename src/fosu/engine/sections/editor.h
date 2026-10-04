@@ -7,6 +7,7 @@
 #include <fosu/engine/parsing/lines.h>
 #include <fosu/engine/parsing/string_lookup.h>
 #include <fosu/engine/primitives/byte_scan.h>
+#include <fosu/format.h>
 #include <fosu/types.h>
 
 #include <algorithm>
@@ -47,9 +48,10 @@ inline constexpr auto kEditorFields = make_string_lookup<FieldParser>({
      assign_field_value<&BeatmapHeader::timeline_zoom, parse_editor_scale>},
 });
 
-inline bool parse_velocity_presets(Beatmap&         beatmap,
-                                   size_t&          count,
-                                   std::string_view input) {
+template <Format F>
+bool parse_velocity_presets(Beatmap&         beatmap,
+                            size_t&          count,
+                            std::string_view input) {
   size_t      parsed = 0;
   const char* p = input.data();
   const char* end = p + input.size();
@@ -58,8 +60,7 @@ inline bool parse_velocity_presets(Beatmap&         beatmap,
     const auto  value =
         parse_field_double(trim_field({p, static_cast<size_t>(comma - p)}));
     // Stable stores exactly three presets; lazer accepts any number.
-    const size_t limit =
-        beatmap.format_version >= 128 ? beatmap.velocity_presets.size() : 3;
+    const size_t limit = F.lazer ? beatmap.velocity_presets.size() : 3;
     if (value && parsed == limit)
       return false;
     if (value)
@@ -70,18 +71,20 @@ inline bool parse_velocity_presets(Beatmap&         beatmap,
   return true;
 }
 
-inline const char* parse_editor_section(Beatmap&    beatmap,
-                                        size_t&     velocity_preset_count,
-                                        bool&       velocity_presets_seen,
-                                        const char* p,
-                                        const char* end) {
+template <Format F>
+const char* parse_editor_section(Beatmap&    beatmap,
+                                 size_t&     velocity_preset_count,
+                                 bool&       velocity_presets_seen,
+                                 const char* p,
+                                 const char* end) {
   return for_each_section_line(p, end, [&](std::string_view line) {
     const auto field = split_key_value(line);
     if (!field)
       return;
     if (field->key == "VelocityPresets") {
       velocity_presets_seen = true;
-      if (!parse_velocity_presets(beatmap, velocity_preset_count, field->value))
+      if (!parse_velocity_presets<F>(beatmap, velocity_preset_count,
+                                     field->value))
         ++beatmap.stats.malformed_lines;
       return;
     }

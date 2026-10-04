@@ -1,3 +1,5 @@
+#include "fosu/format.h"
+
 #include <fosu/beatmap.h>
 #include <fosu/engine/parse_document.h>
 #include <fosu/engine/primitives/byte_scan.h>
@@ -840,9 +842,11 @@ static void test_common_timing_fallback() {
     const auto  input = fosu_test::padded(line + ",outside\n");
     const char* p = input.data();
     const auto  expected =
-        fosu::internal::parse_timing_point(p, p + line.size());
+        fosu::internal::parse_timing_point<fosu::kStableFormat>(
+            p, p + line.size());
     const auto actual =
-        fosu::internal::parse_common_timing_point(p, p + line.size(), 0);
+        fosu::internal::parse_common_timing_point<fosu::kStableFormat>(
+            p, p + line.size());
     if (!actual)
       continue;
     CHECK(expected.has_value());

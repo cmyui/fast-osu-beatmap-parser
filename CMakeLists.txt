@@ -84,6 +84,7 @@ target_sources(fosu_headers INTERFACE FILE_SET HEADERS BASE_DIRS src FILES
   src/fosu/beatmap_header.h
   src/fosu/compiler.h
   src/fosu/enums.h
+  src/fosu/format.h
   src/fosu/io.h
   src/fosu/legacy_rules.h
   src/fosu/mods.h

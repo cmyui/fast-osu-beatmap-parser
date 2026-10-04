@@ -1,3 +1,5 @@
+#include "fosu/format.h"
+
 #include <fosu/beatmap.h>
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/primitives/vector_ops.h>
@@ -345,11 +347,13 @@ static void test_fuzz_timing_point() {
     memset(buf + len, 0, sizeof(buf) - (size_t)len);
 
     const auto point =
-        fosu::internal::parse_common_timing_point(buf, buf + len, 0);
+        fosu::internal::parse_common_timing_point<fosu::kStableFormat>(
+            buf, buf + len);
     if (!point)
       continue;
     ++accepted;
-    const auto reference = fosu::internal::parse_timing_point(buf, buf + len);
+    const auto reference =
+        fosu::internal::parse_timing_point<fosu::kStableFormat>(buf, buf + len);
     CHECK(reference.has_value());
     if (reference) {
       const auto& tp = *point;
