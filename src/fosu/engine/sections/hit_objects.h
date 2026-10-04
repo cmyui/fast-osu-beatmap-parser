@@ -300,20 +300,25 @@ FOSU_NOINLINE const char* parse_hitobjects_fixed_time(
       // Longer type or hitSound: measure both digit runs.
       const u32 type_at = layout.x + layout.y + TimeDigits + 3;
       const u32 type_digits = trailing_zeros(nondigits >> type_at);
+      if (!layout.x || type_digits - 1 > 2)
+        break;
       const u32 sound_at = type_at + type_digits + 1;
       const u32 sound_digits = trailing_zeros(nondigits >> sound_at);
+      if (sound_digits - 1 > 1)
+        break;
       prefix_end = sound_at + sound_digits;
       const u32 delimiters =
           (1u << layout.x) | (1u << (layout.x + layout.y + 1)) |
           (1u << (type_at - 1)) | (1u << (type_at + type_digits));
-      if (!layout.x || type_digits - 1 > 2 || sound_digits - 1 > 1 ||
-          (nondigits & ((1u << prefix_end) - 1)) != delimiters ||
+      if ((nondigits & ((1u << prefix_end) - 1)) != delimiters ||
           (commas & delimiters) != delimiters)
         break;
       mask_index += (type_digits - 1) * 2 + sound_digits - 1;
     }
+    // A NUL is the zero padding only at the end of the input.
     const char after = p[prefix_end];
-    if (after != ',' && after != '\r' && after != '\n' && after != '\0')
+    if (after != ',' && after != '\r' && after != '\n' &&
+        p + prefix_end != file_end)
       break;
 
     u32 fields[4];

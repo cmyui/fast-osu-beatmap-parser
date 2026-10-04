@@ -8,6 +8,10 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>  // IWYU pragma: keep (Windows-only UINT32_MAX)
+#if defined(_WIN32)
+#include <memory>
+#include <new>
+#endif
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN

@@ -13,8 +13,9 @@
 #include <fosu/types.h>
 
 #include <cmath>
-#include <cstddef>
+#include <cstdint>
 #include <optional>
+#include <system_error>
 
 namespace fosu::internal {
 

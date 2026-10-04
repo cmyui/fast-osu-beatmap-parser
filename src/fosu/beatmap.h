@@ -7,7 +7,6 @@
 #include <fosu/slider_path.h>
 #include <fosu/types.h>
 
-#include <cstring>
 #include <optional>
 #include <span>
 #include <string_view>

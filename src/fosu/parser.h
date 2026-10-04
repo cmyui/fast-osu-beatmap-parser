@@ -85,8 +85,8 @@ inline ByteCounts count_bytes(const char* p, size_t n, char* copy) {
   }
 #elif defined(__x86_64__) || defined(_M_X64)
   // Biased, '\n'..'\r' become the four most negative signed bytes.
-  const __m128i bias = _mm_set1_epi8(char(0x80 - '\n')),
-                below = _mm_set1_epi8(char(0x80 + ('\r' - '\n') + 1)),
+  const __m128i bias = _mm_set1_epi8(0x80 - '\n'),
+                below = _mm_set1_epi8(-0x80 + ('\r' - '\n') + 1),
                 pipe = _mm_set1_epi8('|'), zero = _mm_setzero_si128();
   while (n >= 64) {
     __m128i lines = zero, pipes = zero;
