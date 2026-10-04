@@ -58,11 +58,11 @@ calculations. Every row uses the same 1,004 mutually accepted all-mode entries.
 
 | Python interface | Result contract | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---|---:|---:|
-| FOSU AVX2, reused `fosu.Parser` | Full supported document | 167.1 | 177.4 |
-| FOSU scalar, reused `fosu.Parser` | Full supported document | 220.8 | 232.5 |
-| FOSU AVX2, `fosu.parse` per call | Full supported document | 268.2 | 280.3 |
-| FOSU scalar, `fosu.parse` per call | Full supported document | 326.7 | 339.1 |
-| OsuPyParser 1.0.7 | Different eager model and derived statistics | Unsupported | 4,468.7 |
+| FOSU AVX2, reused `fosu.Parser` | Full supported document | 162.8 | 174.5 |
+| FOSU scalar, reused `fosu.Parser` | Full supported document | 219.0 | 227.0 |
+| FOSU AVX2, `fosu.parse` per call | Full supported document | 265.0 | 277.2 |
+| FOSU scalar, `fosu.parse` per call | Full supported document | 324.4 | 334.2 |
+| OsuPyParser 1.0.7 | Different eager model and derived statistics | Unsupported | 4,418.9 |
 
 Packages like rosu-pp and its Python bindings are intentionally excluded. They construct
 a significantly reduced PP-oriented model, not a general-purpose beatmap document.
@@ -77,30 +77,31 @@ for both parsers. All 256 entries are accepted by both parsers.
 
 | Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---:|---:|
-| FOSU AVX2, reused `fosu.Parser` | 452.7 | 469.2 |
-| FOSU scalar, reused `fosu.Parser` | 495.4 | 508.4 |
-| FOSU AVX2, `fosu.parse` per call | 585.6 | 596.2 |
-| FOSU scalar, `fosu.parse` per call | 623.0 | 638.5 |
-| slider 0.8.4 | 17,463.6 | 17,513.2 |
+| FOSU AVX2, reused `fosu.Parser` | 448.3 | 460.2 |
+| FOSU scalar, reused `fosu.Parser` | 496.1 | 509.2 |
+| FOSU AVX2, `fosu.parse` per call | 574.9 | 583.0 |
+| FOSU scalar, `fosu.parse` per call | 610.7 | 631.2 |
+| slider 0.8.4 | 17,369.1 | 17,365.6 |
 
 ### Native and other languages
 
-Resident-input public API latency on the same Core i7-8700 WSL2 host. These two
-interleaved passes use 1,023 common all-mode entries and are not directly
-comparable to the isolated Python batch measurements above.
+Resident-input public API latency on the same Core i7-8700 WSL2 host. Each row
+is the fastest of four whole-corpus passes per library over 1,023 common
+all-mode entries. These are not directly comparable to the Python batch
+measurements above.
 
-| Library / interface | Result scope | Mean µs/map |
+| Library / interface | Result scope | Fastest pass µs/map |
 |---|---|---:|
-| FOSU C++ AVX2, reused parser | Full supported document | 47.8 |
-| FOSU C++ scalar, reused parser | Full supported document | 103.5 |
-| FOSU C++ AVX2, new parser per call | Full supported document | 156.9 |
-| FOSU C++ scalar, new parser per call | Full supported document | 202.1 |
-| rosu-map 0.2.1 (Rust) | General-purpose document | 646.6 |
-| Coosu 2.5.1 (C#) | Typed document plus normal post-processing | 745.6 |
-| OsuParsers 1.7.2 (C#) | Rich document and storyboard decoding | 1,050.2 |
-| osu-parsers 4.1.7 (TypeScript) | Rich document model | 3,374.5 |
-| Official osu!lazer decoder (C#) | Rich ruleset model and processing | 3,974.0 |
-| osu-parser 0.3.3 (JavaScript) | Automatically derives slider/gameplay values | 15,818.6 |
+| FOSU C++ AVX2, reused parser | Full supported document | 34.4 |
+| FOSU C++ scalar, reused parser | Full supported document | 92.7 |
+| FOSU C++ AVX2, new parser per call | Full supported document | 125.7 |
+| FOSU C++ scalar, new parser per call | Full supported document | 185.8 |
+| rosu-map 0.2.1 (Rust) | General-purpose document | 602.1 |
+| Coosu 2.5.1 (C#) | Typed document plus normal post-processing | 573.0 |
+| OsuParsers 1.7.2 (C#) | Rich document and storyboard decoding | 877.5 |
+| osu-parsers 4.1.7 (TypeScript) | Rich document model | 3,337.5 |
+| Official osu!lazer decoder (C#) | Rich ruleset model and processing | 3,403.3 |
+| osu-parser 0.3.3 (JavaScript) | Automatically derives slider/gameplay values | 15,312.9 |
 
 All rows were measured on 2026-10-04 with the same host, corpus and scheduling
 harness.
@@ -118,8 +119,8 @@ corpus. Values use a reused parser.
 
 | Profile | x86 C++ AVX2 | x86 Python AVX2 | M3 C++ NEON | M3 Python NEON |
 |---|---:|---:|---:|---:|
-| Decode | 24.0 | 96.0 | 18.2 | 69.5 |
-| Gameplay | 27.4 | 119.1 | 19.8 | 85.0 |
+| Decode | 23.8 | 95.5 | 18.0 | 68.8 |
+| Gameplay | 27.2 | 118.7 | 19.6 | 84.6 |
 
 The [full comparison](docs/comparison.md) defines the result contracts, execution
 models, versions, per-pass variation and coverage. [Performance details](docs/performance.md)
