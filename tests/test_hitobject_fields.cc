@@ -145,6 +145,7 @@ static void test_slider_repeats_and_length() {
       {", 12 , 1e2 ", 12, 100},
       {",9000,131072", 9000, 131072},
       {",-1,-5", 1, 0},
+      {",1,-131072", 1, 0},
   };
   for (bool simd : {false, true}) {
     for (const auto& test : cases) {
@@ -157,7 +158,7 @@ static void test_slider_repeats_and_length() {
       CHECK_EQ(map.sliders[0].length, test.length);
     }
     for (const auto tail : {"", ",", ",1,", ",9001,10", ",1,131073",
-                            ",1,10,,/:0", ",1,10,,,/:0"}) {
+                            ",1,-131073", ",1,10,,/:0", ",1,10,,,/:0"}) {
       const auto map =
           parse_str(slider_document("B|1:2" + std::string(tail)), simd);
       CHECK(map.hit_objects.empty());

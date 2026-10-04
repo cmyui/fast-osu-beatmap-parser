@@ -22,6 +22,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <optional>
 #include <string_view>
@@ -371,7 +372,7 @@ FOSU_NOINLINE bool parse_slider_as(
     const char* length_begin = p + 1;
     const char* next = parse_short_decimal(length_begin, length);
     if (!next || next > end || *next == 'e' || *next == 'E' ||
-        !(length <= 131072))
+        !(std::abs(length) <= 131072))
       next = parse_osu_double(length_begin, end, length, 131072);
     if (next == length_begin || (next < end && *next != ',')) {
       counts.slider_points = slider_point_begin;
