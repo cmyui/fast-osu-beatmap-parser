@@ -19,17 +19,33 @@ const char* parse_timing_points_section(Beatmap&    beatmap,
                                         size_t&     point_count,
                                         const char* p,
                                         const char* file_end) {
-  return for_each_section_line(p, file_end, [&](std::string_view line) {
-    const char* begin = line.data();
-    const char* end = begin + line.size();
-    auto        point = parse_common_timing_point<F>(begin, end);
-    if (!point) [[unlikely]]
-      point = parse_timing_point<F>(begin, end);
-    if (point)
-      beatmap.timing_points[point_count++] = *point;
-    else [[unlikely]]
-      ++beatmap.stats.malformed_lines;
-  });
+  u32 time_digits = 1;
+  while (p < file_end) {
+    TimingPoint point;
+    if (const char* next =
+            parse_common_timing_point<F>(p, file_end, time_digits, point)) {
+      beatmap.timing_points[point_count++] = point;
+      p = next;
+      continue;
+    }
+    // Blank lines, comments, a section header, or another spelling.
+    if (*p == '\r' || *p == '\n') {
+      ++p;
+      continue;
+    }
+    const auto  line = read_line(p, file_end);
+    const char* line_end = p + line.text.size();
+    if (section_header_line(p, line_end))
+      break;
+    if (!ignored_line(p, line_end)) {
+      if (const auto general = parse_timing_point<F>(p, line_end))
+        beatmap.timing_points[point_count++] = *general;
+      else [[unlikely]]
+        ++beatmap.stats.malformed_lines;
+    }
+    p = line.next;
+  }
+  return p;
 }
 
 }  // namespace fosu::internal

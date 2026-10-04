@@ -318,7 +318,7 @@ FOSU_NOINLINE const char* parse_hitobjects_fixed_time(
     // A NUL is the zero padding only at the end of the input.
     const char after = p[prefix_end];
     if (after != ',' && after != '\r' && after != '\n' &&
-        p + prefix_end != file_end)
+        (after != '\0' || p + prefix_end != file_end))
       break;
 
     u32 fields[4];

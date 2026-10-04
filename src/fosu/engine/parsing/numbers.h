@@ -79,6 +79,36 @@ inline constexpr u64 kPow10u[9] = {
 };
 inline constexpr u64 kMaxExactDoubleInteger = 1ull << 53;
 
+// A decimal with at most 8 integer and 17 total digits whose value is below
+// 2^53. The digits form an exact integer and 10^fraction is an exact double, so
+// one IEEE division rounds exactly as a full decimal conversion would.
+inline const char* parse_short_decimal(const char* p, f64& out) {
+  const bool negative = *p == '-';
+  p += negative;
+  const u32 integer_digits = digit_run8(p);
+  if (integer_digits - 1 > 7)
+    return nullptr;
+  u64 mantissa = swar_parse_u64(p, integer_digits);
+  p += integer_digits;
+  u32 fraction_digits = 0;
+  if (*p == '.') {
+    const u32 first = digit_run8(++p);
+    const u32 second = first == 8 ? digit_run8(p + 8) : 0;
+    fraction_digits = first + second;
+    if (!first || integer_digits + fraction_digits > 17)
+      return nullptr;
+    mantissa = mantissa * kPow10u[first] + swar_parse_u64(p, first);
+    if (second)
+      mantissa = mantissa * kPow10u[second] + swar_parse_u64(p + 8, second);
+    p += fraction_digits;
+  }
+  if (mantissa > kMaxExactDoubleInteger)
+    return nullptr;
+  const f64 magnitude = static_cast<f64>(mantissa) / kPow10[fraction_digits];
+  out = negative ? -magnitude : magnitude;
+  return p;
+}
+
 // Locale-independent decimal parse that also accepts a leading '+'.
 inline const char* bounded_double(const char* start,
                                   const char* end,

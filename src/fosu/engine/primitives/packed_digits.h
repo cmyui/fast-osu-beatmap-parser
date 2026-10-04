@@ -29,16 +29,26 @@ inline u64 load_u64_le(const char* p) {
   return v;
 }
 
-// Number of leading ASCII digits in the next 8 bytes (0..8). A byte is a
-// digit iff its high nibble is 3 and adding 6 doesn't change that (which
-// rules out ':'..'?'). The +6 carry can only corrupt classification of
-// bytes *after* a non-digit byte, which tzcnt never reaches.
-inline u32 digit_run8(const char* p) {
+// Nonzero bytes mark the non-digits among the next 8 bytes, exactly up to
+// and including the first one. A byte is a digit iff its high nibble is 3 and
+// adding 6 doesn't change that (which rules out ':'..'?'). The +6 carry can
+// only corrupt classification of bytes *after* a non-digit byte.
+inline u64 nondigit_bytes8(const char* p) {
   const u64     chunk = load_u64_le(p);
   constexpr u64 kHi = 0xF0F0F0F0F0F0F0F0ull;
   constexpr u64 kThrees = 0x3030303030303030ull;
-  const u64 nondigit = (((chunk & kHi) ^ kThrees) |
-                        (((chunk + 0x0606060606060606ull) & kHi) ^ kThrees));
+  return ((chunk & kHi) ^ kThrees) |
+         (((chunk + 0x0606060606060606ull) & kHi) ^ kThrees);
+}
+
+// Whether the next `n` (1..8) bytes are all digits.
+inline bool leading_digits(const char* p, u32 n) {
+  return !(nondigit_bytes8(p) & (~0ull >> (64 - 8 * n)));
+}
+
+// Number of leading ASCII digits in the next 8 bytes (0..8).
+inline u32 digit_run8(const char* p) {
+  const u64 nondigit = nondigit_bytes8(p);
   if (nondigit == 0)
     return 8;
 #if defined(_MSC_VER)
