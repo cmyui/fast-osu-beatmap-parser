@@ -16,8 +16,9 @@
 // GCC does not inline across differing attributes: keep the post-processing
 // code that calls these functions inside the markers too.
 #if defined(__clang__)
-#define FOSU_FP_CONTRACT_OFF_BEGIN _Pragma("clang fp contract(off)")
-#define FOSU_FP_CONTRACT_OFF_END
+#define FOSU_FP_CONTRACT_OFF_BEGIN \
+  _Pragma("float_control(push)") _Pragma("clang fp contract(off)")
+#define FOSU_FP_CONTRACT_OFF_END _Pragma("float_control(pop)")
 #elif defined(__GNUC__)
 #define FOSU_FP_CONTRACT_OFF_BEGIN \
   _Pragma("GCC push_options") _Pragma("GCC optimize(\"fp-contract=off\")")
