@@ -4,6 +4,7 @@
 
 #include <fosu/arena.h>
 #include <fosu/beatmap.h>
+#include <fosu/compiler.h>
 #include <fosu/slider_event.h>
 #include <fosu/slider_path.h>
 #include <fosu/slider_timing.h>
@@ -14,6 +15,8 @@
 #include <span>
 
 namespace fosu::internal {
+
+FOSU_FP_CONTRACT_OFF_BEGIN
 
 inline bool set_slider_events(Beatmap&       map,
                               Arena*         result_arena,
@@ -105,5 +108,7 @@ inline bool set_slider_events(Beatmap&       map,
   map.slider_events = {ranges, map.sliders.size()};
   return true;
 }
+
+FOSU_FP_CONTRACT_OFF_END
 
 }  // namespace fosu::internal

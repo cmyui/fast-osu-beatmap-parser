@@ -2,6 +2,7 @@
 
 #include <fosu/arena.h>
 #include <fosu/beatmap.h>
+#include <fosu/compiler.h>
 #include <fosu/slider_geometry.h>
 #include <fosu/types.h>
 
@@ -12,6 +13,8 @@
 #include <span>
 
 namespace fosu::internal {
+
+FOSU_FP_CONTRACT_OFF_BEGIN
 
 struct SliderTimingChange {
   f64    time;
@@ -155,5 +158,7 @@ inline bool set_slider_end_times(Beatmap&                map,
   }
   return true;
 }
+
+FOSU_FP_CONTRACT_OFF_END
 
 }  // namespace fosu::internal
