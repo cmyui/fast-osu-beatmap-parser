@@ -336,7 +336,10 @@ static void test_fuzz_timing_point() {
         buf[len++] = char('0' + rng() % 4);
         continue;
       }
-      const fosu::i32 fd = 1 + (fosu::i32)(rng() % 3);
+      // The editor writes one-digit meter, uninherited and effects fields,
+      // a one- or two-digit sample index and up to three volume digits.
+      const fosu::i32 widest = f == 3 ? 3 : f == 2 ? 2 : rng() % 8 ? 1 : 3;
+      const fosu::i32 fd = 1 + (fosu::i32)(rng() % (uint64_t)widest);
       for (fosu::i32 i = 0; i < fd; ++i)
         buf[len++] = char('0' + rng() % 10);
     }
@@ -346,17 +349,20 @@ static void test_fuzz_timing_point() {
     }
     memset(buf + len, 0, sizeof(buf) - (size_t)len);
 
-    const auto point =
+    // Any carried time width must give the same result.
+    uint32_t          time_digits = 1 + (uint32_t)(rng() % 8);
+    fosu::TimingPoint tp;
+    const char*       next =
         fosu::internal::parse_common_timing_point<fosu::kStableFormat>(
-            buf, buf + len);
-    if (!point)
+            buf, buf + len, time_digits, tp);
+    if (!next)
       continue;
+    CHECK(next == buf + len);
     ++accepted;
     const auto reference =
         fosu::internal::parse_timing_point<fosu::kStableFormat>(buf, buf + len);
     CHECK(reference.has_value());
     if (reference) {
-      const auto& tp = *point;
       const auto& w = *reference;
       CHECK(memcmp(&tp.time, &w.time, 8) == 0);
       CHECK(memcmp(&tp.beat_length, &w.beat_length, 8) == 0);

@@ -51,13 +51,19 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--variant", default=f"python-{fosu.backend}")
     parser.add_argument("--suite", choices=["all-modes", "standard"], required=True)
+    # One lifetime per process: a fresh parser maps and unmaps its memory every
+    # call, which would also slow interleaved reused-parser calls.
+    parser.add_argument("--parser", choices=["reused", "fresh"], required=True)
     args = parser.parse_args()
     files = select_files(parser, args.corpus, args.reps, args.limit)
     inputs = [(file, file.read_bytes()) for file in files]
 
     selected_profiles = PROFILES if args.suite == "all-modes" else STANDARD_PROFILES
+    # The module functions create a temporary parser per call; a reused
+    # Parser keeps its memory between calls.
+    api = fosu.Parser() if args.parser == "reused" else fosu
     for options in selected_profiles.values():
-        fosu.parse(inputs[0][1], **options)
+        api.parse(inputs[0][1], **options)
     gc.collect()
 
     writer = csv.writer(sys.stdout)
@@ -70,11 +76,18 @@ def main() -> None:
                     (file_index + rep + job_index) % len(profiles)
                 ]
                 begin = perf_counter_ns()
-                beatmap = fosu.parse(data, **options)
+                beatmap = api.parse(data, **options)
                 del beatmap
                 elapsed = perf_counter_ns() - begin
                 writer.writerow(
-                    [file.name, len(data), rep, args.variant, profile, elapsed]
+                    [
+                        file.name,
+                        len(data),
+                        rep,
+                        args.variant,
+                        f"{profile}-{args.parser}",
+                        elapsed,
+                    ]
                 )
 
 

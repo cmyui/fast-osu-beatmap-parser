@@ -23,11 +23,16 @@ def load_parser(name):
         else:
             raise ValueError(f"unknown FOSU benchmark profile: {profile}")
 
+        # A reused Parser keeps its memory between calls; the module
+        # functions create a temporary parser per call.
+        reused = os.environ.get("FOSU_BENCH_PARSER") == "reused"
+        api = fosu.Parser() if reused else fosu
+
         def parse(data, path, workload):
             return (
-                fosu.parse_file(path, **options)
+                api.parse_file(path, **options)
                 if workload == "file"
-                else fosu.parse(data, **options)
+                else api.parse(data, **options)
             )
 
         def count(beatmap):

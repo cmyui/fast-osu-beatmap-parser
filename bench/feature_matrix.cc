@@ -82,15 +82,21 @@ void parse(fosu::Parser&      parser,
 }
 
 int main(int argc, char** argv) {
-  if (argc != 5) {
-    std::fprintf(
-        stderr,
-        "usage: feature_matrix corpus reps variant all-modes|standard\n");
+  if (argc != 6) {
+    std::fprintf(stderr,
+                 "usage: feature_matrix corpus reps variant "
+                 "all-modes|standard reused|fresh\n");
     return 2;
   }
   const fosu::i32 reps = std::atoi(argv[2]);
   if (reps < 1)
     return 2;
+  // Time one parser lifetime per process. A fresh parser maps and unmaps its
+  // memory every call, which would also slow interleaved reused-parser calls.
+  const std::string_view lifetime = argv[5];
+  if (lifetime != "reused" && lifetime != "fresh")
+    return 2;
+  const bool                         reuse = lifetime == "reused";
 
   std::vector<std::filesystem::path> files;
   for (const auto& file : std::filesystem::directory_iterator(argv[1]))
@@ -117,11 +123,10 @@ int main(int argc, char** argv) {
     if (!read_file(filename.c_str(), input))
       return 1;
     for (fosu::i32 rep = 0; rep < reps; ++rep) {
-      for (size_t job_index = 0; job_index < profile_count * 2; ++job_index) {
-        const size_t job = (job_index + file_index + static_cast<size_t>(rep)) %
-                           (profile_count * 2);
-        const Profile& profile = profiles[job / 2];
-        const bool     reuse = job % 2;
+      for (size_t job_index = 0; job_index < profile_count; ++job_index) {
+        const Profile& profile =
+            profiles[(job_index + file_index + static_cast<size_t>(rep)) %
+                     profile_count];
         const uint64_t begin = now();
         if (reuse) {
           parse(reused_parser, input, profile.options);
@@ -131,7 +136,7 @@ int main(int argc, char** argv) {
         }
         const uint64_t elapsed = now() - begin;
         std::printf("%s,%zu,%d,%s,%s-%s,%llu\n", filename.c_str(), input.size(),
-                    rep, argv[3], profile.name, reuse ? "reused" : "fresh",
+                    rep, argv[3], profile.name, argv[5],
                     static_cast<unsigned long long>(elapsed));
       }
     }

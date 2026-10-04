@@ -832,33 +832,60 @@ static void test_timing_integer_widths() {
 static void test_common_timing_fallback() {
   // Unusual spellings must either be left to the general parser or agree
   // with it exactly.
-  for (const std::string line :
-       {"-1.5,500", "0,NaN,4,0,0,100,0,0", "0,500,0meter,0,0,100,1,0",
-        "0,500,4,0,0,100,1anything,0,ignored", " 1 , 500 , 4 ,0,0,100,1,0",
-        "0,500,4,0,0,100,1,", "0,500,,0,0,100,1,0", "0,500,4,0,0,100,1,bad",
-        "0,NaN,4,0,0,100,1,0", "bad,500", "0,500,", "0,500,4,0,0,100,10,0",
-        "0,+500,4,0,0,100,1,0", "0,1e3,4,0,0,100,1,0", "0,500,0,0,0,100,1,0",
-        "0,3000000000,4,0,0,100,1,0", "0,500,4,9,0,100,1,0"}) {
+  for (const std::string line : {"-1.5,500",
+                                 "0,NaN,4,0,0,100,0,0",
+                                 "0,500,0meter,0,0,100,1,0",
+                                 "0,500,4,0,0,100,1anything,0,ignored",
+                                 " 1 , 500 , 4 ,0,0,100,1,0",
+                                 "0,500,4,0,0,100,1,",
+                                 "0,500,,0,0,100,1,0",
+                                 "0,500,4,0,0,100,1,bad",
+                                 "0,NaN,4,0,0,100,1,0",
+                                 "bad,500",
+                                 "0,500,",
+                                 "0,500,4,0,0,100,10,0",
+                                 "0,+500,4,0,0,100,1,0",
+                                 "0,1e3,4,0,0,100,1,0",
+                                 "0,500,0,0,0,100,1,0",
+                                 "0,3000000000,4,0,0,100,1,0",
+                                 "0,500,4,9,0,100,1,0",
+                                 "12345,-100,4,2,1,60,0,0",
+                                 "12345,-1000,4,2,1,60,0,0",
+                                 "12345,-100.5,4,2,1,60,0,0",
+                                 "123,-66.6666666666667,4,2,12,100,0,1",
+                                 "123,333.333333333333,4,1,0,5,1,0",
+                                 "123,0.1,4,1,0,5,1,0",
+                                 "123,12345678.12345678,4,1,0,5,1,0",
+                                 "123,1.,4,1,0,5,1,0",
+                                 "123,-0,4,1,0,5,1,0",
+                                 "123,9007199254740993,4,1,0,5,1,0",
+                                 "123,9.007199254740993,4,1,0,5,1,0"}) {
     const auto  input = fosu_test::padded(line + ",outside\n");
     const char* p = input.data();
     const auto  expected =
         fosu::internal::parse_timing_point<fosu::kStableFormat>(
             p, p + line.size());
-    const auto actual =
-        fosu::internal::parse_common_timing_point<fosu::kStableFormat>(
-            p, p + line.size());
-    if (!actual)
-      continue;
-    CHECK(expected.has_value());
-    if (expected) {
-      CHECK_EQ(actual->time, expected->time);
-      CHECK_EQ(actual->beat_length, expected->beat_length);
-      CHECK_EQ(actual->meter, expected->meter);
-      CHECK_EQ(actual->sample_set, expected->sample_set);
-      CHECK_EQ(actual->sample_index, expected->sample_index);
-      CHECK_EQ(actual->volume, expected->volume);
-      CHECK_EQ(actual->uninherited, expected->uninherited);
-      CHECK_EQ(actual->effects, expected->effects);
+    // The time width carried from a previous row must not change the result.
+    for (uint32_t carried = 1; carried <= 8; ++carried) {
+      uint32_t          time_digits = carried;
+      fosu::TimingPoint actual;
+      const char*       next =
+          fosu::internal::parse_common_timing_point<fosu::kStableFormat>(
+              p, p + line.size(), time_digits, actual);
+      if (!next)
+        continue;
+      CHECK_EQ(next, p + line.size());
+      CHECK(expected.has_value());
+      if (expected) {
+        CHECK_EQ(actual.time, expected->time);
+        CHECK_EQ(actual.beat_length, expected->beat_length);
+        CHECK_EQ(actual.meter, expected->meter);
+        CHECK_EQ(actual.sample_set, expected->sample_set);
+        CHECK_EQ(actual.sample_index, expected->sample_index);
+        CHECK_EQ(actual.volume, expected->volume);
+        CHECK_EQ(actual.uninherited, expected->uninherited);
+        CHECK_EQ(actual.effects, expected->effects);
+      }
     }
   }
 }

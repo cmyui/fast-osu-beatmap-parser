@@ -1,6 +1,6 @@
 # Public parser comparison
 
-All rows were measured on 2026-09-20 from FOSU 0.5.0 (`798b810`), using
+All rows were measured on 2026-10-04 from FOSU 0.6.0 (`20ccd67`), using
 the fixed cohorts and timing protocols below. The native comparison uses the
 complete interleaved worker schedule. This comparison asks how long documented
 public APIs take to produce useful beatmap results. It does not pretend that
@@ -22,6 +22,12 @@ Unavoidable additional work stays inside the timer.
 - **Mod-adjusted gameplay** is likewise reported only for FOSU until another
   measured public API offers an equivalent bulk result.
 
+FOSU appears with two parser lifetimes. A **reused parser** keeps its memory
+between calls. A **new parser per call** also reserves that memory and takes a
+page fault on the first write to each page, every call; Python's module-level
+`fosu.parse` and `fosu.parse_file` work this way. The other libraries are
+measured through their normal per-call APIs.
+
 `Exact` means the invocation requests the stated FOSU contract. `Superset` means
 the parser unavoidably performs additional work. `Different` covers richer models
 whose fields and processing do not form a strict subset or superset.
@@ -30,7 +36,7 @@ whose fields and processing do not form a strict subset or superset.
 
 | Library | Normal timed result | Slider/gameplay work | Relation to structural decode |
 |---|---|---|---|
-| FOSU | Full supported document; detached objects in Python and parser-owned records in C++ | End times, paths, events, stacking and mods are explicit parse options | Exact baseline |
+| FOSU | Full supported document; detached objects in Python and parser-owned records in C++; a parser can be reused across calls | End times, paths, events, stacking and mods are explicit parse options | Exact baseline |
 | slider 0.8.4 | Eager Python beatmap objects; reliable on the measured standard, taiko and catch maps | Slider end times and curve objects are eager; stacking and mods are follow-up calls | Superset for structural decode; comparable geometry outcome |
 | OsuPyParser 1.0.7 | Eager Python document, file hash and derived statistics | File-only public API | Different, with additional eager work |
 | rosu-map 0.2.1 | General-purpose legacy document | Ordinary decode only | Closest structural scope; representation differs |
@@ -60,9 +66,11 @@ the remaining five or six passes; see run stability below.
 
 | Python interface | Contract | Resident bytes | Warm file | Pass detail: bytes / file |
 |---|---|---:|---:|---|
-| FOSU AVX2 | Exact | 165.1 | 174.7 | 161.2–169.8 / 172.2–176.6 |
-| FOSU scalar | Exact | 224.4 | 231.6 | 223.3–228.1 / 229.9–232.5 |
-| OsuPyParser | Different | Unsupported | 4,418.2 | — / 4,402.8–4,423.7 |
+| FOSU AVX2, reused parser | Exact | 168.3 | 179.1 | 163.5–171.2 / 178.0–185.8 |
+| FOSU scalar, reused parser | Exact | 232.5 | 242.5 | 230.1–237.7 / 241.2–252.8 |
+| FOSU AVX2, `fosu.parse` per call | Exact | 274.6 | 287.1 | 271.1–284.0 / 283.2–288.1 |
+| FOSU scalar, `fosu.parse` per call | Exact | 341.1 | 349.5 | 338.4–345.3 / 345.7–356.9 |
+| OsuPyParser | Different | Unsupported | 4,448.6 | — / 4,418.7–4,490.2 |
 
 OsuPyParser has no published resident-input API.
 
@@ -74,10 +82,12 @@ work described in the next section.
 
 | Python interface | Contract | Resident bytes | Warm file |
 |---|---|---:|---:|
-| FOSU AVX2 | Exact | 174.4 | 186.1 |
-| FOSU scalar | Exact | 219.6 | 228.2 |
-| OsuPyParser | Different | Unsupported | 4,072.7 |
-| slider | Superset | 15,864.6 | 16,096.7 |
+| FOSU AVX2, reused parser | Exact | 176.7 | 187.6 |
+| FOSU scalar, reused parser | Exact | 221.6 | 232.7 |
+| FOSU AVX2, `fosu.parse` per call | Exact | 277.6 | 290.4 |
+| FOSU scalar, `fosu.parse` per call | Exact | 322.3 | 334.7 |
+| OsuPyParser | Different | Unsupported | 4,127.9 |
+| slider | Superset | 15,890.8 | 16,141.8 |
 
 Python result construction dominates these measurements, so the backend difference
 is smaller here than at the native parsing boundary.
@@ -93,9 +103,11 @@ and slider is accessed with `hit_objects(stacking=False)`.
 
 | Python interface | Execution model | Resident bytes | Warm file | Pass detail: bytes / file |
 |---|---|---:|---:|---|
-| FOSU AVX2 | Explicit geometry options | 483.5 | 490.4 | 480.5–494.8 / 489.5–494.7 |
-| FOSU scalar | Explicit geometry options | 530.7 | 545.2 | 523.0–537.6 / 534.0–564.3 |
-| slider | Geometry built during parse | 17,289.6 | 17,410.9 | 17,143.7–17,423.6 / 17,241.6–17,757.7 |
+| FOSU AVX2, reused parser | Explicit geometry options | 462.8 | 479.9 | 460.7–484.4 / 474.2–489.0 |
+| FOSU scalar, reused parser | Explicit geometry options | 514.8 | 526.2 | 508.8–523.3 / 519.3–541.9 |
+| FOSU AVX2, `fosu.parse` per call | Explicit geometry options | 592.2 | 614.3 | 583.5–600.2 / 597.4–627.6 |
+| FOSU scalar, `fosu.parse` per call | Explicit geometry options | 646.6 | 660.4 | 636.9–666.1 / 652.9–673.6 |
+| slider | Geometry built during parse | 17,373.3 | 17,386.3 | 17,247.0–17,916.9 / 17,298.2–17,735.1 |
 
 Eager Python construction and geometry work reduce the relative backend difference
 in this scenario; native feature costs are reported separately in
@@ -104,20 +116,23 @@ in this scenario; native feature costs are reported separately in
 ## Native and cross-language structural decode
 
 Resident-input API latency over the 1,023-entry common all-mode cohort. Every
-runtime is a persistent worker, but each timed call creates a fresh parser/result.
+runtime is a persistent worker, and each timed call creates a new result. FOSU's
+reused-parser rows keep one parser per worker; the others create one per call.
 Jobs rotate per map and reverse in pass two. This is an interleaved public-API
 comparison and is not directly comparable to the isolated Python batches.
 
 | Library / interface | Contract | Mean | Pass 1 / pass 2 |
 |---|---|---:|---:|
-| FOSU C++ AVX2 | Exact | 50.2 | 50.7 / 49.7 |
-| FOSU C++ scalar | Exact | 109.0 | 109.8 / 108.2 |
-| rosu-map (Rust) | Closest structural scope | 648.0 | 645.5 / 650.6 |
-| Coosu (C#) | Different | 790.2 | 926.5 / 654.0 |
-| OsuParsers (C#) | Superset | 1,038.3 | 1,107.7 / 968.9 |
-| osu-parsers (TypeScript) | Different | 3,357.9 | 3,468.4 / 3,247.3 |
-| Official osu!lazer decoder (C#) | Superset | 4,010.8 | 4,294.2 / 3,727.4 |
-| osu-parser (JavaScript) | Superset | 15,836.4 | 16,256.7 / 15,416.2 |
+| FOSU C++ AVX2, reused parser | Exact | 51.0 | 48.5 / 53.4 |
+| FOSU C++ scalar, reused parser | Exact | 110.4 | 107.0 / 113.8 |
+| FOSU C++ AVX2, new parser per call | Exact | 158.0 | 174.6 / 141.4 |
+| FOSU C++ scalar, new parser per call | Exact | 210.6 | 215.9 / 205.3 |
+| rosu-map (Rust) | Closest structural scope | 648.7 | 646.8 / 650.7 |
+| Coosu (C#) | Different | 748.2 | 843.3 / 653.1 |
+| OsuParsers (C#) | Superset | 1,025.2 | 1,097.1 / 953.3 |
+| osu-parsers (TypeScript) | Different | 3,309.2 | 3,410.6 / 3,207.8 |
+| Official osu!lazer decoder (C#) | Superset | 4,181.0 | 4,577.8 / 3,784.2 |
+| osu-parser (JavaScript) | Superset | 15,764.1 | 16,160.6 / 15,367.5 |
 
 ## Coverage
 
@@ -160,13 +175,14 @@ JSON IPC are outside the timer. Managed runtimes keep normal GC behavior. A
 
 ## Run stability
 
-Builds finished before timing, workloads ran serially, and host load was recorded.
-WSL reported no swapping or CPU steal during the run. The one-sided Python rule
-excludes four of 108 complete passes, not individual slow maps or GC events.
-Their raw measurements are retained; an external cause is assumed for reporting,
-not established by the load logs. Managed-runtime
-variation in the interleaved table is substantially larger (for example, Coosu's
-926.5 versus 654.0 µs/map); these are observed pass means, not confidence bounds
+Builds finished before timing, workloads ran serially, and the host's
+one-minute load average was recorded at each step; it stayed between 1.0 and
+3.6. The one-sided Python rule excludes two of 180 complete passes, not
+individual slow maps or GC events. Their raw measurements are retained; an
+external cause is assumed for reporting, not established by the load logs.
+Variation between the two interleaved passes is substantially larger for
+managed runtimes and for FOSU with a new parser per call (for example, Coosu's
+843.3 versus 653.1 µs/map); these are observed pass means, not confidence bounds
 or evidence of an otherwise identical workload. That two-pass comparison has
 too few repetitions to classify whole-pass outliers reliably, so both are shown.
 
