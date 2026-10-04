@@ -21,6 +21,12 @@
 #include <span>
 #include <string_view>
 
+#if defined(__aarch64__) || defined(_M_ARM64)
+#include <arm_neon.h>
+#elif defined(__x86_64__) || defined(_M_X64)
+#include <emmintrin.h>
+#endif
+
 namespace fosu {
 
 inline constexpr size_t kBufferPadding = 128;
@@ -34,51 +40,97 @@ inline bool push_span(Arena* arena, std::span<T>& out, size_t capacity) {
   return values;
 }
 
+// Lazer accepts any number of velocity presets; beyond this many, the line
+// is malformed.
+inline constexpr size_t kMaxVelocityPresets = 64;
+
 struct ByteCounts {
-  size_t lines = 1;  // line endings + 1
+  size_t lines = 1;  // line-ending bytes + 1
   size_t pipes = 0;
-  size_t commas = 0;
 };
 
-// One pass with byte-wide counters per lane, flushed before they can
-// overflow, so compilers vectorize it.
-inline ByteCounts count_bytes(std::span<const char> input) {
-  ByteCounts  counts;
-  const char* p = input.data();
-  size_t      n = input.size();
-  while (n >= 32) {
-    u8           lines[32] = {}, pipes[32] = {}, commas[32] = {};
-    const size_t blocks = std::min<size_t>(n / 32, 255);
-    for (size_t b = 0; b < blocks; ++b, p += 32, n -= 32)
-      for (int i = 0; i < 32; ++i) {
-        lines[i] += (p[i] == '\n') | (p[i] == '\r');
-        pipes[i] += p[i] == '|';
-        commas[i] += p[i] == ',';
+// Counts the bytes that bound the per-line and per-point arrays, copying the
+// input to `copy` in the same pass when it is non-null. '\n', '\v', '\f' and
+// '\r' all count as line endings: a safe over-count with one range compare.
+//
+// SSE2 and NEON are baseline on x86-64 and arm64, so this needs no dispatch.
+// Each 64-byte step subtracts the sum of four 0/-1 match masks from byte
+// counters, which are widened every 63 steps, before they can overflow.
+inline ByteCounts count_bytes(const char* p, size_t n, char* copy) {
+  ByteCounts counts;
+#if defined(__aarch64__) || defined(_M_ARM64)
+  const uint8x16_t newline = vdupq_n_u8('\n'), span = vdupq_n_u8('\r' - '\n'),
+                   pipe = vdupq_n_u8('|');
+  while (n >= 64) {
+    uint8x16_t lines = vdupq_n_u8(0), pipes = lines;
+    for (size_t steps = std::min<size_t>(n / 64, 63); steps;
+         --steps, p += 64, n -= 64) {
+      const uint8x16x4_t v = vld1q_u8_x4(reinterpret_cast<const u8*>(p));
+      if (copy) {
+        vst1q_u8_x4(reinterpret_cast<u8*>(copy), v);
+        copy += 64;
       }
-    for (int i = 0; i < 32; ++i) {
-      counts.lines += lines[i];
-      counts.pipes += pipes[i];
-      counts.commas += commas[i];
+      uint8x16_t l[4], q[4];
+      for (int i = 0; i < 4; ++i) {
+        l[i] = vcleq_u8(vsubq_u8(v.val[i], newline), span);
+        q[i] = vceqq_u8(v.val[i], pipe);
+      }
+      lines =
+          vsubq_u8(lines, vaddq_u8(vaddq_u8(l[0], l[1]), vaddq_u8(l[2], l[3])));
+      pipes =
+          vsubq_u8(pipes, vaddq_u8(vaddq_u8(q[0], q[1]), vaddq_u8(q[2], q[3])));
     }
+    counts.lines += vaddlvq_u8(lines);
+    counts.pipes += vaddlvq_u8(pipes);
   }
+#elif defined(__x86_64__) || defined(_M_X64)
+  // Biased, '\n'..'\r' become the four most negative signed bytes.
+  const __m128i bias = _mm_set1_epi8(char(0x80 - '\n')),
+                below = _mm_set1_epi8(char(0x80 + ('\r' - '\n') + 1)),
+                pipe = _mm_set1_epi8('|'), zero = _mm_setzero_si128();
+  while (n >= 64) {
+    __m128i lines = zero, pipes = zero;
+    for (size_t steps = std::min<size_t>(n / 64, 63); steps;
+         --steps, p += 64, n -= 64) {
+      __m128i l[4], q[4];
+      for (int i = 0; i < 4; ++i) {
+        const __m128i v =
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(p) + i);
+        if (copy)
+          _mm_storeu_si128(reinterpret_cast<__m128i*>(copy) + i, v);
+        l[i] = _mm_cmpgt_epi8(below, _mm_add_epi8(v, bias));
+        q[i] = _mm_cmpeq_epi8(v, pipe);
+      }
+      if (copy)
+        copy += 64;
+      lines = _mm_sub_epi8(lines, _mm_add_epi8(_mm_add_epi8(l[0], l[1]),
+                                               _mm_add_epi8(l[2], l[3])));
+      pipes = _mm_sub_epi8(pipes, _mm_add_epi8(_mm_add_epi8(q[0], q[1]),
+                                               _mm_add_epi8(q[2], q[3])));
+    }
+    const __m128i l = _mm_sad_epu8(lines, zero), q = _mm_sad_epu8(pipes, zero);
+    counts.lines += size_t(_mm_cvtsi128_si64(l) + _mm_extract_epi16(l, 4));
+    counts.pipes += size_t(_mm_cvtsi128_si64(q) + _mm_extract_epi16(q, 4));
+  }
+#endif
+  if (copy && n)
+    std::memcpy(copy, p, n);
   for (; n; ++p, --n) {
-    counts.lines += (*p == '\n') | (*p == '\r');
+    counts.lines += u8(*p - '\n') <= '\r' - '\n';
     counts.pipes += *p == '|';
-    counts.commas += *p == ',';
   }
   return counts;
 }
 
 // A record is at least one line, so the line count bounds the per-line
 // arrays. Slider points and segments each start with '|'.
-inline bool prealloc_beatmap_arrays(Arena*                arena,
-                                    Beatmap&              beatmap,
-                                    std::span<const char> input) {
-  const auto [lines, pipes, commas] = count_bytes(input);
+inline bool prealloc_beatmap_arrays(Arena*     arena,
+                                    Beatmap&   beatmap,
+                                    ByteCounts counts) {
+  const auto [lines, pipes] = counts;
   return push_span(arena, beatmap.breaks, lines) &&
          push_span(arena, beatmap.combo_colours, lines) &&
-         // At least three, for the default presets:
-         push_span(arena, beatmap.velocity_presets, commas + 3) &&
+         push_span(arena, beatmap.velocity_presets, kMaxVelocityPresets) &&
          push_span(arena, beatmap.timing_points, lines) &&
          push_span(arena, beatmap.hit_objects, lines) &&
          push_span(arena, beatmap.sliders, lines) &&
@@ -113,9 +165,9 @@ class Parser {
     char* buffer = reserve_input(input.size());
     if (!buffer)
       return nullptr;
-    if (!input.empty())
-      std::memcpy(buffer, input.data(), input.size());
-    return parse_input({buffer, input.size()}, opts);
+    const auto counts =
+        internal::count_bytes(input.data(), input.size(), buffer);
+    return parse_input({buffer, input.size()}, counts, opts);
   }
 
   Beatmap* parse_file(const char* path, ParseOptions opts = {}) noexcept {
@@ -125,14 +177,17 @@ class Parser {
     const std::span<const char> input = load_file(path);
     if (!input.data())
       return nullptr;
-    return parse_input(input, opts);
+    const auto counts =
+        internal::count_bytes(input.data(), input.size(), nullptr);
+    return parse_input(input, counts, opts);
   }
 
  private:
   Beatmap* parse_input(std::span<const char> input,
+                       internal::ByteCounts  counts,
                        ParseOptions          opts) noexcept {
     if (!input.empty() &&
-        !internal::prealloc_beatmap_arrays(result_arena_, beatmap_, input)) {
+        !internal::prealloc_beatmap_arrays(result_arena_, beatmap_, counts)) {
       reset_working_state();
       return nullptr;
     }
