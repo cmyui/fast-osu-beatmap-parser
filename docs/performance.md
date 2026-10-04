@@ -41,7 +41,7 @@ mostly operating-system work, and it is larger on Linux than on macOS.
 
 ## Current feature costs
 
-Measured on 2026-10-04 from FOSU commit `7ea3961` (after 0.6.0). The performance profile
+Measured on 2026-10-04 from FOSU commit `f2c86ce` (after 0.6.1). The performance profile
 contains 1,024 entries (986 unique beatmaps), 256 per mode and 46,029,610 bytes.
 Repeated entries are deliberate products of the stratified selection. Input is
 resident in memory. Python rows include the complete detached Python result and

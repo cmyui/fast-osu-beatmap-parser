@@ -41,7 +41,7 @@ if (!map) return 1;
 ## Performance
 
 Benchmarks use public APIs and include result construction and release. Lower is
-better. Current measurements use FOSU commit `7ea3961` (after 0.6.0) and a
+better. Current measurements use FOSU commit `f2c86ce` (after 0.6.1) and a
 representative 1,024-entry corpus: 256 entries per game mode and 46,029,610
 bytes total.
 

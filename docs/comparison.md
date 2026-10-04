@@ -1,6 +1,6 @@
 # Public parser comparison
 
-All rows were measured on 2026-10-04 from FOSU commit `7ea3961` (after 0.6.0), using
+All rows were measured on 2026-10-04 from FOSU commit `f2c86ce` (after 0.6.1), using
 the fixed cohorts and timing protocols below. The native comparison times one
 complete corpus pass per worker job. This comparison asks how long documented
 public APIs take to produce useful beatmap results. It does not pretend that
