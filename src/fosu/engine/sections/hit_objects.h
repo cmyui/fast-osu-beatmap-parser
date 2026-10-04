@@ -358,15 +358,9 @@ FOSU_NOINLINE const char* parse_hitobjects_fixed_time(
     time = vgetq_lane_f64(vcvtq_f64_u64(vmovl_u32(vpadd_u32(terms, terms))), 0);
 #endif
 
-#if FOSU_SIMD_NEON
     const u32   first_ending = first_line_end32(ascii);
     const char* line_end =
         first_ending < 32 ? p + first_ending : find_line_end(p + 32, file_end);
-#else
-    const u32   endings = line_end_mask32(ascii);
-    const char* line_end =
-        endings ? p + trailing_zeros(endings) : find_line_end(p + 32, file_end);
-#endif
     ++fast_lines;
     accept_hitobject<F>(beatmap, counts, constants, preceding_was_spinner,
                         HitObject{

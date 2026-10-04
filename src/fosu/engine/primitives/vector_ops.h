@@ -81,34 +81,32 @@ template <u8 Value>
 inline ByteVector broadcast_byte() {
   return vdupq_n_u8(Value);
 }
-// Comparisons have all-zero or all-one lanes. Weight each true lane and
-// pairwise-add until the first two bytes hold the masks of the two halves.
-// One scalar extraction then gives the same byte-position mask as AVX2.
-inline u32 byte_mask16(uint8x16_t v) {
+// Comparisons have all-zero or all-one lanes. Weight each true lane by its bit
+// and pairwise-add until each byte holds eight lanes' bits. Both halves share
+// one reduction, so a 32-byte mask costs one extraction, as with AVX2.
+inline u32 byte_mask32(uint8x16_t low, uint8x16_t high) {
   constexpr u8 weights[16] = {1, 2, 4, 8, 16, 32, 64, 128,
                               1, 2, 4, 8, 16, 32, 64, 128};
-  const auto   bits = vandq_u8(v, vld1q_u8(weights));
-  const auto   pairs = vpaddq_u8(bits, bits);
+  const auto   w = vld1q_u8(weights);
+  const auto   pairs = vpaddq_u8(vandq_u8(low, w), vandq_u8(high, w));
   const auto   fours = vpaddq_u8(pairs, pairs);
   const auto   eights = vpaddq_u8(fours, fours);
-  return vgetq_lane_u16(vreinterpretq_u16_u8(eights), 0);
+  return vgetq_lane_u32(vreinterpretq_u32_u8(eights), 0);
 }
 inline u32 equal_mask32(Bytes32 v, ByteVector c) {
-  return byte_mask16(vceqq_u8(v.val[0], c)) |
-         (byte_mask16(vceqq_u8(v.val[1], c)) << 16);
+  return byte_mask32(vceqq_u8(v.val[0], c), vceqq_u8(v.val[1], c));
 }
 inline u32 line_end_mask32(Bytes32 v) {
   const auto cr = broadcast_byte<'\r'>();
   const auto lf = broadcast_byte<'\n'>();
-  const auto low = vorrq_u8(vceqq_u8(v.val[0], cr), vceqq_u8(v.val[0], lf));
-  const auto high = vorrq_u8(vceqq_u8(v.val[1], cr), vceqq_u8(v.val[1], lf));
-  return byte_mask16(low) | (byte_mask16(high) << 16);
+  return byte_mask32(vorrq_u8(vceqq_u8(v.val[0], cr), vceqq_u8(v.val[0], lf)),
+                     vorrq_u8(vceqq_u8(v.val[1], cr), vceqq_u8(v.val[1], lf)));
 }
-inline u32 nondigit_mask16(uint8x16_t v) {
-  return byte_mask16(vcgtq_u8(vsubq_u8(v, vdupq_n_u8('0')), vdupq_n_u8(9)));
+inline uint8x16_t nondigit_bytes16(uint8x16_t v) {
+  return vcgtq_u8(vsubq_u8(v, vdupq_n_u8('0')), vdupq_n_u8(9));
 }
 inline u32 nondigit_mask32(Bytes32 v) {
-  return nondigit_mask16(v.val[0]) | (nondigit_mask16(v.val[1]) << 16);
+  return byte_mask32(nondigit_bytes16(v.val[0]), nondigit_bytes16(v.val[1]));
 }
 #endif
 #if FOSU_SIMD
