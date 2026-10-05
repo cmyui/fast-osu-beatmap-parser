@@ -188,23 +188,24 @@ FOSU_NOINLINE void reject_hitobject_line(Beatmap&    beatmap,
   }
 }
 
-// Interpret a successfully decoded record before publishing it to the arena.
-// The preceding object is in source order, including across repeated
-// HitObjects sections.
-inline HitObject normalize_hitobject(HitObject object,
-                                     size_t    preceding_count,
-                                     bool      preceding_was_spinner,
-                                     i32       offset) {
+// Interpret a successfully decoded record of `kind` before publishing it to
+// the arena. The preceding object is in source order, including across
+// repeated HitObjects sections.
+inline HitObject normalize_hitobject(HitObject     object,
+                                     HitObjectKind kind,
+                                     size_t        preceding_count,
+                                     bool          preceding_was_spinner,
+                                     i32           offset) {
   const bool explicit_combo = object.type & 4;
   object.time += offset;
   object.new_combo = false;
   object.combo_skip = 0;
-  if (object.is_circle() || object.is_slider()) {
+  if (kind == HitObjectKind::Circle || kind == HitObjectKind::Slider) {
     object.new_combo =
         !preceding_count || explicit_combo || preceding_was_spinner;
     object.combo_skip = explicit_combo ? (object.type >> 4) & 7 : 0;
-    object.end_time = object.is_circle() ? object.time : 0;
-  } else if (object.is_spinner()) {
+    object.end_time = kind == HitObjectKind::Circle ? object.time : 0;
+  } else if (kind == HitObjectKind::Spinner) {
     object.new_combo = explicit_combo;
     object.x = 256;
     object.y = 192;
@@ -236,11 +237,12 @@ const char* parse_hitobjects_section_scalar(
     if (!ignored_line(p, line_end)) {
       if (const auto object = parse_hitobject_line_scalar<F>(
               beatmap, counts, p, line_end, constants)) {
+        const auto kind = classify_hitobject_kind(object->type);
         beatmap.hit_objects[counts.objects] =
-            normalize_hitobject(*object, counts.objects,
+            normalize_hitobject(*object, kind, counts.objects,
                                 counts.preceding_was_spinner, F.time_offset);
         ++counts.objects;
-        counts.preceding_was_spinner = object->is_spinner();
+        counts.preceding_was_spinner = kind == HitObjectKind::Spinner;
       } else [[unlikely]] {
         reject_hitobject_line<F>(beatmap, counts.preceding_was_spinner, p,
                                  line_end);
@@ -284,8 +286,8 @@ FOSU_ALWAYS_INLINE void accept_hitobject(
     return;
   }
   const size_t count = counts.objects++;
-  beatmap.hit_objects[count] =
-      normalize_hitobject(object, count, preceding_was_spinner, F.time_offset);
+  beatmap.hit_objects[count] = normalize_hitobject(
+      object, kind, count, preceding_was_spinner, F.time_offset);
   preceding_was_spinner = kind == HitObjectKind::Spinner;
 }
 
@@ -479,9 +481,10 @@ const char* parse_hitobjects_section_simd(
       if (const auto object = parse_hitobject_line_scalar<F>(
               beatmap, counts, p, line_end, constants)) {
         const size_t count = counts.objects++;
+        const auto   kind = classify_hitobject_kind(object->type);
         beatmap.hit_objects[count] = normalize_hitobject(
-            *object, count, preceding_was_spinner, F.time_offset);
-        preceding_was_spinner = object->is_spinner();
+            *object, kind, count, preceding_was_spinner, F.time_offset);
+        preceding_was_spinner = kind == HitObjectKind::Spinner;
       } else [[unlikely]] {
         reject_hitobject_line<F>(beatmap, preceding_was_spinner, p, line_end);
       }
