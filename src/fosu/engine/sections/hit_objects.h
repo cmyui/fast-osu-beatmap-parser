@@ -69,15 +69,16 @@ FOSU_NOINLINE bool parse_hitobject_details(
   return false;
 }
 
-// Lines the fast prefix does not accept: the scalar prefix parser handles
-// signed, decimal, spaced or wide fields; anything else is malformed.
+struct HitObjectPrefix {
+  HitObject   object;
+  const char* rest;  // After hitSound: empty, or starting with ','.
+};
+
+// The x,y,time,type,hitSound prefix of a line the fast prefix does not
+// accept: signed, decimal, spaced or wide fields.
 template <Format F>
-std::optional<HitObject> parse_hitobject_line_scalar(
-    Beatmap&                       beatmap,
-    HitObjectCounts&               counts,
-    const char*                    p,
-    const char*                    line_end,
-    const HitObjectParseConstants& constants) {
+std::optional<HitObjectPrefix> parse_hitobject_prefix(const char* p,
+                                                      const char* line_end) {
   f32         x;
   const char* next = parse_osu_float(p, line_end, x, 131072);
   if (next == p || next >= line_end || *next != ',')
@@ -114,29 +115,82 @@ std::optional<HitObject> parse_hitobject_line_scalar(
     y = static_cast<f32>(static_cast<i32>(y));
   }
 
-  ++beatmap.stats.slow_path_lines;
-  HitObject object{
-      .x = x,
-      .y = y,
-      .type = static_cast<u32>(type),
-      .hitsound = static_cast<u32>(hitsound),
-      .time = time,
-      .end_time = 0,
-      .slider = HitObject::kNoSlider,
-      .new_combo = false,
-      .combo_skip = 0,
-      .hit_sample = {},
+  return HitObjectPrefix{
+      .object =
+          {
+              .x = x,
+              .y = y,
+              .type = static_cast<u32>(type),
+              .hitsound = static_cast<u32>(hitsound),
+              .time = time,
+              .end_time = 0,
+              .slider = HitObject::kNoSlider,
+              .new_combo = false,
+              .combo_skip = 0,
+              .hit_sample = {},
+          },
+      .rest = next,
   };
-  if (!parse_hitobject_details<F>(beatmap, counts, object, next, line_end,
-                                  constants)) {
+}
+
+// Anything else the scalar prefix parser rejects is malformed.
+template <Format F>
+std::optional<HitObject> parse_hitobject_line_scalar(
+    Beatmap&                       beatmap,
+    HitObjectCounts&               counts,
+    const char*                    p,
+    const char*                    line_end,
+    const HitObjectParseConstants& constants) {
+  auto prefix = parse_hitobject_prefix<F>(p, line_end);
+  if (!prefix)
+    return std::nullopt;
+  ++beatmap.stats.slow_path_lines;
+  if (!parse_hitobject_details<F>(beatmap, counts, prefix->object, prefix->rest,
+                                  line_end, constants)) {
     return std::nullopt;
   }
-  return object;
+  return prefix->object;
+}
+
+// osu! (lazer) creates a circle once its prefix parses, and a spinner once
+// its end time also parses, before reading the hit sample. A line rejected
+// only for its sample therefore still counts as the previous object when the
+// next one decides whether it starts a new combo. `rest` follows hitSound.
+inline bool preceding_spinner_after_rejection(u32         type,
+                                              bool        preceding_was_spinner,
+                                              const char* rest,
+                                              const char* line_end) {
+  switch (classify_hitobject_kind(type)) {
+    case HitObjectKind::Circle:
+      return false;
+    case HitObjectKind::Spinner: {
+      if (rest == line_end || *rest != ',')
+        return preceding_was_spinner;
+      f64         end_time;
+      const char* next = parse_osu_double(rest + 1, line_end, end_time);
+      return (next != rest + 1 && (next == line_end || *next == ',')) ||
+             preceding_was_spinner;
+    }
+    default:
+      return preceding_was_spinner;
+  }
+}
+
+template <Format F>
+FOSU_NOINLINE void reject_hitobject_line(Beatmap&    beatmap,
+                                         bool&       preceding_was_spinner,
+                                         const char* p,
+                                         const char* line_end) {
+  ++beatmap.stats.malformed_lines;
+  if (const auto prefix = parse_hitobject_prefix<F>(p, line_end)) {
+    preceding_was_spinner = preceding_spinner_after_rejection(
+        prefix->object.type, preceding_was_spinner, prefix->rest, line_end);
+  }
 }
 
 // Interpret a successfully decoded record before publishing it to the arena.
-// The preceding accepted object is still in source order, including across
-// repeated HitObjects sections. No separate state crosses the engine boundary.
+// The preceding object is in source order, including across repeated
+// HitObjects sections.
 inline HitObject normalize_hitobject(HitObject object,
                                      size_t    preceding_count,
                                      bool      preceding_was_spinner,
@@ -182,17 +236,14 @@ const char* parse_hitobjects_section_scalar(
     if (!ignored_line(p, line_end)) {
       if (const auto object = parse_hitobject_line_scalar<F>(
               beatmap, counts, p, line_end, constants)) {
-        const bool preceding_was_spinner =
-            counts.objects && (object->is_circle() || object->is_slider()) &&
-            !(object->type & 4) &&
-            classify_hitobject_kind(
-                beatmap.hit_objects[counts.objects - 1].type) ==
-                HitObjectKind::Spinner;
-        beatmap.hit_objects[counts.objects] = normalize_hitobject(
-            *object, counts.objects, preceding_was_spinner, F.time_offset);
+        beatmap.hit_objects[counts.objects] =
+            normalize_hitobject(*object, counts.objects,
+                                counts.preceding_was_spinner, F.time_offset);
         ++counts.objects;
+        counts.preceding_was_spinner = object->is_spinner();
       } else [[unlikely]] {
-        ++beatmap.stats.malformed_lines;
+        reject_hitobject_line<F>(beatmap, counts.preceding_was_spinner, p,
+                                 line_end);
       }
     }
     p = following_line;
@@ -228,6 +279,8 @@ FOSU_ALWAYS_INLINE void accept_hitobject(
                                                 line_end, constants)))
       [[unlikely]] {
     ++beatmap.stats.malformed_lines;
+    preceding_was_spinner = preceding_spinner_after_rejection(
+        object.type, preceding_was_spinner, rest, line_end);
     return;
   }
   const size_t count = counts.objects++;
@@ -394,10 +447,7 @@ const char* parse_hitobjects_section_simd(
     const char*                    p,
     const char*                    file_end,
     const HitObjectParseConstants& constants) {
-  bool preceding_was_spinner =
-      counts.objects &&
-      classify_hitobject_kind(beatmap.hit_objects[counts.objects - 1].type) ==
-          HitObjectKind::Spinner;
+  bool preceding_was_spinner = counts.preceding_was_spinner;
   while (p < file_end) {
     p = parse_hitobjects_fixed_time<1, F>(beatmap, counts, constants,
                                           preceding_was_spinner, p, file_end);
@@ -431,14 +481,14 @@ const char* parse_hitobjects_section_simd(
         const size_t count = counts.objects++;
         beatmap.hit_objects[count] = normalize_hitobject(
             *object, count, preceding_was_spinner, F.time_offset);
-        preceding_was_spinner =
-            classify_hitobject_kind(object->type) == HitObjectKind::Spinner;
+        preceding_was_spinner = object->is_spinner();
       } else [[unlikely]] {
-        ++beatmap.stats.malformed_lines;
+        reject_hitobject_line<F>(beatmap, preceding_was_spinner, p, line_end);
       }
     }
     p = after_line_ending(line_end, file_end);
   }
+  counts.preceding_was_spinner = preceding_was_spinner;
   return p;
 }
 #endif

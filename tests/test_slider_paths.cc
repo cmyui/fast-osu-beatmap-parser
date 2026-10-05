@@ -108,7 +108,12 @@ static void test_perfect_curve_falls_back_for_unusable_points() {
           path_as("L|100:0|200:0,1,0", simd));
     CHECK(path_as("P|100:100|200:0|300:100,1,0", simd) ==
           path_as("B|100:100|200:0|300:100,1,0", simd));
-    // Nearly collinear points also give a straight path.
+    // Lazer-format maps keep the perfect curve type, but a triangle with
+    // |cross product| <= 1e-3 has no usable circle: osu! draws a Bezier.
+    CHECK(path_as("P|100:0|200:0,1,0", simd, 128) ==
+          path_as("B|100:0|200:0,1,0", simd, 128));
+    CHECK(path_as("P|200:0|100:0,1,0", simd, 128) ==
+          path_as("B|200:0|100:0,1,0", simd, 128));
     const auto nearly = path_as("P|100:0|200:0.00001,1,200", simd, 128);
     CHECK_EQ(nearly.points.size(), 3u);
     CHECK_EQ(nearly.distance, 200);

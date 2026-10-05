@@ -2,6 +2,7 @@
 
 #include <fosu/beatmap.h>
 #include <fosu/engine/hit_objects/slider.h>
+#include <fosu/engine/parsing/key_value.h>
 #include <fosu/engine/parsing/lines.h>
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/parsing/section_names.h>
@@ -34,21 +35,37 @@ static_assert(kSectionGeneral == 1u << static_cast<i32>(Section::General) &&
                       1u << static_cast<i32>(Section::HitObjects),
               "public section bits mirror the internal Section ordinals");
 
+// Both osu! clients read the version as the whole integer after the header's
+// last 'v'; "osu file format v5v4" is version 4.
+inline void parse_format_version(Beatmap& beatmap, std::string_view line) {
+  constexpr std::string_view kMagic = "osu file format v";
+  if (!line.starts_with(kMagic))
+    return;
+  const char* number = line.data() + line.rfind('v') + 1;
+  const char* end = line.data() + line.size();
+  i64         value;
+  const char* next = parse_osu_int(number, end, value);
+  if (next != number && next == end)
+    beatmap.format_version = static_cast<i32>(value);
+}
+
 inline const char* parse_preamble(Beatmap&    beatmap,
                                   const char* p,
                                   const char* end) {
   if (end - p >= 3 && static_cast<u8>(p[0]) == 0xEF &&
       static_cast<u8>(p[1]) == 0xBB && static_cast<u8>(p[2]) == 0xBF)
     p += 3;
-  return for_each_section_line(p, end, [&](std::string_view line) {
-    const size_t version = line.find("osu file format v");
-    if (version != std::string_view::npos) {
-      i64         value;
-      const char* number = line.data() + version + 17;
-      if (parse_i64(number, line.data() + line.size(), value) != number)
-        beatmap.format_version = clamp_i32(value);
+  // Only the first non-blank line can be the header: a version line after a
+  // comment or a section is ignored.
+  for (const char* q = p; q < end;) {
+    const auto line = read_line(q, end);
+    if (const auto text = trim_field(line.text); !text.empty()) {
+      parse_format_version(beatmap, text);
+      break;
     }
-  });
+    q = line.next;
+  }
+  return skip_section(p, end);
 }
 
 // Parses every section after the preamble, with the map's format rules fixed

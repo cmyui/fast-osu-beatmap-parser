@@ -8,6 +8,8 @@
 
 namespace fosu::internal {
 
+// Like stable, only whole-line comments are skipped. lazer also strips a
+// trailing "//..." outside [Metadata]; that is not supported (yet).
 inline bool ignored_line(const char* p, const char* end) {
   p = skip_numeric_space(p, end);
   return p == end || (end - p >= 2 && p[0] == '/' && p[1] == '/');

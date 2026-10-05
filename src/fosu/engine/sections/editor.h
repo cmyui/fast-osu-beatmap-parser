@@ -7,13 +7,16 @@
 #include <fosu/engine/parsing/lines.h>
 #include <fosu/engine/parsing/string_lookup.h>
 #include <fosu/engine/primitives/byte_scan.h>
+#include <fosu/engine/third_party/fast_float.h>
 #include <fosu/format.h>
 #include <fosu/types.h>
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <string_view>
+#include <system_error>
 
 namespace fosu::internal {
 
@@ -48,6 +51,41 @@ inline constexpr auto kEditorFields = make_string_lookup<FieldParser>({
      assign_field_value<&BeatmapHeader::timeline_zoom, parse_editor_scale>},
 });
 
+// lazer reads each preset with .NET double.TryParse (NumberStyles.Float):
+// ASCII spaces around an optional sign and a decimal, or NaN or Infinity in
+// any case. There is no range limit; out-of-range values become infinities
+// or zeros.
+inline std::optional<f64> parse_velocity_preset(std::string_view text) {
+  const char* p = text.data();
+  const char* end = p + text.size();
+  while (p < end && is_numeric_space(*p))
+    ++p;
+  while (end > p && is_numeric_space(end[-1]))
+    --end;
+  const bool negative = p < end && *p == '-';
+  if (p < end && (*p == '-' || *p == '+'))
+    ++p;
+  const auto is = [&](std::string_view word) {
+    return static_cast<size_t>(end - p) == word.size() &&
+           std::equal(p, end, word.begin(), [](char a, char b) {
+             return (a | 0x20) == b;
+           });
+  };
+  if (is("nan"))
+    return std::numeric_limits<f64>::quiet_NaN();
+  if (is("infinity"))
+    return negative ? -std::numeric_limits<f64>::infinity()
+                    : std::numeric_limits<f64>::infinity();
+  if (p == end || !(is_digit(*p) || *p == '.'))
+    return std::nullopt;
+  f64        value;
+  const auto r = fast_float::from_chars(p, end, value);
+  if (r.ptr != end ||
+      (r.ec != std::errc() && r.ec != std::errc::result_out_of_range))
+    return std::nullopt;
+  return negative ? -value : value;
+}
+
 template <Format F>
 bool parse_velocity_presets(Beatmap&         beatmap,
                             size_t&          count,
@@ -58,7 +96,7 @@ bool parse_velocity_presets(Beatmap&         beatmap,
   while (p < end) {
     const char* comma = find_byte<','>(p, end);
     const auto  value =
-        parse_field_double(trim_field({p, static_cast<size_t>(comma - p)}));
+        parse_velocity_preset({p, static_cast<size_t>(comma - p)});
     // Stable stores exactly three presets; lazer accepts any number.
     const size_t limit = F.lazer ? beatmap.velocity_presets.size() : 3;
     if (value && parsed == limit)

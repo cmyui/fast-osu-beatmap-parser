@@ -173,7 +173,33 @@ static void test_stacking_applies_only_to_osu_standard() {
   }
 }
 
+// An object stacks as the kind the parser chose (circle, slider, spinner,
+// hold), whatever other kind bits its type also sets.
+static void test_objects_with_several_kind_bits_stack_as_their_kind() {
+  const std::string header =
+      "osu file format v14\n[Difficulty]\nSliderMultiplier:1\n"
+      "[TimingPoints]\n0,500\n[HitObjects]\n";
+  const auto stacks = [&](const char* objects, bool simd) {
+    return heights(header + objects, simd);
+  };
+  for (bool simd : {false, true}) {
+    // 3 = circle and slider bits, 9 = circle and spinner.
+    CHECK((stacks("100,100,1000,3,0\n100,100,1100,1,0\n", simd) ==
+           std::vector<int>{1, 0}));
+    CHECK((stacks("100,100,1000,1,0\n100,100,1100,9,0\n", simd) ==
+           std::vector<int>{1, 0}));
+    // 10 = slider and spinner, 130 = slider and hold.
+    CHECK((stacks("100,100,1000,1,0\n100,100,1100,10,0,L|200:100,1,100\n",
+                  simd) == std::vector<int>{1, 0}));
+    CHECK((stacks("100,100,1000,10,0,L|200:100,1,100\n100,100,1100,1,0\n",
+                  simd) == std::vector<int>{1, 0}));
+    CHECK((stacks("100,100,1000,1,0\n100,100,1100,130,0,L|200:100,1,100\n",
+                  simd) == std::vector<int>{1, 0}));
+  }
+}
+
 int main() {
+  test_objects_with_several_kind_bits_stack_as_their_kind();
   test_circles_at_one_position_stack_up_and_left();
   test_stack_offset_scales_with_circle_size();
   test_objects_at_a_slider_end_stack_down_and_right();

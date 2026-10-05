@@ -74,8 +74,9 @@ void parse_break_event(Beatmap&    bm,
     ++bm.stats.malformed_lines;
     return;
   }
+  // osu! ignores any fields after the end time.
   const char* r = parse_osu_double(q + 1, end, stop);
-  if (r == q + 1 || r != end) {
+  if (r == q + 1 || (r != end && *r != ',')) {
     ++bm.stats.malformed_lines;
     return;
   }

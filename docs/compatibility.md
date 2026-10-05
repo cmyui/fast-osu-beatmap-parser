@@ -35,6 +35,9 @@ retained separately from effective combo flags.
   Unknown values and comma-separated sample-set combinations are malformed.
   Slider curve types must be `B` (Bezier), `C` (Catmull), `L` (linear), or `P`
   (perfect curve). Unknown curve types reject the hitobject, not the whole map.
+  B-spline degrees (`B2|…`) are read only in lazer-format (v128) maps; older
+  formats reject the line, where stable cannot load the map and lazer reads a
+  B-spline.
 - Difficulty values and stack leniency decode directly to float32, then widen
   to double storage. Difficulty and editor settings use the official clamps;
   mania circle size is a key count bounded to 1–18. Omitted editor distance
@@ -42,7 +45,8 @@ retained separately from effective combo flags.
   whitespace, including its Unicode whitespace characters.
 - Omitted fields take osu!'s defaults: HP, CS, OD and AR 5 (a missing AR
   follows OD), slider multiplier 1.4, tick rate 1, stack leniency 0.7, sample
-  volume 100, and format version 14 without an `osu file format` line.
+  volume 100, and format version 14 unless the first non-blank line is an
+  `osu file format v` header, whose version is the integer after its last `v`.
   osu!stable and lazer differ only in presentation and editor defaults. For
   presentation fosu follows stable: an omitted `Countdown` is 1 (normal), where
   lazer uses 0 (none). A missing ID or preview time is -1, exposed as `None` in
@@ -77,15 +81,21 @@ retained separately from effective combo flags.
   keys or combo indices are ignored.
 - Section and metadata names must match completely. Unknown fields/sections
   are ignored. An empty input produces an empty/default result; successful
-  parsing is not proof of a valid or playable beatmap. Comments and blank lines
-  are ignored. Storyboard bodies are counted rather than interpreted.
+  parsing is not proof of a valid or playable beatmap. Whole-line comments and
+  blank lines are ignored. As in stable, a trailing `//` stays part of its line;
+  lazer strips it outside `[Metadata]`, which fosu does not support yet.
+  Storyboard bodies are counted rather than interpreted.
 
 Hitobjects are stably sorted by timestamp only when input order decreases.
 Equal-time objects keep their source order, and slider indices still identify
 their original pool entries. Sorting uses temporary arena memory. Effective
 `new_combo` and `combo_skip` follow the first-object, post-spinner and post-break
-rules while `type` retains the source bits. Section-selective parsing applies
-rules using only the selected data; omitted events cannot contribute breaks,
+rules while `type` retains the source bits. Like lazer, a circle or spinner line
+rejected only for its hit sample still counts as the previous object for the
+post-spinner rule. With several kind bits set, an object is a circle, slider,
+spinner or hold in that order of precedence, and the C++ `is_circle()`,
+`is_slider()`, `is_spinner()` and `is_hold()` helpers follow it.
+Section-selective parsing applies rules using only the selected data; omitted events cannot contribute breaks,
 and omitted General metadata leaves the mode at its default.
 
 Inputs are bounded by the process address space rather than an arbitrary format

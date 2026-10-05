@@ -27,6 +27,9 @@ static void test_slider_points() {
       {"|-1.9:2.9", -1, 2},
       {"|1:2e1", 1, 20},
       {"|131072:-131072", 131072, -131072},
+      // osu! reads only the first two ':'-separated values of a point.
+      {"|172:44:9", 172, 44},
+      {"|172:44:junk", 172, 44},
   };
   for (bool simd : {false, true}) {
     for (const auto& test : cases) {
@@ -296,7 +299,58 @@ static void test_negative_zero_times_and_coordinates() {
   }
 }
 
+// Kind bits take precedence: circle, slider, spinner, then hold.
+static void test_exactly_one_kind_helper_is_true() {
+  for (uint32_t type = 1; type < 256; ++type) {
+    fosu::HitObject object{};
+    object.type = type;
+    const int kinds = object.is_circle() + object.is_slider() +
+                      object.is_spinner() + object.is_hold();
+    CHECK_EQ(kinds, (type & 139) ? 1 : 0);
+  }
+  const auto kind_of = [](uint32_t type) {
+    fosu::HitObject object{};
+    object.type = type;
+    return object.is_circle()    ? 'c'
+           : object.is_slider()  ? 's'
+           : object.is_spinner() ? 'p'
+           : object.is_hold()    ? 'h'
+                                 : '-';
+  };
+  CHECK_EQ(kind_of(3), 'c');
+  CHECK_EQ(kind_of(9), 'c');
+  CHECK_EQ(kind_of(10), 's');
+  CHECK_EQ(kind_of(130), 's');
+  CHECK_EQ(kind_of(136), 'p');
+  CHECK_EQ(kind_of(4), '-');
+}
+
+// B-spline degrees belong to lazer-format maps. Older formats reject the line:
+// stable cannot load it, and lazer (unlike us) reads a B-spline.
+static void test_bspline_degree_needs_lazer_format() {
+  for (bool simd : {false, true}) {
+    for (const char* version : {"v14", "v127"}) {
+      const auto map =
+          parse_str(std::string("osu file format ") + version +
+                        "\n[HitObjects]\n0,0,0,2,0,B2|100:0|100:100,"
+                        "1,10\n",
+                    simd);
+      CHECK(map.hit_objects.empty());
+      CHECK_EQ(map.stats.malformed_lines, 1u);
+    }
+    const auto lazer = parse_str(
+        "osu file format v128\n[HitObjects]\n0,0,0,2,0,B2|100:0|100:100,1,10\n",
+        simd);
+    CHECK_EQ(lazer.hit_objects.size(), 1u);
+    CHECK_EQ(lazer.slider_segments.size(), 1u);
+    if (!lazer.slider_segments.empty())
+      CHECK(lazer.slider_segments[0].degree == 2u);
+  }
+}
+
 int main() {
+  test_exactly_one_kind_helper_is_true();
+  test_bspline_degree_needs_lazer_format();
   test_unknown_hitsound_bits_are_kept();
   test_non_finite_object_times_are_rejected();
   test_negative_zero_times_and_coordinates();

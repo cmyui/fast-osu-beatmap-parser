@@ -82,8 +82,9 @@ static void test_section_header_inside_value() {
 }
 
 static void test_combo_state_across_malformed_lines() {
-  // Only accepted objects carry combo state across malformed lines and
-  // repeated HitObjects sections, including after a scalar-prefix spinner.
+  // Combo state carries across malformed lines and repeated HitObjects
+  // sections, including after a scalar-prefix spinner. A spinner rejected
+  // for its end time was never created, so it does not count.
   for (bool simd : {false, true}) {
     fosu::Parser combo_parser(simd ? fosu::internal::compiled_engine
                                    : fosu_test::scalar_engine());

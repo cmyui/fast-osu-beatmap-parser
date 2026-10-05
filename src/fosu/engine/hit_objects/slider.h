@@ -34,6 +34,9 @@ struct HitObjectCounts {
   size_t sliders = 0;
   size_t slider_segments = 0;
   size_t slider_points = 0;
+  // Whether osu!'s previous object, in source order, is a spinner. It can be
+  // a rejected line: see preceding_spinner_after_rejection.
+  bool   preceding_was_spinner = false;
 };
 
 inline std::optional<CurveType> parse_curve_type(char value) {
@@ -161,6 +164,11 @@ FOSU_ALWAYS_INLINE std::optional<ParsedSliderPoint> parse_slider_point(
     coordinate = next;
   }
 
+  // osu! reads only the first two ':'-separated values of a point.
+  if (coordinate < end && *coordinate == ':') [[unlikely]] {
+    while (coordinate < end && *coordinate != '|' && *coordinate != ',')
+      ++coordinate;
+  }
   return ParsedSliderPoint{.point = {x, y}, .end = coordinate};
 }
 
@@ -243,6 +251,10 @@ FOSU_NOINLINE bool parse_slider_as(
 
   std::optional<u32> first_curve_degree;
   if (*first_curve_type == CurveType::Bezier && p < end && is_digit(*p)) {
+    // B-spline degrees belong to lazer-format maps. Older formats reject the
+    // line: stable cannot load it, and lazer (unlike us) reads a B-spline.
+    if constexpr (!Lazer)
+      return false;
     i64         degree;
     const char* next = parse_osu_int(p, end, degree);
     if (next == p || degree <= 0 || degree > UINT32_MAX)
