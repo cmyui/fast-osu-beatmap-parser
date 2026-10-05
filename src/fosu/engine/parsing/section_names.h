@@ -8,7 +8,9 @@
 #include <string_view>
 
 namespace fosu::internal {
-// Unknown also stands for sections a client knows but fosu does not read.
+// Ordinals match the public kSection bits; None only fills ordinal 0.
+// Unknown is any span fosu skips: before stable's first header, or a section
+// fosu does not read, including ones a client knows.
 enum class Section : u8 {
   None,
   General,

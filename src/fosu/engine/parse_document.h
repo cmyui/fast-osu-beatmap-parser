@@ -119,14 +119,14 @@ Preamble parse_preamble(Beatmap& beatmap, const char* begin, const char* end) {
     const auto first = read_line(p, end);
     if (!parse_format_version<C>(beatmap, first.text))
       return {.body = end,
-              .section = Section::None,
+              .section = Section::Unknown,
               .error = {ParseErrorCode::Unloadable, 1}};
-    Section section = Section::None;
+    Section section = Section::Unknown;
     if (section_header_line<C>(first.text.data(),
                                first.text.data() + first.text.size())) {
       section = match_section<C>(first.text, section);
       if (read_by_stable_header_reader(section))
-        section = Section::None;
+        section = Section::Unknown;
     }
     return {.body = first.next, .section = section, .error = {}};
   } else {
@@ -135,7 +135,7 @@ Preamble parse_preamble(Beatmap& beatmap, const char* begin, const char* end) {
       if (const auto text = trim_field(line.text); !text.empty()) {
         if (!parse_format_version<C>(beatmap, text))
           return {.body = end,
-                  .section = Section::None,
+                  .section = Section::Unknown,
                   .error = {ParseErrorCode::Unloadable, line_number(begin, q)}};
         break;
       }

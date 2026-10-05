@@ -58,13 +58,9 @@ inline std::string_view without_group_separators(std::string_view input,
 }
 
 // Decode directly to float32, as osu! does, then widen for the public storage.
-// Like every float and double field below, both clients' .NET parsers accept
-// group separators.
-inline std::optional<f64> parse_field_float(std::string_view input) {
+inline std::optional<f64> parse_float_value(std::string_view input) {
   if (input.empty())
     return std::nullopt;
-  UngroupBuffer buffer;
-  input = without_group_separators(input, buffer);
   f32 value;
   if (!consumed_field_value(
           input,
@@ -73,11 +69,9 @@ inline std::optional<f64> parse_field_float(std::string_view input) {
   return value;
 }
 
-inline std::optional<f64> parse_field_double(std::string_view input) {
+inline std::optional<f64> parse_double_value(std::string_view input) {
   if (input.empty())
     return std::nullopt;
-  UngroupBuffer buffer;
-  input = without_group_separators(input, buffer);
   f64 value;
   if (!consumed_field_value(
           input,
@@ -85,6 +79,27 @@ inline std::optional<f64> parse_field_double(std::string_view input) {
       value < -INT32_MAX || value > INT32_MAX)
     return std::nullopt;
   return value;
+}
+
+// Both clients' .NET parsers accept group separators in float and double
+// fields. Maps almost never use them, so only a value that fails to parse
+// without them pays to remove them.
+template <auto ParseValue>
+std::optional<f64> parse_grouped_value(std::string_view input) {
+  if (const auto value = ParseValue(input))
+    return value;
+  UngroupBuffer buffer;
+  const auto    ungrouped = without_group_separators(input, buffer);
+  return ungrouped.data() == input.data() ? std::nullopt
+                                          : ParseValue(ungrouped);
+}
+
+inline std::optional<f64> parse_field_float(std::string_view input) {
+  return parse_grouped_value<parse_float_value>(input);
+}
+
+inline std::optional<f64> parse_field_double(std::string_view input) {
+  return parse_grouped_value<parse_double_value>(input);
 }
 
 inline std::optional<bool> parse_field_boolean(std::string_view input) {
