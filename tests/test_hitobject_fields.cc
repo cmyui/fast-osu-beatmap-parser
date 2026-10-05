@@ -1,7 +1,11 @@
 #include <fosu/beatmap.h>
 #include <fosu/engine/hit_objects/object_types.h>
+#include <fosu/engine/parse_document.h>
 #include <fosu/engine/primitives/vector_ops.h>
+#include <fosu/parse_options.h>
+#include <fosu/parser.h>
 #include <fosu/types.h>
+#include <tests/support/scalar_engine.h>
 #include <tests/support/test.h>
 
 #include <cmath>

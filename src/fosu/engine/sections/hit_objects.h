@@ -12,6 +12,7 @@
 #include <fosu/engine/primitives/digit_groups.h>
 #include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/format.h>
+#include <fosu/parse_options.h>
 #include <fosu/types.h>
 
 #include <algorithm>

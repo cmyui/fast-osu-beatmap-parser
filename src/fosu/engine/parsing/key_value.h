@@ -6,6 +6,7 @@
 #include <fosu/engine/parsing/lines.h>
 #include <fosu/engine/parsing/string_lookup.h>
 #include <fosu/engine/primitives/byte_scan.h>
+#include <fosu/parse_options.h>
 
 #include <cstddef>
 #include <optional>

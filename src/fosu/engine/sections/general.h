@@ -10,6 +10,7 @@
 #include <fosu/engine/primitives/byte_scan.h>
 #include <fosu/enums.h>
 #include <fosu/format.h>
+#include <fosu/parse_options.h>
 #include <fosu/types.h>
 
 #include <algorithm>

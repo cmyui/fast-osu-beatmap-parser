@@ -1,12 +1,17 @@
 // Where osu!stable and lazer read a map differently, each client's rule.
 #include <fosu/beatmap.h>
+#include <fosu/engine/parse_document.h>
+#include <fosu/engine/parsing_engine.h>
 #include <fosu/enums.h>
 #include <fosu/parse_options.h>
 #include <fosu/parser.h>
 #include <fosu/slider_path.h>
+#include <fosu/types.h>
 #include <tests/support/scalar_engine.h>
 #include <tests/support/test.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 

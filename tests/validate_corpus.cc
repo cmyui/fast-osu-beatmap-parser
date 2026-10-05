@@ -1,5 +1,6 @@
 // Complete scalar/SIMD/record-layout equivalence on an existing local corpus.
 // Run with sanitizers; map contents and identifiers never leave the host.
+#include <fosu/parse_options.h>
 #include <fosu/parser.h>
 #include <tests/support/canonical_dump.h>
 #include <tests/support/scalar_engine.h>
@@ -24,7 +25,7 @@ int main(int argc, char** argv) {
     std::cerr << "numeric oracle load failed\n";
     return 1;
   }
-  size_t files = 0, bytes = 0, objects = 0, malformed = 0, unloadable = 0;
+  size_t       files = 0, bytes = 0, objects = 0, malformed = 0, unloadable = 0;
   fosu::Parser scalar_parser(fosu_test::scalar_engine());
   fosu::Parser simd_parser;
   for (const auto& entry :

@@ -5,8 +5,10 @@
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/engine/timing_points/point.h>
+#include <fosu/parser.h>
 #include <fosu/slider_geometry.h>
 #include <fosu/types.h>
+#include <tests/support/scalar_engine.h>
 #include <tests/support/test.h>
 
 #include <bit>

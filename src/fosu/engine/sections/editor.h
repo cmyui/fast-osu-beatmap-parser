@@ -10,6 +10,7 @@
 #include <fosu/engine/primitives/byte_scan.h>
 #include <fosu/engine/third_party/fast_float.h>
 #include <fosu/format.h>
+#include <fosu/parse_options.h>
 #include <fosu/types.h>
 
 #include <algorithm>

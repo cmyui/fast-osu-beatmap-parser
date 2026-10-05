@@ -4,6 +4,7 @@
 #include <fosu/engine/parsing/field_values.h>
 #include <fosu/engine/parsing/lines.h>
 #include <fosu/engine/primitives/byte_scan.h>
+#include <fosu/parse_options.h>
 #include <fosu/types.h>
 
 #include <cstddef>

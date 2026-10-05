@@ -6,6 +6,7 @@
 #include <fosu/engine/parsing/key_value.h>
 #include <fosu/engine/parsing/lines.h>
 #include <fosu/engine/parsing/string_lookup.h>
+#include <fosu/parse_options.h>
 #include <fosu/types.h>
 
 #include <algorithm>

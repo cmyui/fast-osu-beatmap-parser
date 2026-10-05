@@ -7,6 +7,7 @@
 #include <fosu/engine/primitives/byte_scan.h>
 #include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/engine/timing_points/point.h>
+#include <fosu/parse_options.h>
 #include <fosu/types.h>
 
 #include <algorithm>

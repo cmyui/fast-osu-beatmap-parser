@@ -5,6 +5,7 @@
 #include <fosu/engine/parsing/field_values.h>
 #include <fosu/engine/parsing/key_value.h>
 #include <fosu/engine/parsing/string_lookup.h>
+#include <fosu/parse_options.h>
 
 namespace fosu::internal {
 

@@ -4,6 +4,7 @@
 #include <fosu/parse_options.h>
 #include <fosu/types.h>
 
+#include <cstddef>
 #include <string_view>
 
 namespace fosu::internal {

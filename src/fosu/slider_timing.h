@@ -3,6 +3,7 @@
 #include <fosu/arena.h>
 #include <fosu/beatmap.h>
 #include <fosu/compiler.h>
+#include <fosu/parse_options.h>
 #include <fosu/slider_geometry.h>
 #include <fosu/types.h>
 

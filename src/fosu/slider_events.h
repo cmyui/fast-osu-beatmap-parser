@@ -5,6 +5,7 @@
 #include <fosu/arena.h>
 #include <fosu/beatmap.h>
 #include <fosu/compiler.h>
+#include <fosu/parse_options.h>
 #include <fosu/slider_event.h>
 #include <fosu/slider_path.h>
 #include <fosu/slider_timing.h>
