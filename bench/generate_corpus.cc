@@ -74,9 +74,9 @@ std::string generate_map(fosu::i32 n_objects) {
       for (fosu::i32 p = 0; p < n_pts; ++p)
         off += snprintf(line + off, sizeof line - off, "|%d:%d",
                         fosu::i32(rng() % 640), fosu::i32(rng() % 480));
-      off += snprintf(line + off, sizeof line - off, ",%d,%.2f,,%s\r\n",
-                      1 + fosu::i32(rng() % 3),
-                      30.0 + double(rng() % 12000) / 20.0, samples[rng() % 4]);
+      snprintf(line + off, sizeof line - off, ",%d,%.2f,,%s\r\n",
+               1 + fosu::i32(rng() % 3), 30.0 + double(rng() % 12000) / 20.0,
+               samples[rng() % 4]);
       out += line;
     } else {
       snprintf(line, sizeof line, "256,192,%d,12,%d,%d%s\r\n", t, hs,
