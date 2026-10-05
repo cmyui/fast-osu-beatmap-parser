@@ -806,12 +806,14 @@ def test_shared_coordinates_preserve_values_and_signed_zero(coordinate):
         f"{coordinate},{coordinate},1,2,0,L|{coordinate}:{coordinate},1,10\n"
     ).encode()
     slider = fosu.parse(data).hit_objects[0]
-    expected = float(coordinate)
-    for actual in (
-        slider.x,
-        slider.y,
-        slider.control_points[1].x,
-        slider.control_points[1].y,
+    point = float(coordinate)
+    # Object positions clamp to [0, 512], keeping -0.0; control points do not.
+    position = min(max(point, 0.0), 512.0)
+    for actual, expected in (
+        (slider.x, position),
+        (slider.y, position),
+        (slider.control_points[1].x, point),
+        (slider.control_points[1].y, point),
     ):
         assert type(actual) is float
         assert actual == expected

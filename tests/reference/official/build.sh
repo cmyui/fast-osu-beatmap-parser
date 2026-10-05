@@ -2,7 +2,7 @@
 # Build the unmodified official legacy decoder at a reproducible revision.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
-revision=48c4800e3ae4ee752452cdff83bd3787ccf3105f
+revision=fc790c78c4b393f4a0101b9ad54cb3b4391037cd
 source="$root/build/official-osu"
 if [ ! -d "$source/.git" ]; then
     mkdir -p "$source"

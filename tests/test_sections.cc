@@ -248,9 +248,11 @@ static void test_aspire_edge_cases() {
       "100,100,5000,2,0,B|-64:-32|700:512,1,600\n");  // negative ctrl points
   CHECK_EQ(bm.hit_objects.size(), 6u);
   CHECK_EQ(bm.hit_objects[0].time, -1000);
-  CHECK_EQ(bm.hit_objects[1].x, -48);
-  CHECK_EQ(bm.hit_objects[2].y, -24);
-  CHECK_EQ(bm.hit_objects[3].x, 5120);
+  // Object positions clamp to [0, 512]; slider control points do not.
+  CHECK_EQ(bm.hit_objects[1].x, 0);
+  CHECK_EQ(bm.hit_objects[2].x, 512);
+  CHECK_EQ(bm.hit_objects[2].y, 0);
+  CHECK_EQ(bm.hit_objects[3].x, 512);
   CHECK_EQ(bm.hit_objects[4].x, 256);  // truncated
   CHECK_EQ(bm.hit_objects[4].y, 112);
   const auto& s = bm.sliders[bm.hit_objects[5].slider];
