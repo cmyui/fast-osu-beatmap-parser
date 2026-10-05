@@ -3,6 +3,31 @@
 Requires C++20, CMake 3.26+, and Linux, macOS or Windows. Header-only consumers can
 include `src/fosu/parser.h` without building a library.
 
+## Checks
+
+`make test` runs every check of parser behaviour that works on one machine:
+
+| Target | Runs | Needs |
+|---|---|---|
+| `make test-native` | CTest (`check`): C++ parser tests on both engines, engine selection, and on Linux, exported-symbol and binary-hardening checks | CMake and a C++20 compiler |
+| `make test-python` | `tests/test_python.py`, including mypy and stubtest, on both backends against the package reinstalled into `build/venv` | Python 3.10+ (`PYTHON=` selects the interpreter) |
+| `make test-official` | Comparisons with osu!'s own decoder on both backends: synthetic field cases (`tests/test_official.py`), then acceptance and field-level values for the test beatmaps in the pinned osu! checkout | .NET 10 SDK as `dotnet`; the first run fetches the pinned osu! revision |
+
+Each parsing or calculation rule has a named C++ test (`tests/test_*.cc`) next
+to the code it covers: sections and fields, numbers, storage and parser reuse,
+slider timing and events, slider paths, stacking and mods. Expected values that
+follow osu! are checked against its decoder when the test is written.
+`tests/test_python.py` covers only the Python interface: conversion to Python
+objects, `None` for missing values, object lifetime, errors, buffers, and the
+logic implemented in the binding (bookmark and tag lists, `control_points`,
+`raw_position()` and `slider_position_at()`).
+
+CI runs the same checks, plus checks that need other platforms or builds: macOS
+and Windows; scalar, Debug, sanitizer and fuzzing builds; AArch64 and non-AVX
+dispatch under emulation; installed C++ consumers (`tests/test_build.py`);
+wheels on five platforms; and benchmark tools. Full-corpus comparisons with osu!
+run only locally, because the corpus is not in the repository.
+
 ## Native
 
 ```sh

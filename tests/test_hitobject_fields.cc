@@ -4,8 +4,10 @@
 #include <fosu/types.h>
 #include <tests/support/test.h>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <string_view>
 
@@ -247,7 +249,57 @@ static void test_hitobject_details() {
   }
 }
 
+static void test_unknown_hitsound_bits_are_kept() {
+  const uint32_t values[] = {0, 1,  2,  3,  4,  5,  6,  7,  8,
+                             9, 10, 11, 12, 13, 14, 15, 32, 33};
+  std::string    input = "osu file format v14\n[HitObjects]\n";
+  for (size_t i = 0; i < std::size(values); ++i)
+    input +=
+        "1,2," + std::to_string(i) + ",1," + std::to_string(values[i]) + "\n";
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(input, simd);
+    CHECK_EQ(map.stats.malformed_lines, 0u);
+    CHECK_EQ(map.hit_objects.size(), std::size(values));
+    for (size_t i = 0; i < map.hit_objects.size(); ++i)
+      CHECK_EQ(map.hit_objects[i].hitsound, values[i]);
+  }
+}
+
+static void test_non_finite_object_times_are_rejected() {
+  for (const char* time : {"NaN", "Infinity", "-Infinity", "1e309"}) {
+    const auto input = "osu file format v14\n[HitObjects]\n1,2," +
+                       std::string(time) + ",1,0\n1,2,3,1,0\n";
+    for (bool simd : {false, true}) {
+      const auto map = parse_str(input, simd);
+      CHECK_EQ(map.hit_objects.size(), 1u);
+      CHECK_EQ(map.stats.malformed_lines, 1u);
+    }
+  }
+}
+
+// osu! adds the format's time offset, so -0 becomes +0. Lazer-format
+// coordinates keep fractions and the sign of zero; older formats truncate.
+static void test_negative_zero_times_and_coordinates() {
+  for (bool simd : {false, true}) {
+    CHECK(!std::signbit(
+        parse_str("[HitObjects]\n1,2,-0,1,0\n", simd).hit_objects[0].time));
+    const auto lazer = parse_str(
+        "osu file format v128\n[HitObjects]\n-0,-0,1,2,0,L|-0:-0,1,10\n", simd);
+    CHECK(std::signbit(lazer.hit_objects[0].x));
+    CHECK(std::signbit(lazer.hit_objects[0].y));
+    CHECK(std::signbit(lazer.slider_points[0].x));
+    CHECK(std::signbit(lazer.slider_points[0].y));
+    const auto stable = parse_str(
+        "osu file format v14\n[HitObjects]\n-0,-0,1,2,0,L|-0:-0,1,10\n", simd);
+    CHECK(!std::signbit(stable.hit_objects[0].x));
+    CHECK(!std::signbit(stable.slider_points[0].x));
+  }
+}
+
 int main() {
+  test_unknown_hitsound_bits_are_kept();
+  test_non_finite_object_times_are_rejected();
+  test_negative_zero_times_and_coordinates();
   test_slider_points();
   test_slider_pool_indices_after_rejected_record();
   test_slider_point_digit_widths();

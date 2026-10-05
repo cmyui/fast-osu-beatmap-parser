@@ -84,7 +84,7 @@ def main():
         stdout=subprocess.PIPE,
         text=True,
     ) as reference:
-        paths = sorted(args.corpus.glob("*.osu"))
+        paths = sorted(p for p in args.corpus.rglob("*.osu") if p.is_file())
         if args.limit:
             paths = paths[: args.limit]
         for path in paths:

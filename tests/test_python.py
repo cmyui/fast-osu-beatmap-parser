@@ -18,165 +18,46 @@ import fosu
 import pytest
 
 
-def test_standard_mods_adjust_difficulty_positions_and_gameplay_time():
+def test_mods_apply_through_the_python_interface():
     data = (
-        b"osu file format v14\n[General]\nMode:0\n"
-        b"[Difficulty]\nHPDrainRate:4\nCircleSize:4\nOverallDifficulty:4\n"
-        b"ApproachRate:4\nSliderMultiplier:1\n"
-        b"[Events]\n2,1500,2000\n[TimingPoints]\n0,500\n"
-        b"[HitObjects]\n100,100,1000,2,0,L|200:150,1,100\n"
+        b"osu file format v14\n[Difficulty]\nSliderMultiplier:1\n"
+        b"[TimingPoints]\n0,500\n[HitObjects]\n100,100,1000,2,0,L|200:150,1,100\n"
     )
-    map = fosu.parse(
-        data,
-        calculate_slider_events=True,
-        mods=fosu.Mods.HARD_ROCK | fosu.Mods.DOUBLE_TIME,
-    )
-    assert (map.hp, map.cs, map.od, map.ar) == pytest.approx((5.6, 5.2, 5.6, 5.6))
+    map = fosu.parse(data, mods=fosu.Mods.HARD_ROCK | fosu.Mods.DOUBLE_TIME)
     slider = map.hit_objects[0]
-    assert (slider.x, slider.y, slider.time, slider.end_time) == pytest.approx(
-        (100, 284, 1000 / 1.5, 1500 / 1.5)
-    )
+    assert (slider.y, slider.time) == (284, 1000 / 1.5)
     assert slider.control_points == [fosu.Point(100, 284), fosu.Point(200, 234)]
-    assert [event.time for event in slider.events] == pytest.approx(
-        [1000 / 1.5, 1464 / 1.5, 1500 / 1.5]
-    )
-    assert all(
-        event.span_start_time == pytest.approx(1000 / 1.5) for event in slider.events
-    )
-    assert map.timing_points[0].beat_length == pytest.approx(500 / 1.5)
-    assert (map.breaks[0].start, map.breaks[0].end) == pytest.approx(
-        (1500 / 1.5, 2000 / 1.5)
-    )
 
 
 @pytest.mark.parametrize(
-    "mods,rate",
+    "data,options",
     [
-        (fosu.Mods.DOUBLE_TIME, 1.5),
-        (fosu.Mods.NIGHTCORE, 1.5),
-        (fosu.Mods.HALF_TIME, 0.75),
+        (b"", {"mods": fosu.Mods.EASY | fosu.Mods.HARD_ROCK}),
+        (b"", {"mods": fosu.Mods(1 << 30)}),
+        (b"[General]\nMode:3\n", {"mods": fosu.Mods.EASY}),
+        (b"", {"sections": fosu.Sections.HIT_OBJECTS, "mods": fosu.Mods.HARD_ROCK}),
     ],
 )
-@pytest.mark.parametrize("mode", [0, 1, 2, 3])
-def test_rate_mods_support_every_mode_and_preserve_inherited_velocity(mods, rate, mode):
-    object_line = (
-        "0,0,900,128,0,1500:0:0:0:0:" if mode == 3 else "0,0,900,8,0,1500,0:0:0:0:"
-    )
-    data = (
-        f"[General]\nMode:{mode}\n[TimingPoints]\n300,600\n"
-        f"600,-50,4,0,0,100,0,0\n[HitObjects]\n{object_line}\n"
-    ).encode()
-    map = fosu.parse(data, mods=mods)
-    assert (map.hit_objects[0].time, map.hit_objects[0].end_time) == pytest.approx(
-        (900 / rate, 1500 / rate)
-    )
-    assert [point.time for point in map.timing_points] == pytest.approx(
-        [300 / rate, 600 / rate]
-    )
-    assert map.timing_points[0].beat_length == pytest.approx(600 / rate)
-    assert map.timing_points[1].beat_length == -50
-
-
-@pytest.mark.parametrize(
-    "fixture", sorted((Path(__file__).parent / "fixtures" / "official").glob("*.osu"))
-)
-def test_duration_only_matches_full_calculation_on_official_fixtures(fixture):
-    data = fixture.read_bytes()
-    duration_only = fosu.parse(data, calculate_slider_end_times=True)
-    full = fosu.parse(data, calculate_slider_events=True, apply_stacking=True)
-    assert [obj.end_time for obj in duration_only.hit_objects] == [
-        obj.end_time for obj in full.hit_objects
-    ]
-    assert duration_only.mode == full.mode
-
-
-def test_taiko_difficulty_mods_follow_mode_specific_rules():
-    data = (
-        b"[General]\nMode:1\n[Difficulty]\nHPDrainRate:4\nCircleSize:4\n"
-        b"OverallDifficulty:4\nApproachRate:4\nSliderMultiplier:1\n"
-        b"[HitObjects]\n100,100,1000,1,0\n"
-    )
-    easy = fosu.parse(data, mods=fosu.Mods.EASY)
-    assert (
-        easy.hp,
-        easy.cs,
-        easy.od,
-        easy.ar,
-        easy.slider_multiplier,
-    ) == pytest.approx((2, 2, 2, 2, 0.8))
-    hard_rock = fosu.parse(data, mods=fosu.Mods.HARD_ROCK)
-    assert (hard_rock.hp, hard_rock.cs, hard_rock.od, hard_rock.ar) == pytest.approx(
-        (5.6, 4, 5.6, 4)
-    )
-    assert hard_rock.slider_multiplier == pytest.approx(1.4 * 4 / 3)
-    assert hard_rock.hit_objects[0].y == 100
-
-
-@pytest.mark.parametrize("mode", [2, 3])
-def test_catch_and_mania_reject_unimplemented_difficulty_mods(mode):
-    data = f"[General]\nMode:{mode}\n[Difficulty]\nCircleSize:4\n".encode()
+def test_rejected_options_raise_value_error(data, options):
     with pytest.raises(ValueError, match="invalid input"):
-        fosu.parse(data, mods=fosu.Mods.EASY)
+        fosu.parse(data, **options)
 
 
-@pytest.mark.parametrize(
-    "mods",
-    [
-        fosu.Mods.EASY | fosu.Mods.HARD_ROCK,
-        fosu.Mods.DOUBLE_TIME | fosu.Mods.HALF_TIME,
-        fosu.Mods.NIGHTCORE | fosu.Mods.HALF_TIME,
-        fosu.Mods(1 << 30),
-    ],
-)
-def test_invalid_mod_combinations_are_rejected(mods):
-    with pytest.raises(ValueError, match="invalid input"):
-        fosu.parse(b"", mods=mods)
-
-
-def test_difficulty_mods_require_general_and_difficulty_sections():
-    with pytest.raises(ValueError, match="invalid input"):
-        fosu.parse(
-            b"[HitObjects]\n0,0,0,1,0\n",
-            sections=fosu.Sections.HIT_OBJECTS,
-            mods=fosu.Mods.HARD_ROCK,
-        )
-
-
-@pytest.mark.parametrize(
-    "curve,length,distance",
-    [
-        ("L|110:20", 150, 150),
-        ("L|110:20", 50, 50),
-        ("L|110:20|110:20", 150, 100),
-        ("B|10:20", 100, 0),
-        ("B|110:120|210:20", 200, 200),
-        ("P|110:120|210:20", 200, 200),
-        ("C|110:120|210:20", 200, 200),
-    ],
-)
-def test_retained_slider_paths(tmp_path, curve, length, distance):
-    data = f"osu file format v14\n[HitObjects]\n10,20,1000,2,0,{curve},2,{length}\n".encode()
+def test_slider_paths_convert(tmp_path):
+    data = b"osu file format v14\n[HitObjects]\n10,20,1000,2,0,B|110:120|210:20,2,200\n"
     source = tmp_path / "path.osu"
     source.write_bytes(data)
-    raw = fosu.parse(data).hit_objects[0]
-    assert raw.path is None
+    assert fosu.parse(data).hit_objects[0].path is None
     map = fosu.parse(data, calculate_slider_paths=True)
     assert map == fosu.parse_file(source, calculate_slider_paths=True)
-    slider = map.hit_objects[0]
-    path = slider.path
-    assert path is not None and path.distance() == pytest.approx(distance)
-    assert slider.end_time == 0
+    path = map.hit_objects[0].path
+    assert path is not None and path.distance() == 200
     assert len(path.points) == len(path.cumulative_lengths)
     assert path.cumulative_lengths == sorted(path.cumulative_lengths)
     assert fosu.slider_position_at(path, -1) == path.points[0]
     assert fosu.slider_position_at(path, 2) == path.points[-1]
     assert pickle.loads(pickle.dumps(map)) == map
     assert deepcopy(map) == map
-    timed = fosu.parse(data, calculate_slider_end_times=True)
-    both = fosu.parse(
-        data, calculate_slider_paths=True, calculate_slider_end_times=True
-    )
-    assert timed.hit_objects[0].end_time == both.hit_objects[0].end_time
 
 
 def test_path_query_is_detached_and_does_not_mutate():
@@ -191,179 +72,61 @@ def test_path_query_is_detached_and_does_not_mutate():
     assert path == before
 
 
-@pytest.mark.parametrize("version,tick_count", [(7, 6), (8, 2)])
-def test_slider_event_ticks_repeats_and_versions(tmp_path, version, tick_count):
+def test_slider_events_convert(tmp_path):
     data = (
-        f"osu file format v{version}\n[Difficulty]\nSliderMultiplier:1\nSliderTickRate:1\n"
-        "[TimingPoints]\n0,500\n0,-50,4,0,0,100,0,0\n"
-        "[HitObjects]\n0,0,1000,2,0,L|400:0,2,400\n"
-    ).encode()
+        b"osu file format v14\n[Difficulty]\nSliderMultiplier:1\n"
+        b"[TimingPoints]\n0,500\n[HitObjects]\n0,0,1000,2,0,L|400:0,2,400\n"
+    )
     path = tmp_path / "events.osu"
     path.write_bytes(data)
     assert fosu.parse(data).hit_objects[0].events == []
     map = fosu.parse(data, calculate_slider_events=True)
     assert map == fosu.parse_file(path, calculate_slider_events=True)
     slider = map.hit_objects[0]
-    events = slider.events
-    assert events[0].type is fosu.SliderEventType.HEAD
-    assert events[-1].type is fosu.SliderEventType.TAIL
-    assert events[-1].time == slider.end_time == 3000
-    assert events[-1].position == fosu.PathPoint(0, 0)
-    legacy = [
-        event for event in events if event.type is fosu.SliderEventType.LEGACY_LAST_TICK
-    ]
-    assert len(legacy) == 1
-    assert legacy[0].time == 2964
-    assert legacy[0].path_progress == pytest.approx(0.036)
-    assert (legacy[0].position.x, legacy[0].position.y) == pytest.approx((14.4, 0))
-    assert sum(e.type is fosu.SliderEventType.TICK for e in events) == tick_count
-    repeats = [e for e in events if e.type is fosu.SliderEventType.REPEAT]
-    assert len(repeats) == 1 and repeats[0].time == 2000
-    assert repeats[0].position == fosu.PathPoint(400, 0)
-    path_events = [
-        event
-        for event in events
-        if event.type is not fosu.SliderEventType.LEGACY_LAST_TICK
-    ]
-    assert [event.time for event in path_events] == sorted(
-        event.time for event in path_events
+    assert slider.events[5] == fosu.SliderEvent(
+        type=fosu.SliderEventType.TICK,
+        time=3500,
+        span_index=1,
+        span_start_time=3000,
+        path_progress=0.75,
+        position=fosu.PathPoint(300, 0),
     )
+    # The Python path query agrees with the native event positions.
+    for event in slider.events:
+        position = fosu.slider_position_at(slider.path, event.path_progress)
+        assert (event.position.x, event.position.y) == pytest.approx(
+            (position.x, position.y)
+        )
     assert pickle.loads(pickle.dumps(map)) == map
-    for e in events:
-        position = fosu.slider_position_at(slider.path, e.path_progress)
-        assert (e.position.x, e.position.y) == pytest.approx((position.x, position.y))
 
 
-@pytest.mark.parametrize("curve,length", [("L|100:0", 100), ("B|0:0", 0)])
-def test_slider_events_without_ticks(curve, length):
+def test_stacking_converts_and_raw_position_removes_it(tmp_path):
     data = (
-        "[TimingPoints]\n0,500\n0,NaN,4,0,0,100,0,0\n"
-        f"[HitObjects]\n0,0,0,2,0,{curve},1,{length}\n"
-    ).encode()
-    events = fosu.parse(data, calculate_slider_events=True).hit_objects[0].events
-    assert [e.type for e in events] == [
-        fosu.SliderEventType.HEAD,
-        fosu.SliderEventType.LEGACY_LAST_TICK,
-        fosu.SliderEventType.TAIL,
-    ]
-    assert all(math.isfinite(e.time) and math.isfinite(e.path_progress) for e in events)
-
-
-def test_short_slider_legacy_last_tick_clamps_to_half_duration():
-    data = (
-        b"[Difficulty]\nSliderMultiplier:1\n[TimingPoints]\n0,500\n"
-        b"[HitObjects]\n0,0,1000,2,0,L|10:0,1,10\n"
+        b"osu file format v14\n[Difficulty]\nSliderMultiplier:1\n"
+        b"[TimingPoints]\n0,500\n[HitObjects]\n"
+        b"100,100,1000,2,0,L|200:100,1,100\n100,100,1100,1,0\n"
     )
-    slider = fosu.parse(data, calculate_slider_events=True).hit_objects[0]
-    legacy = next(
-        event
-        for event in slider.events
-        if event.type is fosu.SliderEventType.LEGACY_LAST_TICK
-    )
-    assert slider.end_time == 1050
-    assert (legacy.time, legacy.path_progress, legacy.position.x) == pytest.approx(
-        (1025, 0.5, 5)
-    )
-
-
-@pytest.mark.parametrize(
-    "version,heights", [(5, [2, 1, 0]), (6, [2, 1, 0]), (14, [2, 1, 0])]
-)
-def test_circle_stacking_applies_positions_and_recovers_raw_position(
-    tmp_path, version, heights
-):
-    data = (
-        f"osu file format v{version}\n[HitObjects]\n"
-        "100,100,1000,1,0\n100,100,1100,1,0\n100,100,1200,1,0\n"
-    ).encode()
     assert all(h.stacking is None for h in fosu.parse(data).hit_objects)
     source = tmp_path / "stacks.osu"
     source.write_bytes(data)
     map = fosu.parse(data, apply_stacking=True)
     assert map == fosu.parse_file(source, apply_stacking=True)
-    assert [h.stacking.stack_height for h in map.hit_objects] == heights
-    assert all(h.raw_position() == pytest.approx((100, 100)) for h in map.hit_objects)
-    assert map.hit_objects[0].x == pytest.approx(93.597376, abs=1e-5)
-    assert map.hit_objects[0].y == map.hit_objects[0].x
-    assert map.hit_objects[0].stacking.stack_offset.x == pytest.approx(
-        -6.402624, abs=1e-5
-    )
+    slider, circle = map.hit_objects
+    assert slider.stacking.stack_height == 1
+    assert slider.stacking.stack_offset.x == pytest.approx(-3.2013118, abs=1e-6)
+    assert slider.raw_position() == pytest.approx((100, 100))
+    # Control points start at the stacked head.
+    assert slider.control_points[0] == fosu.Point(slider.x, slider.y)
+    assert circle.stacking.stack_height == 0
+    assert circle.raw_position() == (circle.x, circle.y)
     assert pickle.loads(pickle.dumps(map)) == map
     assert deepcopy(map) == map
-
-
-def test_stacked_slider_control_points_and_relative_geometry():
-    data = (
-        b"osu file format v14\n[Difficulty]\nSliderMultiplier:1\n"
-        b"[TimingPoints]\n0,500\n[HitObjects]\n"
-        b"100,100,1000,2,0,L|200:100,2,100\n100,100,1100,2,0,L|200:100,1,100\n"
-    )
-    raw = fosu.parse(data, calculate_slider_events=True)
-    stacked = fosu.parse(data, calculate_slider_events=True, apply_stacking=True)
-    a, b = stacked.hit_objects
-    assert a.stacking.stack_height == 1
-    assert a.raw_position() == pytest.approx((100, 100))
-    assert a.x < 100 and a.y < 100
-    assert a.control_points[0] == fosu.Point(a.x, a.y)
-    assert a.control_points[1].x == pytest.approx(
-        200 + a.stacking.stack_offset.x, abs=1e-5
-    )
-    assert a.control_points[1].y == a.y
-    assert a.path == raw.hit_objects[0].path
-    assert a.events == raw.hit_objects[0].events
-    assert b.raw_position() == (b.x, b.y)
-    assert isinstance(a.x, float) and isinstance(raw.hit_objects[0].x, float)
-    assert pickle.loads(pickle.dumps(stacked)) == stacked
 
 
 def test_raw_position_without_stacking_and_after_other_normalization():
     notes = fosu.parse(b"[HitObjects]\n10,20,100,1,0\n0,0,200,8,0,300\n").hit_objects
     assert notes[0].raw_position() == (10.0, 20.0)
     assert notes[1].raw_position() == (256.0, 192.0)
-
-
-@pytest.mark.parametrize("version", [5, 6, 14])
-def test_slider_tail_negative_stacks(version):
-    data = (
-        f"osu file format v{version}\n[Difficulty]\nSliderMultiplier:1\n"
-        "[TimingPoints]\n0,500\n[HitObjects]\n"
-        "0,0,1000,2,0,L|100:0,1,100\n100,0,1550,1,0\n100,0,1600,1,0\n"
-    ).encode()
-    map = fosu.parse(data, apply_stacking=True)
-    assert [h.stacking.stack_height for h in map.hit_objects] == [0, -1, -2]
-    assert map.hit_objects[0].end_time > 0
-    assert map.hit_objects[0].events == []
-
-
-@pytest.mark.parametrize(
-    "fixture,heights",
-    [
-        ("stacking-slider-end-precision.osu", [0, -1, 0, -1, -2]),
-        ("stacking-zero-leniency.osu", [0, -1]),
-    ],
-)
-def test_stacking_uses_standard_slider_end_time_precision(fixture, heights):
-    source = Path(__file__).parent / "fixtures" / "official" / fixture
-    map = fosu.parse_file(source, apply_stacking=True)
-    assert [object.stacking.stack_height for object in map.hit_objects] == heights
-
-
-@pytest.mark.parametrize("mode", [1, 2, 3])
-def test_stacking_does_not_convert_other_modes(mode):
-    data = (
-        f"[General]\nMode:{mode}\n[HitObjects]\n100,100,0,1,0\n100,100,1,1,0\n".encode()
-    )
-    assert fosu.parse(data, apply_stacking=True) == fosu.parse(data)
-
-
-def test_modern_stacking_time_distance_and_spinner_boundaries():
-    data = (
-        b"osu file format v14\n[Difficulty]\nApproachRate:10\n"
-        b"[HitObjects]\n100,100,0,1,0\n100,100,316,1,0\n103,100,400,1,0\n"
-        b"0,0,410,8,0,420\n103,100,500,1,0\n"
-    )
-    map = fosu.parse(data, apply_stacking=True)
-    assert [h.stacking.stack_height for h in map.hit_objects] == [0, 0, 1, 0, 0]
 
 
 @pytest.mark.parametrize("file", [False, True])
@@ -419,46 +182,6 @@ def test_invalid_section_masks(tmp_path, sections):
         fosu.parse_file(tmp_path / "missing.osu", sections=sections)
 
 
-def test_skipped_sections_do_not_count_malformed_records():
-    data = b"[Metadata]\nTitle:ok\n[HitObjects]\ninvalid\n"
-    assert fosu.parse(data).stats.malformed_lines == 1
-    selected = fosu.parse(data, sections=fosu.Sections.METADATA)
-    assert selected.title == "ok" and selected.stats.malformed_lines == 0
-
-
-@pytest.mark.parametrize(
-    "curve,length,distance",
-    [
-        ("L|100:0", "140", 140),
-        ("L|100:0", "0", 100),
-        ("L|100:0", None, 100),
-        ("L|100:0|100:0", "200", 100),
-        ("B|0:0", "200", 0),
-    ],
-)
-def test_slider_end_time_uses_effective_distance(curve, length, distance):
-    tail = "" if length is None else f",{length}"
-    data = (
-        "[Difficulty]\nSliderMultiplier:1\n"
-        "[TimingPoints]\n0,500\n0,-50,4,0,0,100,0,0\n"
-        f"[HitObjects]\n0,0,1000,2,0,{curve},2{tail}\n"
-    ).encode()
-    slider = fosu.parse(data, calculate_slider_end_times=True).hit_objects[0]
-    assert isinstance(slider, fosu.Slider)
-    assert slider.end_time == 1000 + 2 * distance / (200 / 500)
-
-
-def test_slider_end_time_without_timing_sections():
-    data = b"[Difficulty]\nSliderMultiplier:1\n[TimingPoints]\n0,500\n[HitObjects]\n0,0,0,2,0,L|100:0,1,140\n"
-    assert (
-        fosu.parse(data, calculate_slider_end_times=True).hit_objects[0].end_time == 700
-    )
-    # Selected sections alone determine the result; omitted settings use defaults.
-    assert fosu.parse(
-        data, sections=fosu.Sections.HIT_OBJECTS, calculate_slider_end_times=True
-    ).hit_objects[0].end_time == pytest.approx(1000)
-
-
 def test_slider_end_time_opt_out(tmp_path):
     data = (
         b"[HitObjects]\n0,0,1000,1,0\n0,0,2000,2,0,L|100:0,1,140\n"
@@ -480,32 +203,6 @@ def test_slider_end_time_opt_out(tmp_path):
     )
     for copied in (skipped, deepcopy(skipped), pickle.loads(pickle.dumps(skipped))):
         assert copied.hit_objects[1].end_time == 0
-
-
-def test_fractional_times_and_malformed_numeric_fields():
-    import math
-
-    bm = fosu.parse(
-        b"[Metadata]\nTitle:ok\nTitlX:no\n[MetadataFake]\nTitle:no\n"
-        b"[Difficulty]\nApproachRate:1e309\n"
-        b"[TimingPoints]\n0,500\n1,NaN,4,2,1,100,0,0\n2,NaN,4,2,1,100,1,0\n"
-        b"[HitObjects]\n256.5,192,1000.5,1,0\n1,2,2000.25,8,0,3000.75\n"
-        b"1,2,4000.5,128,0,5000.75:0:0:0:0:\n"
-        b"1,2,6000,2,0,B|1.5:2.5,1,2.5e2\n"
-        b"1,2,NaN,1,0\n1,2,3,1,0\x00junk\n"
-        b"[Events]\n2,1.25,9.75\n"
-    )
-    assert bm.title == "ok" and bm.ar == 5
-    assert len(bm.timing_points) == 2
-    assert math.isnan(bm.timing_points[1].beat_length)
-    assert not bm.timing_points[1].uninherited
-    assert [h.time for h in bm.hit_objects] == [1000.5, 2000.25, 4000.5, 6000]
-    assert [h.end_time for h in bm.hit_objects] == [1000.5, 3000.75, 5000.75, 0]
-    assert bm.hit_objects[0].x == 256
-    assert bm.hit_objects[3].length == 250
-    assert [(p.x, p.y) for p in bm.hit_objects[3].control_points[1:]] == [(1, 2)]
-    assert (bm.breaks[0].start, bm.breaks[0].end) == (1.25, 9.75)
-    assert bm.stats.malformed_lines == 4
 
 
 def test_complete_map(tmp_path):
@@ -574,11 +271,10 @@ def test_complete_map(tmp_path):
     assert "hit_objects=4" in repr(b) and len(repr(b)) < 150
 
 
-def test_modern_curve_segments_drive_path_calculation():
+def test_curve_segments_convert_with_the_head():
     slider = fosu.parse(
         b"osu file format v128\n[HitObjects]\n"
-        b"10,20,100,2,0,B2|30.5:40.25|50:60|L|70.75:80.5,1,100\n",
-        calculate_slider_paths=True,
+        b"10,20,100,2,0,B2|30.5:40.25|50:60|L|70.75:80.5,1,100\n"
     ).hit_objects[0]
     assert isinstance(slider, fosu.Slider)
     assert [(segment.type, segment.degree) for segment in slider.curve_segments] == [
@@ -592,39 +288,11 @@ def test_modern_curve_segments_drive_path_calculation():
         [(10, 20), (30.5, 40.25), (50, 60), (70.75, 80.5)],
         [(70.75, 80.5)],
     ]
-    assert slider.path is not None
-    assert len(slider.path.points) > 2
-
-    degree = fosu.parse(
-        b"osu file format v128\n[HitObjects]\n"
-        b"0,0,100,2,0,B2|100:0|100:100|0:100,1,300\n"
-    ).hit_objects[0]
-    assert isinstance(degree, fosu.Slider)
-    assert [(segment.type, segment.degree) for segment in degree.curve_segments] == [
-        (fosu.CurveType.BEZIER, 2)
-    ]
-
     legacy = fosu.parse(
         b"osu file format v14\n[HitObjects]\n10,20,100,2,0,B|30.5:40.25,1,100\n"
     ).hit_objects[0]
     assert isinstance(legacy, fosu.Slider)
     assert legacy.curve_segments == []
-
-
-@pytest.mark.parametrize("length", ["300", "0", ""])
-def test_lazer_slider_timing_matches_retained_path(length):
-    slider_tail = f",1,{length}" if length else ",1"
-    data = (
-        "osu file format v128\n[Difficulty]\nSliderMultiplier:1.4\n"
-        "[TimingPoints]\n0,500\n[HitObjects]\n"
-        f"0,0,1000,2,0,B2|100:0|100:100|100:100{slider_tail}\n"
-    ).encode()
-    timed = fosu.parse(data, calculate_slider_end_times=True).hit_objects[0]
-    retained = fosu.parse(
-        data, calculate_slider_paths=True, calculate_slider_end_times=True
-    ).hit_objects[0]
-    with_events = fosu.parse(data, calculate_slider_events=True).hit_objects[0]
-    assert timed.end_time == retained.end_time == with_events.end_time
 
 
 def test_empty_input_defaults():
@@ -633,28 +301,6 @@ def test_empty_input_defaults():
     assert b.hit_objects == b.timing_points == b.breaks == b.bookmark_list == []
     assert b.mode is fosu.GameMode.OSU
     assert b.beatmap_id is None and b.preview_time is None
-
-
-def test_omitted_general_uses_defaults():
-    b = fosu.parse(b"[Metadata]\nTitle:Only metadata\n")
-    assert b.title == "Only metadata" and b.audio_filename == ""
-    assert b.mode is fosu.GameMode.OSU
-    assert b.velocity_presets == [0.75, 1, 1.5]
-
-
-def test_omitted_metadata_uses_defaults():
-    b = fosu.parse(b"[General]\nAudioLeadIn:450\n")
-    assert b.audio_lead_in == 450 and b.title == "" and b.tag_list == []
-
-
-def test_omitted_hitobjects_is_empty_list():
-    b = fosu.parse(b"[Difficulty]\nApproachRate:8\n")
-    assert b.ar == 8 and b.hit_objects == []
-
-
-def test_explicit_empty_hitobject_section():
-    b = fosu.parse(b"[HitObjects]\n")
-    assert b.hit_objects == [] and b.stats.malformed_lines == 0
 
 
 def test_zero_and_other_negative_values_are_preserved():
@@ -686,16 +332,6 @@ def test_utf8_and_embedded_nul_roundtrip():
     data = b"[Metadata]\nTitle:hello\xff\x00world\n"
     b = fosu.parse(data)
     assert b.title.encode("utf-8", "surrogateescape") == b"hello\xff\x00world"
-
-
-def test_inherited_nan_survives_and_time_uses_official_offset_arithmetic():
-    import struct
-
-    b = fosu.parse(
-        b"[TimingPoints]\n0,500\n10,NaN,4,1,0,100,0,0\n[HitObjects]\n1,2,-0,1,0\n"
-    )
-    assert math.isnan(b.timing_points[1].beat_length)
-    assert struct.pack("<d", b.hit_objects[0].time) == struct.pack("<d", 0.0)
 
 
 def test_kind_precedence_and_combo_flags():

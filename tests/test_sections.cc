@@ -1167,6 +1167,18 @@ static void test_repeated_lazer_velocity_presets() {
   }
 }
 
+static void test_invalid_velocity_presets_are_skipped() {
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(
+        "osu file format v128\n[Editor]\nVelocityPresets:0.5, invalid,1,2.25\n",
+        simd);
+    CHECK_EQ(map.velocity_presets.size(), 3u);
+    CHECK_EQ(map.velocity_presets[0], 0.5);
+    CHECK_EQ(map.velocity_presets[1], 1);
+    CHECK_EQ(map.velocity_presets[2], 2.25);
+  }
+}
+
 static void test_combo_colour_domain() {
   for (bool simd : {false, true}) {
     const auto map = parse_str(
@@ -1264,12 +1276,61 @@ static void test_legacy_rules() {
   }
 }
 
+// Only -1 stands for a missing ID or preview time.
+static void test_explicit_zero_and_negative_ids_are_kept() {
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(
+        "[Metadata]\nBeatmapID:0\nBeatmapSetID:-2\n[General]\nPreviewTime:0\n",
+        simd);
+    CHECK_EQ(map.beatmap_id, 0);
+    CHECK_EQ(map.beatmap_set_id, -2);
+    CHECK_EQ(map.preview_time, 0);
+  }
+}
+
+static void test_metadata_keeps_raw_bytes() {
+  constexpr char input[] = "[Metadata]\nTitle:hello\xff\0world\n";
+  constexpr char title[] = "hello\xff\0world";
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(std::string(input, sizeof input - 1), simd);
+    CHECK_EQ(map.title, std::string_view(title, sizeof title - 1));
+  }
+}
+
+// Objects sort by time, stably; each slider keeps its own points and fields.
+static void test_time_sort_keeps_slider_data_with_its_object() {
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(
+        "[HitObjects]\n10,20,300,2,0,L|40:50,1,60\n"
+        "60,70,100,2,0,B|80:90|100:110,2,120\n120,130,100,1,0\n",
+        simd);
+    const auto objects = map.hit_objects;
+    CHECK_EQ(objects[0].time, 100);
+    CHECK_EQ(objects[0].x, 60);
+    CHECK_EQ(objects[1].x, 120);
+    CHECK_EQ(objects[2].time, 300);
+    const auto& first = map.sliders[objects[0].slider];
+    CHECK_EQ(first.slides, 2);
+    CHECK_EQ(first.length, 120);
+    CHECK_EQ(first.point_count, 2u);
+    CHECK_EQ(map.slider_points[first.point_begin].x, 80);
+    const auto& last = map.sliders[objects[2].slider];
+    CHECK_EQ(last.slides, 1);
+    CHECK_EQ(last.length, 60);
+    CHECK_EQ(map.slider_points[last.point_begin].x, 40);
+  }
+}
+
 int main() {
+  test_explicit_zero_and_negative_ids_are_kept();
+  test_metadata_keeps_raw_bytes();
+  test_time_sort_keeps_slider_data_with_its_object();
   test_legacy_rules();
   test_combo_colour_domain();
   test_header_field_failures_preserve_values();
   test_repeated_section_bodies();
   test_repeated_lazer_velocity_presets();
+  test_invalid_velocity_presets_are_skipped();
   test_enum_contracts();
   test_byte_scan_boundaries<','>();
   test_byte_scan_boundaries<':'>();
