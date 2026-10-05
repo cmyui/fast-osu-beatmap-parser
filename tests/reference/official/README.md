@@ -43,7 +43,7 @@ separately and never treated as official line rejections.
 | Filenames and events | Compare explicit source filenames and normalized break endpoints, not standardized paths, video-as-background repairs or storyboard background fallback. Video filenames are retained even though the official beatmap decoder discards them. |
 | Metadata whitespace | Compare text exactly after the official whitespace trimming. There is no whitespace exception in the audit. |
 | Python conveniences | Compare `-1` identifiers/preview times as `None` and `bookmark_list` with the official integer-list parsing. Text fields use the C names `tags` and `bookmarks`. Native/Python regression checks cover other derived conveniences. |
-| Enums | Explicitly record FOSU's stricter sample-set/curve-type rejection policy rather than pretending official acceptance agrees. |
+| Enums | Explicitly record FOSU's stricter sample-set rejection policy rather than pretending official acceptance agrees. Unknown curve letters read as Catmull, as in the official decoder. |
 
 `UseSkinSprites`, `OverlayPosition`, and `SkinPreference` are retained legacy
 fields that this pinned official decoder ignores; those checks validate raw

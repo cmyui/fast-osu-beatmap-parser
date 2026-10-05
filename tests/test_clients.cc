@@ -227,21 +227,29 @@ static void test_hit_object_lines_stable_skips() {
   }
 }
 
-// A line only fosu's own rules reject, such as an unknown curve type both
-// clients read as Catmull, never makes a map unloadable. A slider that ends
-// at that type is one stable cannot read either: its repeat count is missing.
-static void test_policy_rejection_keeps_stable_map_loadable() {
+// Both clients read a one-letter curve type other than B, C, L or P as
+// Catmull. stable also ignores any other one-character marker; lazer reads
+// one as a point, which fails. A slider that ends at its type is one stable
+// cannot read: its repeat count is missing.
+static void test_unknown_curve_types() {
   const auto slider = [](const char* curve) {
     return "osu file format v14\n[TimingPoints]\n0,500\n[HitObjects]\n"
            "64,64,100,2,0," +
            std::string(curve) + "\n64,64,300,1,0\n";
   };
-  for (const char* curve : {"X|100:100,1,50", "X,1,50"}) {
-    for (bool simd : {false, true}) {
-      const auto map = parse_str(slider(curve), simd, kStable);
-      CHECK_EQ(map.hit_objects.size(), 1u);
-      CHECK_EQ(map.stats.malformed_lines, 1u);
+  for (bool simd : {false, true}) {
+    for (const auto options : {kStable, kLazer}) {
+      for (const char* curve : {"X|100:100,1,50", "b,1,50"}) {
+        const auto map = parse_str(slider(curve), simd, options);
+        CHECK_EQ(map.hit_objects.size(), 2u);
+        CHECK(map.sliders[0].curve_type == fosu::CurveType::Catmull);
+        CHECK_EQ(map.stats.malformed_lines, 0u);
+      }
     }
+    const auto digit = slider("0|100:100,1,50");
+    CHECK(parse_str(digit, simd, kStable).sliders[0].curve_type ==
+          fosu::CurveType::Catmull);
+    CHECK(parse_str(digit, simd, kLazer).sliders.empty());
   }
   CHECK_EQ(unloadable_line(slider("X"), Client::Stable), 5u);
 }
@@ -257,10 +265,10 @@ static void test_indented_colours() {
   CHECK_EQ(parse_str(input, true, kLazer).combo_colours.size(), 2u);
 }
 
-// Before v128, stable reads a one-character token as the curve type of the
-// whole slider, the last one winning, and ignores one naming no type; a
-// longer token must be a point. Lazer starts a segment at each type (see
-// test_slider_paths) and rejects a token naming none.
+// stable reads a one-character token as the curve type of the whole slider,
+// the last one winning, and ignores one naming no type; a longer token must
+// be a point. Lazer starts a segment at each letter (see test_slider_paths)
+// and rejects a one-character token that is not a letter.
 static void test_curve_type_tokens() {
   const auto slider = [](const char* curve) {
     return "osu file format v14\n[TimingPoints]\n0,500\n[HitObjects]\n"
@@ -283,8 +291,10 @@ static void test_curve_type_tokens() {
                               "B|100:0|L", "B|L|100:100"}) {
       CHECK_EQ(parse_str(slider(curve), simd, kStable).sliders.size(), 1u);
     }
-    for (const char* curve :
-         {"B|100:0|X|100:100", "B|100:0|5|100:100", "B|100:0|L"}) {
+    const auto unknown = parse_str(slider("B|100:0|X|100:100"), simd, kLazer);
+    CHECK_EQ(unknown.slider_segments.size(), 2u);
+    CHECK(unknown.slider_segments[1].type == fosu::CurveType::Catmull);
+    for (const char* curve : {"B|100:0|5|100:100", "B|100:0|L"}) {
       const auto map = parse_str(slider(curve), simd, kLazer);
       CHECK(map.sliders.empty());
       CHECK_EQ(map.stats.malformed_lines, 1u);
@@ -419,7 +429,7 @@ int main() {
   test_header_sections_after_hit_objects();
   test_unreadable_hit_object_fails_stable();
   test_hit_object_lines_stable_skips();
-  test_policy_rejection_keeps_stable_map_loadable();
+  test_unknown_curve_types();
   test_indented_colours();
   test_curve_type_tokens();
   test_coordinate_and_length_bounds();

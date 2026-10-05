@@ -20,8 +20,7 @@ compiles its own parse, so the choice adds no per-line cost.
   Python). Both clients refuse a map whose version number does not parse.
   stable also refuses a map with a hit object it cannot read, though it ignores
   one whose type names no kind; fosu counts that as malformed. Lazer skips
-  each invalid hit object. A line only fosu's own rules reject, such as an
-  unknown curve type, never makes a map unloadable.
+  each invalid hit object.
 - **v128 maps.** stable has no rules past v14, its latest format, so stable
   mode reads a v128 map as it reads v14: it truncates coordinates, reads
   curve types as below, rejects B-spline degrees and uses the legacy path
@@ -52,7 +51,8 @@ compiles its own parse, so the choice adds no per-line cost.
   indented lines and rejects the others.
 - **Curve types.** stable reads a one-character token as the curve type of
   the whole slider, the last one winning, and ignores one naming no type; a
-  longer token must be a point. Lazer starts a segment at each type; before
+  longer token must be a point. Lazer starts a segment at each letter and
+  rejects any other one-character token; before
   v128 it gives each segment the legacy curve rules, counting the next
   segment's first point as its end. Lazer would also read a longer token starting with
   a letter as a type; fosu rejects it, so in stable mode the map is unloadable.
@@ -100,8 +100,8 @@ fields as integers. Lazer's trailing `//` comments are not stripped.
   timing points accept 0–3. Zero is the legacy default selector, not an error:
   timing points use the beatmap default, and a General `None` denotes normal.
   Unknown values and comma-separated sample-set combinations are malformed.
-  Slider curve types must be `B` (Bezier), `C` (Catmull), `L` (linear), or `P`
-  (perfect curve). Unknown curve types reject the hitobject, not the whole map.
+  Slider curve types are `B` (Bezier), `C` (Catmull), `L` (linear) and `P`
+  (perfect curve); like both clients, fosu reads any other letter as Catmull.
   B-spline degrees (`B2|…`) are read only under lazer's v128 rules.
   Otherwise they reject the line: stable cannot load such a map, and lazer
   before v128 reads a B-spline.

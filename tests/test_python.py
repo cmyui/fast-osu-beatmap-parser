@@ -810,10 +810,11 @@ def test_enum_values_and_malformed_records():
         b"[HitObjects]\n0,0,1,2,0,X|1:2,1,30\n0,0,2,2,0,P|1:2,1,30\n"
     )
     assert b.sample_set is fosu.SampleSet.SOFT
-    assert b.stats.malformed_lines == 3
-    assert len(b.timing_points) == len(b.hit_objects) == 1
+    assert b.stats.malformed_lines == 2
+    assert len(b.timing_points) == 1 and len(b.hit_objects) == 2
     assert b.timing_points[0].sample_set is fosu.SampleSet.NONE
-    assert b.hit_objects[0].curve_type is fosu.CurveType.PERFECT_CURVE
+    assert b.hit_objects[0].curve_type is fosu.CurveType.CATMULL
+    assert b.hit_objects[1].curve_type is fosu.CurveType.PERFECT_CURVE
     assert (
         fosu.parse(b"osu file format v14\n[General]\nSampleSet:None\n").sample_set
         is fosu.SampleSet.NONE

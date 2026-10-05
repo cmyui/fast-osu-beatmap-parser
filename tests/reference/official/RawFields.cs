@@ -118,12 +118,15 @@ sealed class RawFields
         : Coordinate(text);
     static string At(string[] fields, int index, string fallback = "") => index < fields.Length ? fields[index] : fallback;
 
+    // The official decoder reads any letter other than B, C, L or P as Catmull.
+    static string CurveType(char letter) => "BCLP".Contains(letter) ? letter.ToString() : "C";
+
     static (string type, int? degree) Curve(string text)
     {
         int? degree = text[0] == 'B' && text.Length > 1 && int.TryParse(text.AsSpan(1), out int value) && value > 0
             ? value
             : null;
-        return (text[0].ToString(), degree);
+        return (CurveType(text[0]), degree);
     }
 
     static object[] CurveSegments(string[] path, Point head, bool preserveFraction)
@@ -269,14 +272,9 @@ sealed class RawFields
                 break;
             case "slider":
                 var path = parts[5].Split('|');
-                if (path[0].Length == 0 || !"BCLP".Contains(path[0][0]))
-                {
-                    policy_rejections.Add("HitObjects.CurveType");
-                    return;
-                }
                 bool preserveFraction = map.BeatmapVersion >= LegacyBeatmapEncoder.FIRST_LAZER_VERSION;
                 var head = new Point(Coordinate(parts[0], preserveFraction), Coordinate(parts[1], preserveFraction));
-                result["curve_type"] = path[0][0].ToString();
+                result["curve_type"] = CurveType(path[0][0]);
                 result["slides"] = Math.Max(1, Integer(parts[6]));
                 result["length"] = parts.Length > 7 ? Math.Max(0, Parsing.ParseDouble(parts[7], Parsing.MAX_COORDINATE_VALUE)) : 0.0;
                 result["edge_sounds"] = At(parts, 8);

@@ -1084,18 +1084,23 @@ static void test_enum_contracts() {
       CHECK_EQ(map.timing_points.size(), 1u);
       CHECK_EQ(map.timing_points[0].sample_set, fosu::SampleSet::Soft);
     }
+    // Both clients read an unknown curve letter as Catmull. stable also
+    // ignores another one-character marker, which lazer rejects.
     for (char value : {'B', 'C', 'L', 'P', 'X', 'b', '0'}) {
-      const auto map = parse_str(std::string("[HitObjects]\n0,0,1,2,0,") +
-                                     value + "|1:2,1,30\n0,0,2,1,0\n",
-                                 simd);
-      const bool valid =
-          value == 'B' || value == 'C' || value == 'L' || value == 'P';
-      CHECK_EQ(map.stats.malformed_lines, valid ? 0u : 1u);
-      CHECK_EQ(map.hit_objects.size(), valid ? 2u : 1u);
-      CHECK_EQ(map.sliders.size(), valid ? 1u : 0u);
-      CHECK_EQ(map.slider_points.size(), valid ? 1u : 0u);
-      if (valid)
-        CHECK_EQ(static_cast<char>(map.sliders[0].curve_type), value);
+      for (const auto client : {fosu::Client::Stable, fosu::Client::Lazer}) {
+        const auto map = parse_str(std::string("[HitObjects]\n0,0,1,2,0,") +
+                                       value + "|1:2,1,30\n0,0,2,1,0\n",
+                                   simd, {.client = client});
+        const bool known =
+            value == 'B' || value == 'C' || value == 'L' || value == 'P';
+        const bool read = value != '0' || client == fosu::Client::Stable;
+        CHECK_EQ(map.stats.malformed_lines, read ? 0u : 1u);
+        CHECK_EQ(map.hit_objects.size(), read ? 2u : 1u);
+        CHECK_EQ(map.sliders.size(), read ? 1u : 0u);
+        if (read)
+          CHECK_EQ(static_cast<char>(map.sliders[0].curve_type),
+                   known ? value : 'C');
+      }
     }
   }
 }

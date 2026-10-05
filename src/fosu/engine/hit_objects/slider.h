@@ -53,6 +53,10 @@ template <Client C>
 inline constexpr f64 kSliderLengthLimit =
     C == Client::Lazer ? 131072.0 : std::numeric_limits<f64>::max();
 
+inline bool is_ascii_letter(char value) {
+  return static_cast<u8>((value | 0x20) - 'a') < 26;
+}
+
 inline std::optional<CurveType> parse_curve_type(char value) {
   switch (value) {
     case 'B':
@@ -267,12 +271,19 @@ FOSU_NOINLINE bool parse_slider_as(
   const size_t   slider_segment_begin = counts.slider_segments;
 
   constexpr bool kSegments = C == Client::Lazer;
-  const auto     first_curve_type = parse_curve_type(*p++);
-  if (!first_curve_type)
+  // Both clients read a one-letter type other than B, C, L or P as Catmull.
+  // stable also ignores any other one-character marker, keeping its default
+  // Catmull; lazer reads one as a point, which fails.
+  const char     first_token = *p++;
+  const auto     known_curve_type = parse_curve_type(first_token);
+  if (!known_curve_type && !is_ascii_letter(first_token) &&
+      (C == Client::Lazer || first_token == '|' || first_token == ','))
     return false;
+  const CurveType first_curve_type =
+      known_curve_type.value_or(CurveType::Catmull);
 
   std::optional<u32> first_curve_degree;
-  if (*first_curve_type == CurveType::Bezier && p < end && is_digit(*p)) {
+  if (first_curve_type == CurveType::Bezier && p < end && is_digit(*p)) {
     // B-spline degrees belong to lazer's v128 format. Otherwise the line is
     // rejected: stable cannot load it, and lazer before v128 (unlike us)
     // reads a B-spline.
@@ -286,7 +297,7 @@ FOSU_NOINLINE bool parse_slider_as(
     p = next;
   }
 
-  CurveType          current_curve_type = *first_curve_type;
+  CurveType          current_curve_type = first_curve_type;
   std::optional<u32> current_curve_degree = first_curve_degree;
   size_t             segment_point_begin = counts.slider_points;
   bool               has_explicit_segments = false;
@@ -312,20 +323,13 @@ FOSU_NOINLINE bool parse_slider_as(
     }
 
     const bool starts_segment =
-        kSegments && p + 1 < end &&
-        (p[1] == 'B' || p[1] == 'C' || p[1] == 'L' || p[1] == 'P');
+        kSegments && p + 1 < end && is_ascii_letter(p[1]);
 
     CurveType          next_curve_type = current_curve_type;
     std::optional<u32> next_curve_degree = current_curve_degree;
     if (starts_segment) {
       ++p;
-      const auto type = parse_curve_type(*p++);
-      if (!type) {
-        counts.slider_points = slider_point_begin;
-        counts.slider_segments = slider_segment_begin;
-        return false;
-      }
-      next_curve_type = *type;
+      next_curve_type = parse_curve_type(*p++).value_or(CurveType::Catmull);
       next_curve_degree.reset();
       // As for the first type, fosu reads B-spline degrees only in lazer's
       // v128 format.
@@ -489,7 +493,7 @@ FOSU_NOINLINE bool parse_slider_as(
                                                     slider_segment_begin)
                                  : 0,
       .slides = std::max(1, slides),
-      .curve_type = kSegments ? *first_curve_type : current_curve_type,
+      .curve_type = kSegments ? first_curve_type : current_curve_type,
       .length = std::max(0.0, length),
       .edge_sounds = edge_sounds,
       .edge_sets = edge_sets,
