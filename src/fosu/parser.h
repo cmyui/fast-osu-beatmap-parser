@@ -231,14 +231,17 @@ class Parser {
     // Difficulty mods catch and mania do not implement.
     if (!apply_mods_before_calculations(map, opts.mods))
       return ParseErrorCode::InvalidOptions;
-    if ((stacking &&
-         !push_span(scratch, stacking_end_times, map.sliders.size())) ||
-        (paths && !set_slider_paths(map, opts.client, result, scratch)) ||
-        (events && !set_slider_events(map, opts.client, result, scratch,
-                                      stacking_end_times)) ||
-        (end_times && !set_slider_end_times(map, opts.client, scratch, {},
-                                            stacking_end_times)) ||
-        (stacking && !apply_stacking(map, result, stacking_end_times)))
+    if (stacking && !push_span(scratch, stacking_end_times, map.sliders.size()))
+      return ParseErrorCode::OutOfMemory;
+    if (paths && !set_slider_paths(map, opts.client, result, scratch))
+      return ParseErrorCode::OutOfMemory;
+    if (events && !set_slider_events(map, opts.client, result, scratch,
+                                     stacking_end_times))
+      return ParseErrorCode::OutOfMemory;
+    if (end_times && !set_slider_end_times(map, opts.client, scratch, {},
+                                           stacking_end_times))
+      return ParseErrorCode::OutOfMemory;
+    if (stacking && !apply_stacking(map, result, stacking_end_times))
       return ParseErrorCode::OutOfMemory;
     apply_clock_rate(map, opts.mods);
     return ParseErrorCode::None;
