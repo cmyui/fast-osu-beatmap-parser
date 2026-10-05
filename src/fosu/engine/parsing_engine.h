@@ -17,11 +17,12 @@ enum class EngineKind : u8 {
 // Private core/engine ABI. Input excludes its readable zero padding.
 // Beatmap spans initially describe writable capacity; the engine fills them
 // and shortens them to actual counts. No allocation, I/O, or retained state.
+// The only error an engine reports is ParseErrorCode::Unloadable.
 struct ParsingEngine {
   EngineKind kind;
-  void (*parse_document)(std::span<const char> input,
-                         Beatmap&              beatmap,
-                         ParseOptions          options) noexcept;
+  ParseError (*parse_document)(std::span<const char> input,
+                               Beatmap&              beatmap,
+                               ParseOptions          options) noexcept;
 };
 
 }  // namespace fosu

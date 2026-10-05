@@ -68,16 +68,26 @@ inline const char* parse_preamble(Beatmap&    beatmap,
   return skip_section(p, end);
 }
 
-// Parses every section after the preamble, with the map's format rules fixed
-// at compile time. Each section consumes its body and returns the next header
-// or EOF; framing and scalar fallbacks stay inside the section.
-template <Format F>
-void parse_sections(const char*  p,
-                    const char*  end,
-                    Beatmap&     beatmap,
-                    ParseOptions options,
-                    size_t&      velocity_preset_count,
-                    bool&        velocity_presets_seen) {
+// The 1-based number of the line starting at `line`. Like .NET's StreamReader,
+// "\r\n", "\n" and a lone "\r" each end a line.
+inline u32 line_number(const char* begin, const char* line) {
+  u32 number = 1;
+  for (const char* p = begin; p < line; ++p)
+    number += *p == '\n' || (*p == '\r' && (p + 1 == line || p[1] != '\n'));
+  return number;
+}
+
+// Parses every section after the preamble, with the map's format rules and
+// the target client's behaviour fixed at compile time. Each section consumes
+// its body and returns the next header or EOF; framing and scalar fallbacks
+// stay inside the section.
+template <Format F, Client C>
+ParseError parse_sections(const char*  p,
+                          const char*  end,
+                          Beatmap&     beatmap,
+                          ParseOptions options,
+                          size_t&      velocity_preset_count,
+                          bool&        velocity_presets_seen) {
   size_t             break_count = 0, colour_count = 0, timing_point_count = 0;
   HitObjectCounts    counts;
   std::optional<f64> approach_rate;
@@ -147,21 +157,27 @@ void parse_sections(const char*  p,
   beatmap.slider_points = beatmap.slider_points.first(counts.slider_points);
   beatmap.velocity_presets =
       beatmap.velocity_presets.first(velocity_preset_count);
+  return {};
 }
 
-// Compiled once per engine ISA. The format version is read first and selects
-// the parse for that format.
+// Compiled once per engine ISA. The format version is read first and, with
+// the target client, selects the parse.
 // Input has kBufferPadding readable zero bytes; string views refer into it.
-inline void parse_document(std::span<const char> input,
-                           Beatmap&              beatmap,
-                           ParseOptions          options) noexcept {
+inline ParseError parse_document(std::span<const char> input,
+                                 Beatmap&              beatmap,
+                                 ParseOptions          options) noexcept {
   size_t      velocity_preset_count = 0;
   bool        velocity_presets_seen = false;
   const char* end = input.data() + input.size();
   const char* p = parse_preamble(beatmap, input.data(), end);
-  with_format(beatmap.format_version, [&]<Format F>() {
-    parse_sections<F>(p, end, beatmap, options, velocity_preset_count,
-                      velocity_presets_seen);
+  return with_format(beatmap.format_version, [&]<Format F>() {
+    return options.client == Client::Lazer
+               ? parse_sections<F, Client::Lazer>(p, end, beatmap, options,
+                                                  velocity_preset_count,
+                                                  velocity_presets_seen)
+               : parse_sections<F, Client::Stable>(p, end, beatmap, options,
+                                                   velocity_preset_count,
+                                                   velocity_presets_seen);
   });
 }
 

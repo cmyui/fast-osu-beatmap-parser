@@ -336,9 +336,11 @@ static void test_failed_parse_resets_and_parser_remains_reusable() {
 
   auto failed = parser.parse(input, {.sections = 1});
   CHECK(!failed);
+  CHECK(parser.error().code == fosu::ParseErrorCode::InvalidOptions);
 
   const auto& recovered = require_parse(parser.parse(input));
   CHECK(recovered.title == "Before failure");
+  CHECK(parser.error().code == fosu::ParseErrorCode::None);
 }
 
 static void test_arena_interface() {
@@ -375,7 +377,7 @@ static void test_parser_prepares_engine_input_and_output() {
   const fosu::ParsingEngine engine{
       fosu::EngineKind::Scalar,
       [](std::span<const char> input, fosu::Beatmap& beatmap,
-         fosu::ParseOptions options) noexcept {
+         fosu::ParseOptions options) noexcept -> fosu::ParseError {
         ++calls;
         CHECK_EQ(options.sections, fosu::kSectionHitObjects);
         CHECK_EQ(std::string_view(input.data(), input.size()), "1,2,3,1,0");
@@ -389,6 +391,7 @@ static void test_parser_prepares_engine_input_and_output() {
         beatmap.hit_objects = objects;
         beatmap.hit_objects[0] = {};
         beatmap.hit_objects[0].x = 42;
+        return {};
       },
   };
   fosu::Parser parser(engine);

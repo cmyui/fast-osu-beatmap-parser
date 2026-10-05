@@ -29,6 +29,27 @@ def test_mods_apply_through_the_python_interface():
     assert slider.control_points == [fosu.Point(100, 284), fosu.Point(200, 234)]
 
 
+@pytest.mark.parametrize("client", ["stable", "lazer"])
+def test_client_option(tmp_path, client):
+    data = b"osu file format v14\n[HitObjects]\n1,2,3,1,0\n"
+    source = tmp_path / "client.osu"
+    source.write_bytes(data)
+    parser = fosu.Parser()
+    for result in (
+        fosu.parse(data, client=client),
+        fosu.parse_file(source, client=client),
+        parser.parse(data, client=client),
+        parser.parse_file(source, client=client),
+    ):
+        assert len(result.hit_objects) == 1
+
+
+@pytest.mark.parametrize("client", ["Stable", "", None, 0])
+def test_unknown_client_raises_value_error(client):
+    with pytest.raises(ValueError, match="client must be"):
+        fosu.parse(b"", client=client)
+
+
 @pytest.mark.parametrize(
     "data,options",
     [

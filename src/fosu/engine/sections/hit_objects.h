@@ -45,8 +45,8 @@ FOSU_NOINLINE bool parse_hitobject_details(
     }
     case HitObjectKind::Slider:
       return p < end && *p == ',' &&
-             parse_slider_as<F.lazer>(beatmap, counts, object, p + 1, end,
-                                      constants);
+             parse_slider_as<F.lazer_format>(beatmap, counts, object, p + 1,
+                                             end, constants);
     case HitObjectKind::Spinner: {
       const auto details = parse_spinner_details(p, end);
       if (!details)
@@ -110,7 +110,7 @@ std::optional<HitObjectPrefix> parse_hitobject_prefix(const char* p,
 
   x = std::clamp(x, 0.0f, 512.0f);
   y = std::clamp(y, 0.0f, 512.0f);
-  if constexpr (!F.lazer) {
+  if constexpr (!F.lazer_format) {
     x = static_cast<f32>(static_cast<i32>(x));
     y = static_cast<f32>(static_cast<i32>(y));
   }
@@ -274,9 +274,9 @@ FOSU_ALWAYS_INLINE void accept_hitobject(
     if (rest_length)
       object.hit_sample = {rest + 1, 8};
   } else if (!(kind == HitObjectKind::Slider
-                   ? rest_length &&
-                         parse_slider_as<F.lazer>(beatmap, counts, object,
-                                                  rest + 1, line_end, constants)
+                   ? rest_length && parse_slider_as<F.lazer_format>(
+                                        beatmap, counts, object, rest + 1,
+                                        line_end, constants)
                    : parse_hitobject_details<F>(beatmap, counts, object, rest,
                                                 line_end, constants)))
       [[unlikely]] {

@@ -6,6 +6,7 @@ import sys
 from bisect import bisect_left
 from enum import IntFlag
 from os import PathLike
+from typing import Literal
 
 if sys.version_info >= (3, 12):
     from collections.abc import Buffer
@@ -24,6 +25,7 @@ from ._model import (
     HitObject,
     HitSound,
     HoldNote,
+    MapLoadError,
     ParseStats,
     Point,
     PathPoint,
@@ -41,12 +43,14 @@ __all__ = [
     "Beatmap",
     "Break",
     "Circle",
+    "Client",
     "CurveType",
     "CurveSegment",
     "GameMode",
     "HitObject",
     "HitSound",
     "HoldNote",
+    "MapLoadError",
     "Mods",
     "ParseStats",
     "Parser",
@@ -66,6 +70,21 @@ __all__ = [
     "parse",
     "parse_file",
 ]
+
+
+Client = Literal["stable", "lazer"]
+"""Whose behaviour to follow where osu!stable and osu!lazer parse differently."""
+
+_CLIENTS: dict[str, int] = {"stable": 0, "lazer": 1}
+
+
+def _client_index(client: str) -> int:
+    try:
+        return _CLIENTS[client]
+    except (KeyError, TypeError):
+        raise ValueError(
+            f"client must be 'stable' or 'lazer', not {client!r}"
+        ) from None
 
 
 class Sections(IntFlag):
@@ -117,6 +136,7 @@ class Parser:
         calculate_slider_events: bool = False,
         apply_stacking: bool = False,
         mods: Mods = Mods.NONE,
+        client: Client = "stable",
     ) -> Beatmap:
         """Parse selected sections into detached values, copying mutable buffers."""
         if not isinstance(data, bytes):
@@ -130,6 +150,7 @@ class Parser:
             calculate_slider_events,
             apply_stacking,
             int(mods),
+            _client_index(client),
         )
 
     def parse_file(
@@ -142,6 +163,7 @@ class Parser:
         calculate_slider_events: bool = False,
         apply_stacking: bool = False,
         mods: Mods = Mods.NONE,
+        client: Client = "stable",
     ) -> Beatmap:
         """Read selected sections; raise OSError on file errors."""
         return self._native.parse_file(
@@ -152,6 +174,7 @@ class Parser:
             calculate_slider_events,
             apply_stacking,
             int(mods),
+            _client_index(client),
         )
 
 
@@ -164,6 +187,7 @@ def parse(
     calculate_slider_events: bool = False,
     apply_stacking: bool = False,
     mods: Mods = Mods.NONE,
+    client: Client = "stable",
 ) -> Beatmap:
     """Parse once with a temporary parser; see Parser.parse."""
     return Parser().parse(
@@ -174,6 +198,7 @@ def parse(
         calculate_slider_events=calculate_slider_events,
         apply_stacking=apply_stacking,
         mods=mods,
+        client=client,
     )
 
 
@@ -186,6 +211,7 @@ def parse_file(
     calculate_slider_events: bool = False,
     apply_stacking: bool = False,
     mods: Mods = Mods.NONE,
+    client: Client = "stable",
 ) -> Beatmap:
     """Parse once with a temporary parser; see Parser.parse_file."""
     return Parser().parse_file(
@@ -196,6 +222,7 @@ def parse_file(
         calculate_slider_events=calculate_slider_events,
         apply_stacking=apply_stacking,
         mods=mods,
+        client=client,
     )
 
 

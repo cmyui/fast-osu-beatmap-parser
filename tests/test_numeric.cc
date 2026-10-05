@@ -391,14 +391,14 @@ static void test_fuzz_timing_point() {
     uint32_t          time_digits = 1 + (uint32_t)(rng() % 8);
     fosu::TimingPoint tp;
     const char*       next =
-        fosu::internal::parse_common_timing_point<fosu::kStableFormat>(
+        fosu::internal::parse_common_timing_point<fosu::kFormatV5>(
             buf, buf + len, time_digits, tp);
     if (!next)
       continue;
     CHECK(next == buf + len);
     ++accepted;
     const auto reference =
-        fosu::internal::parse_timing_point<fosu::kStableFormat>(buf, buf + len);
+        fosu::internal::parse_timing_point<fosu::kFormatV5>(buf, buf + len);
     CHECK(reference.has_value());
     if (reference) {
       const auto& w = *reference;

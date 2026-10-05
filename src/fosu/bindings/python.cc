@@ -312,6 +312,7 @@ enum PythonType {
   t_mode,
   t_sample,
   t_curve,
+  t_map_load_error,
   type_count
 };
 constexpr int         record_type_count = t_curve_segment + 1;
@@ -320,7 +321,7 @@ constexpr const char* type_names[] = {
     "HoldNote",  "TimingPoint",  "Break",           "ParseStats",
     "PathPoint", "SliderPath",   "Beatmap",         "SliderEvent",
     "Stacking",  "CurveSegment", "SliderEventType", "HitSound",
-    "GameMode",  "SampleSet",    "CurveType"};
+    "GameMode",  "SampleSet",    "CurveType",       "MapLoadError"};
 struct State {
   PyObject*  model;
   PyObject*  types[type_count];
@@ -859,14 +860,16 @@ PyObject* parser_parse_impl(PyObject* object, PyObject* args, bool file) {
   int           calculate_slider_events;
   int           apply_stacking;
   unsigned long mods;
-  if (!PyArg_ParseTuple(args, "Olppppk", &arg, &sections,
+  int           client;
+  if (!PyArg_ParseTuple(args, "Olppppki", &arg, &sections,
                         &calculate_slider_end_times, &calculate_slider_paths,
-                        &calculate_slider_events, &apply_stacking, &mods))
+                        &calculate_slider_events, &apply_stacking, &mods,
+                        &client))
     return nullptr;
   if (sections < 0 ||
       (static_cast<unsigned long>(sections) &
        ~static_cast<unsigned long>(fosu::kAllSections)) ||
-      mods > UINT32_MAX) {
+      mods > UINT32_MAX || client < 0 || client > 1) {
     PyErr_SetString(PyExc_ValueError, "invalid parse options");
     return nullptr;
   }
@@ -877,6 +880,7 @@ PyObject* parser_parse_impl(PyObject* object, PyObject* args, bool file) {
       .calculate_slider_events = calculate_slider_events != 0,
       .apply_stacking = apply_stacking != 0,
       .mods = static_cast<fosu::Mods>(mods),
+      .client = static_cast<fosu::Client>(client),
   };
   try {
     PythonRef input = file ? PythonRef(PyOS_FSPath(arg)) : retain(arg);
@@ -897,19 +901,30 @@ PyObject* parser_parse_impl(PyObject* object, PyObject* args, bool file) {
     fosu::Beatmap* result =
         file ? native.parser.parse_file(bytes, options)
              : native.parser.parse({bytes, static_cast<size_t>(size)}, options);
-    const int read_error = file && !result ? errno : 0;
+    const int              read_error = file && !result ? errno : 0;
+    const fosu::ParseError error = native.parser.error();
     PyEval_RestoreThread(thread);
     if (read_error) {
       errno = read_error;
       PyErr_SetFromErrnoWithFilenameObject(PyExc_OSError, arg);
       throw PythonError{};
     }
+    const auto* state =
+        static_cast<State*>(PyType_GetModuleState(Py_TYPE(object)));
+    if (error.code == fosu::ParseErrorCode::Unloadable) {
+      PythonRef exception(
+          PyObject_CallFunction(state->types[t_map_load_error], "sI",
+                                options.client == fosu::Client::Stable
+                                    ? "osu!stable would not load this map"
+                                    : "osu!lazer would not load this map",
+                                error.line));
+      PyErr_SetObject(state->types[t_map_load_error], exception);
+      throw PythonError{};
+    }
     if (!result) {
       PyErr_SetString(PyExc_ValueError, "invalid input");
       throw PythonError{};
     }
-    const auto* state =
-        static_cast<State*>(PyType_GetModuleState(Py_TYPE(object)));
     PauseGC          pause_gc;
     BeatmapConverter converter(*result, *state);
     return converter.beatmap().release();

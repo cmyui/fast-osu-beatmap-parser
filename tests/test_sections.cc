@@ -924,14 +924,13 @@ static void test_common_timing_fallback() {
     const auto  input = fosu_test::padded(line + ",outside\n");
     const char* p = input.data();
     const auto  expected =
-        fosu::internal::parse_timing_point<fosu::kStableFormat>(
-            p, p + line.size());
+        fosu::internal::parse_timing_point<fosu::kFormatV5>(p, p + line.size());
     // The time width carried from a previous row must not change the result.
     for (uint32_t carried = 1; carried <= 8; ++carried) {
       uint32_t          time_digits = carried;
       fosu::TimingPoint actual;
       const char*       next =
-          fosu::internal::parse_common_timing_point<fosu::kStableFormat>(
+          fosu::internal::parse_common_timing_point<fosu::kFormatV5>(
               p, p + line.size(), time_digits, actual);
       if (!next)
         continue;

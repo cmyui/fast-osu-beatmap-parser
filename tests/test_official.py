@@ -255,10 +255,17 @@ def main():
             if not line:
                 raise RuntimeError("Official decoder exited without a response")
             expected = json.loads(line)
-            actual = (
-                fosu.parse_file(path) if data is None else fosu.parse(data.encode())
-            )
-            ours = (True, actual.stats.malformed_lines, len(actual.hit_objects))
+            try:
+                actual = (
+                    fosu.parse_file(path, client="lazer")
+                    if data is None
+                    else fosu.parse(data.encode(), client="lazer")
+                )
+                ours = (True, actual.stats.malformed_lines, len(actual.hit_objects))
+                bookmarks = actual.bookmark_list
+            except fosu.MapLoadError:
+                # The decoder then fails the whole file too.
+                ours, bookmarks = (False, 0, 0), []
             theirs = (
                 expected["ok"],
                 len(expected.get("rejected", [])),
@@ -272,9 +279,7 @@ def main():
                 counts["intentional_enum_rejections"] += 1
             else:
                 acceptance_matches = ours == theirs
-            if not acceptance_matches or actual.bookmark_list != expected.get(
-                "bookmarks", []
-            ):
+            if not acceptance_matches or bookmarks != expected.get("bookmarks", []):
                 gaps.append(
                     {
                         "case": name,
@@ -282,7 +287,7 @@ def main():
                         "fosu": ours,
                         "official_rejections": expected.get("rejected", []),
                         "official_bookmarks": expected.get("bookmarks", []),
-                        "fosu_bookmarks": actual.bookmark_list,
+                        "fosu_bookmarks": bookmarks,
                     }
                 )
             if counts["files"] % 1000 == 0:

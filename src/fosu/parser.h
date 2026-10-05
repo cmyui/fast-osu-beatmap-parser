@@ -158,13 +158,14 @@ class Parser {
     arena_release(scratch_arena_);
   }
 
+  // Returns null on failure; error() then says why.
   Beatmap* parse(std::string_view input, ParseOptions opts = {}) noexcept {
     reset_working_state();
     if (invalid_options(opts))
-      return nullptr;
+      return fail(ParseErrorCode::InvalidOptions);
     char* buffer = reserve_input(input.size());
     if (!buffer)
-      return nullptr;
+      return fail(ParseErrorCode::OutOfMemory);
     const auto counts =
         internal::count_bytes(input.data(), input.size(), buffer);
     return parse_input({buffer, input.size()}, counts, opts);
@@ -173,33 +174,42 @@ class Parser {
   Beatmap* parse_file(const char* path, ParseOptions opts = {}) noexcept {
     reset_working_state();
     if (invalid_options(opts))
-      return nullptr;
+      return fail(ParseErrorCode::InvalidOptions);
     const std::span<const char> input = load_file(path);
     if (!input.data())
-      return nullptr;
+      return fail(errno ? ParseErrorCode::ReadFailed
+                        : ParseErrorCode::OutOfMemory);
     const auto counts =
         internal::count_bytes(input.data(), input.size(), nullptr);
     return parse_input(input, counts, opts);
   }
 
+  // Why the last parse failed; code is None after a success.
+  ParseError error() const noexcept { return error_; }
+
  private:
+  Beatmap* fail(ParseErrorCode code, u32 line = 0) noexcept {
+    reset_working_state();
+    error_ = {code, line};
+    return nullptr;
+  }
+
   Beatmap* parse_input(std::span<const char> input,
                        internal::ByteCounts  counts,
                        ParseOptions          opts) noexcept {
     if (!input.empty() &&
-        !internal::prealloc_beatmap_arrays(result_arena_, beatmap_, counts)) {
-      reset_working_state();
-      return nullptr;
-    }
-    engine_->parse_document(input, beatmap_, opts);
-    if (!post_process(opts)) {
-      reset_working_state();
-      return nullptr;
-    }
+        !internal::prealloc_beatmap_arrays(result_arena_, beatmap_, counts))
+      return fail(ParseErrorCode::OutOfMemory);
+    if (const ParseError error = engine_->parse_document(input, beatmap_, opts);
+        error.code != ParseErrorCode::None)
+      return fail(error.code, error.line);
+    if (const ParseErrorCode code = post_process(opts);
+        code != ParseErrorCode::None)
+      return fail(code);
     return &beatmap_;
   }
 
-  bool post_process(ParseOptions opts) noexcept {
+  ParseErrorCode post_process(ParseOptions opts) noexcept {
     const bool stacking = opts.apply_stacking && beatmap_.mode == 0;
     const bool events = opts.calculate_slider_events;
     const bool paths = opts.calculate_slider_paths || events || stacking;
@@ -215,22 +225,21 @@ class Parser {
 
     using namespace internal;
     if (!apply_legacy_rules(map, scratch))
-      return false;
+      return ParseErrorCode::OutOfMemory;
+    // Difficulty mods catch and mania do not implement.
     if (!apply_mods_before_calculations(map, opts.mods))
-      return false;
-    if (stacking && !push_span(scratch, stacking_end_times, map.sliders.size()))
-      return false;
-    if (paths && !set_slider_paths(map, result, scratch))
-      return false;
-    if (events && !set_slider_events(map, result, scratch, stacking_end_times))
-      return false;
-    if (end_times &&
-        !set_slider_end_times(map, scratch, {}, stacking_end_times))
-      return false;
-    if (stacking && !apply_stacking(map, result, stacking_end_times))
-      return false;
+      return ParseErrorCode::InvalidOptions;
+    if ((stacking &&
+         !push_span(scratch, stacking_end_times, map.sliders.size())) ||
+        (paths && !set_slider_paths(map, result, scratch)) ||
+        (events &&
+         !set_slider_events(map, result, scratch, stacking_end_times)) ||
+        (end_times &&
+         !set_slider_end_times(map, scratch, {}, stacking_end_times)) ||
+        (stacking && !apply_stacking(map, result, stacking_end_times)))
+      return ParseErrorCode::OutOfMemory;
     apply_clock_rate(map, opts.mods);
-    return true;
+    return ParseErrorCode::None;
   }
 
   // Reads the whole file into the result arena. Returns a span with a null
@@ -287,12 +296,14 @@ class Parser {
     arena_clear(result_arena_);
     arena_clear(scratch_arena_);
     beatmap_ = {};
+    error_ = {};
   }
 
   Arena*               result_arena_;
   Arena*               scratch_arena_;
   const ParsingEngine* engine_;
   Beatmap              beatmap_{};
+  ParseError           error_{};
 };
 
 }  // namespace fosu

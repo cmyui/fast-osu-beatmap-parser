@@ -99,7 +99,7 @@ bool parse_velocity_presets(Beatmap&         beatmap,
     const auto  value =
         parse_velocity_preset({p, static_cast<size_t>(comma - p)});
     // Stable stores exactly three presets; lazer accepts any number.
-    const size_t limit = F.lazer ? beatmap.velocity_presets.size() : 3;
+    const size_t limit = F.lazer_format ? beatmap.velocity_presets.size() : 3;
     if (value && parsed == limit)
       return false;
     if (value)
