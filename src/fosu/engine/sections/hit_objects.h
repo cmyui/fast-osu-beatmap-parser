@@ -19,7 +19,6 @@
 #include <array>
 #include <cstring>
 #include <optional>
-#include <utility>
 
 namespace fosu::internal {
 
@@ -178,6 +177,14 @@ inline bool preceding_spinner_after_rejection(u32         type,
   }
 }
 
+// The one rule fosu adds to osu!'s: a slider's first curve type must be B, C,
+// L or P. Both clients read another one-character type as Catmull.
+inline bool only_fosu_rejects(u32 type, const char* rest, const char* end) {
+  return classify_hitobject_kind(type) == HitObjectKind::Slider &&
+         end - rest > 2 && !parse_curve_type(rest[1]) &&
+         (rest[2] == '|' || rest[2] == ',');
+}
+
 // osu!stable cannot load a map with a hit object it fails to read, but
 // ignores one whose type names no kind. Lazer skips both. A line only fosu
 // rejects never makes a map unloadable.
@@ -189,9 +196,9 @@ void reject_hitobject(HitObjectCounts& counts,
                       const char*      rest,
                       const char*      line_end) {
   if constexpr (C == Client::Stable) {
-    if (!std::exchange(counts.policy_rejection, false) &&
+    if (!counts.unloadable_line &&
         classify_hitobject_kind(type) != HitObjectKind::Invalid &&
-        !counts.unloadable_line)
+        !only_fosu_rejects(type, rest, line_end))
       counts.unloadable_line = line;
   } else {
     preceding_was_spinner = preceding_spinner_after_rejection(

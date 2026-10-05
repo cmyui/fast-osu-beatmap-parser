@@ -228,16 +228,22 @@ static void test_hit_object_lines_stable_skips() {
 }
 
 // A line only fosu's own rules reject, such as an unknown curve type both
-// clients read as Catmull, never makes a map unloadable.
+// clients read as Catmull, never makes a map unloadable. A slider that ends
+// at that type is one stable cannot read either: its repeat count is missing.
 static void test_policy_rejection_keeps_stable_map_loadable() {
-  const std::string input =
-      "osu file format v14\n[TimingPoints]\n0,500\n[HitObjects]\n"
-      "64,64,100,2,0,X|100:100,1,50\n64,64,300,1,0\n";
-  for (bool simd : {false, true}) {
-    const auto map = parse_str(input, simd, kStable);
-    CHECK_EQ(map.hit_objects.size(), 1u);
-    CHECK_EQ(map.stats.malformed_lines, 1u);
+  const auto slider = [](const char* curve) {
+    return "osu file format v14\n[TimingPoints]\n0,500\n[HitObjects]\n"
+           "64,64,100,2,0," +
+           std::string(curve) + "\n64,64,300,1,0\n";
+  };
+  for (const char* curve : {"X|100:100,1,50", "X,1,50"}) {
+    for (bool simd : {false, true}) {
+      const auto map = parse_str(slider(curve), simd, kStable);
+      CHECK_EQ(map.hit_objects.size(), 1u);
+      CHECK_EQ(map.stats.malformed_lines, 1u);
+    }
   }
+  CHECK_EQ(unloadable_line(slider("X"), Client::Stable), 5u);
 }
 
 // Like storyboard commands, stable skips colour lines indented with ' ' or

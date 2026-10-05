@@ -39,9 +39,6 @@ struct HitObjectCounts {
   // Whether osu!'s previous object, in source order, is a spinner. It can be
   // a rejected line: see preceding_spinner_after_rejection.
   bool        preceding_was_spinner = false;
-  // Whether the last rejected line broke only a rule fosu adds; osu! itself
-  // reads such a line.
-  bool        policy_rejection = false;
   // The first line that makes osu!stable refuse the map, if any.
   const char* unloadable_line = nullptr;
 };
@@ -271,11 +268,8 @@ FOSU_NOINLINE bool parse_slider_as(
 
   constexpr bool kSegments = C == Client::Lazer;
   const auto     first_curve_type = parse_curve_type(*p++);
-  if (!first_curve_type) {
-    // Both clients read an unknown one-character type as Catmull.
-    counts.policy_rejection = p >= end || *p == '|' || *p == ',';
+  if (!first_curve_type)
     return false;
-  }
 
   std::optional<u32> first_curve_degree;
   if (*first_curve_type == CurveType::Bezier && p < end && is_digit(*p)) {
@@ -307,11 +301,9 @@ FOSU_NOINLINE bool parse_slider_as(
     }
 #endif
 
-    const bool one_character_token =
-        p + 1 < end && p[1] != '|' && p[1] != ',' &&
-        (p + 2 == end || p[2] == '|' || p[2] == ',');
     if constexpr (!kSegments) {
-      if (one_character_token) {
+      if (p + 1 < end && p[1] != '|' && p[1] != ',' &&
+          (p + 2 == end || p[2] == '|' || p[2] == ',')) {
         if (const auto type = parse_curve_type(p[1]))
           current_curve_type = *type;
         p += 2;
@@ -322,13 +314,6 @@ FOSU_NOINLINE bool parse_slider_as(
     const bool starts_segment =
         kSegments && p + 1 < end &&
         (p[1] == 'B' || p[1] == 'C' || p[1] == 'L' || p[1] == 'P');
-    if (kSegments && !starts_segment && one_character_token &&
-        ((p[1] | 0x20) >= 'a' && (p[1] | 0x20) <= 'z')) {
-      counts.slider_points = slider_point_begin;
-      counts.slider_segments = slider_segment_begin;
-      counts.policy_rejection = true;
-      return false;
-    }
 
     CurveType          next_curve_type = current_curve_type;
     std::optional<u32> next_curve_degree = current_curve_degree;
