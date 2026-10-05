@@ -5,6 +5,7 @@
 #include <fosu/engine/parsing/field_values.h>
 #include <fosu/engine/parsing/key_value.h>
 #include <fosu/engine/parsing/lines.h>
+#include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/parsing/string_lookup.h>
 #include <fosu/engine/primitives/byte_scan.h>
 #include <fosu/engine/third_party/fast_float.h>
