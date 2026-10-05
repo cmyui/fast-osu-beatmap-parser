@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
     std::cerr << "numeric oracle load failed\n";
     return 1;
   }
-  size_t       files = 0, bytes = 0, objects = 0, malformed = 0;
+  size_t files = 0, bytes = 0, objects = 0, malformed = 0, unloadable = 0;
   fosu::Parser scalar_parser(fosu_test::scalar_engine());
   fosu::Parser simd_parser;
   for (const auto& entry :
@@ -37,9 +37,19 @@ int main(int argc, char** argv) {
       std::cerr << "input read failed at file " << files << '\n';
       return 1;
     }
-    auto* scalar =
-        scalar_parser.parse(input, {.calculate_slider_end_times = true});
-    auto* simd = simd_parser.parse(input, {.calculate_slider_end_times = true});
+    // stable may refuse a map lazer reads; both engines must agree on it.
+    const fosu::ParseOptions stable{.calculate_slider_end_times = true};
+    const bool               stable_loads = scalar_parser.parse(input, stable);
+    if (stable_loads != bool(simd_parser.parse(input, stable)) ||
+        scalar_parser.error().line != simd_parser.error().line) {
+      std::cerr << "stable engines disagree at file " << files << '\n';
+      return 1;
+    }
+    unloadable += !stable_loads;
+    const fosu::ParseOptions lazer{.calculate_slider_end_times = true,
+                                   .client = fosu::Client::Lazer};
+    auto*                    scalar = scalar_parser.parse(input, lazer);
+    auto*                    simd = simd_parser.parse(input, lazer);
     if (!scalar || !simd) {
       std::cerr << "parse failed at file " << files << '\n';
       return 1;
@@ -71,7 +81,8 @@ int main(int argc, char** argv) {
       std::cout << "verified " << files << std::endl;
   }
   std::cout << "files=" << files << " bytes=" << bytes << " objects=" << objects
-            << " malformed_lines=" << malformed << '\n';
+            << " malformed_lines=" << malformed
+            << " stable_unloadable=" << unloadable << '\n';
   if (library)
     dlclose(library);
   return files ? 0 : 1;

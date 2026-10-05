@@ -50,6 +50,10 @@ inline std::string padded(std::string_view text) {
   return *parsed;
 }
 
+// Lazer skips a hit object it cannot read, where stable refuses the whole
+// map. Tests of what one record accepts parse as lazer to see the rest.
+inline constexpr fosu::ParseOptions kLazer{.client = fosu::Client::Lazer};
+
 // The result borrows the parser's memory: the next call with the same engine
 // invalidates its spans.
 [[maybe_unused]] static fosu::Beatmap parse_str(

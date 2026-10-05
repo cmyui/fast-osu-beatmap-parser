@@ -55,6 +55,7 @@ static void test_reparse_accepts_larger_arrays() {
 
 static void test_reparse_clears_omitted_sections() {
   auto initial = std::string(
+      "osu file format v14\n"
       "[General]\nAudioFilename:previous.mp3\nSampleSet:Soft\n"
       "[Editor]\nGridSize:16\n"
       "[Metadata]\nTitle:Previous title\nBeatmapID:123\n"
@@ -63,14 +64,15 @@ static void test_reparse_clears_omitted_sections() {
       "[TimingPoints]\n0,500\n"
       "[Colours]\nCombo1:0,128,255\n"
       "[HitObjects]\n64,96,700,2,0,B|128:192|192:96,1,200\n");
-  auto replacement = std::string("[Metadata]\nTitle:Replacement title\n");
+  auto replacement =
+      std::string("osu file format v14\n[Metadata]\nTitle:Replacement title\n");
   fosu::Parser parser;
   const auto&  initial_map = require_parse(parser.parse(initial));
   CHECK(!initial_map.sliders.empty() && !initial_map.timing_points.empty());
 
   const auto& beatmap = require_parse(parser.parse(replacement));
   CHECK(beatmap.title == "Replacement title");
-  CHECK_EQ(beatmap.beatmap_id, -1);
+  CHECK_EQ(beatmap.beatmap_id, 0);
   CHECK(beatmap.audio_filename.empty() && beatmap.background.empty());
   CHECK(beatmap.sample_set == fosu::SampleSet::Normal);
   CHECK_EQ(beatmap.grid_size, 0);
@@ -91,7 +93,7 @@ static void test_empty_reparse_resets_defaults() {
       "[HitObjects]\ninvalid\n96,192,800,1,0\n");
   auto         empty = std::string("");
   fosu::Parser parser;
-  const auto&  initial_map = require_parse(parser.parse(initial));
+  const auto&  initial_map = require_parse(parser.parse(initial, kLazer));
   CHECK_EQ(initial_map.stats.malformed_lines, 1u);
 
   const auto& beatmap = require_parse(parser.parse(empty));
@@ -106,9 +108,9 @@ static void test_empty_reparse_resets_defaults() {
 }
 
 static void test_large_arena_arrays() {
-  std::string circles = "[HitObjects]\n";
-  std::string sliders = "[HitObjects]\n";
-  std::string timing = "[TimingPoints]\n";
+  std::string circles = "osu file format v14\n[HitObjects]\n";
+  std::string sliders = "osu file format v14\n[HitObjects]\n";
+  std::string timing = "osu file format v14\n[TimingPoints]\n";
   for (fosu::i32 i = 0; i < 3000; ++i) {
     if (i == 1500) {
       circles += "[HitObjects]\n";
@@ -136,7 +138,7 @@ static void test_large_arena_arrays() {
     CHECK_EQ(circles_map.hit_objects.back().slider, fosu::HitObject::kNoSlider);
     CHECK(circles_map.hit_objects.back().hit_sample.empty());
 
-    const auto& sliders_map = require_parse(parser.parse(slider_input));
+    const auto& sliders_map = require_parse(parser.parse(slider_input, kLazer));
     CHECK_EQ(sliders_map.hit_objects.size(), 3000u);
     CHECK_EQ(sliders_map.sliders.size(), 3000u);
     CHECK_EQ(sliders_map.slider_points.size(), 9000u);
@@ -168,7 +170,7 @@ static void test_rejected_slider_points() {
     for (bool simd : {false, true}) {
       fosu::Parser parser(simd ? fosu::internal::compiled_engine
                                : fosu_test::scalar_engine());
-      const auto&  beatmap = require_parse(parser.parse(input));
+      const auto&  beatmap = require_parse(parser.parse(input, kLazer));
       CHECK_EQ(beatmap.stats.malformed_lines, 1u);
       CHECK_EQ(beatmap.hit_objects.size(), 1u);
       CHECK_EQ(beatmap.sliders.size(), 1u);
@@ -182,7 +184,7 @@ static void test_rejected_slider_points() {
         "osu file format v128\n[HitObjects]\n"
         "1,2,3,2,0,B|7:8|L|9:10,1,bad\n"
         "1,2,4,2,0,L|11:12,1,10\n",
-        simd);
+        simd, kLazer);
     CHECK_EQ(map.stats.malformed_lines, 1u);
     CHECK_EQ(map.hit_objects.size(), 1u);
     CHECK_EQ(map.sliders.size(), 1u);
@@ -296,7 +298,8 @@ static void test_tick_endpoint_exclusion() {
     for (const auto [length, tick_count] :
          {std::pair{14.49, 0u}, std::pair{14.5, 0u}, std::pair{14.51, 1u}}) {
       const std::string input =
-          "[Difficulty]\nSliderMultiplier:1\nSliderTickRate:8\n"
+          "osu file format v14\n[Difficulty]\nSliderMultiplier:1\n"
+          "SliderTickRate:8\n"
           "[TimingPoints]\n0,500\n[HitObjects]\n"
           "0,0,1000,2,0,L|100:0,1," +
           std::to_string(length) + "\n";
@@ -331,7 +334,8 @@ static void test_multisegment_path_trim() {
 
 static void test_failed_parse_resets_and_parser_remains_reusable() {
   fosu::Parser parser;
-  auto         input = std::string("[Metadata]\nTitle:Before failure\n");
+  auto         input =
+      std::string("osu file format v14\n[Metadata]\nTitle:Before failure\n");
   CHECK(parser.parse(input));
 
   auto failed = parser.parse(input, {.sections = 1});

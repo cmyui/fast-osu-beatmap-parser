@@ -15,7 +15,7 @@
 
 namespace fosu::internal {
 
-template <Format F>
+template <Format F, Client C>
 const char* parse_timing_points_section(Beatmap&    beatmap,
                                         size_t&     point_count,
                                         const char* p,
@@ -48,7 +48,7 @@ const char* parse_timing_points_section(Beatmap&    beatmap,
     }
     const auto  line = read_line(p, file_end);
     const char* line_end = p + line.text.size();
-    if (section_header_line(p, line_end))
+    if (section_header_line<C>(p, line_end))
       break;
     if (!ignored_line(p, line_end)) {
       if (const auto general = parse_timing_point<F>(p, line_end))

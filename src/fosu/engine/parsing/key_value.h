@@ -81,6 +81,8 @@ inline bool assign_field_text(BeatmapHeader& header, std::string_view input) {
   return true;
 }
 
+// An invalid value keeps the field's previous one, as in lazer. stable's
+// header reader instead stops at it, which is not modelled yet.
 template <size_t N>
 inline void parse_key_value(Beatmap&                            beatmap,
                             const StringLookup<FieldParser, N>& fields,
@@ -90,13 +92,13 @@ inline void parse_key_value(Beatmap&                            beatmap,
       ++beatmap.stats.malformed_lines;
 }
 
-template <size_t N>
+template <Client C, size_t N>
 inline const char* parse_key_value_section(
     Beatmap&                            beatmap,
     const StringLookup<FieldParser, N>& fields,
     const char*                         p,
     const char*                         end) {
-  return for_each_section_line(p, end, [&](std::string_view line) {
+  return for_each_section_line<C>(p, end, [&](std::string_view line) {
     if (const auto field = split_key_value(line))
       parse_key_value(beatmap, fields, *field);
   });

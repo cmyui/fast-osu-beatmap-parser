@@ -240,13 +240,14 @@ static void test_aspire_edge_cases() {
   auto bm = parse_str(
       "osu file format v14\n"
       "[HitObjects]\n"
-      "-48,192,1000,1,0\n"                            // negative x -> fallback
-      "640,-24,2000,1,0\n"                            // negative y
-      "256,192,-1000,1,0\n"                           // negative time
-      "5120,192,3000,1,0\n"                           // 4-digit x
-      "256.5,112.2,4000,1,0\n"                        // decimal coords
-      "0,0,4294967290,1,0\n"                          // time > INT32_MAX
-      "100,100,5000,2,0,B|-64:-32|700:512,1,600\n");  // negative ctrl points
+      "-48,192,1000,1,0\n"                           // negative x -> fallback
+      "640,-24,2000,1,0\n"                           // negative y
+      "256,192,-1000,1,0\n"                          // negative time
+      "5120,192,3000,1,0\n"                          // 4-digit x
+      "256.5,112.2,4000,1,0\n"                       // decimal coords
+      "0,0,4294967290,1,0\n"                         // time > INT32_MAX
+      "100,100,5000,2,0,B|-64:-32|700:512,1,600\n",  // negative ctrl points
+      true, kLazer);
   CHECK_EQ(bm.hit_objects.size(), 6u);
   CHECK_EQ(bm.hit_objects[0].time, -1000);
   // Object positions clamp to [0, 512]; slider control points do not.
@@ -329,7 +330,8 @@ static void test_malformed() {
       "12,,123,4,0\n"          // empty field (index-alias trap)
       "256,192\n"              // truncated line
       "256,192,1000,2,0,B|\n"  // truncated slider
-      "256,192,1000,1,0\n");   // one valid line
+      "256,192,1000,1,0\n",    // one valid line
+      true, kLazer);
   CHECK_EQ(bm.hit_objects.size(), 1u);
   CHECK_EQ(bm.hit_objects[0].time, 1000);
   CHECK_EQ(bm.stats.malformed_lines, 5u);
@@ -349,7 +351,7 @@ static void test_invalid_byte_in_hitobjects() {
         const auto map =
             parse_str("osu file format v14\n[HitObjects]\n" + damaged +
                           "\n300,100,300,1,0\n[Metadata]\nTitle:sentinel\n",
-                      simd);
+                      simd, kLazer);
         CHECK(!map.hit_objects.empty());
         if (!map.hit_objects.empty())
           CHECK_EQ(map.hit_objects.back().time, 300);
@@ -438,11 +440,19 @@ static void test_invalid_byte_replacement_across_document() {
   for (size_t position = 0; position < input.size(); ++position) {
     const char previous = input[position];
     input[position] = '\x01';
-    auto& a = require_parse(native.parse(input));
-    auto& b = require_parse(scalar.parse(input));
-    a.stats.fast_path_lines = a.stats.slow_path_lines = 0;
-    b.stats.fast_path_lines = b.stats.slow_path_lines = 0;
-    CHECK_EQ(canonical(a), canonical(b));
+    auto* a = native.parse(input, kLazer);
+    auto* b = scalar.parse(input, kLazer);
+    // A damaged version number makes the map unloadable.
+    CHECK(a || position < input.find('\n'));
+    CHECK_EQ(!a, !b);
+    if (a && b) {
+      a->stats.fast_path_lines = a->stats.slow_path_lines = 0;
+      b->stats.fast_path_lines = b->stats.slow_path_lines = 0;
+      CHECK_EQ(canonical(*a), canonical(*b));
+    }
+    // Both engines also agree on whether stable can load the map.
+    CHECK_EQ(!native.parse(input), !scalar.parse(input));
+    CHECK_EQ(native.error().line, scalar.error().line);
     input[position] = previous;
   }
 }
@@ -453,7 +463,7 @@ static void test_bracketed_records_do_not_change_section() {
         "osu file format v14\n[HitObjects]\n[256,192,100,1,0\n"
         "300,100,300,1,0\n[TimingPoints]\n[100,500,4,2,1,60,1,0\n"
         "200,500,4,2,1,60,1,0\n[Metadata]\nTitle:sentinel\n",
-        simd);
+        simd, kLazer);
     CHECK_EQ(bracketed.hit_objects.size(), 1u);
     CHECK_EQ(bracketed.timing_points.size(), 1u);
     CHECK_EQ(bracketed.stats.malformed_lines, 2u);
@@ -508,7 +518,7 @@ static void check_crlf_recovery(const std::string& input,
                                 size_t             hit_objects,
                                 size_t             timing_points) {
   for (bool simd : {false, true}) {
-    const auto map = parse_str(input, simd);
+    const auto map = parse_str(input, simd, kLazer);
     CHECK_EQ(map.hit_objects.size(), hit_objects);
     CHECK_EQ(map.timing_points.size(), timing_points);
     CHECK(map.title == "after");
@@ -638,7 +648,8 @@ static void test_invalid_byte_replaces_hitobject_lf() {
 
 static void test_omitted_sections_use_defaults() {
   for (bool simd : {false, true}) {
-    auto bm = parse_str("[Metadata]\nTitle:Only metadata\n", simd);
+    auto bm = parse_str(
+        "osu file format v14\n[Metadata]\nTitle:Only metadata\n", simd);
     CHECK(bm.title == "Only metadata");
     CHECK(bm.audio_filename.empty());
     CHECK(bm.sample_set == fosu::SampleSet::Normal);
@@ -660,60 +671,65 @@ static void test_omitted_sections_use_defaults() {
   }
 }
 
-// A document that sets nothing gets osu!'s defaults, stable's where stable and
-// lazer differ (Countdown). Without a version line, both use version 14.
+// A document that sets nothing gets the target client's defaults; stable and
+// lazer differ only in Countdown and BeatmapID. Without a version line, both
+// use version 14.
 static void test_unset_fields_use_osu_defaults() {
   for (const std::string input : {"osu file format v14\n", "[General]\n"}) {
-    for (bool simd : {false, true}) {
-      const auto bm = parse_str(input, simd);
-      CHECK_EQ(bm.format_version, 14);
+    for (const auto client : {fosu::Client::Stable, fosu::Client::Lazer}) {
+      for (bool simd : {false, true}) {
+        const bool stable = client == fosu::Client::Stable;
+        const auto bm = parse_str(input, simd, {.client = client});
+        CHECK_EQ(bm.format_version, 14);
 
-      CHECK(bm.audio_filename.empty());
-      CHECK_EQ(bm.audio_lead_in, 0);
-      CHECK_EQ(bm.preview_time, -1);
-      CHECK_EQ(bm.countdown, 1);
-      CHECK(bm.sample_set == fosu::SampleSet::Normal);
-      CHECK_EQ(bm.sample_volume, 100);
-      CHECK_EQ(bm.stack_leniency, double(0.7f));
-      CHECK_EQ(bm.mode, 0);
-      CHECK(!bm.letterbox_in_breaks && !bm.widescreen_storyboard);
-      CHECK(!bm.epilepsy_warning && !bm.special_style);
-      CHECK(!bm.use_skin_sprites && !bm.samples_match_playback_rate);
-      CHECK_EQ(bm.countdown_offset, 0);
-      CHECK(bm.overlay_position.empty() && bm.skin_preference.empty());
+        CHECK(bm.audio_filename.empty());
+        CHECK_EQ(bm.audio_lead_in, 0);
+        CHECK_EQ(bm.preview_time, -1);
+        CHECK_EQ(bm.countdown, stable ? 1 : 0);
+        CHECK(bm.sample_set == fosu::SampleSet::Normal);
+        CHECK_EQ(bm.sample_volume, 100);
+        CHECK_EQ(bm.stack_leniency, double(0.7f));
+        CHECK_EQ(bm.mode, 0);
+        CHECK(!bm.letterbox_in_breaks && !bm.widescreen_storyboard);
+        CHECK(!bm.epilepsy_warning && !bm.special_style);
+        CHECK(!bm.use_skin_sprites && !bm.samples_match_playback_rate);
+        CHECK_EQ(bm.countdown_offset, 0);
+        CHECK(bm.overlay_position.empty() && bm.skin_preference.empty());
 
-      CHECK(bm.bookmarks.empty());
-      CHECK_EQ(bm.distance_spacing, 1);
-      CHECK_EQ(bm.beat_divisor, 4);
-      CHECK_EQ(bm.grid_size, 0);
-      CHECK_EQ(bm.timeline_zoom, 1);
-      CHECK(bm.velocity_presets.size() == 3 && bm.velocity_presets[0] == 0.75 &&
-            bm.velocity_presets[1] == 1 && bm.velocity_presets[2] == 1.5);
+        CHECK(bm.bookmarks.empty());
+        CHECK_EQ(bm.distance_spacing, 1);
+        CHECK_EQ(bm.beat_divisor, 4);
+        CHECK_EQ(bm.grid_size, 0);
+        CHECK_EQ(bm.timeline_zoom, 1);
+        CHECK(bm.velocity_presets.size() == 3 &&
+              bm.velocity_presets[0] == 0.75 && bm.velocity_presets[1] == 1 &&
+              bm.velocity_presets[2] == 1.5);
 
-      CHECK(bm.title.empty() && bm.title_unicode.empty());
-      CHECK(bm.artist.empty() && bm.artist_unicode.empty());
-      CHECK(bm.creator.empty() && bm.version.empty());
-      CHECK(bm.source.empty() && bm.tags.empty());
-      CHECK_EQ(bm.beatmap_id, -1);
-      CHECK_EQ(bm.beatmap_set_id, -1);
+        CHECK(bm.title.empty() && bm.title_unicode.empty());
+        CHECK(bm.artist.empty() && bm.artist_unicode.empty());
+        CHECK(bm.creator.empty() && bm.version.empty());
+        CHECK(bm.source.empty() && bm.tags.empty());
+        CHECK_EQ(bm.beatmap_id, stable ? 0 : -1);
+        CHECK_EQ(bm.beatmap_set_id, -1);
 
-      CHECK_EQ(bm.hp, 5);
-      CHECK_EQ(bm.cs, 5);
-      CHECK_EQ(bm.od, 5);
-      CHECK_EQ(bm.ar, 5);
-      CHECK_EQ(bm.slider_multiplier, 1.4);
-      CHECK_EQ(bm.slider_tick_rate, 1);
+        CHECK_EQ(bm.hp, 5);
+        CHECK_EQ(bm.cs, 5);
+        CHECK_EQ(bm.od, 5);
+        CHECK_EQ(bm.ar, 5);
+        CHECK_EQ(bm.slider_multiplier, 1.4);
+        CHECK_EQ(bm.slider_tick_rate, 1);
 
-      CHECK(bm.background.empty() && bm.video.empty() && bm.breaks.empty());
-      CHECK(bm.timing_points.empty() && bm.combo_colours.empty());
-      CHECK(bm.hit_objects.empty() && bm.sliders.empty());
-      CHECK(bm.slider_segments.empty() && bm.slider_points.empty());
-      CHECK(bm.slider_paths.empty() && bm.slider_events.empty());
-      CHECK(bm.stacking.empty());
-      CHECK_EQ(bm.stats.fast_path_lines, 0u);
-      CHECK_EQ(bm.stats.slow_path_lines, 0u);
-      CHECK_EQ(bm.stats.malformed_lines, 0u);
-      CHECK_EQ(bm.stats.storyboard_lines, 0u);
+        CHECK(bm.background.empty() && bm.video.empty() && bm.breaks.empty());
+        CHECK(bm.timing_points.empty() && bm.combo_colours.empty());
+        CHECK(bm.hit_objects.empty() && bm.sliders.empty());
+        CHECK(bm.slider_segments.empty() && bm.slider_points.empty());
+        CHECK(bm.slider_paths.empty() && bm.slider_events.empty());
+        CHECK(bm.stacking.empty());
+        CHECK_EQ(bm.stats.fast_path_lines, 0u);
+        CHECK_EQ(bm.stats.slow_path_lines, 0u);
+        CHECK_EQ(bm.stats.malformed_lines, 0u);
+        CHECK_EQ(bm.stats.storyboard_lines, 0u);
+      }
     }
   }
 }
@@ -820,15 +836,20 @@ static void test_all_section_mask_matches_default() {
 }
 
 static void test_exact_keys_and_event_aliases() {
-  CHECK_EQ(parse_str("[General]\nCountdown:DoubleSpeed\n").countdown, 3);
+  CHECK_EQ(parse_str("osu file format v14\n[General]\nCountdown:DoubleSpeed\n",
+                     true, kLazer)
+               .countdown,
+           3);
   const auto map = parse_str(
-      "[General]\nCountdown:Normal,HalfSpeed\nSampleSet:Soft\n"
+      "osu file format "
+      "v14\n[General]\nCountdown:Normal,HalfSpeed\nSampleSet:Soft\n"
       "[Metadata]\nTitle:\tkept \nTitleUnicode : unicode\n"
       "TitleExtra:ignored\n Title:ignored\nTitle\t: final: title \n"
       "[MetadataExtra]\nTitle:ignored section\n"
       "[Events]\n0,0,\"background.jpg\"\n"
       "1,0,\"old.mp4\"\nVideo,0,\"new.mp4\"\n"
-      "2,10,20\nBreak,30,40\nVideoExtra,0,\"ignored.mp4\"\n");
+      "2,10,20\nBreak,30,40\nVideoExtra,0,\"ignored.mp4\"\n",
+      true, kLazer);
   CHECK_EQ(map.countdown, 3);
   CHECK_EQ(map.sample_set, fosu::SampleSet::Soft);
   CHECK_EQ(map.title, "final: title");
@@ -867,8 +888,9 @@ static void test_long_event_lines() {
 static void test_timing_integer_widths() {
   for (fosu::i32 value : {9, 99, 999, 9999, 10000, 99999999, INT32_MAX}) {
     const auto        field = std::to_string(value);
-    const std::string input = "[TimingPoints]\n0,-100," + field + ",2," +
-                              field + "," + field + ",0," + field;
+    const std::string input = "osu file format v14\n[TimingPoints]\n0,-100," +
+                              field + ",2," + field + "," + field + ",0," +
+                              field;
     for (bool simd : {false, true}) {
       fosu::Parser parser(simd ? fosu::internal::compiled_engine
                                : fosu_test::scalar_engine());
@@ -1037,8 +1059,9 @@ static void test_enum_contracts() {
       for (const auto& spelling :
            {names[value], std::to_string(value),
             " +" + std::to_string(value) + " ", "0" + std::to_string(value)}) {
-        const auto map =
-            parse_str("[General]\nSampleSet:" + spelling + "\n", simd);
+        const auto map = parse_str(
+            "osu file format v14\n[General]\nSampleSet:" + spelling + "\n",
+            simd);
         CHECK_EQ(map.stats.malformed_lines, 0u);
         CHECK_EQ(map.sample_set, static_cast<fosu::SampleSet>(value));
       }
@@ -1046,14 +1069,17 @@ static void test_enum_contracts() {
     for (const std::string value :
          {"-1", "4", "99", "2147483647", "Unknown", "Normal,Soft"}) {
       const auto map = parse_str(
-          "[General]\nSampleSet:Soft\nSampleSet:" + value + "\n", simd);
+          "osu file format v14\n[General]\nSampleSet:Soft\nSampleSet:" + value +
+              "\n",
+          simd);
       CHECK_EQ(map.sample_set, fosu::SampleSet::Soft);
       CHECK_EQ(map.stats.malformed_lines, 1u);
     }
     for (const std::string value : {"-1", "4", "9", "99", "2147483647"}) {
-      const auto map = parse_str("[TimingPoints]\n0,500,4," + value +
-                                     ",0,100,1,0\n1,500,4,2,0,100,1,0\n",
-                                 simd);
+      const auto map =
+          parse_str("osu file format v14\n[TimingPoints]\n0,500,4," + value +
+                        ",0,100,1,0\n1,500,4,2,0,100,1,0\n",
+                    simd);
       CHECK_EQ(map.stats.malformed_lines, 1u);
       CHECK_EQ(map.timing_points.size(), 1u);
       CHECK_EQ(map.timing_points[0].sample_set, fosu::SampleSet::Soft);
@@ -1077,7 +1103,8 @@ static void test_enum_contracts() {
 static void test_header_field_failures_preserve_values() {
   for (bool simd : {false, true}) {
     const auto map = parse_str(
-        "[General]\nPreviewTime:17\nPreviewTime:2147483648\n"
+        "osu file format "
+        "v14\n[General]\nPreviewTime:17\nPreviewTime:2147483648\n"
         "Mode:3\nMode:4\nSampleSet:Soft\nSampleSet:Normal,Soft\n"
         "Countdown:Normal,HalfSpeed\nUseSkinSprites:1suffix\n"
         "LetterboxInBreaks:1suffix\nApproachRate:9\n"
@@ -1099,7 +1126,8 @@ static void test_header_field_failures_preserve_values() {
     CHECK_EQ(map.stats.malformed_lines, 6u);
 
     const auto missing_ar = parse_str(
-        "[Difficulty]\nApproachRate:bad\nOverallDifficulty:6\n"
+        "osu file format "
+        "v14\n[Difficulty]\nApproachRate:bad\nOverallDifficulty:6\n"
         "[General]\nApproachRate:9\n"
         "[Difficulty]\nOverallDifficulty:7\n",
         simd);
@@ -1127,7 +1155,7 @@ static void test_repeated_section_bodies() {
           input += '\r';
         input += c;
       }
-      const auto map = parse_str(input, simd);
+      const auto map = parse_str(input, simd, kLazer);
       CHECK_EQ(map.audio_filename, "first.mp3");
       CHECK_EQ(map.grid_size, 8);
       CHECK_EQ(map.title, "literal [Difficulty]");
@@ -1222,18 +1250,52 @@ static void test_combo_colour_domain() {
   }
 }
 
+// Both clients' .NET parsers accept ',' anywhere in a float or double's
+// integer part after its first digit.
+static void test_float_fields_accept_group_separators() {
+  struct Case {
+    const char* value;
+    double      od;
+  };
+  for (const auto& test : {
+           Case{"0,7.5", 7.5},
+           Case{"7,", 7},
+           Case{"1,,0", 10},
+           Case{"1,e0", 1},
+           Case{",7", 5},
+           Case{"+,7", 5},
+           Case{"7.,5", 5},
+           Case{"1e0,", 5},
+       }) {
+    for (const auto client : {fosu::Client::Stable, fosu::Client::Lazer}) {
+      const auto map = parse_str(
+          "osu file format v14\n[Difficulty]\n"
+          "OverallDifficulty:" +
+              std::string(test.value) + "\n",
+          true, {.client = client});
+      CHECK_EQ(map.od, test.od);
+      CHECK_EQ(map.stats.malformed_lines, test.od == 5 ? 1u : 0u);
+    }
+  }
+  const auto map =
+      parse_str("osu file format v14\n[Difficulty]\nSliderMultiplier:0,002\n");
+  CHECK_EQ(map.slider_multiplier, 2);
+}
+
 static void test_legacy_rules() {
   static_assert(std::is_trivially_copyable_v<fosu::HitObject>);
   for (bool simd : {false, true}) {
     const auto late_mode = parse_str(
-        "[Difficulty]\nCircleSize:18\nOverallDifficulty:20\nApproachRate:bad\n"
+        "osu file format "
+        "v14\n[Difficulty]\nCircleSize:18\nOverallDifficulty:20\nApproachRate:"
+        "bad\n"
         "[General]\nMode:0\n[General]\nMode:3\n",
-        simd);
+        simd, kLazer);
     CHECK_EQ(late_mode.cs, 18);
     CHECK_EQ(late_mode.od, 10);
     CHECK_EQ(late_mode.ar, 10);
     const auto explicit_ar = parse_str(
-        "[Difficulty]\nCircleSize:18\nApproachRate:20\n"
+        "osu file format v14\n[Difficulty]\nCircleSize:18\nApproachRate:20\n"
         "[Difficulty]\nApproachRate:bad\nOverallDifficulty:3\n"
         "[General]\nMode:3\n[General]\nMode:0\n",
         simd);
@@ -1250,7 +1312,7 @@ static void test_legacy_rules() {
         "[HitObjects]\n10,20,200,1,0\n30,40,0,8,0,-10\n"
         "50,60,50,2,0,B|100:100,0,0\n70,80,100,53,0\n"
         "90,100,100,49,0\n110,120,20,128,0,10\n130,140,201,1,0\n",
-        simd);
+        simd, kLazer);
     CHECK_EQ(map.title, "trimmed");
     CHECK_EQ(map.hp, 10);
     CHECK_EQ(map.cs, 18);
@@ -1294,7 +1356,7 @@ static void test_legacy_rules() {
   }
 }
 
-// osu! (lazer) creates a circle, and a spinner once its end time parses,
+// Lazer creates a circle, and a spinner once its end time parses,
 // before reading the hit sample. A line rejected for its sample still counts
 // as the previous object: a spinner gives the next object a new combo, a
 // circle does not. Rejected sliders and holds are never created.
@@ -1303,7 +1365,7 @@ static void test_line_rejected_for_its_sample_counts_for_new_combo() {
       "osu file format v14\n[Difficulty]\nSliderMultiplier:1\n"
       "[TimingPoints]\n0,500\n[HitObjects]\n1,2,50,1,0\n";
   const auto last_new_combo = [&](const char* lines, bool simd) {
-    const auto map = parse_str(header + lines, simd);
+    const auto map = parse_str(header + lines, simd, kLazer);
     return map.hit_objects.back().new_combo;
   };
   for (bool simd : {false, true}) {
@@ -1341,20 +1403,26 @@ static void test_format_version_comes_from_the_first_line() {
       CHECK_EQ(parse_str(test.text, simd).format_version, test.version);
 }
 
-// Like stable, only whole-line comments are skipped. lazer also strips a
-// trailing "//..." outside [Metadata]; that is not supported (yet).
+// Like stable, only whole-line comments are skipped, so stable cannot read a
+// hit object followed by one. Lazer also strips a trailing "//..." outside
+// [Metadata]; that is not supported (yet), so lazer mode rejects the line.
 static void test_trailing_comments_are_not_stripped() {
-  for (bool simd : {false, true}) {
-    const auto map = parse_str(
-        "osu file format v14\n[General]\nAudioFilename: a//b.mp3\n"
-        "[Metadata]\nTitle:a//b\n[HitObjects]\n1,2,3,1,0//x\n"
-        "1,2,4,1,0,0:0:0:0:a//b.wav\n",
-        simd);
+  const std::string text =
+      "osu file format v14\n[General]\nAudioFilename: a//b.mp3\n"
+      "[Metadata]\nTitle:a//b\n[HitObjects]\n1,2,4,1,0,0:0:0:0:a//b.wav\n";
+  const std::string commented = text + "1,2,5,1,0//x\n";
+  for (const auto* engine :
+       {&fosu::internal::compiled_engine, &fosu_test::scalar_engine()}) {
+    fosu::Parser parser(*engine);
+    const auto&  map = require_parse(parser.parse(text));
     CHECK_EQ(map.audio_filename, "a//b.mp3");
     CHECK_EQ(map.title, "a//b");
-    CHECK_EQ(map.hit_objects.size(), 1u);
     CHECK_EQ(map.hit_objects[0].hit_sample, "0:0:0:0:a//b.wav");
-    CHECK_EQ(map.stats.malformed_lines, 1u);
+    CHECK(!parser.parse(commented));
+    CHECK_EQ(parser.error().line, 8u);
+    const auto& lazer = require_parse(parser.parse(commented, kLazer));
+    CHECK_EQ(lazer.hit_objects.size(), 1u);
+    CHECK_EQ(lazer.stats.malformed_lines, 1u);
   }
 }
 
@@ -1373,7 +1441,9 @@ static void test_break_ignores_fields_after_its_end() {
 static void test_explicit_zero_and_negative_ids_are_kept() {
   for (bool simd : {false, true}) {
     const auto map = parse_str(
-        "[Metadata]\nBeatmapID:0\nBeatmapSetID:-2\n[General]\nPreviewTime:0\n",
+        "osu file format "
+        "v14\n[Metadata]\nBeatmapID:0\nBeatmapSetID:-2\n[General]\nPreviewTime:"
+        "0\n",
         simd);
     CHECK_EQ(map.beatmap_id, 0);
     CHECK_EQ(map.beatmap_set_id, -2);
@@ -1382,7 +1452,8 @@ static void test_explicit_zero_and_negative_ids_are_kept() {
 }
 
 static void test_metadata_keeps_raw_bytes() {
-  constexpr char input[] = "[Metadata]\nTitle:hello\xff\0world\n";
+  constexpr char input[] =
+      "osu file format v14\n[Metadata]\nTitle:hello\xff\0world\n";
   constexpr char title[] = "hello\xff\0world";
   for (bool simd : {false, true}) {
     const auto map = parse_str(std::string(input, sizeof input - 1), simd);
@@ -1423,6 +1494,7 @@ int main() {
   test_metadata_keeps_raw_bytes();
   test_time_sort_keeps_slider_data_with_its_object();
   test_legacy_rules();
+  test_float_fields_accept_group_separators();
   test_combo_colour_domain();
   test_header_field_failures_preserve_values();
   test_repeated_section_bodies();

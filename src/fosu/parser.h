@@ -209,6 +209,8 @@ class Parser {
     return &beatmap_;
   }
 
+  // Calculated values follow lazer for both clients; stable's own end times,
+  // paths, events and stacking are not modelled yet.
   ParseErrorCode post_process(ParseOptions opts) noexcept {
     const bool stacking = opts.apply_stacking && beatmap_.mode == 0;
     const bool events = opts.calculate_slider_events;

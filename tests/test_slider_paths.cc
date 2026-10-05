@@ -27,8 +27,12 @@ struct Path {
   bool operator==(const Path&) const = default;
 };
 
-Path path(const std::string& input, bool simd, size_t object = 0) {
-  const auto  map = parse_str(input, simd, {.calculate_slider_paths = true});
+Path path(const std::string& input,
+          bool               simd,
+          size_t             object = 0,
+          fosu::Client       client = fosu::Client::Stable) {
+  const auto map = parse_str(
+      input, simd, {.calculate_slider_paths = true, .client = client});
   const auto& path = map.slider_paths[map.hit_objects[object].slider];
   return {{path.points.begin(), path.points.end()}, path.distance()};
 }
@@ -176,6 +180,40 @@ static void test_lazer_format_letters_start_new_segments() {
   }
 }
 
+Path lazer_path_as(std::string_view slider, bool simd) {
+  return path(beatmap("0,0,1000,2,0," + std::string(slider) + "\n"), simd, 0,
+              fosu::Client::Lazer);
+}
+
+// Before v128, lazer also starts a segment at each letter, then applies the
+// legacy rules to each segment, ending at the next one's first point. stable
+// gives the whole slider the last type instead; see test_clients.
+static void test_lazer_letters_start_legacy_segments() {
+  for (bool simd : {false, true}) {
+    CHECK(
+        lazer_path_as("L|100:0|B|100:100|0:100,1,0", simd).points ==
+        (std::vector<fosu::PathPoint>{{0, 0}, {100, 0}, {100, 100}, {0, 100}}));
+    // A perfect curve needs exactly three points, counting that end point,
+    // and draws a line through collinear ones.
+    const auto arc = lazer_path_as("P|100:100|L|200:0|300:0,1,0", simd);
+    CHECK_NEAR(arc.distance, 314.05381774902344 + 100, 1e-3);
+    CHECK(
+        lazer_path_as("P|100:0|L|200:0|200:100,1,0", simd).points ==
+        (std::vector<fosu::PathPoint>{{0, 0}, {100, 0}, {200, 0}, {200, 100}}));
+    // A last segment holding only its first point adds nothing.
+    CHECK(lazer_path_as("L|100:0|B|100:100,1,0", simd).points ==
+          (std::vector<fosu::PathPoint>{{0, 0}, {100, 0}, {100, 100}}));
+    // A repeated point splits a segment, unless it is the segment's last
+    // before the next one's first.
+    CHECK_NEAR(
+        lazer_path_as("B|100:100|100:100|200:0|L|300:100,1,0", simd).distance,
+        370.9743161201477, 1e-3);
+    CHECK_NEAR(
+        lazer_path_as("B|100:100|200:0|200:0|L|300:100,1,0", simd).distance,
+        338.47502517700195, 1e-3);
+  }
+}
+
 static void test_bspline_degree_shapes_the_curve() {
   for (bool simd : {false, true}) {
     // Degree 1 joins the control points with straight lines.
@@ -223,6 +261,7 @@ int main() {
   test_catmull_point_at_the_head_is_merged();
   test_repeated_catmull_points_split_only_in_lazer_format();
   test_lazer_format_letters_start_new_segments();
+  test_lazer_letters_start_legacy_segments();
   test_bspline_degree_shapes_the_curve();
   test_segments_of_different_types_join();
   test_position_query_clamps_and_interpolates();

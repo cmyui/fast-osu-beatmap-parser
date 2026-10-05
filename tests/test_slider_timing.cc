@@ -79,7 +79,8 @@ static void test_slide_count_below_one_is_one_slide() {
 // The generic decoder's end time; rulesets convert sliders afterwards.
 static void test_end_time_does_not_depend_on_game_mode() {
   for (const char* mode : {"0", "1", "2"}) {
-    const auto input = std::string("[General]\nMode:") + mode +
+    const auto input = std::string("osu file format v14\n[General]\nMode:") +
+                       mode +
                        "\n[Difficulty]\nSliderMultiplier:1\n[TimingPoints]\n"
                        "0,500\n[HitObjects]\n0,0,1000,2,0,L|100:0,2,100\n";
     for (bool simd : {false, true})

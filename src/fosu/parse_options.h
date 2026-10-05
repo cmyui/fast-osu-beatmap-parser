@@ -18,7 +18,8 @@ enum : u32 {
 };
 
 // Whose behaviour to follow where osu!stable and osu!lazer parse a map
-// differently. This is independent of the map's format version.
+// differently. This is independent of the map's format version; see
+// docs/compatibility.md for the rules each client changes.
 enum class Client : u8 { Stable, Lazer };
 
 struct ParseOptions {

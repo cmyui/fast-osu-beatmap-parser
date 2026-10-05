@@ -110,13 +110,13 @@ bool parse_velocity_presets(Beatmap&         beatmap,
   return true;
 }
 
-template <Format F>
+template <Format F, Client C>
 const char* parse_editor_section(Beatmap&    beatmap,
                                  size_t&     velocity_preset_count,
                                  bool&       velocity_presets_seen,
                                  const char* p,
                                  const char* end) {
-  return for_each_section_line(p, end, [&](std::string_view line) {
+  return for_each_section_line<C>(p, end, [&](std::string_view line) {
     const auto field = split_key_value(line);
     if (!field)
       return;

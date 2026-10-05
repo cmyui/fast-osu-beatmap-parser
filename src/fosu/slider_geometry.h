@@ -403,14 +403,19 @@ inline CurveType lazer_curve_type(std::span<const CurvePoint> points,
              : type;
 }
 
+// Lazer's legacy rules for one segment of a pre-v128 path. `points` ends with
+// the next segment's first point, if any; that point takes part in the curve
+// type and geometry but cannot start an implicit segment, nor can the last
+// of the segment's own `vertex_count` points.
 inline bool calculate_legacy_slider_distance(std::span<const CurvePoint> points,
-                                             CurveType                   type,
+                                             size_t         vertex_count,
+                                             CurveType      type,
                                              CurveDistance& distance,
                                              Arena*         arena) {
   type = legacy_curve_type(points, type);
   size_t begin = 0;
   for (size_t i = 1; i < points.size(); ++i) {
-    if (points[i] != points[i - 1] || i == points.size() - 1 ||
+    if (points[i] != points[i - 1] || i >= vertex_count - 1 ||
         (type == CurveType::Catmull && i > 1)) {
       continue;
     }
@@ -461,6 +466,28 @@ inline bool calculate_lazer_slider_distance(
   return true;
 }
 
+// Calls visit(points, vertex_count, type, continues_path) for each segment of
+// a pre-v128 path, which has explicit ones only in lazer mode. Each segment's
+// points end with the next one's first.
+template <typename Visit>
+inline bool for_each_legacy_segment(std::span<const CurvePoint>   points,
+                                    std::span<const CurveSegment> segments,
+                                    CurveType                     type,
+                                    Visit                         visit) {
+  if (segments.empty())
+    return visit(points, points.size(), type, false);
+  for (size_t i = 0; i < segments.size(); ++i) {
+    const auto&  source = segments[i];
+    const size_t start = source.point_begin + (i == 0 ? 0 : 1);
+    const size_t count = source.point_count + (i == 0 ? 1 : 0);
+    const size_t end_point = i + 1 < segments.size() ? 1 : 0;
+    if (!visit(points.subspan(start, count), count - end_point, source.type,
+               i > 0))
+      return false;
+  }
+  return true;
+}
+
 inline f64 slider_distance(const Beatmap&   map,
                            const HitObject& object,
                            Arena*           arena) {
@@ -496,8 +523,15 @@ inline f64 slider_distance(const Beatmap&   map,
       return 0.f;
     }
   } else {
-    if (!calculate_legacy_slider_distance(relative_points, slider.curve_type,
-                                          distance, arena)) {
+    const auto segments =
+        map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
+    if (!for_each_legacy_segment(
+            relative_points, segments, slider.curve_type,
+            [&](std::span<const CurvePoint> points, size_t vertex_count,
+                CurveType type, bool) {
+              return calculate_legacy_slider_distance(points, vertex_count,
+                                                      type, distance, arena);
+            })) {
       return 0.f;
     }
   }
@@ -546,20 +580,24 @@ struct CurveVertices {
   }
 };
 
+// See calculate_legacy_slider_distance. A segment after the first starts at
+// the previous one's end, so it never repeats that vertex.
 inline bool calculate_legacy_slider_curve(std::span<const CurvePoint> points,
-                                          CurveType                   type,
-                                          CurveVertices&              curve,
-                                          Arena*                      arena) {
+                                          size_t         vertex_count,
+                                          bool           continues_path,
+                                          CurveType      type,
+                                          CurveVertices& curve,
+                                          Arena*         arena) {
   type = legacy_curve_type(points, type);
   size_t begin = 0;
   for (size_t i = 1; i <= points.size(); ++i) {
     if (i < points.size() &&
-        (points[i] != points[i - 1] || i == points.size() - 1 ||
+        (points[i] != points[i - 1] || i >= vertex_count - 1 ||
          (type == CurveType::Catmull && i > 1))) {
       continue;
     }
     if (i == points.size() || i - begin > 1) {
-      curve.first_in_segment = i - begin > 1;
+      curve.first_in_segment = i - begin > 1 || (continues_path && !begin);
       if (!approximate_curve_segment(points.subspan(begin, i - begin), type,
                                      curve, arena) ||
           curve.failed) {
@@ -645,8 +683,16 @@ inline std::optional<SliderPath> calculate_slider_path(const Beatmap&   map,
       return std::nullopt;
     }
   } else {
-    if (!calculate_legacy_slider_curve(relative_points, slider.curve_type,
-                                       curve, scratch_arena)) {
+    const auto segments =
+        map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
+    if (!for_each_legacy_segment(
+            relative_points, segments, slider.curve_type,
+            [&](std::span<const CurvePoint> points, size_t vertex_count,
+                CurveType type, bool continues_path) {
+              return calculate_legacy_slider_curve(points, vertex_count,
+                                                   continues_path, type, curve,
+                                                   scratch_arena);
+            })) {
       return std::nullopt;
     }
   }

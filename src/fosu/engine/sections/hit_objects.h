@@ -18,6 +18,7 @@
 #include <array>
 #include <cstring>
 #include <optional>
+#include <utility>
 
 namespace fosu::internal {
 
@@ -26,7 +27,7 @@ namespace fosu::internal {
 
 // Everything after the "x,y,time,type,hitSound" prefix: slider params,
 // spinner/hold end times, or a trailing hit sample.
-template <Format F>
+template <Format F, Client C>
 FOSU_NOINLINE bool parse_hitobject_details(
     Beatmap&                       beatmap,
     HitObjectCounts&               counts,
@@ -45,8 +46,8 @@ FOSU_NOINLINE bool parse_hitobject_details(
     }
     case HitObjectKind::Slider:
       return p < end && *p == ',' &&
-             parse_slider_as<F.lazer_format>(beatmap, counts, object, p + 1,
-                                             end, constants);
+             parse_slider_as<F.lazer_format, C>(beatmap, counts, object, p + 1,
+                                                end, constants);
     case HitObjectKind::Spinner: {
       const auto details = parse_spinner_details(p, end);
       if (!details)
@@ -76,17 +77,17 @@ struct HitObjectPrefix {
 
 // The x,y,time,type,hitSound prefix of a line the fast prefix does not
 // accept: signed, decimal, spaced or wide fields.
-template <Format F>
+template <Format F, Client C>
 std::optional<HitObjectPrefix> parse_hitobject_prefix(const char* p,
                                                       const char* line_end) {
   f32         x;
-  const char* next = parse_osu_float(p, line_end, x, 131072);
+  const char* next = parse_osu_float(p, line_end, x, kCoordinateLimit<C>);
   if (next == p || next >= line_end || *next != ',')
     return std::nullopt;
   p = next + 1;
 
   f32 y;
-  next = parse_osu_float(p, line_end, y, 131072);
+  next = parse_osu_float(p, line_end, y, kCoordinateLimit<C>);
   if (next == p || next >= line_end || *next != ',')
     return std::nullopt;
   p = next + 1;
@@ -134,19 +135,19 @@ std::optional<HitObjectPrefix> parse_hitobject_prefix(const char* p,
 }
 
 // Anything else the scalar prefix parser rejects is malformed.
-template <Format F>
+template <Format F, Client C>
 std::optional<HitObject> parse_hitobject_line_scalar(
     Beatmap&                       beatmap,
     HitObjectCounts&               counts,
     const char*                    p,
     const char*                    line_end,
     const HitObjectParseConstants& constants) {
-  auto prefix = parse_hitobject_prefix<F>(p, line_end);
+  auto prefix = parse_hitobject_prefix<F, C>(p, line_end);
   if (!prefix)
     return std::nullopt;
   ++beatmap.stats.slow_path_lines;
-  if (!parse_hitobject_details<F>(beatmap, counts, prefix->object, prefix->rest,
-                                  line_end, constants)) {
+  if (!parse_hitobject_details<F, C>(beatmap, counts, prefix->object,
+                                     prefix->rest, line_end, constants)) {
     return std::nullopt;
   }
   return prefix->object;
@@ -176,16 +177,47 @@ inline bool preceding_spinner_after_rejection(u32         type,
   }
 }
 
-template <Format F>
-FOSU_NOINLINE void reject_hitobject_line(Beatmap&    beatmap,
-                                         bool&       preceding_was_spinner,
-                                         const char* p,
-                                         const char* line_end) {
-  ++beatmap.stats.malformed_lines;
-  if (const auto prefix = parse_hitobject_prefix<F>(p, line_end)) {
+// osu!stable cannot load a map with a hit object it fails to read, but
+// ignores one whose type names no kind. Lazer skips both. A line only fosu
+// rejects never makes a map unloadable.
+template <Client C>
+void reject_hitobject(HitObjectCounts& counts,
+                      bool&            preceding_was_spinner,
+                      u32              type,
+                      const char*      line,
+                      const char*      rest,
+                      const char*      line_end) {
+  if constexpr (C == Client::Stable) {
+    if (!std::exchange(counts.policy_rejection, false) &&
+        classify_hitobject_kind(type) != HitObjectKind::Invalid &&
+        !counts.unloadable_line)
+      counts.unloadable_line = line;
+  } else {
     preceding_was_spinner = preceding_spinner_after_rejection(
-        prefix->object.type, preceding_was_spinner, prefix->rest, line_end);
+        type, preceding_was_spinner, rest, line_end);
   }
+}
+
+template <Format F, Client C>
+FOSU_NOINLINE void reject_hitobject_line(Beatmap&         beatmap,
+                                         HitObjectCounts& counts,
+                                         bool&            preceding_was_spinner,
+                                         const char*      p,
+                                         const char*      line_end) {
+  ++beatmap.stats.malformed_lines;
+  if (const auto prefix = parse_hitobject_prefix<F, C>(p, line_end))
+    reject_hitobject<C>(counts, preceding_was_spinner, prefix->object.type, p,
+                        prefix->rest, line_end);
+  else if (C == Client::Stable && !counts.unloadable_line)
+    counts.unloadable_line = p;
+}
+
+// Lines osu!stable skips before reading a hit object: blank, comments, and
+// those indented with ' ' or '_'.
+template <Client C>
+bool ignored_hitobject_line(const char* p, const char* line_end) {
+  return (C == Client::Stable && (*p == ' ' || *p == '_')) ||
+         ignored_line(p, line_end);
 }
 
 // Interpret a successfully decoded record of `kind` before publishing it to
@@ -217,7 +249,7 @@ inline HitObject normalize_hitobject(HitObject     object,
   return object;
 }
 
-template <Format F>
+template <Format F, Client C>
 const char* parse_hitobjects_section_scalar(
     Beatmap&                       beatmap,
     HitObjectCounts&               counts,
@@ -231,11 +263,11 @@ const char* parse_hitobjects_section_scalar(
       continue;
     }
     const char* line_end = find_line_end(p, file_end);
-    if (c == '[' && section_header_line(p, line_end))
+    if (c == '[' && section_header_line<C>(p, line_end))
       break;
     const char* following_line = after_line_ending(line_end, file_end);
-    if (!ignored_line(p, line_end)) {
-      if (const auto object = parse_hitobject_line_scalar<F>(
+    if (!ignored_hitobject_line<C>(p, line_end)) {
+      if (const auto object = parse_hitobject_line_scalar<F, C>(
               beatmap, counts, p, line_end, constants)) {
         const auto kind = classify_hitobject_kind(object->type);
         beatmap.hit_objects[counts.objects] =
@@ -244,8 +276,8 @@ const char* parse_hitobjects_section_scalar(
         ++counts.objects;
         counts.preceding_was_spinner = kind == HitObjectKind::Spinner;
       } else [[unlikely]] {
-        reject_hitobject_line<F>(beatmap, counts.preceding_was_spinner, p,
-                                 line_end);
+        reject_hitobject_line<F, C>(beatmap, counts,
+                                    counts.preceding_was_spinner, p, line_end);
       }
     }
     p = following_line;
@@ -256,13 +288,14 @@ const char* parse_hitobjects_section_scalar(
 #if FOSU_SIMD
 // Publishes an object whose x,y,time,type,hitSound prefix is decoded. `rest`
 // is everything after the prefix: empty, or starting with ','.
-template <Format F>
+template <Format F, Client C>
 FOSU_ALWAYS_INLINE void accept_hitobject(
     Beatmap&                       beatmap,
     HitObjectCounts&               counts,
     const HitObjectParseConstants& constants,
     bool&                          preceding_was_spinner,
     HitObject                      object,
+    const char*                    line,
     const char*                    rest,
     const char*                    line_end) {
   const HitObjectKind kind = classify_hitobject_kind(object.type);
@@ -274,15 +307,15 @@ FOSU_ALWAYS_INLINE void accept_hitobject(
     if (rest_length)
       object.hit_sample = {rest + 1, 8};
   } else if (!(kind == HitObjectKind::Slider
-                   ? rest_length && parse_slider_as<F.lazer_format>(
+                   ? rest_length && parse_slider_as<F.lazer_format, C>(
                                         beatmap, counts, object, rest + 1,
                                         line_end, constants)
-                   : parse_hitobject_details<F>(beatmap, counts, object, rest,
-                                                line_end, constants)))
+                   : parse_hitobject_details<F, C>(beatmap, counts, object,
+                                                   rest, line_end, constants)))
       [[unlikely]] {
     ++beatmap.stats.malformed_lines;
-    preceding_was_spinner = preceding_spinner_after_rejection(
-        object.type, preceding_was_spinner, rest, line_end);
+    reject_hitobject<C>(counts, preceding_was_spinner, object.type, line, rest,
+                        line_end);
     return;
   }
   const size_t count = counts.objects++;
@@ -332,7 +365,7 @@ inline constexpr auto kPrefixLayouts = make_prefix_layouts<TimeDigits>();
 // y, 1-3 digit type and 1-2 digit hitSound. Times only grow through a map, so
 // one width usually covers a long run of lines. Returns at the first other
 // line.
-template <u32 TimeDigits, Format F>
+template <u32 TimeDigits, Format F, Client C>
 FOSU_NOINLINE const char* parse_hitobjects_fixed_time(
     Beatmap&                       beatmap,
     HitObjectCounts&               counts,
@@ -421,20 +454,20 @@ FOSU_NOINLINE const char* parse_hitobjects_fixed_time(
     fields[0] = std::clamp(fields[0], 0u, 512u);
     fields[1] = std::clamp(fields[1], 0u, 512u);
     ++fast_lines;
-    accept_hitobject<F>(beatmap, counts, constants, preceding_was_spinner,
-                        HitObject{
-                            .x = static_cast<f32>(fields[0]),
-                            .y = static_cast<f32>(fields[1]),
-                            .type = fields[2],
-                            .hitsound = fields[3],
-                            .time = time,
-                            .end_time = 0,
-                            .slider = HitObject::kNoSlider,
-                            .new_combo = false,
-                            .combo_skip = 0,
-                            .hit_sample = {},
-                        },
-                        p + prefix_end, line_end);
+    accept_hitobject<F, C>(beatmap, counts, constants, preceding_was_spinner,
+                           HitObject{
+                               .x = static_cast<f32>(fields[0]),
+                               .y = static_cast<f32>(fields[1]),
+                               .type = fields[2],
+                               .hitsound = fields[3],
+                               .time = time,
+                               .end_time = 0,
+                               .slider = HitObject::kNoSlider,
+                               .new_combo = false,
+                               .combo_skip = 0,
+                               .hit_sample = {},
+                           },
+                           p, p + prefix_end, line_end);
     p = after_line_ending(line_end, file_end);
   }
   beatmap.stats.fast_path_lines += fast_lines;
@@ -442,7 +475,7 @@ FOSU_NOINLINE const char* parse_hitobjects_fixed_time(
   return p;
 }
 
-template <Format F>
+template <Format F, Client C>
 const char* parse_hitobjects_section_simd(
     Beatmap&                       beatmap,
     HitObjectCounts&               counts,
@@ -451,20 +484,20 @@ const char* parse_hitobjects_section_simd(
     const HitObjectParseConstants& constants) {
   bool preceding_was_spinner = counts.preceding_was_spinner;
   while (p < file_end) {
-    p = parse_hitobjects_fixed_time<1, F>(beatmap, counts, constants,
-                                          preceding_was_spinner, p, file_end);
-    p = parse_hitobjects_fixed_time<2, F>(beatmap, counts, constants,
-                                          preceding_was_spinner, p, file_end);
-    p = parse_hitobjects_fixed_time<3, F>(beatmap, counts, constants,
-                                          preceding_was_spinner, p, file_end);
-    p = parse_hitobjects_fixed_time<4, F>(beatmap, counts, constants,
-                                          preceding_was_spinner, p, file_end);
-    p = parse_hitobjects_fixed_time<5, F>(beatmap, counts, constants,
-                                          preceding_was_spinner, p, file_end);
-    p = parse_hitobjects_fixed_time<6, F>(beatmap, counts, constants,
-                                          preceding_was_spinner, p, file_end);
-    p = parse_hitobjects_fixed_time<7, F>(beatmap, counts, constants,
-                                          preceding_was_spinner, p, file_end);
+    p = parse_hitobjects_fixed_time<1, F, C>(
+        beatmap, counts, constants, preceding_was_spinner, p, file_end);
+    p = parse_hitobjects_fixed_time<2, F, C>(
+        beatmap, counts, constants, preceding_was_spinner, p, file_end);
+    p = parse_hitobjects_fixed_time<3, F, C>(
+        beatmap, counts, constants, preceding_was_spinner, p, file_end);
+    p = parse_hitobjects_fixed_time<4, F, C>(
+        beatmap, counts, constants, preceding_was_spinner, p, file_end);
+    p = parse_hitobjects_fixed_time<5, F, C>(
+        beatmap, counts, constants, preceding_was_spinner, p, file_end);
+    p = parse_hitobjects_fixed_time<6, F, C>(
+        beatmap, counts, constants, preceding_was_spinner, p, file_end);
+    p = parse_hitobjects_fixed_time<7, F, C>(
+        beatmap, counts, constants, preceding_was_spinner, p, file_end);
     if (p >= file_end)
       break;
     // A line no fixed-width loop accepts: blank lines, comments, a section
@@ -475,10 +508,10 @@ const char* parse_hitobjects_section_simd(
       continue;
     }
     const char* line_end = find_line_end(p, file_end);
-    if (c == '[' && section_header_line(p, line_end))
+    if (c == '[' && section_header_line<C>(p, line_end))
       break;
-    if (!ignored_line(p, line_end)) {
-      if (const auto object = parse_hitobject_line_scalar<F>(
+    if (!ignored_hitobject_line<C>(p, line_end)) {
+      if (const auto object = parse_hitobject_line_scalar<F, C>(
               beatmap, counts, p, line_end, constants)) {
         const size_t count = counts.objects++;
         const auto   kind = classify_hitobject_kind(object->type);
@@ -486,7 +519,8 @@ const char* parse_hitobjects_section_simd(
             *object, kind, count, preceding_was_spinner, F.time_offset);
         preceding_was_spinner = kind == HitObjectKind::Spinner;
       } else [[unlikely]] {
-        reject_hitobject_line<F>(beatmap, preceding_was_spinner, p, line_end);
+        reject_hitobject_line<F, C>(beatmap, counts, preceding_was_spinner, p,
+                                    line_end);
       }
     }
     p = after_line_ending(line_end, file_end);
@@ -496,18 +530,18 @@ const char* parse_hitobjects_section_simd(
 }
 #endif
 
-template <Format F>
+template <Format F, Client C>
 const char* parse_hitobjects_section(Beatmap&         beatmap,
                                      HitObjectCounts& counts,
                                      const char*      p,
                                      const char*      file_end) {
   const HitObjectParseConstants constants;
 #if FOSU_SIMD
-  return parse_hitobjects_section_simd<F>(beatmap, counts, p, file_end,
-                                          constants);
+  return parse_hitobjects_section_simd<F, C>(beatmap, counts, p, file_end,
+                                             constants);
 #else
-  return parse_hitobjects_section_scalar<F>(beatmap, counts, p, file_end,
-                                            constants);
+  return parse_hitobjects_section_scalar<F, C>(beatmap, counts, p, file_end,
+                                               constants);
 #endif
 }
 

@@ -3,6 +3,9 @@
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/types.h>
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -29,10 +32,39 @@ inline std::optional<i32> parse_field_integer(std::string_view input) {
   return static_cast<i32>(value);
 }
 
+inline constexpr size_t kMaxGroupedLength = 128;
+using UngroupBuffer = std::array<char, 2 * kMaxGroupedLength>;
+
+// `input` without the ',' group separators .NET's AllowThousands accepts: any
+// number of them anywhere in the integer part after its first digit. The
+// result is followed by readable zero bytes, as the numeric parsers require.
+// Values over kMaxGroupedLength bytes keep their commas, and so fail.
+inline std::string_view without_group_separators(std::string_view input,
+                                                 UngroupBuffer&   buffer) {
+  if (input.find(',') == std::string_view::npos ||
+      input.size() > kMaxGroupedLength)
+    return input;
+  size_t length = 0;
+  bool   digits = false, integer_part = true;
+  for (const char c : input) {
+    if (c == ',' && digits && integer_part)
+      continue;
+    digits |= is_digit(c);
+    integer_part &= c != '.' && c != 'e' && c != 'E';
+    buffer[length++] = c;
+  }
+  std::fill(buffer.begin() + length, buffer.end(), '\0');
+  return {buffer.data(), length};
+}
+
 // Decode directly to float32, as osu! does, then widen for the public storage.
+// Like every float and double field below, both clients' .NET parsers accept
+// group separators.
 inline std::optional<f64> parse_field_float(std::string_view input) {
   if (input.empty())
     return std::nullopt;
+  UngroupBuffer buffer;
+  input = without_group_separators(input, buffer);
   f32 value;
   if (!consumed_field_value(
           input,
@@ -44,6 +76,8 @@ inline std::optional<f64> parse_field_float(std::string_view input) {
 inline std::optional<f64> parse_field_double(std::string_view input) {
   if (input.empty())
     return std::nullopt;
+  UngroupBuffer buffer;
+  input = without_group_separators(input, buffer);
   f64 value;
   if (!consumed_field_value(
           input,
