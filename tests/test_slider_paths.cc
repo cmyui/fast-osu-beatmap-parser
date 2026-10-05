@@ -37,10 +37,11 @@ Path path(const std::string& input,
   return {{path.points.begin(), path.points.end()}, path.distance()};
 }
 
-// The same slider with another curve description.
+// The same slider with another curve description. Only lazer has v128 rules.
 Path path_as(std::string_view slider, bool simd, int version = 14) {
   return path(beatmap("0,0,1000,2,0," + std::string(slider) + "\n", version),
-              simd);
+              simd, 0,
+              version >= 128 ? fosu::Client::Lazer : fosu::Client::Stable);
 }
 
 }  // namespace
@@ -151,7 +152,7 @@ static void test_repeated_catmull_points_split_only_in_lazer_format() {
   const std::string slider =
       "200,304,1000,2,0,C|288:304|288:304|288:208|288:208|352:208,1,0\n";
   for (bool simd : {false, true}) {
-    const auto lazer = path(beatmap(slider, 128), simd);
+    const auto lazer = path(beatmap(slider, 128), simd, 0, fosu::Client::Lazer);
     CHECK_NEAR(lazer.distance, 88 + 96 + 64, 1e-3);
     CHECK_NEAR(lazer.points.back().x, 152, 1e-3);
     CHECK_NEAR(lazer.points.back().y, -96, 1e-3);
@@ -166,7 +167,9 @@ static void test_lazer_format_letters_start_new_segments() {
       "63,301,1000,2,0,P|224:57|B|439:298|131:316|322:169|155:194,1,1040\n",
       128);
   for (bool simd : {false, true}) {
-    const auto map = parse_str(input, simd, {.calculate_slider_paths = true});
+    const auto map = parse_str(
+        input, simd,
+        {.calculate_slider_paths = true, .client = fosu::Client::Lazer});
     const auto segments = map.slider_segments;
     CHECK_EQ(segments.size(), 2u);
     CHECK(segments[0].type == fosu::CurveType::PerfectCurve);

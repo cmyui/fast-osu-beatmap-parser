@@ -108,7 +108,8 @@ harness.
 
 The official osu!lazer completely and rosu-map largely support lazer-specific
 v128 beatmap features. FOSU supports the v128 fields represented by its public
-model; other parsers in this table have more limited or no v128 coverage.
+model when parsing as lazer, since osu!stable has no v128 rules; other parsers
+in this table have more limited or no v128 coverage.
 
 ### FOSU on real lazer v128 maps
 

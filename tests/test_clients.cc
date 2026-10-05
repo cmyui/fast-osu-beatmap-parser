@@ -3,10 +3,12 @@
 #include <fosu/enums.h>
 #include <fosu/parse_options.h>
 #include <fosu/parser.h>
+#include <fosu/slider_path.h>
 #include <tests/support/scalar_engine.h>
 #include <tests/support/test.h>
 
 #include <string>
+#include <vector>
 
 using fosu::Client;
 
@@ -305,6 +307,42 @@ static void test_coordinate_and_length_bounds() {
   }
 }
 
+// stable has no rules past v14, its latest format, so it reads a v128 map
+// like a v14 one: it truncates coordinates, reads curve types as markers and
+// uses the legacy path rules. The map still reports v128.
+static void test_v128_maps_in_stable() {
+  const auto slider = [](int version, const char* curve) {
+    return "osu file format v" + std::to_string(version) +
+           "\n[TimingPoints]\n0,500\n[HitObjects]\n10.75,20.5,100,2,0," +
+           std::string(curve) + ",1,0\n";
+  };
+  constexpr fosu::ParseOptions kPaths{.calculate_slider_paths = true};
+  for (bool simd : {false, true}) {
+    const auto stable =
+        parse_str(slider(128, "B|100.5:0|L|100:100"), simd, kPaths);
+    CHECK_EQ(stable.format_version, 128);
+    CHECK_EQ(stable.hit_objects[0].x, 10);
+    CHECK_EQ(stable.slider_points[0].x, 100);
+    CHECK(stable.sliders[0].curve_type == fosu::CurveType::Linear);
+    CHECK(stable.slider_segments.empty());
+    const auto lazer =
+        parse_str(slider(128, "B|100.5:0|L|100:100"), simd, kLazer);
+    CHECK_EQ(lazer.hit_objects[0].x, 10.75f);
+    CHECK_EQ(lazer.slider_segments.size(), 2u);
+
+    // A collinear perfect curve is a line under the legacy rules.
+    const auto v128 = parse_str(slider(128, "P|100:20|200:20"), simd, kPaths);
+    const std::vector<fosu::PathPoint> v128_path(
+        v128.slider_paths[0].points.begin(), v128.slider_paths[0].points.end());
+    const auto v14 = parse_str(slider(14, "P|100:20|200:20"), simd, kPaths);
+    CHECK(v128_path ==
+          std::vector<fosu::PathPoint>(v14.slider_paths[0].points.begin(),
+                                       v14.slider_paths[0].points.end()));
+  }
+  CHECK_EQ(unloadable_line(slider(128, "B2|100:0|100:100"), Client::Stable),
+           5u);
+}
+
 static std::string difficulty_document(int version, const std::string& body) {
   return "osu file format v" + std::to_string(version) + "\n" + body +
          kTimingAndCircle;
@@ -374,6 +412,7 @@ int main() {
   test_indented_colours();
   test_curve_type_tokens();
   test_coordinate_and_length_bounds();
+  test_v128_maps_in_stable();
   test_stack_leniency_range();
   test_difficulty_bytes_before_v13();
   test_circle_size_range_follows_mode_order();

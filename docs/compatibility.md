@@ -22,6 +22,11 @@ compiles its own parse, so the choice adds no per-line cost.
   one whose type names no kind; fosu counts that as malformed. Lazer skips
   each invalid hit object. A line only fosu's own rules reject, such as an
   unknown curve type, never makes a map unloadable.
+- **v128 maps.** stable has no rules past v14, its latest format, so stable
+  mode reads a v128 map as it reads v14: it truncates coordinates, reads
+  curve types as below, rejects B-spline degrees and uses the legacy path
+  rules. `format_version` still reports 128. Only lazer mode applies the
+  v128 rules this document describes.
 - **Version line.** stable reads only the first line, if it starts with
   `osu file format`, and takes the integer after its last `v` with the full
   int32 range. Lazer reads the first non-blank line after trimming, if it
@@ -45,11 +50,11 @@ compiles its own parse, so the choice adds no per-line cost.
 - **Indented lines.** stable skips hit-object and colour lines starting with
   a space or `_`, and hit-object lines starting with `[`. Lazer reads
   indented lines and rejects the others.
-- **Curve types before v128.** stable reads a one-character token as the
-  curve type of the whole slider, the last one winning, and ignores one naming
-  no type; a longer token must be a point. Lazer starts a segment at each type,
-  and gives each segment the legacy curve rules, counting the next segment's
-  first point as its end. Lazer would also read a longer token starting with
+- **Curve types.** stable reads a one-character token as the curve type of
+  the whole slider, the last one winning, and ignores one naming no type; a
+  longer token must be a point. Lazer starts a segment at each type; before
+  v128 it gives each segment the legacy curve rules, counting the next
+  segment's first point as its end. Lazer would also read a longer token starting with
   a letter as a type; fosu rejects it, so in stable mode the map is unloadable.
 - **Coordinates and slider lengths.** Lazer rejects values beyond ±131,072.
   stable has no bound; fosu keeps its control points within int32 and its
@@ -81,7 +86,8 @@ fields as integers. Lazer's trailing `//` comments are not stripped.
   the official +24 ms adjustment, including its distinct hold-end ordering.
 - Coordinate acceptance follows the official decoder's float32 conversion and,
   in lazer mode, its ±131,072 bound. Accepted object positions clamp to [0, 512] on both axes,
-  as in osu!stable and lazer; pre-v128 positions then truncate toward zero.
+  as in osu!stable and lazer; except in lazer's v128 rules, positions then
+  truncate toward zero.
   Slider control points are not clamped. Timestamps,
   timing-point beat lengths and double metadata use its ±2,147,483,647 bound.
   Slider lengths use the coordinate bound. Out-of-range fields are rejected, not saturated.
@@ -96,9 +102,9 @@ fields as integers. Lazer's trailing `//` comments are not stripped.
   Unknown values and comma-separated sample-set combinations are malformed.
   Slider curve types must be `B` (Bezier), `C` (Catmull), `L` (linear), or `P`
   (perfect curve). Unknown curve types reject the hitobject, not the whole map.
-  B-spline degrees (`B2|…`) are read only in lazer-format (v128) maps. Older
-  formats reject the line: stable cannot load such a map, and lazer reads a
-  B-spline.
+  B-spline degrees (`B2|…`) are read only under lazer's v128 rules.
+  Otherwise they reject the line: stable cannot load such a map, and lazer
+  before v128 reads a B-spline.
 - Difficulty values and stack leniency decode directly to float32, then widen
   to double storage. Difficulty and editor settings use the official clamps;
   mania circle size is a key count bounded to 1–18. Omitted editor distance

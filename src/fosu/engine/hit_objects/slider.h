@@ -252,7 +252,7 @@ FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
 // Lazer starts a segment at each curve type in the point list; before v128 it
 // later applies legacy rules to each one. stable instead reads a one-character
 // token as the curve type of the whole slider, the last one winning, and
-// ignores one naming no type; fosu follows it in stable mode before v128.
+// ignores one naming no type, in every format; fosu follows it in stable mode.
 // Lazer would also read a longer token starting with a letter as a type,
 // which fosu rejects.
 template <bool LazerFormat, Client C>
@@ -269,7 +269,7 @@ FOSU_NOINLINE bool parse_slider_as(
   const size_t   slider_point_begin = counts.slider_points;
   const size_t   slider_segment_begin = counts.slider_segments;
 
-  constexpr bool kSegments = LazerFormat || C == Client::Lazer;
+  constexpr bool kSegments = C == Client::Lazer;
   const auto     first_curve_type = parse_curve_type(*p++);
   if (!first_curve_type) {
     // Both clients read an unknown one-character type as Catmull.
@@ -279,8 +279,9 @@ FOSU_NOINLINE bool parse_slider_as(
 
   std::optional<u32> first_curve_degree;
   if (*first_curve_type == CurveType::Bezier && p < end && is_digit(*p)) {
-    // B-spline degrees belong to lazer-format maps. Older formats reject the
-    // line: stable cannot load it, and lazer (unlike us) reads a B-spline.
+    // B-spline degrees belong to lazer's v128 format. Otherwise the line is
+    // rejected: stable cannot load it, and lazer before v128 (unlike us)
+    // reads a B-spline.
     if constexpr (!LazerFormat)
       return false;
     i64         degree;
@@ -341,7 +342,8 @@ FOSU_NOINLINE bool parse_slider_as(
       }
       next_curve_type = *type;
       next_curve_degree.reset();
-      // As for the first type, fosu reads B-spline degrees only in v128.
+      // As for the first type, fosu reads B-spline degrees only in lazer's
+      // v128 format.
       if (LazerFormat && next_curve_type == CurveType::Bezier && p < end &&
           is_digit(*p)) {
         i64         degree;

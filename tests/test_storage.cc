@@ -199,7 +199,9 @@ static void test_canonical_dump_covers_parsed_values() {
       "osu file format v128\n[Editor]\nVelocityPresets:1,2\n"
       "[TimingPoints]\n0,500\n[HitObjects]\n"
       "10.25,20.25,1000,2,0,B2|100.25:0|100:100|0:100,1,300\n",
-      {.calculate_slider_events = true, .apply_stacking = true});
+      {.calculate_slider_events = true,
+       .apply_stacking = true,
+       .client = fosu::Client::Lazer});
   auto& map = require_parse(parsed);
   CHECK_EQ(map.slider_segments.size(), 1u);
   CHECK_EQ(map.slider_paths.size(), 1u);
@@ -322,7 +324,8 @@ static void test_multisegment_path_trim() {
        {&fosu::internal::compiled_engine, &fosu_test::scalar_engine()}) {
     fosu::Parser parser(*engine);
     const auto&  map =
-        require_parse(parser.parse(input, {.calculate_slider_paths = true}));
+        require_parse(parser.parse(input, {.calculate_slider_paths = true,
+                                           .client = fosu::Client::Lazer}));
     CHECK_EQ(map.slider_segments.size(), 2u);
     CHECK_EQ(map.slider_paths.size(), 1u);
     CHECK_EQ(map.slider_paths[0].distance(), 50);

@@ -278,16 +278,22 @@ static void test_end_time_is_independent_of_requested_outputs() {
       "0,0,3000,2,0,B2|100:0|100:100|100:100,1,0\n"
       "0,0,5000,2,0,B2|100:0|100:100|100:100,1\n",
   };
+  constexpr auto           lazer = fosu::Client::Lazer;
   const fosu::ParseOptions variants[] = {
-      {.calculate_slider_end_times = true, .calculate_slider_paths = true},
-      {.calculate_slider_events = true},
-      {.calculate_slider_events = true, .apply_stacking = true},
+      {.calculate_slider_end_times = true,
+       .calculate_slider_paths = true,
+       .client = lazer},
+      {.calculate_slider_events = true, .client = lazer},
+      {.calculate_slider_events = true,
+       .apply_stacking = true,
+       .client = lazer},
   };
   for (const auto& input : inputs) {
     for (bool simd : {false, true}) {
       std::vector<double> expected;
       for (const auto& object :
-           parse_str(input, simd, {.calculate_slider_end_times = true})
+           parse_str(input, simd,
+                     {.calculate_slider_end_times = true, .client = lazer})
                .hit_objects)
         expected.push_back(object.end_time);
       for (const auto& options : variants) {

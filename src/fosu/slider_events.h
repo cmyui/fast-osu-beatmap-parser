@@ -19,6 +19,7 @@ namespace fosu::internal {
 FOSU_FP_CONTRACT_OFF_BEGIN
 
 inline bool set_slider_events(Beatmap&       map,
+                              Client         client,
                               Arena*         result_arena,
                               Arena*         scratch_arena,
                               std::span<f64> stacking_end_times = {}) {
@@ -30,7 +31,8 @@ inline bool set_slider_events(Beatmap&       map,
   auto* ranges = arena_push_array<std::span<SliderEvent>>(result_arena,
                                                           map.sliders.size());
   if (!timings || !ranges ||
-      !set_slider_end_times(map, scratch_arena, {timings, map.sliders.size()},
+      !set_slider_end_times(map, client, scratch_arena,
+                            {timings, map.sliders.size()},
                             stacking_end_times)) {
     return false;
   }

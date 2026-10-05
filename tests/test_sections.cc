@@ -271,7 +271,7 @@ static void test_modern_curve_segments() {
     const auto modern = parse_str(
         "osu file format v128\n[HitObjects]\n"
         "10,20,100,2,0,B2|30.5:40.25|50:60|L|70.75:80.5,1,100\n",
-        simd);
+        simd, kLazer);
     CHECK_EQ(modern.hit_objects.size(), 1u);
     const auto& slider = modern.sliders[modern.hit_objects[0].slider];
     CHECK_EQ(slider.segment_count, 2u);
@@ -293,7 +293,7 @@ static void test_modern_curve_segments() {
     const auto degree = parse_str(
         "osu file format v128\n[HitObjects]\n"
         "0,0,100,2,0,B2|100:0|100:100|0:100,1,300\n",
-        simd);
+        simd, kLazer);
     const auto& degree_slider = degree.sliders[degree.hit_objects[0].slider];
     CHECK_EQ(degree_slider.segment_count, 1u);
     const auto degree_segment =
@@ -305,7 +305,7 @@ static void test_modern_curve_segments() {
     const auto coordinates = parse_str(
         "osu file format v128\n[HitObjects]\n"
         "256.99853,256.001,100,1,0\n",
-        simd);
+        simd, kLazer);
     CHECK_EQ(coordinates.hit_objects[0].x, static_cast<float>(256.99853));
     CHECK_EQ(coordinates.hit_objects[0].y, static_cast<float>(256.001));
 
@@ -1175,7 +1175,8 @@ static void test_repeated_section_bodies() {
 static void test_repeated_lazer_velocity_presets() {
   const auto map = parse_str(
       "osu file format v128\n[Editor]\nVelocityPresets:1,2\n"
-      "[Metadata]\nTitle:test\n[Editor]\nVelocityPresets:3,4,5,6,7\n");
+      "[Metadata]\nTitle:test\n[Editor]\nVelocityPresets:3,4,5,6,7\n",
+      true, kLazer);
   CHECK_EQ(map.velocity_presets.size(), 5u);
   CHECK_EQ(map.velocity_presets[0], 3);
   CHECK_EQ(map.velocity_presets[1], 4);
@@ -1187,7 +1188,7 @@ static void test_repeated_lazer_velocity_presets() {
     const auto spaced = parse_str(
         "osu file format v128\n[Editor]\n"
         "VelocityPresets :1,2,3,4,5\n",
-        simd);
+        simd, kLazer);
     CHECK_EQ(spaced.velocity_presets.size(), 5u);
     CHECK_EQ(spaced.velocity_presets[0], 1);
     CHECK_EQ(spaced.velocity_presets[4], 5);
@@ -1203,7 +1204,7 @@ static void test_velocity_presets_follow_dotnet_double_parsing() {
         "osu file format v128\n[Editor]\n"
         "VelocityPresets:nan, -INFINITY ,1e309,1e-400,\xC2\xA0"
         "2,Inf,.5\n",
-        simd);
+        simd, kLazer);
     CHECK_EQ(map.velocity_presets.size(), 5u);
     CHECK(std::isnan(map.velocity_presets[0]));
     CHECK_EQ(map.velocity_presets[1], -std::numeric_limits<double>::infinity());
@@ -1217,7 +1218,7 @@ static void test_invalid_velocity_presets_are_skipped() {
   for (bool simd : {false, true}) {
     const auto map = parse_str(
         "osu file format v128\n[Editor]\nVelocityPresets:0.5, invalid,1,2.25\n",
-        simd);
+        simd, kLazer);
     CHECK_EQ(map.velocity_presets.size(), 3u);
     CHECK_EQ(map.velocity_presets[0], 0.5);
     CHECK_EQ(map.velocity_presets[1], 1);

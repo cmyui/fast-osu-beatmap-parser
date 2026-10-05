@@ -32,6 +32,7 @@ struct SliderTiming {
 };
 
 inline bool set_slider_end_times(Beatmap&                map,
+                                 Client                  client,
                                  Arena*                  scratch_arena,
                                  std::span<SliderTiming> timings = {},
                                  std::span<f64> stacking_end_times = {}) {
@@ -124,10 +125,10 @@ inline bool set_slider_end_times(Beatmap&                map,
       ++next;
     }
     const auto& slider = map.sliders[object.slider];
-    auto        distance = !map.slider_paths.empty()
-                               ? map.slider_paths[object.slider].distance()
-                               : slider_distance(map, object, scratch_arena);
-    const f64   pixels_per_millisecond =
+    auto distance = !map.slider_paths.empty()
+                        ? map.slider_paths[object.slider].distance()
+                        : slider_distance(map, client, object, scratch_arena);
+    const f64 pixels_per_millisecond =
         100 * map.slider_multiplier * velocity / beat_length;
     // osu! suppresses repeats on effectively zero-length paths. Keep the
     // encoded span count on Slider, but use the effective count for duration.

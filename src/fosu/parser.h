@@ -233,11 +233,11 @@ class Parser {
       return ParseErrorCode::InvalidOptions;
     if ((stacking &&
          !push_span(scratch, stacking_end_times, map.sliders.size())) ||
-        (paths && !set_slider_paths(map, result, scratch)) ||
-        (events &&
-         !set_slider_events(map, result, scratch, stacking_end_times)) ||
-        (end_times &&
-         !set_slider_end_times(map, scratch, {}, stacking_end_times)) ||
+        (paths && !set_slider_paths(map, opts.client, result, scratch)) ||
+        (events && !set_slider_events(map, opts.client, result, scratch,
+                                      stacking_end_times)) ||
+        (end_times && !set_slider_end_times(map, opts.client, scratch, {},
+                                            stacking_end_times)) ||
         (stacking && !apply_stacking(map, result, stacking_end_times)))
       return ParseErrorCode::OutOfMemory;
     apply_clock_rate(map, opts.mods);

@@ -295,7 +295,8 @@ def test_complete_map(tmp_path):
 def test_curve_segments_convert_with_the_head():
     slider = fosu.parse(
         b"osu file format v128\n[HitObjects]\n"
-        b"10,20,100,2,0,B2|30.5:40.25|50:60|L|70.75:80.5,1,100\n"
+        b"10,20,100,2,0,B2|30.5:40.25|50:60|L|70.75:80.5,1,100\n",
+        client="lazer",
     ).hit_objects[0]
     assert isinstance(slider, fosu.Slider)
     assert [(segment.type, segment.degree) for segment in slider.curve_segments] == [
@@ -466,7 +467,7 @@ def test_shared_coordinates_preserve_values_and_signed_zero(coordinate):
         f"osu file format v128\n[HitObjects]\n"
         f"{coordinate},{coordinate},1,2,0,L|{coordinate}:{coordinate},1,10\n"
     ).encode()
-    slider = fosu.parse(data).hit_objects[0]
+    slider = fosu.parse(data, client="lazer").hit_objects[0]
     point = float(coordinate)
     # Object positions clamp to [0, 512], keeping -0.0; control points do not.
     position = min(max(point, 0.0), 512.0)

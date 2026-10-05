@@ -287,7 +287,8 @@ static void test_negative_zero_times_and_coordinates() {
     CHECK(!std::signbit(
         parse_str("[HitObjects]\n1,2,-0,1,0\n", simd).hit_objects[0].time));
     const auto v128 = parse_str(
-        "osu file format v128\n[HitObjects]\n-0,-0,1,2,0,L|-0:-0,1,10\n", simd);
+        "osu file format v128\n[HitObjects]\n-0,-0,1,2,0,L|-0:-0,1,10\n", simd,
+        kLazer);
     CHECK(std::signbit(v128.hit_objects[0].x));
     CHECK(std::signbit(v128.hit_objects[0].y));
     CHECK(std::signbit(v128.slider_points[0].x));
@@ -325,18 +326,21 @@ static void test_exactly_one_kind_helper_is_true() {
   CHECK_EQ(kind_of(4), '-');
 }
 
-// B-spline degrees belong to lazer-format maps. Older formats reject the line,
-// as stable does; lazer itself (unlike us) reads a B-spline there.
+// B-spline degrees belong to lazer's v128 format. Stable cannot load one in
+// any version. Lazer before v128 rejects the line, where lazer itself (unlike
+// us) reads a B-spline.
 static void test_bspline_degree_needs_lazer_format() {
   for (const auto* engine :
        {&fosu::internal::compiled_engine, &fosu_test::scalar_engine()}) {
-    for (const char* version : {"v14", "v127"}) {
+    for (const char* version : {"v14", "v127", "v128"}) {
       const auto   input = std::string("osu file format ") + version +
                            "\n[HitObjects]\n0,0,0,2,0,B2|100:0|100:100,1,10\n";
       fosu::Parser parser(*engine);
       CHECK(!parser.parse(input));
       CHECK(parser.error().code == fosu::ParseErrorCode::Unloadable);
       CHECK_EQ(parser.error().line, 3u);
+      if (std::string_view(version) == "v128")
+        continue;
       const auto& map = require_parse(parser.parse(input, kLazer));
       CHECK(map.hit_objects.empty());
       CHECK_EQ(map.stats.malformed_lines, 1u);
@@ -345,7 +349,7 @@ static void test_bspline_degree_needs_lazer_format() {
   for (bool simd : {false, true}) {
     const auto v128 = parse_str(
         "osu file format v128\n[HitObjects]\n0,0,0,2,0,B2|100:0|100:100,1,10\n",
-        simd);
+        simd, kLazer);
     CHECK_EQ(v128.hit_objects.size(), 1u);
     CHECK_EQ(v128.slider_segments.size(), 1u);
     if (!v128.slider_segments.empty())

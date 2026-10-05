@@ -259,7 +259,7 @@ ParseError parse_document_as(std::span<const char> input,
   const auto  preamble = parse_preamble<C>(beatmap, begin, end);
   if (preamble.error.code != ParseErrorCode::None)
     return preamble.error;
-  return with_format(beatmap.format_version, [&]<Format F>() {
+  return with_format(beatmap.format_version, C, [&]<Format F>() {
     return parse_sections<F, C>(begin, preamble, end, beatmap, options,
                                 velocity_preset_count, velocity_presets_seen);
   });

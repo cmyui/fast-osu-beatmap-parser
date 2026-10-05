@@ -24,6 +24,8 @@
 #include <fosu/beatmap.h>
 #include <fosu/compiler.h>
 #include <fosu/enums.h>
+#include <fosu/format.h>
+#include <fosu/parse_options.h>
 #include <fosu/slider_path.h>
 #include <fosu/types.h>
 
@@ -489,6 +491,7 @@ inline bool for_each_legacy_segment(std::span<const CurvePoint>   points,
 }
 
 inline f64 slider_distance(const Beatmap&   map,
+                           Client           client,
                            const HitObject& object,
                            Arena*           arena) {
   const auto& slider = map.sliders[object.slider];
@@ -515,7 +518,7 @@ inline f64 slider_distance(const Beatmap&   map,
   const size_t                      count = control_points.size() + 1;
   CurveDistance                     distance;
   const std::span<const CurvePoint> relative_points{points, count};
-  if (map.format_version >= 128) {
+  if (reads_lazer_format(map.format_version, client)) {
     const auto segments =
         map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
     if (!calculate_lazer_slider_distance(relative_points, segments,
@@ -652,6 +655,7 @@ inline bool calculate_lazer_slider_curve(std::span<const CurvePoint>   points,
 }
 
 inline std::optional<SliderPath> calculate_slider_path(const Beatmap&   map,
+                                                       Client           client,
                                                        const HitObject& object,
                                                        Arena* result_arena,
                                                        Arena* scratch_arena) {
@@ -674,7 +678,7 @@ inline std::optional<SliderPath> calculate_slider_path(const Beatmap&   map,
   if (count > 1 && points[0] != points[1])
     curve.append(points[0]);
   const std::span<const CurvePoint> relative_points{points, count};
-  if (map.format_version >= 128) {
+  if (reads_lazer_format(map.format_version, client)) {
     const auto segments =
         map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
     if (!calculate_lazer_slider_curve(relative_points, segments,
@@ -724,6 +728,7 @@ inline std::optional<SliderPath> calculate_slider_path(const Beatmap&   map,
 }
 
 inline bool set_slider_paths(Beatmap& map,
+                             Client   client,
                              Arena*   result_arena,
                              Arena*   scratch_arena) {
   if (map.sliders.empty())
@@ -735,7 +740,8 @@ inline bool set_slider_paths(Beatmap& map,
   for (const auto& object : map.hit_objects) {
     if (object.slider == HitObject::kNoSlider)
       continue;
-    auto path = calculate_slider_path(map, object, result_arena, scratch_arena);
+    auto path =
+        calculate_slider_path(map, client, object, result_arena, scratch_arena);
     if (!path) {
       success = false;
       break;
