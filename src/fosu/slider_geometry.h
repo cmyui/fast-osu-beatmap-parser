@@ -283,6 +283,11 @@ template <typename Curve>
 inline bool circular_arc_distance(std::span<const CurvePoint> points,
                                   Curve&                      distance) {
   const auto a = points[0], b = points[1], c = points[2];
+  // Like osu!'s PathApproximator, leave a (nearly) degenerate triangle to the
+  // Bezier fallback; exactly collinear points have no circle at all.
+  const f32  cross = (b.y - a.y) * (c.x - a.x) - (b.x - a.x) * (c.y - a.y);
+  if (std::abs(cross) <= 1e-3f)
+    return false;
   const f32 divisor = 2 * (a.x * (b - c).y + b.x * (c - a).y + c.x * (a - b).y);
   const auto centre =
       CurvePoint{

@@ -31,10 +31,12 @@ struct HitObject {
 
   static constexpr u32 kNoSlider = 0xFFFFFFFF;
 
+  // Exactly one is true. With several kind bits set, osu! picks circle, then
+  // slider, spinner, and hold; `type` keeps the bits as written.
   bool is_circle() const { return type & 1; }
-  bool is_slider() const { return type & 2; }
-  bool is_spinner() const { return type & 8; }
-  bool is_hold() const { return type & 128; }
+  bool is_slider() const { return (type & 3) == 2; }
+  bool is_spinner() const { return (type & 11) == 8; }
+  bool is_hold() const { return (type & 139) == 128; }
   bool is_new_combo() const { return new_combo; }
 };
 

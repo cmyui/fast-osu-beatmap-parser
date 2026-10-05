@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -1167,6 +1168,24 @@ static void test_repeated_lazer_velocity_presets() {
   }
 }
 
+// lazer reads each preset with .NET double.TryParse: NaN and Infinity in any
+// case, no range limit, and only ASCII spaces around each value.
+static void test_velocity_presets_follow_dotnet_double_parsing() {
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(
+        "osu file format v128\n[Editor]\n"
+        "VelocityPresets:nan, -INFINITY ,1e309,1e-400,\xC2\xA0"
+        "2,Inf,.5\n",
+        simd);
+    CHECK_EQ(map.velocity_presets.size(), 5u);
+    CHECK(std::isnan(map.velocity_presets[0]));
+    CHECK_EQ(map.velocity_presets[1], -std::numeric_limits<double>::infinity());
+    CHECK_EQ(map.velocity_presets[2], std::numeric_limits<double>::infinity());
+    CHECK_EQ(map.velocity_presets[3], 0);
+    CHECK_EQ(map.velocity_presets[4], 0.5);
+  }
+}
+
 static void test_invalid_velocity_presets_are_skipped() {
   for (bool simd : {false, true}) {
     const auto map = parse_str(
@@ -1276,6 +1295,81 @@ static void test_legacy_rules() {
   }
 }
 
+// osu! (lazer) creates a circle, and a spinner once its end time parses,
+// before reading the hit sample. A line rejected for its sample still counts
+// as the previous object: a spinner gives the next object a new combo, a
+// circle does not. Rejected sliders and holds are never created.
+static void test_line_rejected_for_its_sample_counts_for_new_combo() {
+  const std::string header =
+      "osu file format v14\n[Difficulty]\nSliderMultiplier:1\n"
+      "[TimingPoints]\n0,500\n[HitObjects]\n1,2,50,1,0\n";
+  const auto last_new_combo = [&](const char* lines, bool simd) {
+    const auto map = parse_str(header + lines, simd);
+    return map.hit_objects.back().new_combo;
+  };
+  for (bool simd : {false, true}) {
+    CHECK(last_new_combo("0,0,100,8,0,200,bad:0\n1,2,300,1,0\n", simd));
+    CHECK(last_new_combo("0.5,0,100,8,0,200,bad:0\n1,2,300,1,0\n", simd));
+    CHECK(last_new_combo(
+        "0,0,100,8,0,200,bad:0\n[Metadata]\n[HitObjects]\n1,2,300,1,0\n",
+        simd));
+    CHECK(!last_new_combo("0,0,100,8,0,bad\n1,2,300,1,0\n", simd));
+    CHECK(!last_new_combo("0,0,100,8,0,200\n1,2,250,1,0,bad:0\n1,2,300,1,0\n",
+                          simd));
+    CHECK(last_new_combo(
+        "0,0,100,8,0,200\n0,0,250,2,0,L|100:0,1,bad\n1,2,300,1,0\n", simd));
+    CHECK(last_new_combo("0,0,100,8,0,200\nx,2,250,1,0\n1,2,300,1,0\n", simd));
+  }
+}
+
+// Both clients take the version from the first non-blank line, as the whole
+// integer after its last 'v'.
+static void test_format_version_comes_from_the_first_line() {
+  struct Case {
+    const char* text;
+    int32_t     version;
+  };
+  const Case cases[] = {
+      {"osu file format v5v4\n", 4},
+      {"osu file format v 4\n", 4},
+      {"osu file format v+4\n", 4},
+      {"osu file format v-1\n", -1},
+      {"// note\nosu file format v4\n", 14},
+      {"[General]\nosu file format v4\n", 14},
+  };
+  for (bool simd : {false, true})
+    for (const auto& test : cases)
+      CHECK_EQ(parse_str(test.text, simd).format_version, test.version);
+}
+
+// Like stable, only whole-line comments are skipped. lazer also strips a
+// trailing "//..." outside [Metadata]; that is not supported (yet).
+static void test_trailing_comments_are_not_stripped() {
+  for (bool simd : {false, true}) {
+    const auto map = parse_str(
+        "osu file format v14\n[General]\nAudioFilename: a//b.mp3\n"
+        "[Metadata]\nTitle:a//b\n[HitObjects]\n1,2,3,1,0//x\n"
+        "1,2,4,1,0,0:0:0:0:a//b.wav\n",
+        simd);
+    CHECK_EQ(map.audio_filename, "a//b.mp3");
+    CHECK_EQ(map.title, "a//b");
+    CHECK_EQ(map.hit_objects.size(), 1u);
+    CHECK_EQ(map.hit_objects[0].hit_sample, "0:0:0:0:a//b.wav");
+    CHECK_EQ(map.stats.malformed_lines, 1u);
+  }
+}
+
+static void test_break_ignores_fields_after_its_end() {
+  for (bool simd : {false, true}) {
+    const auto map =
+        parse_str("osu file format v14\n[Events]\n2,100,200,junk\n", simd);
+    CHECK_EQ(map.breaks.size(), 1u);
+    CHECK_EQ(map.breaks[0].start, 100);
+    CHECK_EQ(map.breaks[0].end, 200);
+    CHECK_EQ(map.stats.malformed_lines, 0u);
+  }
+}
+
 // Only -1 stands for a missing ID or preview time.
 static void test_explicit_zero_and_negative_ids_are_kept() {
   for (bool simd : {false, true}) {
@@ -1322,6 +1416,10 @@ static void test_time_sort_keeps_slider_data_with_its_object() {
 }
 
 int main() {
+  test_line_rejected_for_its_sample_counts_for_new_combo();
+  test_format_version_comes_from_the_first_line();
+  test_trailing_comments_are_not_stripped();
+  test_break_ignores_fields_after_its_end();
   test_explicit_zero_and_negative_ids_are_kept();
   test_metadata_keeps_raw_bytes();
   test_time_sort_keeps_slider_data_with_its_object();
@@ -1330,6 +1428,7 @@ int main() {
   test_header_field_failures_preserve_values();
   test_repeated_section_bodies();
   test_repeated_lazer_velocity_presets();
+  test_velocity_presets_follow_dotnet_double_parsing();
   test_invalid_velocity_presets_are_skipped();
   test_enum_contracts();
   test_byte_scan_boundaries<','>();
