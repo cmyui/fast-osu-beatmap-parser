@@ -107,6 +107,8 @@ std::optional<HitObject> parse_hitobject_line_scalar(
   if (next == p || (next < line_end && *next != ','))
     return std::nullopt;
 
+  x = std::clamp(x, 0.0f, 512.0f);
+  y = std::clamp(y, 0.0f, 512.0f);
   if constexpr (!F.lazer) {
     x = static_cast<f32>(static_cast<i32>(x));
     y = static_cast<f32>(static_cast<i32>(y));
@@ -361,6 +363,8 @@ FOSU_NOINLINE const char* parse_hitobjects_fixed_time(
     const u32   first_ending = first_line_end32(ascii);
     const char* line_end =
         first_ending < 32 ? p + first_ending : find_line_end(p + 32, file_end);
+    fields[0] = std::clamp(fields[0], 0u, 512u);
+    fields[1] = std::clamp(fields[1], 0u, 512u);
     ++fast_lines;
     accept_hitobject<F>(beatmap, counts, constants, preceding_was_spinner,
                         HitObject{

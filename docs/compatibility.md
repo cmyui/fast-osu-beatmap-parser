@@ -19,7 +19,9 @@ retained separately from effective combo flags.
   official clamps; spinners are centred at (256, 192). Pre-v5 timestamps use
   the official +24 ms adjustment, including its distinct hold-end ordering.
 - Coordinate acceptance follows the official decoder's float32 conversion and
-  ±131,072 bound; accepted coordinates truncate toward zero. Timestamps,
+  ±131,072 bound. Accepted object positions clamp to [0, 512] on both axes,
+  as in osu!stable and lazer; pre-v128 positions then truncate toward zero.
+  Slider control points are not clamped. Timestamps,
   timing-point beat lengths and double metadata use its ±2,147,483,647 bound.
   Slider lengths use ±131,072. Out-of-range fields are rejected, not saturated.
 - Integer fields use the official symmetric ±2,147,483,647 range, even when
@@ -106,12 +108,12 @@ timing and curve distance; resolved samples, path-position queries and ruleset
 processing remain outside decoding.
 
 The reference is the unmodified open-source legacy decoder from osu! at
-[`48c4800e3ae4ee752452cdff83bd3787ccf3105f`](https://github.com/ppy/osu/tree/48c4800e3ae4ee752452cdff83bd3787ccf3105f).
+[`fc790c78c4b393f4a0101b9ad54cb3b4391037cd`](https://github.com/ppy/osu/tree/fc790c78c4b393f4a0101b9ad54cb3b4391037cd).
 This is lazer's implementation of legacy `.osu` decoding, not an execution of
 the closed-source stable client. Its
-[numeric helpers](https://github.com/ppy/osu/blob/48c4800e3ae4ee752452cdff83bd3787ccf3105f/osu.Game/Beatmaps/Formats/Parsing.cs),
-[legacy decoder](https://github.com/ppy/osu/blob/48c4800e3ae4ee752452cdff83bd3787ccf3105f/osu.Game/Beatmaps/Formats/LegacyBeatmapDecoder.cs)
-and [object decoder](https://github.com/ppy/osu/blob/48c4800e3ae4ee752452cdff83bd3787ccf3105f/osu.Game/Rulesets/Objects/Legacy/ConvertHitObjectParser.cs)
+[numeric helpers](https://github.com/ppy/osu/blob/fc790c78c4b393f4a0101b9ad54cb3b4391037cd/osu.Game/Beatmaps/Formats/Parsing.cs),
+[legacy decoder](https://github.com/ppy/osu/blob/fc790c78c4b393f4a0101b9ad54cb3b4391037cd/osu.Game/Beatmaps/Formats/LegacyBeatmapDecoder.cs)
+and [object decoder](https://github.com/ppy/osu/blob/fc790c78c4b393f4a0101b9ad54cb3b4391037cd/osu.Game/Rulesets/Objects/Legacy/ConvertHitObjectParser.cs)
 define the tested numeric limits and inherited-NaN behavior. Record acceptance
 also follows the explicit enum restrictions above.
 
@@ -122,7 +124,7 @@ the rejected line. Callers decide whether a partial result is useful.
 
 The executable reference harness records exceptions from the official decoder
 and lets its own outer error handler decide whether decoding continues. Run it
-with .NET 8 and an interpreter with fosu installed:
+with .NET 10 and an interpreter with fosu installed:
 
 ```sh
 sh tests/reference/official/build.sh
