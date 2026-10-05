@@ -178,13 +178,13 @@ static void test_bspline_degree_shapes_the_curve() {
     CHECK(linear.points == (std::vector<fosu::PathPoint>{
                                {0, 0}, {100, 0}, {200, 50}, {300, 0}}));
     // Higher degrees curve between them, even with distant points.
-    const auto far = path_as(
+    const auto distant = path_as(
         "B8|10000:0|-10000:10000|10000:-10000|-10000:0|10000:10000|"
         "-10000:-10000|10000:0|0:10000,1,500",
         simd, 128);
-    CHECK_EQ(far.distance, 500);
-    CHECK_NEAR(far.points.back().x, 499.805969, 1e-3);
-    CHECK_NEAR(far.points.back().y, 11.9145603, 1e-3);
+    CHECK_EQ(distant.distance, 500);
+    CHECK_NEAR(distant.points.back().x, 499.805969, 1e-3);
+    CHECK_NEAR(distant.points.back().y, 11.9145603, 1e-3);
   }
 }
 
