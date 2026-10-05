@@ -659,6 +659,64 @@ static void test_omitted_sections_use_defaults() {
   }
 }
 
+// A document that sets nothing gets osu!'s defaults, stable's where stable and
+// lazer differ (Countdown). Without a version line, both use version 14.
+static void test_unset_fields_use_osu_defaults() {
+  for (const std::string input : {"osu file format v14\n", "[General]\n"}) {
+    for (bool simd : {false, true}) {
+      const auto bm = parse_str(input, simd);
+      CHECK_EQ(bm.format_version, 14);
+
+      CHECK(bm.audio_filename.empty());
+      CHECK_EQ(bm.audio_lead_in, 0);
+      CHECK_EQ(bm.preview_time, -1);
+      CHECK_EQ(bm.countdown, 1);
+      CHECK(bm.sample_set == fosu::SampleSet::Normal);
+      CHECK_EQ(bm.sample_volume, 100);
+      CHECK_EQ(bm.stack_leniency, double(0.7f));
+      CHECK_EQ(bm.mode, 0);
+      CHECK(!bm.letterbox_in_breaks && !bm.widescreen_storyboard);
+      CHECK(!bm.epilepsy_warning && !bm.special_style);
+      CHECK(!bm.use_skin_sprites && !bm.samples_match_playback_rate);
+      CHECK_EQ(bm.countdown_offset, 0);
+      CHECK(bm.overlay_position.empty() && bm.skin_preference.empty());
+
+      CHECK(bm.bookmarks.empty());
+      CHECK_EQ(bm.distance_spacing, 1);
+      CHECK_EQ(bm.beat_divisor, 4);
+      CHECK_EQ(bm.grid_size, 0);
+      CHECK_EQ(bm.timeline_zoom, 1);
+      CHECK(bm.velocity_presets.size() == 3 && bm.velocity_presets[0] == 0.75 &&
+            bm.velocity_presets[1] == 1 && bm.velocity_presets[2] == 1.5);
+
+      CHECK(bm.title.empty() && bm.title_unicode.empty());
+      CHECK(bm.artist.empty() && bm.artist_unicode.empty());
+      CHECK(bm.creator.empty() && bm.version.empty());
+      CHECK(bm.source.empty() && bm.tags.empty());
+      CHECK_EQ(bm.beatmap_id, -1);
+      CHECK_EQ(bm.beatmap_set_id, -1);
+
+      CHECK_EQ(bm.hp, 5);
+      CHECK_EQ(bm.cs, 5);
+      CHECK_EQ(bm.od, 5);
+      CHECK_EQ(bm.ar, 5);
+      CHECK_EQ(bm.slider_multiplier, 1.4);
+      CHECK_EQ(bm.slider_tick_rate, 1);
+
+      CHECK(bm.background.empty() && bm.video.empty() && bm.breaks.empty());
+      CHECK(bm.timing_points.empty() && bm.combo_colours.empty());
+      CHECK(bm.hit_objects.empty() && bm.sliders.empty());
+      CHECK(bm.slider_segments.empty() && bm.slider_points.empty());
+      CHECK(bm.slider_paths.empty() && bm.slider_events.empty());
+      CHECK(bm.stacking.empty());
+      CHECK_EQ(bm.stats.fast_path_lines, 0u);
+      CHECK_EQ(bm.stats.slow_path_lines, 0u);
+      CHECK_EQ(bm.stats.malformed_lines, 0u);
+      CHECK_EQ(bm.stats.storyboard_lines, 0u);
+    }
+  }
+}
+
 static void test_difficulty_selection_skips_other_sections() {
   auto input = std::string(
       "[Metadata]\nTitle:Unrequested\n"
@@ -1251,6 +1309,7 @@ int main() {
   test_invalid_byte_replaces_hitobject_lf();
   test_long_timing_offsets();
   test_omitted_sections_use_defaults();
+  test_unset_fields_use_osu_defaults();
   test_difficulty_selection_skips_other_sections();
   test_metadata_and_difficulty_selection();
   test_hitobject_selection_skips_preceding_sections();

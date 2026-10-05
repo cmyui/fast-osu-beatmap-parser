@@ -138,14 +138,8 @@ void parse_sections(const char*  p,
 inline void parse_document(std::span<const char> input,
                            Beatmap&              beatmap,
                            ParseOptions          options) noexcept {
-  size_t velocity_preset_count = 0;
-  bool   velocity_presets_seen = false;
-  if (input.empty()) {
-    if ((options.sections & kSectionEditor) &&
-        beatmap.velocity_presets.size() >= 3)
-      set_default_velocity_presets(beatmap);
-    return;
-  }
+  size_t      velocity_preset_count = 0;
+  bool        velocity_presets_seen = false;
   const char* end = input.data() + input.size();
   const char* p = parse_preamble(beatmap, input.data(), end);
   with_format(beatmap.format_version, [&]<Format F>() {

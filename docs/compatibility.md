@@ -40,6 +40,15 @@ retained separately from effective combo flags.
   mania circle size is a key count bounded to 1–18. Omitted editor distance
   spacing is 1 and grid size is 0. Metadata keys and text values trim .NET
   whitespace, including its Unicode whitespace characters.
+- Omitted fields take osu!'s defaults: HP, CS, OD and AR 5 (a missing AR
+  follows OD), slider multiplier 1.4, tick rate 1, stack leniency 0.7, sample
+  volume 100, and format version 14 without an `osu file format` line.
+  osu!stable and lazer differ only in presentation and editor defaults. For
+  presentation fosu follows stable: an omitted `Countdown` is 1 (normal), where
+  lazer uses 0 (none). A missing ID or preview time is -1, exposed as `None` in
+  Python; stable stores a missing `BeatmapID` as 0. Editor settings and velocity
+  presets (0.75, 1, 1.5) follow lazer: stable keeps editor settings as user
+  preferences and has no velocity presets.
 - Decimal and exponent conversion is bounded by the field's logical end and
   independent of the process locale. Large significands use a correctly rounded
   fallback rather than rounding an intermediate integer. Overflow is rejected;
