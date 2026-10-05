@@ -70,3 +70,31 @@ Selection happens once from `FOSU_BACKEND=auto|scalar|avx2|neon`; an unavailable
 explicit request returns null. Keep the library loaded while using its engine
 or parsers. Headers and runtime must come from the same revision; there is no
 stable binary ABI. See [build instructions](build.md).
+
+## C and C++98 callers
+
+FOSU itself still builds with C++20. Older callers include only `fosu/c_api.h`
+and link the native-install `fosu::c` CMake target, not the Python wheel. It
+exposes the same sections,
+mods and optional calculations through C-compatible options and records:
+
+```cpp
+#include <fosu/c_api.h>
+
+fosu_c_handle* parser = fosu_c_new();
+if (!parser) return 1;
+int status = fosu_c_parse_file(parser, "map.osu", NULL);
+const fosu_c_view* map = fosu_c_get_view(parser);
+if (status != FOSU_C_OK || !map) { fosu_c_free(parser); return 1; }
+// map->header.title, map->hit_objects, map->timing_points, ...
+fosu_c_free(parser);
+```
+
+`NULL` options mean all sections with derived calculations disabled. For custom
+options, set `sections` explicitly; zero selects no sections. Strings carry a
+pointer and byte length, not a terminating null byte. The view and everything it
+references are valid only until the next parse attempt on that handle or
+`fosu_c_free`. Separate handles may be used concurrently; do not parse the same
+handle concurrently. A failed parse clears its view, and `fosu_c_last_error`
+reports the status, input offset and OS error. The C ABI has its own version
+number and is also subject to this repo's active-development breakage policy.
