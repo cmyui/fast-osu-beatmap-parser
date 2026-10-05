@@ -53,19 +53,23 @@ inline void apply_lazer_defaults(Beatmap& beatmap) {
 // needs to start with "osu file format"; lazer reads it with its ParseInt.
 template <Client C>
 bool parse_format_version(Beatmap& beatmap, std::string_view line) {
-  if (!line.starts_with(C == Client::Stable ? "osu file format"
-                                            : "osu file format v"))
+  constexpr std::string_view kMagic =
+      C == Client::Stable ? "osu file format" : "osu file format v";
+  if (!line.starts_with(kMagic))
     return true;
-  const size_t v = line.rfind('v');
-  const char*  number = line.data() + (v == std::string_view::npos ? 0 : v + 1);
-  const char*  end = line.data() + line.size();
-  i64          value;
-  const char*  next;
+  // Without a 'v', stable parses the whole line, which fails.
+  const size_t last_v = line.rfind('v');
+  const char*  number =
+      last_v == std::string_view::npos ? line.data() : line.data() + last_v + 1;
+  const char* end = line.data() + line.size();
+  i64         value;
+  const char* next;
   if constexpr (C == Client::Stable) {
     const char* first = skip_numeric_space(number, end);
-    next = skip_numeric_space(parse_i64(first, end, value), end);
-    if (next == first || value < INT32_MIN || value > INT32_MAX)
+    const char* digits_end = parse_i64(first, end, value);
+    if (digits_end == first || value < INT32_MIN || value > INT32_MAX)
       return false;
+    next = skip_numeric_space(digits_end, end);
   } else {
     next = parse_osu_int(number, end, value);
     if (next == number)
@@ -88,8 +92,11 @@ inline const char* skip_bom(const char* p, const char* end) {
 // "\r\n", "\n" and a lone "\r" each end a line.
 inline u32 line_number(const char* begin, const char* line) {
   u32 number = 1;
-  for (const char* p = begin; p < line; ++p)
-    number += *p == '\n' || (*p == '\r' && (p + 1 == line || p[1] != '\n'));
+  for (const char* p = begin; p < line; ++p) {
+    const bool crlf = *p == '\r' && p + 1 < line && p[1] == '\n';
+    if (*p == '\n' || (*p == '\r' && !crlf))
+      ++number;
+  }
   return number;
 }
 

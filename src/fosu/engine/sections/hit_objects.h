@@ -214,8 +214,9 @@ FOSU_NOINLINE void reject_hitobject_line(Beatmap&         beatmap,
 // those indented with ' ' or '_'.
 template <Client C>
 bool ignored_hitobject_line(const char* p, const char* line_end) {
-  return (C == Client::Stable && (*p == ' ' || *p == '_')) ||
-         ignored_line(p, line_end);
+  if (C == Client::Stable && (*p == ' ' || *p == '_'))
+    return true;
+  return ignored_line(p, line_end);
 }
 
 // Interpret a successfully decoded record of `kind` before publishing it to

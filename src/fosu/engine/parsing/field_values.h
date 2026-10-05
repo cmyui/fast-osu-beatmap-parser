@@ -47,10 +47,12 @@ inline std::string_view without_group_separators(std::string_view input,
   size_t length = 0;
   bool   digits = false, integer_part = true;
   for (const char c : input) {
-    if (c == ',' && digits && integer_part)
+    if (is_digit(c))
+      digits = true;
+    else if (c == '.' || c == 'e' || c == 'E')
+      integer_part = false;
+    else if (c == ',' && digits && integer_part)
       continue;
-    digits |= is_digit(c);
-    integer_part &= c != '.' && c != 'e' && c != 'E';
     buffer[length++] = c;
   }
   std::fill(buffer.begin() + length, buffer.end(), '\0');

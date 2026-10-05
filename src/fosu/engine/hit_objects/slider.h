@@ -53,6 +53,13 @@ template <Client C>
 inline constexpr f64 kSliderLengthLimit =
     C == Client::Lazer ? 131072.0 : std::numeric_limits<f64>::max();
 
+// Whether the token after the '|' at `p` is a single character.
+inline bool one_character_token(const char* p, const char* end) {
+  if (p + 1 >= end || p[1] == '|' || p[1] == ',')
+    return false;
+  return p + 2 == end || p[2] == '|' || p[2] == ',';
+}
+
 inline bool is_ascii_letter(char value) {
   return static_cast<u8>((value | 0x20) - 'a') < 26;
 }
@@ -271,14 +278,18 @@ FOSU_NOINLINE bool parse_slider_as(
   const size_t   slider_segment_begin = counts.slider_segments;
 
   constexpr bool kSegments = C == Client::Lazer;
-  // Both clients read a one-letter type other than B, C, L or P as Catmull.
-  // stable also ignores any other one-character marker, keeping its default
-  // Catmull; lazer reads one as a point, which fails.
   const char     first_token = *p++;
   const auto     known_curve_type = parse_curve_type(first_token);
-  if (!known_curve_type && !is_ascii_letter(first_token) &&
-      (C == Client::Lazer || first_token == '|' || first_token == ','))
-    return false;
+  if (!known_curve_type && !is_ascii_letter(first_token)) {
+    // Lazer reads any other character as a point, which fails.
+    if constexpr (C == Client::Lazer)
+      return false;
+    // stable ignores it as a marker, unless the token is empty.
+    if (first_token == '|' || first_token == ',')
+      return false;
+  }
+  // Both clients read a letter other than B, C, L or P as Catmull, which is
+  // also stable's type when it ignores a marker.
   const CurveType first_curve_type =
       known_curve_type.value_or(CurveType::Catmull);
 
@@ -313,8 +324,7 @@ FOSU_NOINLINE bool parse_slider_as(
 #endif
 
     if constexpr (!kSegments) {
-      if (p + 1 < end && p[1] != '|' && p[1] != ',' &&
-          (p + 2 == end || p[2] == '|' || p[2] == ',')) {
+      if (one_character_token(p, end)) {
         if (const auto type = parse_curve_type(p[1]))
           current_curve_type = *type;
         p += 2;

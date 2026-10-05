@@ -15,27 +15,35 @@
 
 namespace fosu::internal {
 
-// stable reads HP, CS, OD and AR before v13 with byte.Parse: an integer in
-// [0, 255]. It clamps all of them to [0, 10] as it reads them, but a v13+
-// circle size to the key range in mania. Lazer clamps CS after every section,
-// with the final mode; see parse_document.
+// HP, CS, OD or AR, clamped to [0, 10] except as noted.
 template <Client C, bool CircleSize = false>
 std::optional<f64> parse_difficulty_rating(const BeatmapHeader& header,
                                            std::string_view     input) {
-  std::optional<f64> value;
-  if (C == Client::Stable && header.format_version < 13) {
-    if (const auto byte = parse_field_integer(input);
-        byte && *byte >= 0 && *byte <= 255)
-      value = *byte;
+  if constexpr (C == Client::Lazer) {
+    const auto value = parse_field_float(input);
+    // Lazer clamps CS after every section, with the final mode; see
+    // parse_document.
+    if (!value || CircleSize)
+      return value;
+    return std::clamp(*value, 0.0, 10.0);
   } else {
-    value = parse_field_float(input);
+    // Before v13, stable reads ratings with byte.Parse: an integer in
+    // [0, 255].
+    if (header.format_version < 13) {
+      const auto byte = parse_field_integer(input);
+      if (!byte || *byte < 0 || *byte > 255)
+        return std::nullopt;
+      return std::clamp(static_cast<f64>(*byte), 0.0, 10.0);
+    }
+    const auto value = parse_field_float(input);
+    if (!value)
+      return std::nullopt;
+    // stable clamps as it reads, so CS gets the mania key range only when
+    // [General] already set mania.
+    if (CircleSize && header.mode == 3)
+      return std::clamp(*value, 1.0, 18.0);
+    return std::clamp(*value, 0.0, 10.0);
   }
-  if (!value || (C == Client::Lazer && CircleSize))
-    return value;
-  if (C == Client::Stable && CircleSize && header.mode == 3 &&
-      header.format_version >= 13)
-    return std::clamp(*value, 1.0, 18.0);
-  return std::clamp(*value, 0.0, 10.0);
 }
 
 template <Client C, auto Member, bool CircleSize = false>

@@ -866,10 +866,12 @@ PyObject* parser_parse_impl(PyObject* object, PyObject* args, bool file) {
                         &calculate_slider_events, &apply_stacking, &mods,
                         &client))
     return nullptr;
+  const bool known_client = client == static_cast<int>(fosu::Client::Stable) ||
+                            client == static_cast<int>(fosu::Client::Lazer);
   if (sections < 0 ||
       (static_cast<unsigned long>(sections) &
        ~static_cast<unsigned long>(fosu::kAllSections)) ||
-      mods > UINT32_MAX || client < 0 || client > 1) {
+      mods > UINT32_MAX || !known_client) {
     PyErr_SetString(PyExc_ValueError, "invalid parse options");
     return nullptr;
   }

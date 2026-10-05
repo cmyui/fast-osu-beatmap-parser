@@ -600,7 +600,9 @@ inline bool calculate_legacy_slider_curve(std::span<const CurvePoint> points,
       continue;
     }
     if (i == points.size() || i - begin > 1) {
-      curve.first_in_segment = i - begin > 1 || (continues_path && !begin);
+      const bool several_points = i - begin > 1;
+      const bool after_previous_segment = continues_path && begin == 0;
+      curve.first_in_segment = several_points || after_previous_segment;
       if (!approximate_curve_segment(points.subspan(begin, i - begin), type,
                                      curve, arena) ||
           curve.failed) {
