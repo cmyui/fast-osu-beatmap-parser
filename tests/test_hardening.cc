@@ -24,18 +24,22 @@ static fosu::Beatmap must_parse(fosu::Parser&      parser,
   return *parsed;
 }
 
+// The engines agree on every result, and on which line, if any, makes stable
+// refuse the map.
 static void check(const std::string& text) {
   auto         input = std::string(text);
   fosu::Parser scalar_parser(fosu_test::scalar_engine());
   fosu::Parser simd_parser;
-  auto         scalar = must_parse(scalar_parser, input);
-  auto         simd = must_parse(simd_parser, input);
+  auto         scalar = must_parse(scalar_parser, input, kLazer);
+  auto         simd = must_parse(simd_parser, input, kLazer);
   scalar.stats.fast_path_lines = scalar.stats.slow_path_lines = 0;
   simd.stats.fast_path_lines = simd.stats.slow_path_lines = 0;
   std::string a, b;
   fosu_dump::dump(scalar, a);
   fosu_dump::dump(simd, b);
   assert(a == b);
+  assert(!scalar_parser.parse(input) == !simd_parser.parse(input));
+  assert(scalar_parser.error().line == simd_parser.error().line);
 }
 
 static void test_short_sample_shape() {
@@ -93,7 +97,7 @@ static void test_combo_state_across_malformed_lines() {
         "[Metadata]\nTitle:gap\n[HitObjects]\n"
         "100,100,200,1,0\n101,100,201,1,0\n"
         "1.5,2,250,8,0,300\n1,2,310,1,0\n");
-    auto map = must_parse(combo_parser, input);
+    auto map = must_parse(combo_parser, input, kLazer);
     assert(map.stats.malformed_lines == 1);
     assert(map.hit_objects.size() == 5);
     assert(map.hit_objects[1].new_combo);
@@ -174,8 +178,9 @@ static void test_near_integer_decimals() {
   for (const std::string decimal :
        {"111.99999999999987", "999.9999999999999", "99999.9999999999999"}) {
     const std::string text =
-        "[TimingPoints]\n0,100.0000000000000,4,2,1,100,1,0\n1," + decimal +
-        ",4,2,1,100,1,0\n[HitObjects]\n1,2,3,2,0,B|1:2,1," + decimal;
+        "osu file format v14\n[TimingPoints]\n"
+        "0,100.0000000000000,4,2,1,100,1,0\n1," +
+        decimal + ",4,2,1,100,1,0\n[HitObjects]\n1,2,3,2,0,B|1:2,1," + decimal;
     check(text);
     auto         input = std::string(text);
     auto         map = must_parse(parser, input);
@@ -196,7 +201,7 @@ static void test_unusual_numeric_values() {
         "[HitObjects]\n256.5,192,1000.5,1,0\n1,2,2000.25,8,0,3000.75\n"
         "1,2,4000,2,0,B|1.5:2.5,1,2.5e2\n"
         "[Events]\n2,1e309,100\n2,1.25,9.75\n");
-    auto m = must_parse(parser, input);
+    auto m = must_parse(parser, input, kLazer);
     assert(m.title == "real" && m.beatmap_id == -1);
     assert(m.ar == 5 && m.stats.malformed_lines == 4);
     assert(m.timing_points.size() == 2 &&

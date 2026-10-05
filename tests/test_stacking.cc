@@ -163,8 +163,9 @@ static void test_stacked_slider_moves_its_points_but_not_its_path() {
 
 static void test_stacking_applies_only_to_osu_standard() {
   for (int mode : {1, 2, 3}) {
-    const auto input = "[General]\nMode:" + std::to_string(mode) +
-                       "\n[HitObjects]\n100,100,0,1,0\n100,100,1,1,0\n";
+    const auto input =
+        "osu file format v14\n[General]\nMode:" + std::to_string(mode) +
+        "\n[HitObjects]\n100,100,0,1,0\n100,100,1,1,0\n";
     for (bool simd : {false, true}) {
       const auto map = parse_str(input, simd, kStacking);
       CHECK(map.stacking.empty());

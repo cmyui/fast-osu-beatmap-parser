@@ -2,6 +2,7 @@
 
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/primitives/byte_scan.h>
+#include <fosu/parse_options.h>
 
 #include <cstddef>
 #include <string_view>
@@ -41,10 +42,15 @@ inline Line read_line(const char* p, const char* end) {
           after_line_ending(line_end, end)};
 }
 
-// A stray '[' at the start of a malformed record must not end its section.
+// osu!stable reads any line starting with '[' as a section header, even one
+// that names no section. Lazer also requires the closing ']', so a stray '['
+// at the start of a malformed record does not end its section.
+template <Client C>
 inline bool section_header_line(const char* p, const char* end) {
   if (p == end || *p != '[')
     return false;
+  if constexpr (C == Client::Stable)
+    return true;
   while (end > p && (end[-1] == ' ' || end[-1] == '\t'))
     --end;
   return end - p >= 2 && end[-1] == ']';
@@ -52,7 +58,7 @@ inline bool section_header_line(const char* p, const char* end) {
 
 // Consume a section body, leaving its next header for the document parser.
 // Specialized section loops can fuse framing with record parsing instead.
-template <typename ParseLine>
+template <Client C, typename ParseLine>
 inline const char* for_each_section_line(const char* p,
                                          const char* end,
                                          ParseLine   parse_line) {
@@ -62,7 +68,7 @@ inline const char* for_each_section_line(const char* p,
       continue;
     }
     const auto line = read_line(p, end);
-    if (section_header_line(p, p + line.text.size()))
+    if (section_header_line<C>(p, p + line.text.size()))
       break;
     if (!ignored_line(p, p + line.text.size()))
       parse_line(line.text);
@@ -71,13 +77,15 @@ inline const char* for_each_section_line(const char* p,
   return p;
 }
 
+template <Client C>
 inline const char* skip_section(const char* p, const char* end) {
   const char* header = find_byte<'['>(p, end);
-  // A bracket inside a value or an incomplete header is not a section.
+  // A bracket inside a value is not a section, nor for lazer is an
+  // incomplete header.
   while (header < end) {
     if (header == p || header[-1] == '\n' || header[-1] == '\r') {
       const auto line = read_line(header, end);
-      if (section_header_line(header, header + line.text.size()))
+      if (section_header_line<C>(header, header + line.text.size()))
         return header;
     }
     header = find_byte<'['>(header + 1, end);

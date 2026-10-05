@@ -37,10 +37,17 @@ memoryview, and arrays. Non-bytes buffers are copied to an immutable snapshot;
 encode text explicitly.
 
 File failures raise `OSError`; other parse failures, including invalid
-options and inputs too large to allocate, raise `ValueError`. Native parsing
-releases the GIL; Python value construction holds it. Malformed records are
-skipped and counted in `beatmap.stats.malformed_lines`; success does not
-certify playability.
+options and inputs too large to allocate, raise `ValueError`. A map the target
+client would not load raises `fosu.MapLoadError`, a `ValueError` whose `line`
+is the 1-based line responsible. Native parsing releases the GIL; Python value
+construction holds it. Other malformed records are skipped and counted in
+`beatmap.stats.malformed_lines`; success does not certify playability.
+
+Every parse function takes keyword-only `client`: `"stable"`, the default, or
+`"lazer"`, whose behaviour to follow where the two read a map differently. For
+example, stable refuses a map with a hit object it cannot read, which lazer
+skips, and reads the version from the first line only. See
+[the target client rules](compatibility.md#target-client).
 
 `parse` and `parse_file` allocate native memory for each call. To parse many
 maps, reuse a `fosu.Parser`, which keeps that memory until the parser is
@@ -119,11 +126,12 @@ Shared fields use C++ names. Important Python-specific behavior:
   Other object types still have numeric endpoints. Omitted sections use their default settings.
   Hit samples and slider edge fields remain text.
 - Slider `control_points` includes the head position, unlike the native point
-  range. `curve_segments` preserves modern segment boundaries and explicit
-  B-spline degrees. `slides=2` means forward and back.
+  range. `curve_segments` preserves lazer mode's segment boundaries and
+  explicit B-spline degrees; stable mode has none. `slides=2` means forward and back.
 - `tag_list` and `bookmark_list` are parsed conveniences alongside the
   `tags` and `bookmarks` text fields.
-- IDs and preview time map the `-1` sentinel to `None`.
+- IDs and preview time map the `-1` sentinel to `None`. A map without a
+  `BeatmapID` has `0` in stable mode, as in stable, and `None` in lazer mode.
 - Strings decode with UTF-8 `surrogateescape`, preserving undecodable bytes.
 - Inherited timing-point NaN beat lengths are preserved; consumers must not
   treat them as ordinary slider velocities.

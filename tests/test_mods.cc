@@ -33,7 +33,8 @@ static void test_hard_rock_raises_difficulty_and_flips_vertically() {
 
 static void test_hard_rock_caps_difficulty_at_10() {
   const std::string input =
-      "[General]\nMode:0\n[Difficulty]\nHPDrainRate:8\nCircleSize:8\n"
+      "osu file format "
+      "v14\n[General]\nMode:0\n[Difficulty]\nHPDrainRate:8\nCircleSize:8\n"
       "OverallDifficulty:8\nApproachRate:8\n";
   for (bool simd : {false, true}) {
     const auto map = parse_str(input, simd, {.mods = Mods::HardRock});
@@ -46,7 +47,8 @@ static void test_hard_rock_caps_difficulty_at_10() {
 
 static void test_easy_halves_difficulty() {
   const std::string input =
-      "[General]\nMode:0\n[Difficulty]\nHPDrainRate:4\nCircleSize:4\n"
+      "osu file format "
+      "v14\n[General]\nMode:0\n[Difficulty]\nHPDrainRate:4\nCircleSize:4\n"
       "OverallDifficulty:4\nApproachRate:4\nSliderMultiplier:1\n";
   for (bool simd : {false, true}) {
     const auto map = parse_str(input, simd, {.mods = Mods::Easy});
@@ -62,7 +64,8 @@ static void test_easy_halves_difficulty() {
 // slider velocity instead of flipping positions.
 static void test_taiko_difficulty_mods_follow_taiko_rules() {
   const std::string input =
-      "[General]\nMode:1\n[Difficulty]\nHPDrainRate:4\nCircleSize:4\n"
+      "osu file format "
+      "v14\n[General]\nMode:1\n[Difficulty]\nHPDrainRate:4\nCircleSize:4\n"
       "OverallDifficulty:4\nApproachRate:4\nSliderMultiplier:1\n"
       "[HitObjects]\n100,100,1000,1,0\n";
   for (bool simd : {false, true}) {
@@ -82,8 +85,8 @@ static void test_taiko_difficulty_mods_follow_taiko_rules() {
 
 static void test_catch_and_mania_reject_difficulty_mods() {
   for (const char* mode : {"2", "3"}) {
-    const auto input = std::string("[General]\nMode:") + mode +
-                       "\n[Difficulty]\nCircleSize:4\n";
+    const auto input = std::string("osu file format v14\n[General]\nMode:") +
+                       mode + "\n[Difficulty]\nCircleSize:4\n";
     for (const auto* engine :
          {&fosu::internal::compiled_engine, &fosu_test::scalar_engine()}) {
       fosu::Parser parser(*engine);
@@ -102,10 +105,11 @@ static void test_rate_mods_scale_every_time() {
     for (int mode : {0, 1, 2, 3}) {
       const auto object = mode == 3 ? "0,0,900,128,0,1500:0:0:0:0:"
                                     : "0,0,900,8,0,1500,0:0:0:0:";
-      const auto input = "[General]\nMode:" + std::to_string(mode) +
-                         "\n[Events]\n2,1500,2000\n[TimingPoints]\n300,600\n"
-                         "600,-50,4,0,0,100,0,0\n[HitObjects]\n" +
-                         object + "\n";
+      const auto input =
+          "osu file format v14\n[General]\nMode:" + std::to_string(mode) +
+          "\n[Events]\n2,1500,2000\n[TimingPoints]\n300,600\n"
+          "600,-50,4,0,0,100,0,0\n[HitObjects]\n" +
+          object + "\n";
       for (bool simd : {false, true}) {
         const auto map = parse_str(input, simd, {.mods = mods});
         CHECK_EQ(map.hit_objects[0].time, 900 / rate);
@@ -143,7 +147,9 @@ static void test_rate_mods_scale_calculated_slider_values() {
 
 static void test_invalid_mod_options_fail_the_parse() {
   const std::string input =
-      "[General]\nMode:0\n[Difficulty]\nCircleSize:4\n[HitObjects]\n0,0,0,1,"
+      "osu file format "
+      "v14\n[General]\nMode:0\n[Difficulty]\nCircleSize:4\n[HitObjects]\n0,0,0,"
+      "1,"
       "0\n";
   for (const auto* engine :
        {&fosu::internal::compiled_engine, &fosu_test::scalar_engine()}) {

@@ -4,6 +4,7 @@
 #include <fosu/engine/parsing/field_values.h>
 #include <fosu/engine/parsing/lines.h>
 #include <fosu/engine/primitives/byte_scan.h>
+#include <fosu/parse_options.h>
 #include <fosu/types.h>
 
 #include <cstddef>
@@ -33,11 +34,15 @@ inline std::optional<u32> parse_colour(std::string_view input) {
   return rgb;
 }
 
-inline const char* parse_colours_section(Beatmap&    beatmap,
-                                         size_t&     colour_count,
-                                         const char* p,
-                                         const char* end) {
-  return for_each_section_line(p, end, [&](std::string_view line) {
+template <Client C>
+const char* parse_colours_section(Beatmap&    beatmap,
+                                  size_t&     colour_count,
+                                  const char* p,
+                                  const char* end) {
+  return for_each_section_line<C>(p, end, [&](std::string_view line) {
+    // Like storyboard commands, stable skips lines indented with ' ' or '_'.
+    if (C == Client::Stable && (line.front() == ' ' || line.front() == '_'))
+      return;
     if (const auto comment = line.find("//"); comment != std::string_view::npos)
       line = line.substr(0, comment);
     const char* line_end = line.data() + line.size();

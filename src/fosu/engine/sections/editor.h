@@ -10,6 +10,7 @@
 #include <fosu/engine/primitives/byte_scan.h>
 #include <fosu/engine/third_party/fast_float.h>
 #include <fosu/format.h>
+#include <fosu/parse_options.h>
 #include <fosu/types.h>
 
 #include <algorithm>
@@ -99,7 +100,7 @@ bool parse_velocity_presets(Beatmap&         beatmap,
     const auto  value =
         parse_velocity_preset({p, static_cast<size_t>(comma - p)});
     // Stable stores exactly three presets; lazer accepts any number.
-    const size_t limit = F.lazer ? beatmap.velocity_presets.size() : 3;
+    const size_t limit = F.lazer_format ? beatmap.velocity_presets.size() : 3;
     if (value && parsed == limit)
       return false;
     if (value)
@@ -110,13 +111,13 @@ bool parse_velocity_presets(Beatmap&         beatmap,
   return true;
 }
 
-template <Format F>
+template <Format F, Client C>
 const char* parse_editor_section(Beatmap&    beatmap,
                                  size_t&     velocity_preset_count,
                                  bool&       velocity_presets_seen,
                                  const char* p,
                                  const char* end) {
-  return for_each_section_line(p, end, [&](std::string_view line) {
+  return for_each_section_line<C>(p, end, [&](std::string_view line) {
     const auto field = split_key_value(line);
     if (!field)
       return;

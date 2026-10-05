@@ -29,12 +29,33 @@ def test_mods_apply_through_the_python_interface():
     assert slider.control_points == [fosu.Point(100, 284), fosu.Point(200, 234)]
 
 
+@pytest.mark.parametrize("client", ["stable", "lazer"])
+def test_client_option(tmp_path, client):
+    data = b"osu file format v14\n[HitObjects]\n1,2,3,1,0\n"
+    source = tmp_path / "client.osu"
+    source.write_bytes(data)
+    parser = fosu.Parser()
+    for result in (
+        fosu.parse(data, client=client),
+        fosu.parse_file(source, client=client),
+        parser.parse(data, client=client),
+        parser.parse_file(source, client=client),
+    ):
+        assert len(result.hit_objects) == 1
+
+
+@pytest.mark.parametrize("client", ["Stable", "", None, 0])
+def test_unknown_client_raises_value_error(client):
+    with pytest.raises(ValueError, match="client must be"):
+        fosu.parse(b"", client=client)
+
+
 @pytest.mark.parametrize(
     "data,options",
     [
         (b"", {"mods": fosu.Mods.EASY | fosu.Mods.HARD_ROCK}),
         (b"", {"mods": fosu.Mods(1 << 30)}),
-        (b"[General]\nMode:3\n", {"mods": fosu.Mods.EASY}),
+        (b"osu file format v14\n[General]\nMode:3\n", {"mods": fosu.Mods.EASY}),
         (b"", {"sections": fosu.Sections.HIT_OBJECTS, "mods": fosu.Mods.HARD_ROCK}),
     ],
 )
@@ -274,7 +295,8 @@ def test_complete_map(tmp_path):
 def test_curve_segments_convert_with_the_head():
     slider = fosu.parse(
         b"osu file format v128\n[HitObjects]\n"
-        b"10,20,100,2,0,B2|30.5:40.25|50:60|L|70.75:80.5,1,100\n"
+        b"10,20,100,2,0,B2|30.5:40.25|50:60|L|70.75:80.5,1,100\n",
+        client="lazer",
     ).hit_objects[0]
     assert isinstance(slider, fosu.Slider)
     assert [(segment.type, segment.degree) for segment in slider.curve_segments] == [
@@ -300,19 +322,21 @@ def test_empty_input_defaults():
     assert b.title == "" and b.sample_set is fosu.SampleSet.NORMAL
     assert b.hit_objects == b.timing_points == b.breaks == b.bookmark_list == []
     assert b.mode is fosu.GameMode.OSU
-    assert b.beatmap_id is None and b.preview_time is None
+    # stable stores a missing BeatmapID as 0; lazer as -1, which maps to None.
+    assert b.beatmap_id == 0 and b.preview_time is None
+    assert fosu.parse(b"", client="lazer").beatmap_id is None
 
 
 def test_zero_and_other_negative_values_are_preserved():
     b = fosu.parse(
-        b"[Metadata]\nBeatmapID:0\nBeatmapSetID:-2\n[General]\nPreviewTime:0\n"
+        b"osu file format v14\n[Metadata]\nBeatmapID:0\nBeatmapSetID:-2\n[General]\nPreviewTime:0\n"
     )
     assert b.beatmap_id == 0 and b.beatmap_set_id == -2 and b.preview_time == 0
 
 
 def test_tags_and_raw_text_are_eager():
     b = fosu.parse(
-        b"[Metadata]\nTags:alpha  beta alpha\n[Editor]\nBookmarks:12, -30,40\n"
+        b"osu file format v14\n[Metadata]\nTags:alpha  beta alpha\n[Editor]\nBookmarks:12, -30,40\n"
     )
     assert b.tag_list == ["alpha", "beta", "alpha"]
     assert b.tags == "alpha  beta alpha" and b.bookmarks == "12, -30,40"
@@ -329,7 +353,7 @@ def test_invalid_bookmarks_follow_official_decoder():
 
 
 def test_utf8_and_embedded_nul_roundtrip():
-    data = b"[Metadata]\nTitle:hello\xff\x00world\n"
+    data = b"osu file format v14\n[Metadata]\nTitle:hello\xff\x00world\n"
     b = fosu.parse(data)
     assert b.title.encode("utf-8", "surrogateescape") == b"hello\xff\x00world"
 
@@ -364,7 +388,9 @@ def test_stable_time_order_preserves_slider_data():
 
 
 def test_detached_values_remain_valid_after_reuse():
-    data = bytearray(b"[Metadata]\nTitle:Retained\n[HitObjects]\n32,48,600,1,0\n")
+    data = bytearray(
+        b"osu file format v14\n[Metadata]\nTitle:Retained\n[HitObjects]\n32,48,600,1,0\n"
+    )
     b = fosu.parse(data)
     note = b.hit_objects[0]
     data[:] = b"x" * len(data)
@@ -380,7 +406,7 @@ def test_detached_values_remain_valid_after_reuse():
 @pytest.mark.parametrize("kind", [fosu.Circle, fosu.TimingPoint])
 def test_native_records_have_eager_readonly_fields_and_value_protocols(kind):
     b = fosu.parse(
-        b"[TimingPoints]\n0,500,4,1,0,100,1,0\n[HitObjects]\n32,48,600,1,0\n"
+        b"osu file format v14\n[TimingPoints]\n0,500,4,1,0,100,1,0\n[HitObjects]\n32,48,600,1,0\n"
     )
     record = b.hit_objects[0] if kind is fosu.Circle else b.timing_points[0]
     assert type(record) is kind
@@ -441,7 +467,7 @@ def test_shared_coordinates_preserve_values_and_signed_zero(coordinate):
         f"osu file format v128\n[HitObjects]\n"
         f"{coordinate},{coordinate},1,2,0,L|{coordinate}:{coordinate},1,10\n"
     ).encode()
-    slider = fosu.parse(data).hit_objects[0]
+    slider = fosu.parse(data, client="lazer").hit_objects[0]
     point = float(coordinate)
     # Object positions clamp to [0, 512], keeping -0.0; control points do not.
     position = min(max(point, 0.0), 512.0)
@@ -579,7 +605,9 @@ def test_hit_sample_preserves_default_omitted_and_custom_text():
 
 
 def test_standard_python_copy_and_pickle():
-    b = fosu.parse(b"[Metadata]\nTitle:Copy\n[HitObjects]\n2,4,6,2,0,B|8:10,1,12\n")
+    b = fosu.parse(
+        b"osu file format v14\n[Metadata]\nTitle:Copy\n[HitObjects]\n2,4,6,2,0,B|8:10,1,12\n"
+    )
     restored = pickle.loads(pickle.dumps(b))
     copied = deepcopy(b)
     assert b == restored == copied
@@ -620,7 +648,7 @@ def test_copy_and_pickle_preserve_cycles_through_record_lists():
 def test_buffer_inputs():
     from array import array
 
-    data = b"[Metadata]\nTitle:Buffer\n"
+    data = b"osu file format v14\n[Metadata]\nTitle:Buffer\n"
     interleaved = b"".join(bytes((c, 0)) for c in data)
     for buffer in (
         bytearray(data),
@@ -635,15 +663,17 @@ def test_buffer_inputs():
 
 def test_reused_parser_keeps_earlier_results(tmp_path):
     parser = fosu.Parser()
-    first = parser.parse(b"[Metadata]\nTitle:first\n[HitObjects]\n1,2,3,1,0\n")
+    first = parser.parse(
+        b"osu file format v14\n[Metadata]\nTitle:first\n[HitObjects]\n1,2,3,1,0\n"
+    )
     path = tmp_path / "second.osu"
-    path.write_bytes(b"[Metadata]\nTitle:second\n")
+    path.write_bytes(b"osu file format v14\n[Metadata]\nTitle:second\n")
     second = parser.parse_file(path)
     with pytest.raises(ValueError, match="invalid input"):
         parser.parse(b"", mods=fosu.Mods.EASY | fosu.Mods.HARD_ROCK)
     with pytest.raises(FileNotFoundError):
         parser.parse_file(tmp_path / "missing.osu")
-    third = parser.parse(b"[Metadata]\nTitle:third\n")
+    third = parser.parse(b"osu file format v14\n[Metadata]\nTitle:third\n")
     assert first.title == "first" and first.hit_objects[0].time == 3
     assert second.title == "second" and not second.hit_objects
     assert third.title == "third"
@@ -664,14 +694,14 @@ def test_file_errors(tmp_path):
 
 def test_parse_file_accepts_unicode_paths(tmp_path):
     path = tmp_path / "日本語.osu"
-    path.write_bytes(b"[Metadata]\nTitle:Unicode path\n")
+    path.write_bytes(b"osu file format v14\n[Metadata]\nTitle:Unicode path\n")
     assert fosu.parse_file(path).title == "Unicode path"
 
 
 def test_memory_map_and_wide_buffers_are_detached(tmp_path):
     import mmap
 
-    data = b"[Metadata]\nTitle:Detached\n[HitObjects]\n1,2,3,1,0\n"
+    data = b"osu file format v14\n[Metadata]\nTitle:Detached\n[HitObjects]\n1,2,3,1,0\n"
     path = tmp_path / "mapped.osu"
     path.write_bytes(data)
     with path.open("rb") as source:
@@ -687,7 +717,7 @@ def test_memory_map_and_wide_buffers_are_detached(tmp_path):
 
 def test_concurrent_calls_return_independent_objects():
     inputs = [
-        f"[Metadata]\nTitle:{i}\n[HitObjects]\n1,2,{i},1,0\n".encode()
+        f"osu file format v14\n[Metadata]\nTitle:{i}\n[HitObjects]\n1,2,{i},1,0\n".encode()
         for i in range(24)
     ]
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -713,7 +743,7 @@ def test_backend_errors_in_fresh_process():
 
 def test_all_fields_are_detached_python_values():
     b = fosu.parse(
-        b"[TimingPoints]\n0,500\n[HitObjects]\n1,2,3,2,0,L|4:5,1,6\n1,2,4,1,0\n"
+        b"osu file format v14\n[TimingPoints]\n0,500\n[HitObjects]\n1,2,3,2,0,L|4:5,1,6\n1,2,4,1,0\n"
     )
     seen = set()
 
@@ -775,16 +805,20 @@ def test_native_stub_contract():
 
 def test_enum_values_and_malformed_records():
     b = fosu.parse(
-        b"[General]\nSampleSet:2\nSampleSet:99\n"
+        b"osu file format v14\n[General]\nSampleSet:2\nSampleSet:99\n"
         b"[TimingPoints]\n0,500,4,0,0,100,1,0\n1,500,4,9,0,100,1,0\n"
         b"[HitObjects]\n0,0,1,2,0,X|1:2,1,30\n0,0,2,2,0,P|1:2,1,30\n"
     )
     assert b.sample_set is fosu.SampleSet.SOFT
-    assert b.stats.malformed_lines == 3
-    assert len(b.timing_points) == len(b.hit_objects) == 1
+    assert b.stats.malformed_lines == 2
+    assert len(b.timing_points) == 1 and len(b.hit_objects) == 2
     assert b.timing_points[0].sample_set is fosu.SampleSet.NONE
-    assert b.hit_objects[0].curve_type is fosu.CurveType.PERFECT_CURVE
-    assert fosu.parse(b"[General]\nSampleSet:None\n").sample_set is fosu.SampleSet.NONE
+    assert b.hit_objects[0].curve_type is fosu.CurveType.CATMULL
+    assert b.hit_objects[1].curve_type is fosu.CurveType.PERFECT_CURVE
+    assert (
+        fosu.parse(b"osu file format v14\n[General]\nSampleSet:None\n").sample_set
+        is fosu.SampleSet.NONE
+    )
 
 
 RECORD_TYPES = [

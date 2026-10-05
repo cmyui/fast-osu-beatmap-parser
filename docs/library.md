@@ -14,9 +14,21 @@ if (!map) return 1;
 ```
 
 `parse(std::string_view)` and `parse_file(path)` return `nullptr` for invalid
-options or when memory runs out; `parse_file` also returns `nullptr` when the
-file cannot be read, with `errno` describing the error. Reusing one parser for
+options, when memory runs out, or when the target client would not load the
+map; `parse_file` also returns `nullptr` when the file cannot be read, with
+`errno` describing the error. `parser.error()` then gives a `ParseErrorCode`
+and, for `Unloadable`, the 1-based line responsible. Reusing one parser for
 many maps reuses its memory.
+
+## Target client
+
+```cpp
+auto map = parser.parse(input, {.client = fosu::Client::Lazer});
+```
+
+`ParseOptions::client` chooses whose behaviour to follow where osu!stable and
+osu!lazer read a map differently: `Client::Stable`, the default, or
+`Client::Lazer`. See [the target client rules](compatibility.md#target-client).
 
 ## Ownership
 

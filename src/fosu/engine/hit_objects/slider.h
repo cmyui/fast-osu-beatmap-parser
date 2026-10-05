@@ -15,6 +15,7 @@
 #include <fosu/engine/primitives/packed_digits.h>
 #include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/enums.h>
+#include <fosu/parse_options.h>
 #include <fosu/types.h>
 
 #include <algorithm>
@@ -24,20 +25,44 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <string_view>
 
 namespace fosu::internal {
 
 struct HitObjectCounts {
-  size_t objects = 0;
-  size_t sliders = 0;
-  size_t slider_segments = 0;
-  size_t slider_points = 0;
+  size_t      objects = 0;
+  size_t      sliders = 0;
+  size_t      slider_segments = 0;
+  size_t      slider_points = 0;
   // Whether osu!'s previous object, in source order, is a spinner. It can be
   // a rejected line: see preceding_spinner_after_rejection.
-  bool   preceding_was_spinner = false;
+  bool        preceding_was_spinner = false;
+  // The first line that makes osu!stable refuse the map, if any.
+  const char* unloadable_line = nullptr;
 };
+
+// Lazer bounds coordinates and slider lengths by ±131072. stable reads any
+// finite length, and fosu keeps its coordinates where the int32 truncation
+// of a control point stays defined.
+template <Client C>
+inline constexpr f32 kCoordinateLimit =
+    C == Client::Lazer ? 131072.0f : 2147483520.0f;
+template <Client C>
+inline constexpr f64 kSliderLengthLimit =
+    C == Client::Lazer ? 131072.0 : std::numeric_limits<f64>::max();
+
+// Whether the token after the '|' at `p` is a single character.
+inline bool one_character_token(const char* p, const char* end) {
+  if (p + 1 >= end || p[1] == '|' || p[1] == ',')
+    return false;
+  return p + 2 == end || p[2] == '|' || p[2] == ',';
+}
+
+inline bool is_ascii_letter(char value) {
+  return static_cast<u8>((value | 0x20) - 'a') < 26;
+}
 
 inline std::optional<CurveType> parse_curve_type(char value) {
   switch (value) {
@@ -127,7 +152,7 @@ struct ParsedSliderPoint {
   const char* end;
 };
 
-template <bool Lazer>
+template <bool LazerFormat, Client C>
 FOSU_ALWAYS_INLINE std::optional<ParsedSliderPoint> parse_slider_point(
     const char* p,
     const char* end) {
@@ -139,10 +164,10 @@ FOSU_ALWAYS_INLINE std::optional<ParsedSliderPoint> parse_slider_point(
     x = static_cast<f32>(swar_parse_u32(coordinate, digits));
     coordinate += digits;
   } else {
-    const char* next = parse_osu_float(coordinate, end, x, 131072);
+    const char* next = parse_osu_float(coordinate, end, x, kCoordinateLimit<C>);
     if (next == coordinate || next >= end || *next != ':')
       return std::nullopt;
-    if constexpr (!Lazer)
+    if constexpr (!LazerFormat)
       x = static_cast<f32>(static_cast<i32>(x));
     coordinate = next;
   }
@@ -156,10 +181,10 @@ FOSU_ALWAYS_INLINE std::optional<ParsedSliderPoint> parse_slider_point(
     y = static_cast<f32>(swar_parse_u32(coordinate, digits));
     coordinate += digits;
   } else {
-    const char* next = parse_osu_float(coordinate, end, y, 131072);
+    const char* next = parse_osu_float(coordinate, end, y, kCoordinateLimit<C>);
     if (next == coordinate)
       return std::nullopt;
-    if constexpr (!Lazer)
+    if constexpr (!LazerFormat)
       y = static_cast<f32>(static_cast<i32>(y));
     coordinate = next;
   }
@@ -231,7 +256,14 @@ FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
 // This is one parse transaction. Control points and completed lazer segments
 // are written into their arena arrays as they are accepted. Failures roll both
 // arrays back so rejected sliders leave no published data behind.
-template <bool Lazer>
+//
+// Lazer starts a segment at each curve type in the point list; before v128 it
+// later applies legacy rules to each one. stable instead reads a one-character
+// token as the curve type of the whole slider, the last one winning, and
+// ignores one naming no type, in every format; fosu follows it in stable mode.
+// Lazer would also read a longer token starting with a letter as a type,
+// which fosu rejects.
+template <bool LazerFormat, Client C>
 FOSU_NOINLINE bool parse_slider_as(
     Beatmap&                                        beatmap,
     HitObjectCounts&                                counts,
@@ -242,18 +274,31 @@ FOSU_NOINLINE bool parse_slider_as(
   if (p >= end)
     return false;
 
-  const size_t slider_point_begin = counts.slider_points;
-  const size_t slider_segment_begin = counts.slider_segments;
+  const size_t   slider_point_begin = counts.slider_points;
+  const size_t   slider_segment_begin = counts.slider_segments;
 
-  const auto   first_curve_type = parse_curve_type(*p++);
-  if (!first_curve_type)
-    return false;
+  constexpr bool kSegments = C == Client::Lazer;
+  const char     first_token = *p++;
+  const auto     known_curve_type = parse_curve_type(first_token);
+  if (!known_curve_type && !is_ascii_letter(first_token)) {
+    // Lazer reads any other character as a point, which fails.
+    if constexpr (C == Client::Lazer)
+      return false;
+    // stable ignores it as a marker, unless the token is empty.
+    if (first_token == '|' || first_token == ',')
+      return false;
+  }
+  // Both clients read a letter other than B, C, L or P as Catmull, which is
+  // also stable's type when it ignores a marker.
+  const CurveType first_curve_type =
+      known_curve_type.value_or(CurveType::Catmull);
 
   std::optional<u32> first_curve_degree;
-  if (*first_curve_type == CurveType::Bezier && p < end && is_digit(*p)) {
-    // B-spline degrees belong to lazer-format maps. Older formats reject the
-    // line: stable cannot load it, and lazer (unlike us) reads a B-spline.
-    if constexpr (!Lazer)
+  if (first_curve_type == CurveType::Bezier && p < end && is_digit(*p)) {
+    // B-spline degrees belong to lazer's v128 format. Otherwise the line is
+    // rejected: stable cannot load it, and lazer before v128 (unlike us)
+    // reads a B-spline.
+    if constexpr (!LazerFormat)
       return false;
     i64         degree;
     const char* next = parse_osu_int(p, end, degree);
@@ -263,7 +308,7 @@ FOSU_NOINLINE bool parse_slider_as(
     p = next;
   }
 
-  CurveType          current_curve_type = *first_curve_type;
+  CurveType          current_curve_type = first_curve_type;
   std::optional<u32> current_curve_degree = first_curve_degree;
   size_t             segment_point_begin = counts.slider_points;
   bool               has_explicit_segments = false;
@@ -278,23 +323,28 @@ FOSU_NOINLINE bool parse_slider_as(
     }
 #endif
 
+    if constexpr (!kSegments) {
+      if (one_character_token(p, end)) {
+        if (const auto type = parse_curve_type(p[1]))
+          current_curve_type = *type;
+        p += 2;
+        continue;
+      }
+    }
+
     const bool starts_segment =
-        Lazer && p + 1 < end &&
-        (p[1] == 'B' || p[1] == 'C' || p[1] == 'L' || p[1] == 'P');
+        kSegments && p + 1 < end && is_ascii_letter(p[1]);
 
     CurveType          next_curve_type = current_curve_type;
     std::optional<u32> next_curve_degree = current_curve_degree;
     if (starts_segment) {
       ++p;
-      const auto type = parse_curve_type(*p++);
-      if (!type) {
-        counts.slider_points = slider_point_begin;
-        counts.slider_segments = slider_segment_begin;
-        return false;
-      }
-      next_curve_type = *type;
+      next_curve_type = parse_curve_type(*p++).value_or(CurveType::Catmull);
       next_curve_degree.reset();
-      if (next_curve_type == CurveType::Bezier && p < end && is_digit(*p)) {
+      // As for the first type, fosu reads B-spline degrees only in lazer's
+      // v128 format.
+      if (LazerFormat && next_curve_type == CurveType::Bezier && p < end &&
+          is_digit(*p)) {
         i64         degree;
         const char* next = parse_osu_int(p, end, degree);
         if (next == p || degree <= 0 || degree > UINT32_MAX) {
@@ -313,7 +363,7 @@ FOSU_NOINLINE bool parse_slider_as(
       return false;
     }
 
-    const auto point = parse_slider_point<Lazer>(p, end);
+    const auto point = parse_slider_point<LazerFormat, C>(p, end);
     if (!point) {
       counts.slider_points = slider_point_begin;
       counts.slider_segments = slider_segment_begin;
@@ -384,8 +434,8 @@ FOSU_NOINLINE bool parse_slider_as(
     const char* length_begin = p + 1;
     const char* next = parse_short_decimal(length_begin, length);
     if (!next || next > end || *next == 'e' || *next == 'E' ||
-        !(std::abs(length) <= 131072))
-      next = parse_osu_double(length_begin, end, length, 131072);
+        !(std::abs(length) <= kSliderLengthLimit<C>))
+      next = parse_osu_double(length_begin, end, length, kSliderLengthLimit<C>);
     if (next == length_begin || (next < end && *next != ',')) {
       counts.slider_points = slider_point_begin;
       counts.slider_segments = slider_segment_begin;
@@ -426,7 +476,7 @@ FOSU_NOINLINE bool parse_slider_as(
     return false;
   }
 
-  if constexpr (Lazer) {
+  if constexpr (kSegments) {
     if (has_explicit_segments || first_curve_degree) {
       if (counts.slider_segments == beatmap.slider_segments.size()) {
         counts.slider_points = slider_point_begin;
@@ -449,11 +499,11 @@ FOSU_NOINLINE bool parse_slider_as(
       .point_count =
           static_cast<u32>(counts.slider_points - slider_point_begin),
       .segment_begin = static_cast<u32>(slider_segment_begin),
-      .segment_count = Lazer ? static_cast<u32>(counts.slider_segments -
-                                                slider_segment_begin)
-                             : 0,
+      .segment_count = kSegments ? static_cast<u32>(counts.slider_segments -
+                                                    slider_segment_begin)
+                                 : 0,
       .slides = std::max(1, slides),
-      .curve_type = *first_curve_type,
+      .curve_type = kSegments ? first_curve_type : current_curve_type,
       .length = std::max(0.0, length),
       .edge_sounds = edge_sounds,
       .edge_sets = edge_sets,

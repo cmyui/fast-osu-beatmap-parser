@@ -97,6 +97,21 @@ def main():
                 parse_int=lambda s: -0.0 if s == "-0" else int(s),
             )
             counts["files"] += 1
+            try:
+                beatmap = fosu.parse_file(
+                    path,
+                    calculate_slider_events=True,
+                    apply_stacking=True,
+                    client="lazer",
+                )
+            except fosu.MapLoadError:
+                beatmap = None
+            if beatmap is None and not expected["ok"]:
+                counts["refused_by_both"] += 1
+                continue
+            if beatmap is None:
+                gaps.append({"file": str(path), "fosu_error": "MapLoadError"})
+                continue
             if not expected["ok"] or expected["projection_errors"]:
                 counts["reference_errors"] += 1
                 gaps.append(
@@ -107,9 +122,6 @@ def main():
                     }
                 )
                 continue
-            beatmap = fosu.parse_file(
-                path, calculate_slider_events=True, apply_stacking=True
-            )
             by_mode[int(beatmap.mode)] += 1
             actual = value(beatmap)
             for obj, record in zip(beatmap.hit_objects, actual["hit_objects"]):

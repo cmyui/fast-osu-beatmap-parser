@@ -5,6 +5,7 @@
 #include <fosu/engine/parsing/field_values.h>
 #include <fosu/engine/parsing/key_value.h>
 #include <fosu/engine/parsing/string_lookup.h>
+#include <fosu/parse_options.h>
 
 namespace fosu::internal {
 
@@ -23,10 +24,11 @@ inline constexpr auto kMetadataFields = make_string_lookup<FieldParser>({
      assign_field_value<&BeatmapHeader::beatmap_id, parse_field_integer>},
 });
 
-inline const char* parse_metadata_section(Beatmap&    beatmap,
-                                          const char* p,
-                                          const char* end) {
-  return parse_key_value_section(beatmap, kMetadataFields, p, end);
+template <Client C>
+const char* parse_metadata_section(Beatmap&    beatmap,
+                                   const char* p,
+                                   const char* end) {
+  return parse_key_value_section<C>(beatmap, kMetadataFields, p, end);
 }
 
 }  // namespace fosu::internal

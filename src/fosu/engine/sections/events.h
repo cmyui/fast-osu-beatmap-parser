@@ -6,6 +6,7 @@
 #include <fosu/engine/primitives/byte_scan.h>
 #include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/format.h>
+#include <fosu/parse_options.h>
 #include <fosu/types.h>
 
 #include <algorithm>
@@ -119,7 +120,7 @@ void parse_event_line(Beatmap&    bm,
 }
 
 #if FOSU_SIMD
-template <Format F>
+template <Format F, Client C>
 const char* parse_events_section_simd(Beatmap&    bm,
                                       size_t&     break_count,
                                       const char* p,
@@ -145,7 +146,7 @@ const char* parse_events_section_simd(Beatmap&    bm,
       line_end = find_line_end(p + 64, file_end);
     }
     next_line = after_line_ending(line_end, file_end);
-    if (c == '[' && section_header_line(line, line_end))
+    if (c == '[' && section_header_line<C>(line, line_end))
       break;
     p = next_line;
 
@@ -165,25 +166,25 @@ const char* parse_events_section_simd(Beatmap&    bm,
 }
 #endif
 
-template <Format F>
+template <Format F, Client C>
 const char* parse_events_section_scalar(Beatmap&    bm,
                                         size_t&     break_count,
                                         const char* p,
                                         const char* file_end) {
-  return for_each_section_line(p, file_end, [&](std::string_view line) {
+  return for_each_section_line<C>(p, file_end, [&](std::string_view line) {
     parse_event_line<F>(bm, break_count, line.data(), line.size());
   });
 }
 
-template <Format F>
+template <Format F, Client C>
 const char* parse_events_section(Beatmap&    bm,
                                  size_t&     break_count,
                                  const char* p,
                                  const char* file_end) {
 #if FOSU_SIMD
-  return parse_events_section_simd<F>(bm, break_count, p, file_end);
+  return parse_events_section_simd<F, C>(bm, break_count, p, file_end);
 #else
-  return parse_events_section_scalar<F>(bm, break_count, p, file_end);
+  return parse_events_section_scalar<F, C>(bm, break_count, p, file_end);
 #endif
 }
 

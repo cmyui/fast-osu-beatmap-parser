@@ -1,7 +1,11 @@
 #include <fosu/beatmap.h>
 #include <fosu/engine/hit_objects/object_types.h>
+#include <fosu/engine/parse_document.h>
 #include <fosu/engine/primitives/vector_ops.h>
+#include <fosu/parse_options.h>
+#include <fosu/parser.h>
 #include <fosu/types.h>
+#include <tests/support/scalar_engine.h>
 #include <tests/support/test.h>
 
 #include <cmath>
@@ -47,8 +51,8 @@ static void test_slider_points() {
 
     for (const auto points :
          {"|", "|1", "|1:", "|:2", "|bad:2", "|1:bad", "|131073:2"}) {
-      const auto map =
-          parse_str(slider_document("B" + std::string(points) + ",1,10"), simd);
+      const auto map = parse_str(
+          slider_document("B" + std::string(points) + ",1,10"), simd, kLazer);
       CHECK(map.hit_objects.empty());
       CHECK_EQ(map.stats.malformed_lines, 1u);
     }
@@ -67,7 +71,7 @@ static void test_slider_pool_indices_after_rejected_record() {
                         "[Metadata]\nTitle:gap\n[HitObjects]\n"
                         "0.5,0,400,2,0," +
                         curve + "|70:80,1,40\n",
-                    simd);
+                    simd, kLazer);
       CHECK_EQ(map.stats.malformed_lines, 1u);
       CHECK_EQ(map.hit_objects.size(), 3u);
       CHECK_EQ(map.sliders.size(), 2u);
@@ -165,7 +169,7 @@ static void test_slider_repeats_and_length() {
     for (const auto tail : {"", ",", ",1,", ",9001,10", ",1,131073",
                             ",1,-131073", ",1,10,,/:0", ",1,10,,,/:0"}) {
       const auto map =
-          parse_str(slider_document("B|1:2" + std::string(tail)), simd);
+          parse_str(slider_document("B|1:2" + std::string(tail)), simd, kLazer);
       CHECK(map.hit_objects.empty());
       CHECK_EQ(map.stats.malformed_lines, 1u);
     }
@@ -273,7 +277,7 @@ static void test_non_finite_object_times_are_rejected() {
     const auto input = "osu file format v14\n[HitObjects]\n1,2," +
                        std::string(time) + ",1,0\n1,2,3,1,0\n";
     for (bool simd : {false, true}) {
-      const auto map = parse_str(input, simd);
+      const auto map = parse_str(input, simd, kLazer);
       CHECK_EQ(map.hit_objects.size(), 1u);
       CHECK_EQ(map.stats.malformed_lines, 1u);
     }
@@ -286,16 +290,17 @@ static void test_negative_zero_times_and_coordinates() {
   for (bool simd : {false, true}) {
     CHECK(!std::signbit(
         parse_str("[HitObjects]\n1,2,-0,1,0\n", simd).hit_objects[0].time));
-    const auto lazer = parse_str(
-        "osu file format v128\n[HitObjects]\n-0,-0,1,2,0,L|-0:-0,1,10\n", simd);
-    CHECK(std::signbit(lazer.hit_objects[0].x));
-    CHECK(std::signbit(lazer.hit_objects[0].y));
-    CHECK(std::signbit(lazer.slider_points[0].x));
-    CHECK(std::signbit(lazer.slider_points[0].y));
-    const auto stable = parse_str(
+    const auto v128 = parse_str(
+        "osu file format v128\n[HitObjects]\n-0,-0,1,2,0,L|-0:-0,1,10\n", simd,
+        kLazer);
+    CHECK(std::signbit(v128.hit_objects[0].x));
+    CHECK(std::signbit(v128.hit_objects[0].y));
+    CHECK(std::signbit(v128.slider_points[0].x));
+    CHECK(std::signbit(v128.slider_points[0].y));
+    const auto v14 = parse_str(
         "osu file format v14\n[HitObjects]\n-0,-0,1,2,0,L|-0:-0,1,10\n", simd);
-    CHECK(!std::signbit(stable.hit_objects[0].x));
-    CHECK(!std::signbit(stable.slider_points[0].x));
+    CHECK(!std::signbit(v14.hit_objects[0].x));
+    CHECK(!std::signbit(v14.slider_points[0].x));
   }
 }
 
@@ -325,26 +330,34 @@ static void test_exactly_one_kind_helper_is_true() {
   CHECK_EQ(kind_of(4), '-');
 }
 
-// B-spline degrees belong to lazer-format maps. Older formats reject the line:
-// stable cannot load it, and lazer (unlike us) reads a B-spline.
+// B-spline degrees belong to lazer's v128 format. Stable cannot load one in
+// any version. Lazer before v128 rejects the line, where lazer itself (unlike
+// us) reads a B-spline.
 static void test_bspline_degree_needs_lazer_format() {
-  for (bool simd : {false, true}) {
-    for (const char* version : {"v14", "v127"}) {
-      const auto map =
-          parse_str(std::string("osu file format ") + version +
-                        "\n[HitObjects]\n0,0,0,2,0,B2|100:0|100:100,"
-                        "1,10\n",
-                    simd);
+  for (const auto* engine :
+       {&fosu::internal::compiled_engine, &fosu_test::scalar_engine()}) {
+    for (const char* version : {"v14", "v127", "v128"}) {
+      const auto   input = std::string("osu file format ") + version +
+                           "\n[HitObjects]\n0,0,0,2,0,B2|100:0|100:100,1,10\n";
+      fosu::Parser parser(*engine);
+      CHECK(!parser.parse(input));
+      CHECK(parser.error().code == fosu::ParseErrorCode::Unloadable);
+      CHECK_EQ(parser.error().line, 3u);
+      if (std::string_view(version) == "v128")
+        continue;
+      const auto& map = require_parse(parser.parse(input, kLazer));
       CHECK(map.hit_objects.empty());
       CHECK_EQ(map.stats.malformed_lines, 1u);
     }
-    const auto lazer = parse_str(
+  }
+  for (bool simd : {false, true}) {
+    const auto v128 = parse_str(
         "osu file format v128\n[HitObjects]\n0,0,0,2,0,B2|100:0|100:100,1,10\n",
-        simd);
-    CHECK_EQ(lazer.hit_objects.size(), 1u);
-    CHECK_EQ(lazer.slider_segments.size(), 1u);
-    if (!lazer.slider_segments.empty())
-      CHECK(lazer.slider_segments[0].degree == 2u);
+        simd, kLazer);
+    CHECK_EQ(v128.hit_objects.size(), 1u);
+    CHECK_EQ(v128.slider_segments.size(), 1u);
+    if (!v128.slider_segments.empty())
+      CHECK(v128.slider_segments[0].degree == 2u);
   }
 }
 

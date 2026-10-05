@@ -10,8 +10,10 @@
 #include <fosu/engine/primitives/byte_scan.h>
 #include <fosu/enums.h>
 #include <fosu/format.h>
+#include <fosu/parse_options.h>
 #include <fosu/types.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -96,7 +98,16 @@ bool parse_preview_time(BeatmapHeader& header, std::string_view input) {
   return true;
 }
 
-template <Format F>
+// stable clamps stack leniency to [0, 1]; lazer keeps any value.
+template <Client C>
+std::optional<f64> parse_stack_leniency(std::string_view input) {
+  const auto value = parse_field_float(input);
+  if (C == Client::Stable && value)
+    return std::clamp(*value, 0.0, 1.0);
+  return value;
+}
+
+template <Format F, Client C>
 inline constexpr auto kGeneralFields = make_string_lookup<FieldParser>({
     {"AudioFilename", assign_field_text<&BeatmapHeader::audio_filename>},
     {"AudioLeadIn",
@@ -113,8 +124,8 @@ inline constexpr auto kGeneralFields = make_string_lookup<FieldParser>({
     {"SamplesMatchPlaybackRate",
      assign_field_value<&BeatmapHeader::samples_match_playback_rate,
                         parse_field_boolean>},
-    {"StackLeniency",
-     assign_field_value<&BeatmapHeader::stack_leniency, parse_field_float>},
+    {"StackLeniency", assign_field_value<&BeatmapHeader::stack_leniency,
+                                         parse_stack_leniency<C>>},
     {"Mode", assign_field_value<&BeatmapHeader::mode, parse_mode>},
     {"LetterboxInBreaks",
      assign_field_value<&BeatmapHeader::letterbox_in_breaks,
@@ -131,11 +142,11 @@ inline constexpr auto kGeneralFields = make_string_lookup<FieldParser>({
     {"SkinPreference", assign_field_text<&BeatmapHeader::skin_preference>},
 });
 
-template <Format F>
+template <Format F, Client C>
 const char* parse_general_section(Beatmap&    beatmap,
                                   const char* p,
                                   const char* end) {
-  return parse_key_value_section(beatmap, kGeneralFields<F>, p, end);
+  return parse_key_value_section<C>(beatmap, kGeneralFields<F, C>, p, end);
 }
 
 }  // namespace fosu::internal

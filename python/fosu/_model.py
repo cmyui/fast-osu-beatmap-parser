@@ -14,6 +14,20 @@ from . import _core
 _T = TypeVar("_T")
 
 
+class MapLoadError(ValueError):
+    """The target osu! client would refuse to load this map."""
+
+    line: int
+    """The 1-based line that makes the map unloadable."""
+
+    def __init__(self, message: str, line: int) -> None:
+        super().__init__(message)
+        self.line = line
+
+    def __reduce__(self) -> tuple[type["MapLoadError"], tuple[str, int]]:
+        return type(self), (str(self), self.line)
+
+
 def _restore(cls: type[_T]) -> _T:
     # Pickle/deepcopy memoize the empty record before restoring cyclic fields.
     return cast(_T, _core._restore_record(cls))

@@ -20,6 +20,7 @@ class Parser:
         calculate_slider_events: bool,
         apply_stacking: bool,
         mods: int,
+        client: int,
         /,
     ) -> Beatmap: ...
     def parse_file(
@@ -31,5 +32,6 @@ class Parser:
         calculate_slider_events: bool,
         apply_stacking: bool,
         mods: int,
+        client: int,
         /,
     ) -> Beatmap: ...

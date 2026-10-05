@@ -5,8 +5,10 @@
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/engine/timing_points/point.h>
+#include <fosu/parser.h>
 #include <fosu/slider_geometry.h>
 #include <fosu/types.h>
+#include <tests/support/scalar_engine.h>
 #include <tests/support/test.h>
 
 #include <bit>
@@ -275,7 +277,8 @@ static void test_fuzz_slider_points() {
     }
     const std::string document =
         hitobject_document("0,0,0,2,0,B|" + coordinate + ":2,1,10");
-    check_same_slider(parse_str(document), parse_str(document, false));
+    check_same_slider(parse_str(document, true, kLazer),
+                      parse_str(document, false, kLazer));
     if (g_failures) {
       printf("  failing slider coordinate: %s\n", coordinate.c_str());
       return;
@@ -294,8 +297,8 @@ static void test_hitobject_field_shapes() {
                                ',' + std::string(t, '1') + ',' + type + ',' +
                                sound;
             const std::string document = hitobject_document(line);
-            const auto        fast = parse_str(document);
-            const auto        scalar = parse_str(document, false);
+            const auto        fast = parse_str(document, true, kLazer);
+            const auto        scalar = parse_str(document, false, kLazer);
             // Editor shapes always use the fixed-width loops.
             if (t >= 4 && t <= 7 && strlen(type) <= 3 && strlen(sound) <= 2)
               CHECK_EQ(fast.stats.fast_path_lines, 1u);
@@ -308,7 +311,8 @@ static void test_hitobject_timestamp_boundaries() {
                            "000000001", "0000000001"}) {
     std::string       line = std::string("123,45,") + time + ",1,42";
     const std::string document = hitobject_document(line);
-    check_same_hitobject(parse_str(document), parse_str(document, false));
+    check_same_hitobject(parse_str(document, true, kLazer),
+                         parse_str(document, false, kLazer));
   }
 }
 
@@ -326,7 +330,8 @@ static void test_fuzz_slider_length() {
     }
     const std::string document =
         hitobject_document("0,0,0,2,0,B|1:2,1," + length + ",0:0");
-    check_same_slider(parse_str(document), parse_str(document, false));
+    check_same_slider(parse_str(document, true, kLazer),
+                      parse_str(document, false, kLazer));
     if (g_failures) {
       printf("  failing slider length: %s\n", length.c_str());
       return;
@@ -391,14 +396,14 @@ static void test_fuzz_timing_point() {
     uint32_t          time_digits = 1 + (uint32_t)(rng() % 8);
     fosu::TimingPoint tp;
     const char*       next =
-        fosu::internal::parse_common_timing_point<fosu::kStableFormat>(
+        fosu::internal::parse_common_timing_point<fosu::kFormatV5>(
             buf, buf + len, time_digits, tp);
     if (!next)
       continue;
     CHECK(next == buf + len);
     ++accepted;
     const auto reference =
-        fosu::internal::parse_timing_point<fosu::kStableFormat>(buf, buf + len);
+        fosu::internal::parse_timing_point<fosu::kFormatV5>(buf, buf + len);
     CHECK(reference.has_value());
     if (reference) {
       const auto& w = *reference;
@@ -434,6 +439,15 @@ static uint64_t value_with_digits(fosu::i32 digits, uint64_t max) {
   return lo + rng() % (hi - lo + 1);
 }
 
+// The line that makes stable refuse the map, or 0 if it loads.
+static fosu::u32 stable_unloadable_line(const std::string& document,
+                                        bool               simd) {
+  static fosu::Parser native_parser;
+  static fosu::Parser scalar_parser(fosu_test::scalar_engine());
+  auto&               parser = simd ? native_parser : scalar_parser;
+  return parser.parse(document) ? 0 : parser.error().line;
+}
+
 static void test_fuzz_hitobject_fields() {
   char      buf[128];
   fosu::i32 fast_taken = 0;
@@ -462,10 +476,12 @@ static void test_fuzz_hitobject_fields() {
     }
 
     const std::string document = hitobject_document(buf);
-    const auto        fast = parse_str(document);
-    const auto        scalar = parse_str(document, false);
+    const auto        fast = parse_str(document, true, kLazer);
+    const auto        scalar = parse_str(document, false, kLazer);
     fast_taken += fast.stats.fast_path_lines != 0;
     check_same_hitobject(fast, scalar);
+    CHECK_EQ(stable_unloadable_line(document, true),
+             stable_unloadable_line(document, false));
     if (g_failures) {
       printf("  failing line: %s\n", buf);
       return;
