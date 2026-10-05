@@ -3,6 +3,29 @@
 Requires C++20, CMake 3.26+, and Linux, macOS or Windows. Header-only consumers can
 include `src/fosu/parser.h` without building a library.
 
+## Checks
+
+`make test` runs every check of parser behaviour that works on one machine:
+
+| Target | Runs | Needs |
+|---|---|---|
+| `make test-native` | CTest (`check`): C++ parser tests on both engines, engine selection, and on Linux, exported-symbol and binary-hardening checks | CMake and a C++20 compiler |
+| `make test-python` | `tests/test_python.py`, including mypy and stubtest, on both backends against the package reinstalled into `build/venv` | Python 3.10+ (`PYTHON=` selects the interpreter) |
+| `make test-official` | Comparisons with osu!'s own decoder: synthetic field cases (`tests/test_official.py`) and field-level values for `tests/fixtures/official`, on both backends | .NET 10 SDK as `dotnet`; the first run fetches the pinned osu! revision |
+
+The C++ tests (`tests/test_*.cc`) cover the native parser: field acceptance,
+numbers, storage and parser reuse, and some derived values. `tests/test_python.py`
+covers the Python API and most derived values, such as slider events, end times,
+stacking and mods. Behaviour that must match osu! belongs in
+`tests/fixtures/official` or `tests/test_official.py`, which compare it with
+osu!'s decoder.
+
+CI runs the same checks, plus checks that need other platforms or builds: macOS
+and Windows; scalar, Debug, sanitizer and fuzzing builds; AArch64 and non-AVX
+dispatch under emulation; installed C++ consumers (`tests/test_build.py`);
+wheels on five platforms; and benchmark tools. Full-corpus comparisons with osu!
+run only locally, because the corpus is not in the repository.
+
 ## Native
 
 ```sh
