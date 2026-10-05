@@ -25,5 +25,7 @@ test-official: python-install
 	sh tests/reference/official/build.sh
 	$(VENV)/bin/python tests/test_official.py
 	FOSU_BACKEND=scalar $(VENV)/bin/python tests/test_official.py
-	$(VENV)/bin/python tests/test_official_values.py --corpus tests/fixtures/official --report build/official-values.json
-	FOSU_BACKEND=scalar $(VENV)/bin/python tests/test_official_values.py --corpus tests/fixtures/official --report build/official-values-scalar.json
+	$(VENV)/bin/python tests/test_official.py --corpus build/official-osu --report build/official-acceptance.json
+	FOSU_BACKEND=scalar $(VENV)/bin/python tests/test_official.py --corpus build/official-osu --report build/official-acceptance-scalar.json
+	$(VENV)/bin/python tests/test_official_values.py --corpus build/official-osu --report build/official-values.json
+	FOSU_BACKEND=scalar $(VENV)/bin/python tests/test_official_values.py --corpus build/official-osu --report build/official-values-scalar.json

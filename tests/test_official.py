@@ -292,7 +292,7 @@ def main():
                 )
 
         if args.corpus:
-            for path in sorted(args.corpus.rglob("*.osu")):
+            for path in sorted(p for p in args.corpus.rglob("*.osu") if p.is_file()):
                 check(str(path), path)
         else:
             with tempfile.TemporaryDirectory(prefix="fosu-official-") as directory:

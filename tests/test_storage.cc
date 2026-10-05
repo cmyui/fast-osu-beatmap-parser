@@ -401,25 +401,7 @@ static void test_parser_prepares_engine_input_and_output() {
   CHECK_EQ(calls, 1);
 }
 
-static void test_mods_apply_to_parsed_values() {
-  fosu::Parser parser;
-  const auto   input = std::string(
-      "[General]\nMode:0\n[Difficulty]\nHPDrainRate:4\nCircleSize:4\n"
-      "OverallDifficulty:4\nApproachRate:4\n[TimingPoints]\n0,500\n"
-      "[HitObjects]\n100,100,1500,1,0\n");
-  const auto  mods = fosu::Mods::HardRock | fosu::Mods::DoubleTime;
-  const auto& map = require_parse(parser.parse(input, {.mods = mods}));
-  CHECK_EQ(map.hit_objects[0].time, 1000);
-  CHECK_EQ(map.hit_objects[0].y, 284);
-  CHECK_EQ(map.hp, 4 * 1.4);
-  CHECK_EQ(map.cs, 4 * 1.3);
-  CHECK_EQ(map.timing_points[0].beat_length, 500.0 / 1.5);
-  CHECK(
-      !parser.parse(input, {.mods = fosu::Mods::Easy | fosu::Mods::HardRock}));
-}
-
 int main() {
-  test_mods_apply_to_parsed_values();
   test_parser_prepares_engine_input_and_output();
   test_reparse_reuses_arena_memory();
   test_reparse_accepts_larger_arrays();

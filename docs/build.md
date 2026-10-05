@@ -11,14 +11,16 @@ include `src/fosu/parser.h` without building a library.
 |---|---|---|
 | `make test-native` | CTest (`check`): C++ parser tests on both engines, engine selection, and on Linux, exported-symbol and binary-hardening checks | CMake and a C++20 compiler |
 | `make test-python` | `tests/test_python.py`, including mypy and stubtest, on both backends against the package reinstalled into `build/venv` | Python 3.10+ (`PYTHON=` selects the interpreter) |
-| `make test-official` | Comparisons with osu!'s own decoder: synthetic field cases (`tests/test_official.py`) and field-level values for `tests/fixtures/official`, on both backends | .NET 10 SDK as `dotnet`; the first run fetches the pinned osu! revision |
+| `make test-official` | Comparisons with osu!'s own decoder on both backends: synthetic field cases (`tests/test_official.py`), then acceptance and field-level values for the test beatmaps in the pinned osu! checkout | .NET 10 SDK as `dotnet`; the first run fetches the pinned osu! revision |
 
-The C++ tests (`tests/test_*.cc`) cover the native parser: field acceptance,
-numbers, storage and parser reuse, and some derived values. `tests/test_python.py`
-covers the Python API and most derived values, such as slider events, end times,
-stacking and mods. Behaviour that must match osu! belongs in
-`tests/fixtures/official` or `tests/test_official.py`, which compare it with
-osu!'s decoder.
+Each parsing or calculation rule has a named C++ test (`tests/test_*.cc`) next
+to the code it covers: sections and fields, numbers, storage and parser reuse,
+slider timing and events, slider paths, stacking and mods. Expected values that
+follow osu! are checked against its decoder when the test is written.
+`tests/test_python.py` covers only the Python interface: conversion to Python
+objects, `None` for missing values, object lifetime, errors, buffers, and the
+logic implemented in the binding (bookmark and tag lists, `control_points`,
+`raw_position()` and `slider_position_at()`).
 
 CI runs the same checks, plus checks that need other platforms or builds: macOS
 and Windows; scalar, Debug, sanitizer and fuzzing builds; AArch64 and non-AVX

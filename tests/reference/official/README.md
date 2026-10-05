@@ -50,9 +50,9 @@ fields that this pinned official decoder ignores; those checks validate raw
 retention, not an official decoded property. Storyboard command bodies are not
 parsed by FOSU, and its fast/slow-path counters have no official counterpart.
 Absent defaults outside the explicitly finalized fields above are covered by
-ordinary unit tests, not inferred by this corpus audit. The synthetic files in
-`tests/fixtures/official` exercise finalization and run through this same audit
-in CI, in addition to the native unit tests.
+ordinary unit tests, not inferred by this corpus audit. CI runs this audit on
+the test beatmaps in the pinned osu! checkout, in addition to the native unit
+tests.
 
 Reports contain local paths and input-derived values; keep them private. A
 successful audit is bounded evidence about these files and these explicit
