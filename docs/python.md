@@ -65,7 +65,7 @@ One parser handles one call at a time; a concurrent call raises
 
 ## Performance
 
-FOSU commit `f2c86ce` (after 0.6.1), measured on 2026-10-04 using CPython
+FOSU commit `9620bc6` (after 0.7.0), measured on 2026-10-06 using CPython
 3.12.14 on an Intel Core i7-8700 under Linux/WSL2. All rows use the same 1,004
 mutually accepted all-mode maps. Times include eager result construction and
 release; lower is better. Warm-file measurements include opening and reading
@@ -73,11 +73,11 @@ page-cached files.
 
 | Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
 |---|---:|---:|
-| FOSU AVX2, reused `fosu.Parser` | 162.8 | 174.5 |
-| FOSU scalar, reused `fosu.Parser` | 219.0 | 227.0 |
-| FOSU AVX2, `fosu.parse` per call | 265.0 | 277.2 |
-| FOSU scalar, `fosu.parse` per call | 324.4 | 334.2 |
-| OsuPyParser 1.0.7 | Unsupported | 4,418.9 |
+| FOSU AVX2, reused `fosu.Parser` | 165.7 | 176.2 |
+| FOSU scalar, reused `fosu.Parser` | 226.0 | 240.3 |
+| FOSU AVX2, `fosu.parse` per call | 274.9 | 280.1 |
+| FOSU scalar, `fosu.parse` per call | 332.7 | 354.0 |
+| OsuPyParser 1.0.7 | Unsupported | 4,544.3 |
 
 A `fosu.Parser` keeps its memory between calls. The module functions create a
 new parser per call, which also reserves that memory and takes a page fault on
