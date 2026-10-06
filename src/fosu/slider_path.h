@@ -49,9 +49,18 @@ inline PathPoint slider_position_at(const SliderPath& path, f64 progress) {
     while (i && lengths[i - 1] >= distance)
       --i;
   } else if (progress > 0) {
-    i = static_cast<size_t>(
-        std::lower_bound(lengths.begin(), lengths.end(), distance) -
-        lengths.begin());
+    // std::lower_bound, choosing each half with a conditional move: where a
+    // tick falls along the path is unpredictable, so a branch per step
+    // mispredicts about half the time.
+    const f64* first = lengths.data();
+    size_t     count = lengths.size();
+    while (count > 1) {
+      const size_t half = count / 2;
+      first = first[half] < distance ? first + half : first;
+      count -= half;
+    }
+    i = static_cast<size_t>(first - lengths.data()) +
+        (count && *first < distance);
   }
   if (!i)
     return path.points.front();

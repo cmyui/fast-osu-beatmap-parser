@@ -123,7 +123,10 @@ inline ByteCounts count_bytes(const char* p, size_t n, char* copy) {
 }
 
 // A record is at least one line, so the line count bounds the per-line
-// arrays. Slider points and segments each start with '|'.
+// arrays. Slider points and segments each start with '|'. slider_points has
+// one spare slot: the SIMD point decoder stores a possible second point
+// before knowing it exists, and counts it only if it does. Parsing trims the
+// array to the counted points.
 inline bool prealloc_beatmap_arrays(Arena*     arena,
                                     Beatmap&   beatmap,
                                     ByteCounts counts) {
@@ -135,7 +138,7 @@ inline bool prealloc_beatmap_arrays(Arena*     arena,
          push_span(arena, beatmap.hit_objects, lines) &&
          push_span(arena, beatmap.sliders, lines) &&
          push_span(arena, beatmap.slider_segments, pipes) &&
-         push_span(arena, beatmap.slider_points, pipes);
+         push_span(arena, beatmap.slider_points, pipes + 1);
 }
 
 }  // namespace internal

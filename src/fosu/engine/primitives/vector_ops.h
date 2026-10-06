@@ -102,6 +102,13 @@ inline u32 line_end_mask32(Bytes32 v) {
   return byte_mask32(vorrq_u8(vceqq_u8(v.val[0], cr), vceqq_u8(v.val[0], lf)),
                      vorrq_u8(vceqq_u8(v.val[1], cr), vceqq_u8(v.val[1], lf)));
 }
+// Four bits per byte, all set where `matches` is. One narrowing shift is
+// cheaper than byte_mask32's pairwise sums, for code that needs only
+// positions: divide a mask's bit index by 4.
+inline u64 nibble_mask16(uint8x16_t matches) {
+  return vget_lane_u64(
+      vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(matches), 4)), 0);
+}
 inline uint8x16_t nondigit_bytes16(uint8x16_t v) {
   return vcgtq_u8(vsubq_u8(v, vdupq_n_u8('0')), vdupq_n_u8(9));
 }
