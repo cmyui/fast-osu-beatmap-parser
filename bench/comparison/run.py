@@ -10,6 +10,7 @@ import math
 import os
 from pathlib import Path
 import platform
+import random
 import select
 import subprocess
 import sys
@@ -172,9 +173,13 @@ with args.output.open("x") as out:
         jobs = [(w, kind) for w in workers for kind in w.entry["workloads"]]
         for round_id in range(args.rounds):
             # Each job parses the whole corpus alone, so its calls never follow
-            # another library's; job order reverses every other round.
+            # another library's; job order reverses every other round. Every
+            # job in a round visits the corpus in the same shuffled order, so
+            # no library sees maps grouped by mode or file name.
+            order = files[:]
+            random.Random(round_id).shuffle(order)
             for worker, kind in jobs if round_id % 2 == 0 else reversed(jobs):
-                for path in files:
+                for path in order:
                     result = worker.request(path, kind, args.reps)
                     record = {
                         "round": round_id,

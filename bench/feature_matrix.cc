@@ -56,6 +56,22 @@ uint64_t now() {
       .count();
 }
 
+// A pass's order of corpus entries, shuffled by Fisher-Yates over splitmix64
+// so that the Python matrix (bench/common.py) visits entries identically.
+std::vector<size_t> shuffled_order(size_t count, uint64_t seed) {
+  std::vector<size_t> order(count);
+  for (size_t i = 0; i < count; ++i)
+    order[i] = i;
+  for (size_t i = count; i > 1; --i) {
+    uint64_t z = (seed += 0x9e3779b97f4a7c15ull);
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+    z ^= z >> 31;
+    std::swap(order[i - 1], order[z % i]);
+  }
+  return order;
+}
+
 // Benchmarks parse resident bytes, so file contents are read before timing.
 static bool read_file(const char* path, std::string& out) {
   std::ifstream file(path, std::ios::binary);
@@ -115,19 +131,25 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  std::puts("file,bytes,rep,variant,workload,wall_ns");
-  std::string  input;
-  fosu::Parser reused_parser;
-  for (size_t file_index = 0; file_index < files.size(); ++file_index) {
-    const std::string filename = files[file_index].string();
-    if (!read_file(filename.c_str(), input))
+  std::vector<std::string> inputs(files.size());
+  for (size_t i = 0; i < files.size(); ++i)
+    if (!read_file(files[i].string().c_str(), inputs[i]))
       return 1;
-    for (fosu::i32 rep = 0; rep < reps; ++rep) {
-      for (size_t job_index = 0; job_index < profile_count; ++job_index) {
-        const Profile& profile =
-            profiles[(job_index + file_index + static_cast<size_t>(rep)) %
-                     profile_count];
-        const uint64_t begin = now();
+
+  // Each pass times one profile over every entry once, in its own shuffled
+  // order, so no entry repeats until the next pass: branch predictors and
+  // caches cannot learn one map's pattern from the previous call.
+  std::puts("file,bytes,rep,variant,workload,wall_ns");
+  fosu::Parser reused_parser;
+  for (fosu::i32 rep = 0; rep < reps; ++rep) {
+    for (size_t job_index = 0; job_index < profile_count; ++job_index) {
+      const size_t   profile_index = (job_index + rep) % profile_count;
+      const Profile& profile = profiles[profile_index];
+      for (const size_t file_index :
+           shuffled_order(inputs.size(),
+                          static_cast<uint64_t>(rep) * 1000 + profile_index)) {
+        const std::string& input = inputs[file_index];
+        const uint64_t     begin = now();
         if (reuse) {
           parse(reused_parser, input, profile.options);
         } else {
@@ -135,8 +157,9 @@ int main(int argc, char** argv) {
           parse(parser, input, profile.options);
         }
         const uint64_t elapsed = now() - begin;
-        std::printf("%s,%zu,%d,%s,%s-%s,%llu\n", filename.c_str(), input.size(),
-                    rep, argv[3], profile.name, argv[5],
+        std::printf("%s,%zu,%d,%s,%s-%s,%llu\n",
+                    files[file_index].string().c_str(), input.size(), rep,
+                    argv[3], profile.name, argv[5],
                     static_cast<unsigned long long>(elapsed));
       }
     }
