@@ -1,7 +1,10 @@
-"""Summarize benchmark CSV: mean per-map minima and all-run distribution.
+"""Summarize benchmark CSV: fastest pass, mean per-map minima and all-run distribution.
 
-Groups by variant and workload (or fresh/reused result). Minima estimate an
-uncontended lower envelope; all-run statistics retain scheduler interference.
+Groups by variant and workload (or fresh/reused result). A pass is one timed
+parse of every file: the rows sharing a `rep`. The fastest pass's mean is an
+observed corpus cost; per-map minima combine each map's best sample from
+different passes into a lower envelope; all-run statistics retain scheduler
+interference.
 """
 
 import argparse
@@ -56,6 +59,12 @@ for (variant, kind, mode), files in groups.items():
         "all_mean_us": mean(all_values),
         "all_p50_us": median(all_values),
     }
+    if "rep" in best[0]:
+        passes = collections.defaultdict(list)
+        for rows in files.values():
+            for r in rows:
+                passes[r["rep"]].append(int(r["wall_ns"]) / 1000)
+        result["fastest_pass_mean_us"] = min(map(mean, passes.values()))
     if mode is not None:
         result["mode"] = mode
     if "bytes" in best[0]:
