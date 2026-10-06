@@ -301,8 +301,7 @@ FOSU_ALWAYS_INLINE void accept_hitobject(
   const auto          rest_length = static_cast<size_t>(line_end - rest);
   // Most objects are circles with no sample or the editor's "0:0:0:0:".
   if (kind == HitObjectKind::Circle &&
-      (rest_length == 0 || (rest_length == 9 && short_sample(rest + 1))))
-      [[likely]] {
+      (rest_length == 0 || (rest_length == 9 && short_sample(rest + 1)))) {
     if (rest_length)
       object.hit_sample = {rest + 1, 8};
   } else if (!(kind == HitObjectKind::Slider

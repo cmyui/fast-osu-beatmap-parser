@@ -58,7 +58,7 @@ inline void calculate_modern_stacks(Beatmap&             map,
     for (size_t n = i; n-- > 0;) {
       const auto& previous = map.hit_objects[n];
       const auto& object = map.hit_objects[current];
-      if (previous.is_spinner() || previous.is_hold())
+      if (previous.is_spinner() || previous.is_hold()) [[unlikely]]
         continue;
       // Stable truncates circle comparisons to integer timestamps. Use trunc
       // rather than an out-of-range integer conversion on malformed extremes.
@@ -144,6 +144,7 @@ inline bool apply_stacking(Beatmap&             map,
     // The standard ruleset's spinner overrides StackOffset with Vector2.Zero,
     // even when legacy stacking assigned it a nonzero height.
     if (map.hit_objects[i].is_spinner() || map.hit_objects[i].is_hold())
+        [[unlikely]]
       continue;
     const f32 offset = stack.stack_height * scale * -6.4f;
     stack.stack_offset = {offset, offset};
