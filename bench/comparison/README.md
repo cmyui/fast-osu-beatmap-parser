@@ -116,7 +116,8 @@ observation of what the library itself costs. Never take minimums of individual
 maps: a whole pass keeps the garbage collection and JIT compilation its library
 causes.
 Each library/API/pass gets a fresh process, preloads the common Python cohort,
-warms on 64 maps three times, then times one complete loop. Normal GC and loop
+warms on 64 maps three times, then times one complete loop in a shuffled order
+shared by every API in that pass. Normal GC and loop
 bookkeeping are included. Imports, preload, warmup and process teardown are
 excluded. All per-map object counts must agree across batches. The second pass
 reverses API order; both pass times and the cohort fingerprint are retained.
@@ -130,8 +131,9 @@ cross-language table:
 - Persistent, independent worker processes inherit the driver's CPU affinity.
   Imports, JIT warm-up, JSON IPC, input pre-reading, and report serialization
   are outside the timer. Each worker warms on 64 evenly spaced maps, three
-  parses each. Each worker/workload job then parses the whole sorted corpus on
-  its own in every pass, and job order reverses every other pass. A job's calls
+  parses each. Each worker/workload job then parses the whole corpus on its own
+  in every pass, in that pass's shuffled order, and job order reverses every
+  other pass. A job's calls
   follow only its own calls, so every library runs with its own caches and
   branch history equally warm.
 - `bytes`: decode resident input, read the object count, and release the result.

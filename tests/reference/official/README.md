@@ -6,16 +6,25 @@ the official outer decoder still decides whether to continue.
 
 `tests/test_official.py` compares whole-map completion, line rejection counts,
 hitobject counts, and parsed bookmarks. Its synthetic enum cases explicitly
-assert the documented differences between osu! and FOSU's typed domains.
+assert the documented differences between osu! and FOSU's typed domains; they
+are not skipped comparisons.
 
 `tests/test_official_values.py` additionally requests `RawFields`. It audits
 the represented object, slider, timing-point, break, colour, and explicitly
-provided header fields. Metadata settings, object order, positions, endpoints,
-and combo values come from the finished official map. This is not an assertion
-that FOSU builds every part of osu!'s gameplay model.
+provided header fields, plus retained paths and event descriptors, using the
+official standard processor for stacking. Metadata settings, object order,
+positions, endpoints, and combo values come from the finished official map.
+Path coordinates allow 0.001-pixel/1e-6-relative tolerance for float
+arithmetic; other fields are compared exactly. This is not an assertion that
+FOSU builds every part of osu!'s gameplay model.
+
+Run them with the .NET 10 SDK and an interpreter with fosu installed:
 
 ```sh
 sh tests/reference/official/build.sh
+python tests/test_official.py
+FOSU_BACKEND=scalar python tests/test_official.py
+python tests/test_official.py --corpus /path/to/maps --report /private/report.json
 python tests/test_official_values.py --corpus /path/to/corpus/files \
   --report /private/official-values.json
 FOSU_BACKEND=scalar python tests/test_official_values.py --corpus /path/to/corpus/files \
@@ -50,9 +59,7 @@ fields that this pinned official decoder ignores; those checks validate raw
 retention, not an official decoded property. Storyboard command bodies are not
 parsed by FOSU, and its fast/slow-path counters have no official counterpart.
 Absent defaults outside the explicitly finalized fields above are covered by
-ordinary unit tests, not inferred by this corpus audit. CI runs this audit on
-the test beatmaps in the pinned osu! checkout, in addition to the native unit
-tests.
+ordinary unit tests, not inferred by this corpus audit.
 
 Reports contain local paths and input-derived values; keep them private. A
 successful audit is bounded evidence about these files and these explicit

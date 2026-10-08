@@ -136,7 +136,6 @@ def main() -> int:
         windows_only_exclusions = {
             b"bench/library_compare.cc",
             b"bench/profile_parse.cc",
-            b"tests/reference/native.cc",
             b"tests/validate_corpus.cc",
             b"tests/fuzz_parser.cc",
             # Standalone support headers otherwise inherit the fuzz target's

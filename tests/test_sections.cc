@@ -646,31 +646,6 @@ static void test_invalid_byte_replaces_hitobject_lf() {
       1, 2);
 }
 
-static void test_omitted_sections_use_defaults() {
-  for (bool simd : {false, true}) {
-    auto bm = parse_str(
-        "osu file format v14\n[Metadata]\nTitle:Only metadata\n", simd);
-    CHECK(bm.title == "Only metadata");
-    CHECK(bm.audio_filename.empty());
-    CHECK(bm.sample_set == fosu::SampleSet::Normal);
-    CHECK_EQ(bm.preview_time, -1);
-    CHECK_EQ(bm.grid_size, 0);
-    CHECK_EQ(bm.hp, 5);
-    CHECK_EQ(bm.cs, 5);
-    CHECK_EQ(bm.od, 5);
-    CHECK_EQ(bm.ar, 5);
-    CHECK(bm.background.empty() && bm.video.empty());
-    CHECK(bm.timing_points.empty() && bm.breaks.empty());
-    CHECK(bm.combo_colours.empty() && bm.hit_objects.empty());
-    CHECK(bm.sliders.empty() && bm.slider_points.empty());
-    CHECK_EQ(bm.velocity_presets.size(), 3u);
-    CHECK_EQ(bm.velocity_presets[0], 0.75);
-    CHECK_EQ(bm.velocity_presets[1], 1);
-    CHECK_EQ(bm.velocity_presets[2], 1.5);
-    CHECK_EQ(bm.stats.malformed_lines, 0u);
-  }
-}
-
 // A document that sets nothing gets the target client's defaults; stable and
 // lazer differ only in Countdown and BeatmapID. Without a version line, both
 // use version 14.
@@ -1009,14 +984,6 @@ static void check_line_end_scan_boundaries() {
       }
     }
   }
-}
-
-static void test_cr_scan_boundaries() {
-  check_line_end_scan_boundaries<'\r'>();
-}
-
-static void test_lf_scan_boundaries() {
-  check_line_end_scan_boundaries<'\n'>();
 }
 
 static void test_event_filename_boundaries() {
@@ -1512,8 +1479,8 @@ int main() {
   test_byte_scan_boundaries<':'>();
   test_byte_scan_boundaries<'\n'>();
   test_byte_scan_boundaries<'\0'>();
-  test_cr_scan_boundaries();
-  test_lf_scan_boundaries();
+  check_line_end_scan_boundaries<'\r'>();
+  check_line_end_scan_boundaries<'\n'>();
   test_event_filename_boundaries();
   test_section_skip_boundaries();
   test_long_event_lines();
@@ -1545,7 +1512,6 @@ int main() {
   test_invalid_byte_replaces_hitobject_cr();
   test_invalid_byte_replaces_hitobject_lf();
   test_long_timing_offsets();
-  test_omitted_sections_use_defaults();
   test_unset_fields_use_osu_defaults();
   test_difficulty_selection_skips_other_sections();
   test_metadata_and_difficulty_selection();

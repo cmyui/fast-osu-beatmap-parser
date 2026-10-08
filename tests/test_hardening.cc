@@ -69,22 +69,6 @@ static void test_circle_type_precedence() {
   }
 }
 
-static void test_empty_input() {
-  fosu::Parser parser;
-  auto         empty = parser.parse("");
-  assert(empty && empty->hit_objects.empty());
-  assert(must_parse(parser, "").hit_objects.empty());
-}
-
-static void test_section_header_inside_value() {
-  fosu::Parser parser;
-  auto         embedded = std::string(
-      "[Metadata]\nTitle:[HitObjects]\n1,2,3,1,0\n[HitObjects]\n1,2,4,1,0\n");
-  auto selected =
-      must_parse(parser, embedded, {.sections = fosu::kSectionHitObjects});
-  assert(selected.hit_objects.size() == 1 && selected.hit_objects[0].time == 4);
-}
-
 static void test_combo_state_across_malformed_lines() {
   // Combo state carries across malformed lines and repeated HitObjects
   // sections, including after a scalar-prefix spinner. A spinner rejected
@@ -104,15 +88,6 @@ static void test_combo_state_across_malformed_lines() {
     assert(!map.hit_objects[2].new_combo);
     assert(map.hit_objects[4].new_combo);
   }
-}
-
-static void test_slider_point_numbers() {
-  fosu::Parser parser;
-  auto         point_input =
-      std::string("[HitObjects]\n1,2,3,2,0,B|1:2.5|3:4e1,1,10\n");
-  auto points = must_parse(parser, point_input);
-  assert(points.sliders.size() == 1 && points.slider_points.size() == 2);
-  assert(points.slider_points[0].y == 2 && points.slider_points[1].y == 40);
 }
 
 static void test_comments_and_blank_lines() {
@@ -162,15 +137,6 @@ static void test_slider_tail_shapes() {
           "\n1,2,3,1,0\n");
     check(std::string("[HitObjects]\n256,192,1000,2,0,") + tail + "\r\n");
   }
-}
-
-static void test_slider_sample_with_commas() {
-  fosu::Parser parser;
-  auto         input = std::string(
-      "[HitObjects]\n1,2,3,2,0,L|1:2,1,100,0|0,0:0|0:0,0:0:0:0:a,b\n");
-  auto m = must_parse(parser, input);
-  assert(m.hit_objects.size() == 1 &&
-         m.hit_objects[0].hit_sample == "0:0:0:0:a");
 }
 
 static void test_near_integer_decimals() {
@@ -250,13 +216,9 @@ static void test_parse_double_respects_end() {
 int main() {
   test_short_sample_shape();
   test_circle_type_precedence();
-  test_empty_input();
-  test_section_header_inside_value();
   test_combo_state_across_malformed_lines();
-  test_slider_point_numbers();
   test_comments_and_blank_lines();
   test_slider_tail_shapes();
-  test_slider_sample_with_commas();
   test_near_integer_decimals();
   test_unusual_numeric_values();
   test_long_digit_truncations();

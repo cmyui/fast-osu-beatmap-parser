@@ -2,8 +2,8 @@
 
 fosu decodes legacy `.osu` files and applies the official decoder's metadata
 precision/clamps, legacy clock offsets, stable hitobject ordering and combo rules.
-Optional calculations provide slider paths, end times, path events and unmodded
-osu!standard stacking. They do not resolve samples, apply mods or convert rulesets.
+Optional calculations provide slider paths, end times, path events and
+osu!standard stacking. They do not resolve samples or convert rulesets.
 Retained paths use decoder geometry, not ruleset-specific Catmull rendering optimisations.
 Sample strings and encoded type bits are
 retained separately from effective combo flags.
@@ -191,7 +191,7 @@ numeric behavior. FOSU deliberately rejects unknown enum values rather than
 exposing undefined choices through its typed APIs, even where the official
 decoder accepts them. These domain checks are not a ranking validator.
 Third-party parsers are not the authority for those decisions. Duration resolves
-timing and curve distance; resolved samples, path-position queries and ruleset
+timing and curve distance; resolved samples and ruleset
 processing remain outside decoding.
 
 The reference is the unmodified open-source legacy decoder from osu! at
@@ -212,34 +212,8 @@ hitobjects in lazer mode. For example,
 loading the map. fosu likewise retains the previous/default field and counts
 the rejected line. Callers decide whether a partial result is useful.
 
-The executable reference harness records exceptions from the official decoder
-and lets its own outer error handler decide whether decoding continues. Run it
-with .NET 10 and an interpreter with fosu installed:
-
-```sh
-sh tests/reference/official/build.sh
-python tests/test_official.py
-FOSU_BACKEND=scalar python tests/test_official.py
-python tests/test_official.py --corpus /path/to/maps --report /private/report.json
-```
-
-The synthetic suite checks field rejection and retained object counts. The
-explicit enum-policy cases assert both osu!'s acceptance and FOSU's rejection;
-they are not skipped comparisons. The
-corpus audit compares whole-map completion, rejection counts and object counts;
-it does not prove equality of every gameplay value or identify every rejected
-line in fosu. Keep corpus reports private: they contain local paths.
-
-For field-level corpus comparisons, run `tests/test_official_values.py`. Its
-[reference projection and normalization inventory](../tests/reference/official/README.md)
-describe which values come directly from decoded objects and which raw fields
-are recovered from officially accepted lines. The audit also compares retained
-paths and event descriptors, and uses the official standard processor for stacking.
-Path coordinates allow 0.001-pixel/1e-6-relative tolerance for float arithmetic;
-other fields are compared exactly. This is not equality with the complete gameplay
-model: sample resolution, mods and ruleset conversion remain outside the API.
-
-This is bounded compatibility evidence, not complete format or stable-client
-parity. The raw parser is not a replacement for the game's package loader,
-storyboard interpreter or ruleset processing. Empty raw buffers remain valid
-empty results even though the official file decoder requires a header/content.
+The [official reference audits](../tests/reference/official/README.md) run
+that decoder against fosu and describe what the comparison proves. The raw
+parser is not a replacement for the game's package loader, storyboard
+interpreter or ruleset processing. Empty raw buffers remain valid empty results
+even though the official file decoder requires a header/content.

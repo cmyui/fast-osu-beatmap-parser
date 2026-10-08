@@ -1,7 +1,7 @@
 """Rotate fresh-result Python calls across workloads and optional wheel directories.
 
 Input bytes and imports are warm. Every call releases its result. Path workloads
-include reading the file; iterate parses then sums all hitobject start times; bytes workloads start with bytes already in Python.
+include reading the file; bytes workloads start with bytes already in Python.
 """
 
 import argparse
@@ -27,14 +27,8 @@ def load(path: Path, name: str) -> ModuleType:
     return module
 
 
-def call(package: ModuleType, kind: str, data: bytes, path: Path) -> int | float:
+def call(package: ModuleType, kind: str, data: bytes, path: Path) -> int:
     bm = package.parse_file(path) if kind == "file" else package.parse(data)
-    if kind == "slider-lengths":
-        return sum(
-            note.length for note in bm.hit_objects if isinstance(note, package.Slider)
-        )
-    if kind == "iterate":
-        return sum(note.time for note in bm.hit_objects)
     return len(bm.hit_objects)
 
 
@@ -50,15 +44,7 @@ def main() -> None:
     p.add_argument("--reps", type=int, default=5)
     p.add_argument("--limit", type=int, default=0)
     p.add_argument(
-        "--workloads",
-        nargs="+",
-        choices=[
-            "bytes",
-            "file",
-            "iterate",
-            "slider-lengths",
-        ],
-        default=["bytes", "file"],
+        "--workloads", nargs="+", choices=["bytes", "file"], default=["bytes", "file"]
     )
     args = p.parse_args()
     files = select_files(p, args.corpus, args.reps, args.limit)

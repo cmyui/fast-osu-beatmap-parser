@@ -1,9 +1,7 @@
 # Public parser comparison
 
 All rows were measured on 2026-10-06 from FOSU commit `ab0301c` (after 0.8.0), using
-the fixed cohorts and timing protocols below. The native comparison times one
-complete corpus pass per worker job, visiting maps in a shuffled order. This
-comparison asks how long documented public APIs take to produce useful beatmap
+the fixed cohorts and timing protocols below. This comparison asks how long documented public APIs take to produce useful beatmap
 results. It does not pretend that every parser returns the same model.
 
 ## Result contracts
@@ -22,11 +20,8 @@ Unavoidable additional work stays inside the timer.
 - **Mod-adjusted gameplay** is likewise reported only for FOSU until another
   measured public API offers an equivalent bulk result.
 
-FOSU appears with two parser lifetimes. A **reused parser** keeps its memory
-between calls. A **new parser per call** also reserves that memory and takes a
-page fault on the first write to each page, every call; Python's module-level
-`fosu.parse` and `fosu.parse_file` work this way. The other libraries are
-measured through their normal per-call APIs.
+FOSU rows use both [parser lifetimes](performance.md#parser-lifetime); the
+other libraries are measured through their normal per-call APIs.
 
 `Exact` means the invocation requests the stated FOSU contract. `Superset` means
 the parser unavoidably performs additional work. `Different` covers richer models
@@ -45,6 +40,11 @@ whose fields and processing do not form a strict subset or superset.
 | Coosu 2.5.1 | Typed C# document | Normal post-deserialization processing is eager | Different, with additional work |
 | osu-parsers 4.1.7 | Rich TypeScript document | Optional storyboard decoder disabled | Different |
 | osu-parser 0.3.3 | Legacy JavaScript document | Slider endpoints, duration and maximum combo are eager | Superset work |
+
+The official osu!lazer completely and rosu-map largely support lazer-specific
+v128 beatmap features. FOSU supports the v128 fields represented by its public
+model when parsing as lazer, since osu!stable has no v128 rules; other parsers
+in this table have more limited or no v128 coverage.
 
 rosu-pp, its Python bindings and pyttanko are intentionally excluded. Their
 significantly reduced PP-oriented models are not general-purpose beatmap
@@ -150,10 +150,7 @@ semantic proof. A failed or mismatching entry never contributes a fast timing.
 
 ## Measurement contract
 
-The corpus profile contains 1,024 entries (986 unique beatmaps), 256 from each
-mode and 46,029,610 bytes. It is stratified by ordinary map size, slider/hold
-share and timing-row count from popular ranked/approved Akatsuki maps. The corpus
-SHA-256 is `1f7e90f4ac0222f0a2b0890e6f07c70807e9cc5d5e6ac2b392b859b2fa042895`.
+The corpus is the 1,024-entry [performance snapshot](../bench/corpus/README.md).
 
 The host is a six-core Intel Core i7-8700 running Ubuntu 22.04 under WSL2 on
 Windows 11. Inputs and build products use WSL's ext4 filesystem. Runs are pinned
@@ -161,36 +158,14 @@ to logical CPU 8 with the Windows High performance power plan selected. C++ work
 build through the project's CMake Release configuration with GCC 15.2: `-O3`,
 the product's hardening flags and jump alignment for Intel's JCC erratum. AVX2
 uses `-march=x86-64-v3`, while scalar uses `-march=x86-64` and
-`FOSU_DISABLE_SIMD`. Python uses CPython 3.12.14.
-
-Python headlines use three independent two-pass runs after one discarded warm-up
-batch and report the fastest pass.
-Each job receives a fresh process, preloads the common
-cohort, warms 64 evenly spaced entries three times, then times one complete pass
-in a shuffled order that every API in that pass shares.
-Pass two reverses job order. Parsing, required conversion, allocations, result
-inspection, normal GC and release are timed; imports, preload, warmup and
-shutdown are not. Warm-file calls open, read and close files already in the OS
-page cache.
-
-The cross-language sweep keeps independent workers alive, warms each worker,
-then times one complete pass per job, in a shuffled order that every job in the
-round shares, reversing job order every other pass.
-Input preparation and JSON IPC are outside the timer. Managed runtimes keep
-normal GC behavior. A 10-second request budget records a timeout as failure and
-restarts the worker.
+`FOSU_DISABLE_SIMD`. Python uses CPython 3.12.14. Timing boundaries follow
+the [harness measurement contract](../bench/comparison/README.md#measurement-contract).
 
 ## Run stability
 
 Builds finished before timing, workloads ran serially, and the host's
 one-minute load average was recorded at each step; it stayed between 0.5 and
 2.8.
-
-Every table reports the fastest complete run or pass. Interference from the host
-only adds time, so the fastest pass is the closest observation of what each
-implementation can do. Passes are never split: each keeps the garbage
-collection and JIT compilation its library causes, and no individual map or
-pause is filtered out. All passes remain in the raw evidence.
 
 In the worker table, every row's slowest pass is within 3.3% of its fastest,
 except the three C# libraries. Their first pass takes 2.8–4.2 times their

@@ -361,20 +361,12 @@ inline bool approximate_curve_segment(std::span<const CurvePoint> points,
   return true;
 }
 
-template <typename Curve>
-inline bool approximate_curve_segment(std::span<const CurvePoint> points,
-                                      CurveType                   type,
-                                      Curve&                      segment,
-                                      Arena*                      arena) {
-  return approximate_curve_segment(points, type, std::nullopt, segment, arena);
-}
-
 inline bool curve_segment_distance(std::span<const CurvePoint> points,
                                    CurveType                   type,
                                    CurveDistance&              distance,
                                    Arena*                      arena) {
   CurveDistance segment{.length = distance.length};
-  if (!approximate_curve_segment(points, type, segment, arena))
+  if (!approximate_curve_segment(points, type, std::nullopt, segment, arena))
     return false;
   // Adjacent segments share their first vertex. The last edge is unchanged
   // unless the new segment consists solely of that shared vertex.
@@ -518,26 +510,21 @@ inline f64 slider_distance(const Beatmap&   map,
   const size_t                      count = control_points.size() + 1;
   CurveDistance                     distance;
   const std::span<const CurvePoint> relative_points{points, count};
-  if (reads_lazer_format(map.format_version, client)) {
-    const auto segments =
-        map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
-    if (!calculate_lazer_slider_distance(relative_points, segments,
-                                         slider.curve_type, distance, arena)) {
-      return 0.f;
-    }
-  } else {
-    const auto segments =
-        map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
-    if (!for_each_legacy_segment(
-            relative_points, segments, slider.curve_type,
-            [&](std::span<const CurvePoint> points, size_t vertex_count,
-                CurveType type, bool) {
-              return calculate_legacy_slider_distance(points, vertex_count,
-                                                      type, distance, arena);
-            })) {
-      return 0.f;
-    }
-  }
+  const auto                        segments =
+      map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
+  const bool calculated =
+      reads_lazer_format(map.format_version, client)
+          ? calculate_lazer_slider_distance(relative_points, segments,
+                                            slider.curve_type, distance, arena)
+          : for_each_legacy_segment(
+                relative_points, segments, slider.curve_type,
+                [&](std::span<const CurvePoint> points, size_t vertex_count,
+                    CurveType type, bool) {
+                  return calculate_legacy_slider_distance(
+                      points, vertex_count, type, distance, arena);
+                });
+  if (!calculated)
+    return 0.f;
   // A missing/zero declared length uses the natural path. Otherwise osu! trims
   // or extends it, except when a duplicate final vertex prevents extension.
   if (slider.length > 0 && distance.count > 1 &&
@@ -604,7 +591,7 @@ inline bool calculate_legacy_slider_curve(std::span<const CurvePoint> points,
       const bool after_previous_segment = continues_path && begin == 0;
       curve.first_in_segment = several_points || after_previous_segment;
       if (!approximate_curve_segment(points.subspan(begin, i - begin), type,
-                                     curve, arena) ||
+                                     std::nullopt, curve, arena) ||
           curve.failed) {
         return false;
       }
@@ -630,7 +617,7 @@ inline bool calculate_lazer_slider_curve(std::span<const CurvePoint>   points,
       if (i == points.size() || i - begin > 1) {
         curve.first_in_segment = i - begin > 1;
         if (!approximate_curve_segment(points.subspan(begin, i - begin), type,
-                                       curve, arena) ||
+                                       std::nullopt, curve, arena) ||
             curve.failed) {
           return false;
         }
@@ -680,28 +667,23 @@ inline std::optional<SliderPath> calculate_slider_path(const Beatmap&   map,
   if (count > 1 && points[0] != points[1])
     curve.append(points[0]);
   const std::span<const CurvePoint> relative_points{points, count};
-  if (reads_lazer_format(map.format_version, client)) {
-    const auto segments =
-        map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
-    if (!calculate_lazer_slider_curve(relative_points, segments,
-                                      slider.curve_type, curve,
-                                      scratch_arena)) {
-      return std::nullopt;
-    }
-  } else {
-    const auto segments =
-        map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
-    if (!for_each_legacy_segment(
-            relative_points, segments, slider.curve_type,
-            [&](std::span<const CurvePoint> points, size_t vertex_count,
-                CurveType type, bool continues_path) {
-              return calculate_legacy_slider_curve(points, vertex_count,
-                                                   continues_path, type, curve,
-                                                   scratch_arena);
-            })) {
-      return std::nullopt;
-    }
-  }
+  const auto                        segments =
+      map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
+  const bool calculated =
+      reads_lazer_format(map.format_version, client)
+          ? calculate_lazer_slider_curve(relative_points, segments,
+                                         slider.curve_type, curve,
+                                         scratch_arena)
+          : for_each_legacy_segment(
+                relative_points, segments, slider.curve_type,
+                [&](std::span<const CurvePoint> points, size_t vertex_count,
+                    CurveType type, bool continues_path) {
+                  return calculate_legacy_slider_curve(points, vertex_count,
+                                                       continues_path, type,
+                                                       curve, scratch_arena);
+                });
+  if (!calculated)
+    return std::nullopt;
   // Release the vertex array's unused capacity; the lengths follow it.
   arena_pop_to(result_arena,
                static_cast<size_t>(reinterpret_cast<u8*>(curve.end) -
@@ -725,8 +707,7 @@ inline std::optional<SliderPath> calculate_slider_path(const Beatmap&   map,
         (edge / edge.length()) * static_cast<f32>(expected - lengths[end - 1]);
     lengths[end] = expected;
   }
-  const SliderPath result{{output, end + 1}, {lengths, end + 1}};
-  return result;
+  return SliderPath{{output, end + 1}, {lengths, end + 1}};
 }
 
 inline bool set_slider_paths(Beatmap& map,
@@ -738,21 +719,17 @@ inline bool set_slider_paths(Beatmap& map,
   auto* paths = arena_push_array<SliderPath>(result_arena, map.sliders.size());
   if (!paths)
     return false;
-  bool success = true;
   for (const auto& object : map.hit_objects) {
     if (object.slider == HitObject::kNoSlider)
       continue;
-    auto path =
+    const auto path =
         calculate_slider_path(map, client, object, result_arena, scratch_arena);
-    if (!path) {
-      success = false;
-      break;
-    }
-    paths[object.slider] = path.value();
+    if (!path)
+      return false;
+    paths[object.slider] = *path;
   }
-  if (success)
-    map.slider_paths = {paths, map.sliders.size()};
-  return success;
+  map.slider_paths = {paths, map.sliders.size()};
+  return true;
 }
 
 FOSU_FP_CONTRACT_OFF_END

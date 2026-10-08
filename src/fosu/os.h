@@ -27,7 +27,7 @@ inline void* os_reserve(size_t size) {
   void* memory = mmap(nullptr, size, PROT_NONE, flags, -1, 0);
   if (memory == MAP_FAILED)
     return nullptr;
-#if defined(MADV_HUGEPAGE) && !defined(FOSU_ARENA_NO_HUGEPAGE)
+#if defined(MADV_HUGEPAGE)
   madvise(memory, size, MADV_HUGEPAGE);
 #endif
   return memory;

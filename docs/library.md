@@ -34,7 +34,7 @@ osu!lazer read a map differently: `Client::Stable`, the default, or
 
 `Parser` owns input bytes and parsed arrays. Its result remains valid until
 the next parse attempt or parser destruction. Use separate parsers concurrently.
-Pointer/span input is copied; callers need neither SIMD padding nor a retained
+Input is copied; callers need neither SIMD padding nor a retained
 input buffer. Fields and array elements are writable; strings are
 `std::string_view` values.
 
@@ -48,7 +48,7 @@ assuming every pooled point belongs to an accepted slider.
 ## Section selection
 
 ```cpp
-auto listing = parser.parse(input, size, {
+auto listing = parser.parse(input, {
     .sections = fosu::kSectionMetadata | fosu::kSectionDifficulty,
 });
 if (!listing) return 1;

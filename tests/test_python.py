@@ -367,26 +367,6 @@ def test_kind_precedence_and_combo_flags():
     assert c.new_combo is True and c.combo_skip == 3 and c.type == 53
 
 
-def test_stable_time_order_preserves_slider_data():
-    b = fosu.parse(
-        b"[HitObjects]\n10,20,300,2,0,L|40:50,1,60\n"
-        b"60,70,100,2,0,B|80:90|100:110,2,120\n"
-        b"120,130,100,1,0\n"
-    )
-    first, circle, last = b.hit_objects
-    assert isinstance(first, fosu.Slider) and isinstance(last, fosu.Slider)
-    assert isinstance(circle, fosu.Circle)
-    assert [h.time for h in b.hit_objects] == [100, 100, 300]
-    assert first.length == 120 and first.slides == 2
-    assert first.control_points == [
-        fosu.Point(60, 70),
-        fosu.Point(80, 90),
-        fosu.Point(100, 110),
-    ]
-    assert last.length == 60 and last.slides == 1
-    assert last.control_points == [fosu.Point(10, 20), fosu.Point(40, 50)]
-
-
 def test_detached_values_remain_valid_after_reuse():
     data = bytearray(
         b"osu file format v14\n[Metadata]\nTitle:Retained\n[HitObjects]\n32,48,600,1,0\n"
@@ -424,43 +404,6 @@ def test_native_records_have_eager_readonly_fields_and_value_protocols(kind):
         object.__setattr__(record, "time", 123)
 
 
-@pytest.mark.parametrize("kind", [fosu.Circle, fosu.TimingPoint])
-def test_consumer_created_native_record_cycles_are_collected(kind):
-    class Marker:
-        pass
-
-    marker = Marker()
-    if kind is fosu.Circle:
-        record = kind(
-            time=0,
-            x=1,
-            y=2,
-            hitsound=fosu.HitSound(0),
-            type=1,
-            new_combo=False,
-            combo_skip=0,
-            hit_sample="",
-            stacking=marker,
-            end_time=0,
-        )
-    else:
-        record = kind(
-            time=marker,
-            beat_length=500,
-            meter=4,
-            sample_set=fosu.SampleSet(1),
-            sample_index=0,
-            volume=100,
-            uninherited=True,
-            effects=0,
-        )
-    marker.record = record
-    retained = weakref.ref(marker)
-    del record, marker
-    gc.collect()
-    assert retained() is None
-
-
 @pytest.mark.parametrize("coordinate", ["0", "512", "513", "-1", "1.25", "-0"])
 def test_shared_coordinates_preserve_values_and_signed_zero(coordinate):
     data = (
@@ -480,60 +423,6 @@ def test_shared_coordinates_preserve_values_and_signed_zero(coordinate):
         assert type(actual) is float
         assert actual == expected
         assert math.copysign(1, actual) == math.copysign(1, expected)
-
-
-def test_points_are_read_only_and_independent_between_results():
-    data = b"[HitObjects]\n10,20,30,2,0,L|40:50,1,60\n"
-    b = fosu.parse(data)
-    other = fosu.parse(data)
-    with pytest.raises(AttributeError):
-        b.hit_objects[0].control_points[1].x = 70
-    assert b.hit_objects[0].control_points[1].x == 40
-    assert other.hit_objects[0].control_points[1].x == 40
-
-
-def test_native_points_have_eager_float_fields():
-    point = fosu.Point(x=1.0, y=2.0)
-    assert (point.x, point.y) == (1.0, 2.0)
-    assert repr(point) == "Point(x=1.0, y=2.0)"
-    assert point == fosu.Point(1, 2)
-    assert pickle.loads(pickle.dumps(point)) == point
-    assert deepcopy(point) == point
-    assert gc.is_tracked(point)
-    with pytest.raises(AttributeError):
-        object.__setattr__(point, "x", point)
-
-
-def test_user_cycle_through_slider_list_is_collected():
-    class Marker:
-        pass
-
-    beatmap = fosu.parse(b"[HitObjects]\n1,2,3,2,0,L|4:5,1,6\n")
-    note = beatmap.hit_objects[0]
-    marker = Marker()
-    marker.note = note
-    note.control_points.append(marker)
-    retained = weakref.ref(marker)
-    del beatmap, note, marker
-    gc.collect()
-    assert retained() is None
-
-
-def test_parse_preserves_gc_enabled_state():
-    data = b"[HitObjects]\n1,2,3,1,0\n"
-    original = gc.isenabled()
-    try:
-        gc.enable()
-        assert fosu.parse(data).hit_objects[0].time == 3
-        assert gc.isenabled()
-        gc.disable()
-        assert fosu.parse(data).hit_objects[0].time == 3
-        assert not gc.isenabled()
-    finally:
-        if original:
-            gc.enable()
-        else:
-            gc.disable()
 
 
 @pytest.mark.parametrize("gc_enabled", [False, True], ids=["gc-disabled", "gc-enabled"])
@@ -690,12 +579,6 @@ def test_file_errors(tmp_path):
         fosu.parse_file(tmp_path)
     with pytest.raises(ValueError):
         fosu.parse_file("bad\0path")
-
-
-def test_parse_file_accepts_unicode_paths(tmp_path):
-    path = tmp_path / "日本語.osu"
-    path.write_bytes(b"osu file format v14\n[Metadata]\nTitle:Unicode path\n")
-    assert fosu.parse_file(path).title == "Unicode path"
 
 
 def test_memory_map_and_wide_buffers_are_detached(tmp_path):

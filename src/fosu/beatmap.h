@@ -37,7 +37,6 @@ struct HitObject {
   bool is_slider() const { return (type & 3) == 2; }
   bool is_spinner() const { return (type & 11) == 8; }
   bool is_hold() const { return (type & 139) == 128; }
-  bool is_new_combo() const { return new_combo; }
 };
 
 struct SliderPoint {

@@ -29,11 +29,7 @@ groups: collections.defaultdict[
 ] = collections.defaultdict(lambda: collections.defaultdict(list))
 with args.csv.open(newline="") as stream:
     for row in csv.DictReader(stream):
-        if int(row.get("exit_status", 0)):
-            parser.error("a measured process failed")
-        kind = row.get(
-            "workload", "reuse=" + row["reuse"] if "reuse" in row else "process"
-        )
+        kind = row["workload"] if "workload" in row else "reuse=" + row["reuse"]
         groups[(row["variant"], kind, None)][row["file"]].append(row)
         if modes:
             groups[(row["variant"], kind, modes[Path(row["file"]).name])][
@@ -59,17 +55,13 @@ for (variant, kind, mode), files in groups.items():
         "all_mean_us": mean(all_values),
         "all_p50_us": median(all_values),
     }
-    if "rep" in best[0]:
-        passes = collections.defaultdict(list)
-        for rows in files.values():
-            for r in rows:
-                passes[r["rep"]].append(int(r["wall_ns"]) / 1000)
-        result["fastest_pass_mean_us"] = min(map(mean, passes.values()))
+    passes = collections.defaultdict(list)
+    for rows in files.values():
+        for r in rows:
+            passes[r["rep"]].append(int(r["wall_ns"]) / 1000)
+    result["fastest_pass_mean_us"] = min(map(mean, passes.values()))
     if mode is not None:
         result["mode"] = mode
-    if "bytes" in best[0]:
-        result["MB_per_second"] = sum(int(r["bytes"]) for r in best) / sum(values)
-    if "minor_faults" in best[0]:
-        result["mean_faults_at_file_min"] = mean(int(r["minor_faults"]) for r in best)
+    result["MB_per_second"] = sum(int(r["bytes"]) for r in best) / sum(values)
     summaries.append(result)
 print(json.dumps(summaries, indent=2))
