@@ -1,5 +1,7 @@
 #include <fosu/beatmap.h>
+#include <fosu/engine/hit_objects/common_fields.h>
 #include <fosu/engine/hit_objects/object_types.h>
+#include <fosu/engine/hit_objects/slider.h>
 #include <fosu/engine/parse_document.h>
 #include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/parse_options.h>
@@ -11,6 +13,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iterator>
 #include <string>
 #include <string_view>
