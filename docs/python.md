@@ -65,7 +65,7 @@ One parser handles one call at a time; a concurrent call raises
 
 ## Performance
 
-FOSU commit `9620bc6` (after 0.7.0), measured on 2026-10-06 using CPython
+FOSU commit `ab0301c` (after 0.8.0), measured on 2026-10-06 using CPython
 3.12.14 on an Intel Core i7-8700 under Linux/WSL2. All rows use the same 1,004
 mutually accepted all-mode maps. Times include eager result construction and
 release; lower is better. Warm-file measurements include opening and reading
