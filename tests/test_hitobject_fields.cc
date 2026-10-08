@@ -122,6 +122,68 @@ static void test_slider_point_digit_widths() {
 #endif
 }
 
+static void test_slider_final_point_widths() {
+  for (fosu::i32 x : {1, 12, 123, 1234}) {
+    for (fosu::i32 y : {5, 56, 567, 5678}) {
+      for (bool pair_before : {false, true}) {
+        const auto points = std::string(pair_before ? "B|9:8|7:6|" : "B|") +
+                            std::to_string(x) + ":" + std::to_string(y) +
+                            ",123,456.78,0|0,0:0:0:0:";
+        for (bool simd : {false, true}) {
+          const auto map = parse_str(slider_document(points), simd);
+          CHECK_EQ(map.sliders.size(), 1u);
+          if (map.sliders.empty())
+            continue;
+          const auto& slider = map.sliders[0];
+          CHECK_EQ(slider.point_count, pair_before ? 3u : 1u);
+          const auto& last =
+              map.slider_points[slider.point_begin + slider.point_count - 1];
+          CHECK_EQ(last.x, x);
+          CHECK_EQ(last.y, y);
+          CHECK_EQ(slider.slides, 123);
+          CHECK_EQ(slider.length, 456.78);
+        }
+      }
+    }
+  }
+}
+
+static void test_slider_point_decoder_alignments() {
+#if FOSU_SIMD
+  const fosu::internal::HitObjectParseConstants constants;
+  for (size_t alignment = 0; alignment < 32; ++alignment) {
+    for (const char* text : {"|1:2|3:4,1,10", "|1234:5678,1,10", "|1|2,1,10",
+                             "|1:2:3,1,10", "|x:2,1,10"}) {
+      alignas(32) char input[128]{};
+      char*            p = input + alignment;
+      memcpy(p, text, strlen(text));
+      fosu::SliderPoint points[3]{};
+      fosu::Beatmap     map{};
+      map.slider_points = points;
+      size_t      count = 0;
+      const char* next = fosu::internal::parse_ordinary_slider_points(
+          map, count, p, constants);
+      if (!strcmp(text, "|1:2|3:4,1,10")) {
+        CHECK_EQ(next, p + 8);
+        CHECK_EQ(count, 2u);
+        CHECK_EQ(points[0].x, 1);
+        CHECK_EQ(points[0].y, 2);
+        CHECK_EQ(points[1].x, 3);
+        CHECK_EQ(points[1].y, 4);
+      } else if (!strcmp(text, "|1234:5678,1,10")) {
+        CHECK_EQ(next, p + 10);
+        CHECK_EQ(count, 1u);
+        CHECK_EQ(points[0].x, 1234);
+        CHECK_EQ(points[0].y, 5678);
+      } else {
+        CHECK_EQ(next, p);
+        CHECK_EQ(count, 0u);
+      }
+    }
+  }
+#endif
+}
+
 static void test_slider_point_pairs_resume_after_fallback() {
   const auto input = slider_document(
       "B|123:456|789:123|12.5:7.5|123:456|789:123|123:45|678:90|1:2|3:4,1,10");
@@ -370,6 +432,8 @@ int main() {
   test_slider_points();
   test_slider_pool_indices_after_rejected_record();
   test_slider_point_digit_widths();
+  test_slider_final_point_widths();
+  test_slider_point_decoder_alignments();
   test_slider_point_pairs_resume_after_fallback();
   test_slider_repeats_and_length();
   test_slider_sounds();
