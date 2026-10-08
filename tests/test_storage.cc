@@ -357,10 +357,9 @@ static void test_arena_interface() {
   auto*        first = fosu::arena_push_array<uint32_t>(arena, 16);
   CHECK(first != nullptr);
   CHECK(reinterpret_cast<uintptr_t>(first) % alignof(uint32_t) == 0);
-  size_t checkpoint;
+  const size_t checkpoint = fosu::arena_pos(arena);
   {
     const fosu::TempArena temp{arena};
-    checkpoint = temp.position();
     // Commits beyond the first step; the reservation still bounds pushes.
     CHECK(fosu::arena_push(arena, 96u << 10, alignof(uint64_t)) != nullptr);
     CHECK(fosu::arena_push(arena, 256u << 10, 1) == nullptr);

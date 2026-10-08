@@ -30,19 +30,10 @@ struct Out {
   }
 };
 
-template <typename Map, typename String>
-inline std::string_view resolve(const Map& bm, String s) {
-  if constexpr (requires { bm.resolve(s); })
-    return bm.resolve(s);
-  else
-    return s;
-}
-
 template <typename Map, typename Output>
 inline void dump_to(const Map& bm, Output& o) {
   o.raw("FOSUDMP9", 8);
   for (const auto& h : bm.hit_objects) {
-    const auto sample = resolve(bm, h.hit_sample);
     o.f32(h.x);
     o.f32(h.y);
     o.u32(h.type);
@@ -52,7 +43,7 @@ inline void dump_to(const Map& bm, Output& o) {
     o.u32(h.slider);
     o.u8(h.new_combo);
     o.u8(h.combo_skip);
-    o.u32(static_cast<uint32_t>(sample.size()));
+    o.u32(static_cast<uint32_t>(h.hit_sample.size()));
     if (h.slider != fosu::HitObject::kNoSlider) {
       const auto& s = bm.sliders[h.slider];
       o.u32(s.point_begin);
@@ -67,10 +58,10 @@ inline void dump_to(const Map& bm, Output& o) {
       o.i32(s.slides);
       o.f64(s.length);
       o.u8(static_cast<uint8_t>(s.curve_type));
-      o.str(resolve(bm, s.edge_sounds));
-      o.str(resolve(bm, s.edge_sets));
+      o.str(s.edge_sounds);
+      o.str(s.edge_sets);
     }
-    o.raw(sample.data(), sample.size());
+    o.raw(h.hit_sample.data(), h.hit_sample.size());
   }
   const size_t trailer_begin = o.size();
   o.raw("TRLR", 4);

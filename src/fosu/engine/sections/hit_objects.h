@@ -248,42 +248,6 @@ inline HitObject normalize_hitobject(HitObject     object,
   return object;
 }
 
-template <Format F, Client C>
-const char* parse_hitobjects_section_scalar(
-    Beatmap&                       beatmap,
-    HitObjectCounts&               counts,
-    const char*                    p,
-    const char*                    file_end,
-    const HitObjectParseConstants& constants) {
-  while (p < file_end) {
-    const char c = *p;
-    if (c == '\r' || c == '\n') {
-      ++p;
-      continue;
-    }
-    const char* line_end = find_line_end(p, file_end);
-    if (c == '[' && section_header_line<C>(p, line_end))
-      break;
-    const char* following_line = after_line_ending(line_end, file_end);
-    if (!ignored_hitobject_line<C>(p, line_end)) {
-      if (const auto object = parse_hitobject_line_scalar<F, C>(
-              beatmap, counts, p, line_end, constants)) {
-        const auto kind = classify_hitobject_kind(object->type);
-        beatmap.hit_objects[counts.objects] =
-            normalize_hitobject(*object, kind, counts.objects,
-                                counts.preceding_was_spinner, F.time_offset);
-        ++counts.objects;
-        counts.preceding_was_spinner = kind == HitObjectKind::Spinner;
-      } else [[unlikely]] {
-        reject_hitobject_line<F, C>(beatmap, counts,
-                                    counts.preceding_was_spinner, p, line_end);
-      }
-    }
-    p = following_line;
-  }
-  return p;
-}
-
 #if FOSU_SIMD
 // Publishes an object whose x,y,time,type,hitSound prefix is decoded. `rest`
 // is everything after the prefix: empty, or starting with ','.
@@ -473,15 +437,17 @@ FOSU_NOINLINE const char* parse_hitobjects_fixed_time(
   return p;
 }
 
+#endif
+
 template <Format F, Client C>
-const char* parse_hitobjects_section_simd(
-    Beatmap&                       beatmap,
-    HitObjectCounts&               counts,
-    const char*                    p,
-    const char*                    file_end,
-    const HitObjectParseConstants& constants) {
+const char* parse_hitobjects_section(Beatmap&         beatmap,
+                                     HitObjectCounts& counts,
+                                     const char*      p,
+                                     const char*      file_end) {
+  const HitObjectParseConstants constants;
   bool preceding_was_spinner = counts.preceding_was_spinner;
   while (p < file_end) {
+#if FOSU_SIMD
     p = parse_hitobjects_fixed_time<1, F, C>(
         beatmap, counts, constants, preceding_was_spinner, p, file_end);
     p = parse_hitobjects_fixed_time<2, F, C>(
@@ -498,6 +464,7 @@ const char* parse_hitobjects_section_simd(
         beatmap, counts, constants, preceding_was_spinner, p, file_end);
     if (p >= file_end)
       break;
+#endif
     // A line no fixed-width loop accepts: blank lines, comments, a section
     // header, or a prefix with another width or spelling.
     const char c = *p;
@@ -525,22 +492,6 @@ const char* parse_hitobjects_section_simd(
   }
   counts.preceding_was_spinner = preceding_was_spinner;
   return p;
-}
-#endif
-
-template <Format F, Client C>
-const char* parse_hitobjects_section(Beatmap&         beatmap,
-                                     HitObjectCounts& counts,
-                                     const char*      p,
-                                     const char*      file_end) {
-  const HitObjectParseConstants constants;
-#if FOSU_SIMD
-  return parse_hitobjects_section_simd<F, C>(beatmap, counts, p, file_end,
-                                             constants);
-#else
-  return parse_hitobjects_section_scalar<F, C>(beatmap, counts, p, file_end,
-                                               constants);
-#endif
 }
 
 }  // namespace fosu::internal

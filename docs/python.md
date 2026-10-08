@@ -47,7 +47,7 @@ Every parse function takes keyword-only `client`: `"stable"`, the default, or
 `"lazer"`, whose behaviour to follow where the two read a map differently. For
 example, stable refuses a map with a hit object it cannot read, which lazer
 skips, and reads the version from the first line only. See
-[the target client rules](compatibility.md#target-client).
+[the target client rules](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/docs/compatibility.md#target-client).
 
 `parse` and `parse_file` allocate native memory for each call. To parse many
 maps, reuse a `fosu.Parser`, which keeps that memory until the parser is
@@ -65,30 +65,9 @@ One parser handles one call at a time; a concurrent call raises
 
 ## Performance
 
-FOSU commit `ab0301c` (after 0.8.0), measured on 2026-10-06 using CPython
-3.12.14 on an Intel Core i7-8700 under Linux/WSL2. All rows use the same 1,004
-mutually accepted all-mode maps. Times include eager result construction and
-release; lower is better. Warm-file measurements include opening and reading
-page-cached files.
-
-| Python interface | Resident bytes (µs/map) | Warm file (µs/map) |
-|---|---:|---:|
-| FOSU AVX2, reused `fosu.Parser` | 165.7 | 176.2 |
-| FOSU scalar, reused `fosu.Parser` | 226.0 | 240.3 |
-| FOSU AVX2, `fosu.parse` per call | 274.9 | 280.1 |
-| FOSU scalar, `fosu.parse` per call | 332.7 | 354.0 |
-| OsuPyParser 1.0.7 | Unsupported | 4,544.3 |
-
-A `fosu.Parser` keeps its memory between calls. The module functions create a
-new parser per call, which also reserves that memory and takes a page fault on
-the first write to each page; keep a `Parser` when parsing many maps.
-
-Figures are the fastest of six complete passes per API, not fastest individual
-parses: every pass keeps the garbage collection its parsing causes.
-The parsers expose different models: OsuPyParser also performs derived-statistic
-work. See the [comparison and measured variation](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/docs/comparison.md)
-for result contracts, or the [feature-cost tables](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/docs/performance.md)
-for slider geometry, gameplay, mods, and ARM measurements.
+See the [comparison with other parsers](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/docs/comparison.md)
+and the [per-option costs](https://github.com/cmyui/fast-osu-beatmap-parser/blob/master/docs/performance.md),
+including slider geometry, gameplay, mods and ARM measurements.
 
 ## Section selection
 
@@ -170,7 +149,7 @@ no samples or catch conversion.
 Expansion beyond 1,048,576 events per map fails the parse with `ValueError`
 rather than silently dropping events.
 
-`apply_stacking=True` applies unmodded osu!standard stacking after parsing,
+`apply_stacking=True` applies osu!standard stacking after parsing,
 including the pre-v6 algorithm. Hit-object x/y and absolute slider control points
 are adjusted before returning. `obj.raw_position()` subtracts the stacking offset
 from the current x/y, or returns x/y when stacking is absent. It can have small

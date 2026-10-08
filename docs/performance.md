@@ -1,7 +1,5 @@
 # Measuring performance
 
-Use the small representative all-mode corpus for routine experiments. Keep
-pathological cases in correctness tests and the full compatibility corpus.
 See [corpora](../bench/corpus/README.md) and [iteration guidance](../AGENTS.md).
 
 ## Public benchmark profiles
@@ -22,9 +20,6 @@ configuration.
 | Gameplay | Events and stacking enabled |
 | Double time | `mods=DOUBLE_TIME` |
 
-The geometry and gameplay names describe benchmark outcomes. They do not hide
-new behavior or change the parser's explicit option interface.
-
 ## Parser lifetime
 
 Every profile is measured with two parser lifetimes:
@@ -41,14 +36,10 @@ mostly operating-system work, and it is larger on Linux than on macOS.
 
 ## Current feature costs
 
-Measured on 2026-10-06 from FOSU commit `ab0301c` (after 0.8.0). The performance profile
-contains 1,024 entries (986 unique beatmaps), 256 per mode and 46,029,610 bytes.
-Repeated entries are deliberate products of the stratified selection. Input is
-resident in memory. Python rows include the complete detached Python result and
-its release.
-
-The corpus SHA-256 is
-`1f7e90f4ac0222f0a2b0890e6f07c70807e9cc5d5e6ac2b392b859b2fa042895`.
+Measured on 2026-10-06 from FOSU commit `ab0301c` (after 0.8.0), on the
+1,024-entry [performance snapshot](../bench/corpus/README.md). Input is resident
+in memory. Python rows include the complete detached Python result and its
+release.
 
 Each run makes five passes per profile natively and three in Python. A pass
 parses every corpus entry once with one profile, in a seeded shuffled order that
@@ -136,11 +127,9 @@ construction. Paths and especially events dominate the optional work.
 
 ## Real lazer v128 maps
 
-The v128 profile contains 100 real maps: 8 osu!standard, 43 osu!taiko, 18
-osu!catch and 31 osu!mania maps, totalling 2,634,547 bytes. Its SHA-256 is
-`478a7c7753242f37a87093e919d25fced19833013578c47dbb6e184c4c8b65f2`.
-These values use the same hosts, toolchains and timing boundary as the legacy
-feature matrix.
+The [v128 snapshot](../bench/corpus/README.md) contains 100 real maps. These
+values use the same hosts, toolchains and timing boundary as the legacy feature
+matrix.
 
 The corpus averages substantially smaller files and has a different mode mix.
 Compare feature costs within this table; do not use its absolute values to claim
@@ -243,10 +232,8 @@ python bench/python_compare.py /path/to/maps \
   > build/python-compare.csv
 ```
 
-Build before timing. Serialize runs per host, avoid competing work, and pin a
-CPU with `taskset` on Linux. Screen cheaply; repeat promising small differences
-with reversed variant order and a confirmation sample. Do not compare different
-corpora, API boundaries, outputs, build settings or summary statistics.
+Build before timing, serialize runs per host and pin a CPU with `taskset` on
+Linux; the [iteration guidance](../AGENTS.md) covers screening and comparisons.
 
 `profile_parse` preloads a subset and repeats rounds for profiling:
 

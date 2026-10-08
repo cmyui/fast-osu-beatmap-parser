@@ -150,16 +150,14 @@ const char* parse_events_section_simd(Beatmap&    bm,
       break;
     p = next_line;
 
-    if (fosu::internal::ignored_line(line, line_end))
+    if (ignored_line(line, line_end))
       continue;
     if (c == ' ' || c == '_') {  // indented storyboard command
       ++storyboard_lines;
       continue;
     }
-    const auto len = static_cast<size_t>(line_end - line);
-    if (len >= 2 && c == '/' && line[1] == '/')
-      continue;  // comment
-    parse_event_line<F>(bm, break_count, line, len);
+    parse_event_line<F>(bm, break_count, line,
+                        static_cast<size_t>(line_end - line));
   }
   bm.stats.storyboard_lines += storyboard_lines;
   return p;

@@ -116,10 +116,5 @@ inline u32 nondigit_mask32(Bytes32 v) {
   return byte_mask32(nondigit_bytes16(v.val[0]), nondigit_bytes16(v.val[1]));
 }
 #endif
-#if FOSU_SIMD
-inline u32 comma_mask32(Bytes32 bytes) {
-  return equal_mask32(bytes, broadcast_byte<','>());
-}
-#endif
 
 }  // namespace fosu::internal

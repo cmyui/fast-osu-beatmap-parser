@@ -216,7 +216,6 @@ static void test_byte_masks() {
       const auto     v = load32(text);
       const uint32_t bit = uint32_t(1) << lane;
       CHECK_EQ(nondigit_mask32(v), value >= '0' && value <= '9' ? 0u : bit);
-      CHECK_EQ(comma_mask32(v), value == ',' ? bit : 0u);
       CHECK_EQ(equal_mask32(v, broadcast_byte<'\n'>()),
                value == '\n' ? bit : 0u);
     }

@@ -53,7 +53,6 @@ sdist.exclude = [
   "dist",
   "tests/reference/official/bin",
   "tests/reference/official/obj",
-  "bench/comparison/results",
 ]
 
 [tool.cibuildwheel]

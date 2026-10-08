@@ -104,8 +104,6 @@ class TempArena {
 
   ~TempArena() { arena_pop_to(arena_, pos_); }
 
-  size_t position() const noexcept { return pos_; }
-
  private:
   Arena* arena_;
   size_t pos_;

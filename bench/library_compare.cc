@@ -5,14 +5,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <dlfcn.h>
 #include <filesystem>
 #include <fstream>
 #include <ios>
 #include <iterator>
 #include <string>
-#include <utility>
 #include <vector>
 
 struct Module {
@@ -64,16 +62,6 @@ int main(int argc, char** argv) {
     if (f.path().extension() == ".osu")
       files.push_back(f.path());
   std::sort(files.begin(), files.end());
-  const char* split = getenv("FOSU_BENCH_SPLIT");
-  if (split && strcmp(split, "train") && strcmp(split, "eval"))
-    return 2;
-  if (split) {
-    std::vector<std::string> selected;
-    for (size_t i = 0; i < files.size(); ++i)
-      if ((i % 5 == 0) == (strcmp(split, "train") == 0))
-        selected.push_back(files[i]);
-    files = std::move(selected);
-  }
   if (files.empty())
     return 2;
   puts("file,bytes,rep,variant,reuse,wall_ns");
