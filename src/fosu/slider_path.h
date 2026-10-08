@@ -37,7 +37,7 @@ struct SliderPath {
 // A pure query: no approximation, allocation, or cached mutation. Progress is
 // clamped to [0, 1]; add the hit object's x/y to obtain playfield coordinates.
 inline PathPoint slider_position_at(const SliderPath& path, f64 progress) {
-  if (path.points.empty())
+  if (path.points.empty()) [[unlikely]]
     return {};
   const auto& lengths = path.cumulative_lengths;
   const f64   distance = std::clamp(progress, 0.0, 1.0) * path.distance();
@@ -49,17 +49,26 @@ inline PathPoint slider_position_at(const SliderPath& path, f64 progress) {
     while (i && lengths[i - 1] >= distance)
       --i;
   } else if (progress > 0) {
-    i = static_cast<size_t>(
-        std::lower_bound(lengths.begin(), lengths.end(), distance) -
-        lengths.begin());
+    // std::lower_bound, choosing each half with a conditional move: where a
+    // tick falls along the path is unpredictable, so a branch per step
+    // mispredicts about half the time.
+    const f64* first = lengths.data();
+    size_t     count = lengths.size();
+    while (count > 1) {
+      const size_t half = count / 2;
+      first = first[half] < distance ? first + half : first;
+      count -= half;
+    }
+    i = static_cast<size_t>(first - lengths.data()) +
+        (count && *first < distance);
   }
   if (!i)
     return path.points.front();
-  if (i >= path.points.size())
+  if (i >= path.points.size()) [[unlikely]]
     return path.points.back();
   const f64 start = lengths[i - 1];
   const f64 length = lengths[i] - start;
-  if (std::abs(length) < 1e-7)
+  if (std::abs(length) < 1e-7) [[unlikely]]
     return path.points[i - 1];
   return path.points[i - 1] + (path.points[i] - path.points[i - 1]) *
                                   static_cast<f32>((distance - start) / length);

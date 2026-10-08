@@ -198,31 +198,86 @@ FOSU_ALWAYS_INLINE std::optional<ParsedSliderPoint> parse_slider_point(
 }
 
 #if FOSU_SIMD
+#if FOSU_SIMD_NEON
+// parse_ordinary_slider_points for points that fit in the 16 bytes after the
+// '|', as nearly every pair does. Each mask is then one narrowing shift rather
+// than a pairwise reduction, so the next point waits less. Mask positions
+// count four bits per byte. Returns p when the first point does not fit.
+FOSU_ALWAYS_INLINE const char* parse_short_slider_points(
+    Beatmap&                       beatmap,
+    size_t&                        slider_point_count,
+    const char*                    p,
+    const HitObjectParseConstants& constants) {
+  const uint8x16_t text = vld1q_u8(reinterpret_cast<const u8*>(p + 1));
+  const u64 colons = nibble_mask16(vceqq_u8(text, broadcast_byte<':'>()));
+  const u64 pipes = nibble_mask16(vceqq_u8(text, broadcast_byte<'|'>()));
+  const u64 commas = nibble_mask16(vceqq_u8(text, constants.comma));
+  const u64 ends = pipes | commas;
+  // One bit per byte, so clearing the lowest bit clears a whole boundary.
+  u64       boundaries =
+      nibble_mask16(nondigit_bytes16(text)) & 0x1111111111111111ull;
+  // Offsets from p + 1; 16 when absent.
+  const u32 first_colon = static_cast<u32>(trailing_zeros(boundaries)) >> 2;
+  boundaries &= boundaries - 1;
+  const u32 first_end = static_cast<u32>(trailing_zeros(boundaries)) >> 2;
+  boundaries &= boundaries - 1;
+  const u32 second_colon = static_cast<u32>(trailing_zeros(boundaries)) >> 2;
+  boundaries &= boundaries - 1;
+  const u32  second_end = static_cast<u32>(trailing_zeros(boundaries)) >> 2;
+  // 1 when `mask` marks the byte at `offset`, else 0; an absent offset of 16
+  // wraps the shift, but every caller also requires the offset to be below 16.
+  const auto marks = [](u64 mask, u32 offset) {
+    return (mask >> ((4 * offset) & 63)) & 1;
+  };
+
+  const u32 first_y_digits = first_end - first_colon - 1;
+  if (((first_colon - 1) | (first_y_digits - 1)) > 3 || first_end > 15 ||
+      !(marks(colons, first_colon) & marks(ends, first_end)))
+    return p;
+  const u32  second_x_digits = second_colon - first_end - 1;
+  const u32  second_y_digits = second_end - second_colon - 1;
+  const bool second = (((second_x_digits - 1) | (second_y_digits - 1)) <= 3) &
+                      (second_end <= 15) & marks(pipes, first_end) &
+                      marks(colons, second_colon) & marks(ends, second_end);
+  beatmap.slider_points[slider_point_count] =
+      decode_slider_point(load16(p), first_colon, first_y_digits, constants);
+  // As in parse_ordinary_slider_points, an absent second point is stored in
+  // the spare slot and not counted.
+  beatmap.slider_points[slider_point_count + 1] = decode_slider_point(
+      load16(p + 1 + first_end), ((second_x_digits - 1) & 3) + 1,
+      ((second_y_digits - 1) & 3) + 1, constants);
+  slider_point_count += 1 + second;
+  const u32 points_end = second ? second_end : first_end;
+  const u32 list_end = static_cast<u32>(trailing_zeros(commas)) >> 2;
+  if (points_end == list_end) [[likely]]
+    return p + 1 + list_end;
+  return p + 1 + points_end;
+}
+#endif
+
 // Decodes up to two "|x:y" points whose coordinates have one to four digits.
-// One mask finds every boundary; single bytes confirm what each one is.
-// Returns p when the first point is anything else.
+// One mask finds every boundary. Both points are stored and only valid ones
+// counted, so neither their widths nor whether a second point follows costs
+// a branch; across sliders both vary too much to predict. Returns p when the
+// first point is anything else.
 FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
     Beatmap&                       beatmap,
     size_t&                        slider_point_count,
     const char*                    p,
     const HitObjectParseConstants& constants) {
-  const u32 non_digits = nondigit_mask32(load32(p));
-  // Two-thirds of points are "|ddd:ddd", which needs no boundary search.
-  if ((non_digits & 0x1feu) == 0x110u && p[4] == ':' &&
-      (p[8] == '|' || p[8] == ',')) {
-    beatmap.slider_points[slider_point_count++] =
-        decode_slider_point(load16(p), 3, 3, constants);
-    if (p[8] == '|' && (non_digits & 0x1fe00u) == 0x11000u && p[12] == ':' &&
-        (p[16] == '|' || p[16] == ',')) {
-      beatmap.slider_points[slider_point_count++] =
-          decode_slider_point(load16(p + 8), 3, 3, constants);
-      return p + 16;
-    }
-    return p + 8;
-  }
-
-  u32       boundaries = non_digits & ~1u;
-  const u32 first_colon = trailing_zeros(boundaries);
+#if FOSU_SIMD_NEON
+  if (const char* next =
+          parse_short_slider_points(beatmap, slider_point_count, p, constants);
+      next != p) [[likely]]
+    return next;
+#endif
+  const Bytes32 bytes = load32(p);
+  const u64     colons = equal_mask32(bytes, broadcast_byte<':'>());
+  const u64     pipes = equal_mask32(bytes, broadcast_byte<'|'>());
+  const u32     commas = equal_mask32(bytes, constants.comma);
+  const u64     ends = pipes | commas;
+  u32           boundaries = nondigit_mask32(bytes) & ~1u;
+  const u32     first_colon = trailing_zeros(boundaries);
   boundaries &= boundaries - 1;
   const u32 first_end = trailing_zeros(boundaries);
   boundaries &= boundaries - 1;
@@ -233,20 +288,30 @@ FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
   const u32 first_x_digits = first_colon - 1;
   const u32 first_y_digits = first_end - first_colon - 1;
   if (((first_x_digits - 1) | (first_y_digits - 1)) > 3 ||
-      p[first_colon] != ':' || (p[first_end] != '|' && p[first_end] != ','))
+      !((colons >> first_colon) & (ends >> first_end) & 1))
     return p;
-  beatmap.slider_points[slider_point_count++] =
+  const u32  second_x_digits = second_colon - first_end - 1;
+  const u32  second_y_digits = second_end - second_colon - 1;
+  const bool second =
+      (((second_x_digits - 1) | (second_y_digits - 1)) <= 3) &
+      static_cast<bool>((pipes >> first_end) & (colons >> second_colon) &
+                        (ends >> second_end) & 1);
+  beatmap.slider_points[slider_point_count] =
       decode_slider_point(load16(p), first_x_digits, first_y_digits, constants);
-
-  const u32 second_x_digits = second_colon - first_end - 1;
-  const u32 second_y_digits = second_end - second_colon - 1;
-  if (p[first_end] != '|' ||
-      ((second_x_digits - 1) | (second_y_digits - 1)) > 3 ||
-      p[second_colon] != ':' || (p[second_end] != '|' && p[second_end] != ','))
-    return p + first_end;
-  beatmap.slider_points[slider_point_count++] = decode_slider_point(
-      load16(p + first_end), second_x_digits, second_y_digits, constants);
-  return p + second_end;
+  // The array has a spare slot for an absent second point; its widths are
+  // wrapped into the table's range.
+  beatmap.slider_points[slider_point_count + 1] = decode_slider_point(
+      load16(p + first_end), ((second_x_digits - 1) & 3) + 1,
+      ((second_y_digits - 1) & 3) + 1, constants);
+  slider_point_count += 1 + second;
+  // Most point lists end at the first comma after these points. Continuing
+  // from that comma, behind a branch that rarely fails, keeps the rest of the
+  // line from waiting on the boundary search.
+  const u32 points_end = second ? second_end : first_end;
+  const u32 list_end = trailing_zeros(commas);
+  if (points_end == list_end) [[likely]]
+    return p + list_end;
+  return p + points_end;
 }
 #endif
 

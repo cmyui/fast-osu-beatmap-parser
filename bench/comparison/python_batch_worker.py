@@ -3,6 +3,7 @@
 import hashlib
 import json
 from pathlib import Path
+import random
 import sys
 from time import perf_counter_ns
 
@@ -10,7 +11,7 @@ from python_worker import load_parser
 
 
 def main():
-    name, workload, corpus, summary, table_name = sys.argv[1:]
+    name, workload, corpus, summary, table_name, seed = sys.argv[1:]
     report = json.loads(Path(summary).read_text())
     table = report["tables"][table_name]
     excluded = set(table["excluded_files"])
@@ -30,11 +31,16 @@ def main():
             beatmap = parse(data, path, workload)
             count(beatmap)
             del beatmap
-    counts = []
+    # The pass visits entries in a shuffled order shared by every API in it;
+    # counts stay in corpus order for the cross-API comparison.
+    order = list(range(len(inputs)))
+    random.Random(int(seed)).shuffle(order)
+    counts = [None] * len(inputs)
     start = perf_counter_ns()
-    for path, data in inputs:
+    for index in order:
+        path, data = inputs[index]
         beatmap = parse(data, path, workload)
-        counts.append(count(beatmap))
+        counts[index] = count(beatmap)
         del beatmap
     elapsed = perf_counter_ns() - start
     print(

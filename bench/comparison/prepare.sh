@@ -22,8 +22,11 @@ curl --fail --location --silent --show-error \
     https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp \
     -o "$build/include/nlohmann/json.hpp"
 echo "aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63  $build/include/nlohmann/json.hpp" | sha256sum --check
-common=(-std=c++20 -O3 -fno-plt -fstack-protector-strong -D_FORTIFY_SOURCE=3
-        -I"$build/include" -I"$repo/src" "$bench/native_worker.cc")
-g++ "${common[@]}" -march=x86-64-v3 -o "$build/native-avx2"
-g++ "${common[@]}" -march=x86-64 -DFOSU_DISABLE_SIMD -o "$build/native-scalar"
+# Build the native worker like any CMake user, with the product's flags.
+for isa in avx2 scalar; do
+    cmake -S "$repo" -B "$build/cmake-$isa" -DCMAKE_BUILD_TYPE=Release \
+        -DFOSU_ISA="$isa" -DFOSU_BUILD_PYTHON=OFF -DFOSU_JSON_INCLUDE_DIR="$build/include"
+    cmake --build "$build/cmake-$isa" --target comparison_native_worker
+    cp "$build/cmake-$isa/comparison_native_worker" "$build/native-$isa"
+done
 python3 "$bench/configure.py" "$build"

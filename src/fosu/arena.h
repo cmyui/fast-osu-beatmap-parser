@@ -56,13 +56,13 @@ inline size_t arena_pos(const Arena* arena) {
 // Returns nullptr when the arena is missing or the reservation is exhausted.
 // alignment must be a power of two.
 inline void* arena_push(Arena* arena, size_t size, size_t alignment) {
-  if (!arena)
+  if (!arena) [[unlikely]]
     return nullptr;
   const size_t pos = align_up(arena->pos, alignment);
-  if (pos > arena->reserved || size > arena->reserved - pos)
+  if (pos > arena->reserved || size > arena->reserved - pos) [[unlikely]]
     return nullptr;
   const size_t end = pos + size;
-  if (end > arena->committed) {
+  if (end > arena->committed) [[unlikely]] {
     const size_t target =
         std::min(align_up(end, kArenaCommitStep), arena->reserved);
     auto* start = reinterpret_cast<u8*>(arena) + arena->committed;
@@ -78,7 +78,7 @@ template <typename T>
 inline T* arena_push_array(Arena* arena, size_t count) {
   static_assert(std::is_trivially_copyable_v<T>,
                 "arena arrays require trivially copyable elements");
-  if (count > std::numeric_limits<size_t>::max() / sizeof(T))
+  if (count > std::numeric_limits<size_t>::max() / sizeof(T)) [[unlikely]]
     return nullptr;
   return static_cast<T*>(arena_push(arena, sizeof(T) * count, alignof(T)));
 }

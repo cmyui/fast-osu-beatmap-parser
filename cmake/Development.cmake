@@ -86,3 +86,12 @@ endforeach()
 target_link_libraries(library_compare PRIVATE ${CMAKE_DL_LIBS})
 target_compile_options(profile_parse PRIVATE $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-g>)
 add_custom_target(bench-build DEPENDS library_native library_compare feature_matrix profile_parse generate_corpus)
+
+# The cross-library comparison's native worker; bench/comparison/prepare.sh
+# supplies the nlohmann/json header directory.
+set(FOSU_JSON_INCLUDE_DIR "" CACHE PATH "nlohmann/json include directory")
+if(FOSU_JSON_INCLUDE_DIR)
+  fosu_executable(comparison_native_worker bench/comparison/native_worker.cc)
+  target_include_directories(comparison_native_worker SYSTEM PRIVATE
+    "${FOSU_JSON_INCLUDE_DIR}")
+endif()

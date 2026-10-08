@@ -9,7 +9,7 @@ from time import perf_counter_ns
 
 import fosu
 
-from common import select_files
+from common import select_files, shuffled_order
 
 
 PROFILES = {
@@ -69,12 +69,15 @@ def main() -> None:
     writer = csv.writer(sys.stdout)
     writer.writerow(["file", "bytes", "rep", "variant", "workload", "wall_ns"])
     profiles = list(selected_profiles.items())
-    for file_index, (file, data) in enumerate(inputs):
-        for rep in range(args.reps):
-            for job_index in range(len(profiles)):
-                profile, options = profiles[
-                    (file_index + rep + job_index) % len(profiles)
-                ]
+    # Each pass times one profile over every entry once, in its own shuffled
+    # order (identical to feature_matrix.cc's), so no entry repeats until the
+    # next pass.
+    for rep in range(args.reps):
+        for job_index in range(len(profiles)):
+            profile_index = (job_index + rep) % len(profiles)
+            profile, options = profiles[profile_index]
+            for file_index in shuffled_order(len(inputs), rep * 1000 + profile_index):
+                file, data = inputs[file_index]
                 begin = perf_counter_ns()
                 beatmap = api.parse(data, **options)
                 del beatmap
