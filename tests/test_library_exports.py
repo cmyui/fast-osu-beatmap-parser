@@ -10,7 +10,17 @@ p.add_argument("--engine", action="store_true")
 a = p.parse_args()
 exports = subprocess.check_output(["nm", "-D", "--defined-only", a.library], text=True)
 names = {line.split()[-1] for line in exports.splitlines()}
-expected = {"_ZN4fosu14runtime_engineEv"}
+expected = {
+    "_ZN4fosu14runtime_engineEv",
+    "fosu_c_abi_version",
+    "fosu_c_backend_name",
+    "fosu_c_new",
+    "fosu_c_free",
+    "fosu_c_parse",
+    "fosu_c_parse_file",
+    "fosu_c_get_view",
+    "fosu_c_last_error",
+}
 if a.engine:
     expected = {"fosu_engine_v2"}
 assert names == expected, names ^ expected
