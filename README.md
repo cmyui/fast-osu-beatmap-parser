@@ -97,3 +97,13 @@ or NEON on AArch64, with scalar fallback. Header-only C++ uses the caller’s co
   notices remain in the relevant headers.
 - [Flamme](https://github.com/infernalfire72) originated the project concept
   and the SIMD hitobject prototype on which FOSU's AVX2 prefix parser builds.
+- [rumoi](https://github.com/rumoi) contributed feedback and discussions on SIMD
+  parsing, numeric conversion, and compiler code generation. His
+  [tatai](https://github.com/rumoi/tatai) parser inspired substantial simplification
+  of FOSU's implementation and concrete optimizations, including hit-object fast
+  paths specialized by timestamp length.
+- [Kat](https://github.com/xxkat) contributed early code review and architectural
+  guidance that helped shape FOSU's arena-backed storage, explicit memory
+  ownership, and code organization. His recommendation of
+  [RAD Debugger](https://github.com/EpicGames/raddebugger) also influenced the
+  project's preference for simple, explicit C++.
