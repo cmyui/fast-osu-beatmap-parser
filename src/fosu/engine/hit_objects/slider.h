@@ -76,6 +76,75 @@ inline std::optional<CurveType> parse_curve_type(char value) {
   }
 }
 
+// A 16-bit non-digit mask selects both the shuffle and cursor advance.
+// Pairs may have arbitrary bytes after their final delimiter; single points
+// must end at a comma. Clearing bits past the first comma keeps repeat/length
+// fields out of the key. Other shapes retain the existing point parser.
+#if FOSU_SIMD_NEON
+struct alignas(16) SliderPointLayout {
+  u16 colon_mask = 0;
+  u16 pipe_mask = 0;
+  u16 end_mask = 0;
+  u8  consumed = 0;
+  u8  point_count = 0;
+  alignas(16) u8 shuffle[16]{};
+};
+static_assert(sizeof(SliderPointLayout) == 32);
+
+consteval std::array<SliderPointLayout, 65536> make_slider_point_layouts() {
+  std::array<SliderPointLayout, 65536> layouts{};
+  for (u32 x0 = 1; x0 <= 4; ++x0) {
+    for (u32 y0 = 1; y0 <= 4; ++y0) {
+      for (u32 x1 = 1; x1 <= 4; ++x1) {
+        for (u32 y1 = 1; y1 <= 4; ++y1) {
+          const u32 boundaries[4] = {x0, x0 + y0 + 1, x0 + y0 + x1 + 2,
+                                     x0 + y0 + x1 + y1 + 3};
+          const u32 end = boundaries[3];
+          if (end > 15)
+            continue;
+          const u32 key = (1u << boundaries[0]) | (1u << boundaries[1]) |
+                          (1u << boundaries[2]) | (1u << end);
+          SliderPointLayout layout{};
+          layout.colon_mask = (1u << boundaries[0]) | (1u << boundaries[2]);
+          layout.pipe_mask = 1u << boundaries[1];
+          layout.end_mask = 1u << end;
+          layout.consumed = end + 1;
+          layout.point_count = 2;
+          for (auto& byte : layout.shuffle)
+            byte = 0x80;
+          const u32 widths[4] = {x0, y0, x1, y1};
+          u32       start = 0;
+          for (u32 group = 0; group < 4; ++group) {
+            for (u32 digit = 0; digit < widths[group]; ++digit)
+              layout.shuffle[group * 4 + 4 - widths[group] + digit] =
+                  start + digit;
+            start += widths[group] + 1;
+          }
+          for (u32 suffix = 0; suffix < (1u << (15 - end)); ++suffix)
+            layouts[key | (suffix << (end + 1))] = layout;
+        }
+      }
+      const u32         end = x0 + y0 + 1;
+      const u32         key = (1u << x0) | (1u << end);
+      SliderPointLayout layout{};
+      layout.colon_mask = 1u << x0;
+      layout.end_mask = 1u << end;
+      layout.consumed = end + 1;
+      layout.point_count = 1;
+      for (auto& byte : layout.shuffle)
+        byte = 0x80;
+      for (u32 digit = 0; digit < x0; ++digit)
+        layout.shuffle[4 - x0 + digit] = digit;
+      for (u32 digit = 0; digit < y0; ++digit)
+        layout.shuffle[8 - y0 + digit] = x0 + 1 + digit;
+      layouts[key] = layout;
+    }
+  }
+  return layouts;
+}
+inline constexpr auto kSliderPointLayouts = make_slider_point_layouts();
+#endif
+
 // SIMD point decoding is an implementation detail of parsing the point list.
 // The table is indexed by the digit widths of x and y.
 #if FOSU_SIMD
@@ -266,6 +335,33 @@ FOSU_ALWAYS_INLINE const char* parse_ordinary_slider_points(
     const char*                    p,
     const HitObjectParseConstants& constants) {
 #if FOSU_SIMD_NEON
+  {
+    const auto input = load16(p + 1);
+    const auto mask = [](uint8x16_t bytes) {
+      return byte_mask32(bytes, vdupq_n_u8(0)) & 0xffff;
+    };
+    const u32   nondigits = mask(nondigit_bytes16(input));
+    const u32   colons = mask(vceqq_u8(input, vdupq_n_u8(':')));
+    const u32   pipes = mask(vceqq_u8(input, vdupq_n_u8('|')));
+    const u32   commas = mask(vceqq_u8(input, constants.comma));
+    const u32   first_comma = commas & -commas;
+    const auto& layout = kSliderPointLayouts[nondigits & (first_comma * 2 - 1)];
+    if (layout.consumed && (colons & layout.colon_mask) == layout.colon_mask &&
+        (pipes & layout.pipe_mask) == layout.pipe_mask &&
+        ((layout.point_count == 1 ? commas : pipes | commas) &
+         layout.end_mask)) {
+      const auto placed =
+          vqtbl1q_u8(vsubq_u8(input, constants.zero), vld1q_u8(layout.shuffle));
+      const auto positions = vcvtq_f32_u32(decimal_groups(placed));
+      static_assert(sizeof(SliderPoint) == 8 && offsetof(SliderPoint, x) == 0 &&
+                    offsetof(SliderPoint, y) == 4);
+      // The spare slot permits the same fixed-size store for a final point.
+      memcpy(&beatmap.slider_points[slider_point_count], &positions,
+             sizeof(positions));
+      slider_point_count += layout.point_count;
+      return p + layout.consumed;
+    }
+  }
   if (const char* next =
           parse_short_slider_points(beatmap, slider_point_count, p, constants);
       next != p) [[likely]]
