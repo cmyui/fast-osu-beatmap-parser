@@ -162,30 +162,36 @@ inline bool add_stable_wrong_bezier(std::span<const CurvePoint> points,
   // The steps are independent, so a block of them is worked out at once, one
   // per lane, each lane's arithmetic exactly the scalar's.
   constexpr size_t kLanes = 8;
-  using Lanes = f32[kLanes];
+  // One array, so that compilers can tell its rows apart and vectorize.
+  struct Row {
+    f32 x[kLanes];
+    f32 y[kLanes];
+  };
   const TempArena temp{arena};
-  auto*           x = arena_push_array<Lanes>(arena, count);
-  auto*           y = arena_push_array<Lanes>(arena, count);
-  if (!x || !y)
+  auto*           rows = arena_push_array<Row>(arena, count);
+  if (!rows)
     return false;
   StableCurve curve{out};
   for (size_t first = 0; first < steps; first += kLanes) {
-    Lanes t;
+    f32 t[kLanes];
     for (size_t lane = 0; lane < kLanes; ++lane)
       t[lane] = static_cast<f32>(first + lane) / static_cast<f32>(steps);
     for (size_t i = 0; i < count; ++i)
       for (size_t lane = 0; lane < kLanes; ++lane) {
-        x[i][lane] = points[i].x;
-        y[i][lane] = points[i].y;
+        rows[i].x[lane] = points[i].x;
+        rows[i].y[lane] = points[i].y;
       }
     for (size_t level = 0; level < count; ++level)
-      for (size_t i = 0; i + level + 1 < count; ++i)
+      for (size_t i = 0; i + level + 1 < count; ++i) {
+        Row&       row = rows[i];
+        const Row& next = rows[i + 1];
         for (size_t lane = 0; lane < kLanes; ++lane) {
-          x[i][lane] = x[i][lane] + (x[i + 1][lane] - x[i][lane]) * t[lane];
-          y[i][lane] = y[i][lane] + (y[i + 1][lane] - y[i][lane]) * t[lane];
+          row.x[lane] = row.x[lane] + (next.x[lane] - row.x[lane]) * t[lane];
+          row.y[lane] = row.y[lane] + (next.y[lane] - row.y[lane]) * t[lane];
         }
+      }
     for (size_t lane = 0; lane < kLanes && first + lane < steps; ++lane)
-      curve.append({x[0][lane], y[0][lane]});
+      curve.append({rows[0].x[lane], rows[0].y[lane]});
   }
   return true;
 }
