@@ -199,6 +199,22 @@ static void test_huge_paths_fail_the_parse() {
   }
 }
 
+// A v9 Bézier's work grows with the cube of its points. A curve of 250
+// parses, as real v9 maps' heavy curves must; one of 1000 is too costly to
+// work out, failing the parse rather than hanging.
+static void test_v9_bezier_budget() {
+  const auto slider = [](int points) {
+    std::string line = "0,0,1000,2,0,B";
+    for (int i = 1; i < points; ++i)
+      line += "|" + std::to_string(i) + ":" + std::to_string(i % 2 * 10);
+    return beatmap(line + ",1,0\n", 9);
+  };
+  fosu::Parser parser;
+  CHECK(parser.parse(slider(250), {.calculate_slider_end_times = true}));
+  CHECK(!parser.parse(slider(1000), {.calculate_slider_end_times = true}));
+  CHECK(parser.error().code == fosu::ParseErrorCode::OutOfMemory);
+}
+
 int main() {
   test_end_times_are_whole_milliseconds();
   test_other_modes_keep_lazer_calculations();
@@ -210,5 +226,6 @@ int main() {
   test_holds_stack_as_circles();
   test_slider_velocities();
   test_huge_paths_fail_the_parse();
+  test_v9_bezier_budget();
   return test_result();
 }
