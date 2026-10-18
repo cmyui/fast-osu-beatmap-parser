@@ -64,6 +64,10 @@ compiles its own parse, so the choice adds no per-line cost.
 - **Coordinates and slider lengths.** Lazer rejects values beyond ±131,072.
   stable has no bound; fosu keeps its control points within int32 and its
   lengths finite.
+- **Hit object times.** stable truncates start times toward zero to whole
+  milliseconds, before a pre-v5 map's 24 ms offset. It reads spinner and hold
+  end times as integers, so it cannot load a map where either has a fraction
+  or an exponent. Lazer keeps fractions.
 - **Difficulty and stack leniency.** Before v13, stable reads HP, CS, OD and AR
   as integers from 0 to 255. It clamps circle size as it reads it, to the
   mania key range only for v13+ maps whose `[General]` already set mania, and
@@ -75,15 +79,17 @@ compiles its own parse, so the choice adds no per-line cost.
 Stable mode does not yet model the rest of stable. Calculated values (slider
 end times, paths, events and stacking) follow lazer in both modes. So do header
 values, timing points, breaks and colours that stable cannot read, though its
-header reader stops at the first such value. Hit-object fields still use
-lazer's numeric parsing, where stable truncates timestamps and reads some
-fields as integers. Lazer's trailing `//` comments are not stripped.
+header reader stops at the first such value. Other hit-object numbers still
+use lazer's parsing, though stable reads positions and start times as
+decimals, which have no exponent. Lazer's trailing `//` comments are not
+stripped.
 
 ## Numeric and malformed-input behavior
 
 - Object start times, spinner/hold end times and break endpoints are double
-  milliseconds; fractional values are preserved. Circle `end_time` equals its
-  start. Slider `end_time` is zero by default in both interfaces and must not be
+  milliseconds; fractional values are preserved, except where stable mode
+  reads whole object times (see [target client](#target-client)). Circle
+  `end_time` equals its start. Slider `end_time` is zero by default in both interfaces and must not be
   used unless end-time calculation is requested, directly or through slider events
   or standard stacking. Calculation includes repeats and degenerate-path handling.
   Spinner, hold and break endpoints follow the

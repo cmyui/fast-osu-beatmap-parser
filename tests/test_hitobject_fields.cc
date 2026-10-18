@@ -227,16 +227,18 @@ static void test_hitobject_details() {
       if (details)
         CHECK_EQ(details->hit_sample, test.sample);
     } else if (kind == fosu::internal::HitObjectKind::Spinner) {
-      const auto details = fosu::internal::parse_spinner_details(
-          input.data(), input.data() + size);
+      const auto details =
+          fosu::internal::parse_spinner_details<fosu::Client::Lazer>(
+              input.data(), input.data() + size);
       CHECK(details.has_value());
       if (details) {
         CHECK_EQ(details->end_time, test.end_time);
         CHECK_EQ(details->hit_sample, test.sample);
       }
     } else {
-      const auto details = fosu::internal::parse_hold_details(
-          10, input.data(), input.data() + size);
+      const auto details =
+          fosu::internal::parse_hold_details<fosu::Client::Lazer>(
+              10, input.data(), input.data() + size);
       CHECK(details.has_value());
       if (details) {
         CHECK_EQ(details->end_time, test.end_time);
@@ -246,12 +248,12 @@ static void test_hitobject_details() {
   }
   for (const auto text : {"", ",", ",bad", ",12:0:0", ",12,/:0"}) {
     const auto input = fosu_test::padded(text);
-    CHECK(!fosu::internal::parse_spinner_details(
+    CHECK(!fosu::internal::parse_spinner_details<fosu::Client::Lazer>(
         input.data(), input.data() + std::string_view(text).size()));
   }
   for (const auto text : {",2147483648:0:0:0:0:", ",12x:0:0:0:0:"}) {
     const auto input = fosu_test::padded(text);
-    CHECK(!fosu::internal::parse_hold_details(
+    CHECK(!fosu::internal::parse_hold_details<fosu::Client::Lazer>(
         10, input.data(), input.data() + std::string_view(text).size()));
   }
 }

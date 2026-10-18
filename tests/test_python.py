@@ -465,7 +465,8 @@ def test_hitobject_conversion_error_preserves_gc_and_next_parse(
 def test_repeated_timestamp_fields_preserve_endpoints():
     b = fosu.parse(
         b"[HitObjects]\n1,2,1000.5,1,0\n1,2,2000.5,8,0,3000.5\n"
-        b"1,2,4000.5,128,0,5000.5\n"
+        b"1,2,4000.5,128,0,5000.5\n",
+        client="lazer",
     )
     circle, spinner, hold = b.hit_objects
     assert circle.end_time == circle.time == 1000.5

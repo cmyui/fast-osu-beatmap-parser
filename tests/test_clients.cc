@@ -349,6 +349,56 @@ static void test_coordinate_and_length_bounds() {
   }
 }
 
+// stable truncates hit object start times toward zero to whole milliseconds,
+// before a pre-v5 map's 24 ms offset. Lazer keeps fractions.
+static void test_fractional_start_times() {
+  struct Case {
+    int         version;
+    const char* time;
+    double      stable, lazer;
+  };
+  for (const auto& test : {
+           Case{14, "1000.7", 1000, 1000.7},
+           Case{14, "-10.5", -10, -10.5},
+           Case{4, "-10.5", 14, 13.5},
+       }) {
+    const auto input = "osu file format v" + std::to_string(test.version) +
+                       "\n[TimingPoints]\n0,500\n[HitObjects]\n64,64," +
+                       test.time + ",1,0\n";
+    for (bool simd : {false, true}) {
+      CHECK_EQ(parse_str(input, simd, kStable).hit_objects[0].time,
+               test.stable);
+      CHECK_EQ(parse_str(input, simd, kLazer).hit_objects[0].time, test.lazer);
+    }
+  }
+}
+
+// stable reads spinner and hold end times as integers, so it cannot load a
+// map where either has a fraction or exponent. Lazer reads doubles.
+static void test_integer_end_times() {
+  struct Case {
+    const char* line;
+    double      lazer_end_time;
+  };
+  for (const auto& test : {
+           Case{"256,192,1000,8,0,2000.5", 2000.5},
+           Case{"256,192,1000,8,0,2e3", 2000},
+           Case{"64,192,1000,128,0,2000.0:0:0:0:0:", 2000},
+       }) {
+    const auto input =
+        "osu file format v14\n" + kTimingAndCircle + test.line + "\n";
+    for (const auto* engine : kEngines) {
+      fosu::Parser parser(*engine);
+      CHECK(!parser.parse(input));
+      CHECK(parser.error().code == fosu::ParseErrorCode::Unloadable);
+      CHECK_EQ(parser.error().line, 6u);
+      const auto& lazer = require_parse(parser.parse(input, kLazer));
+      CHECK_EQ(lazer.hit_objects.size(), 2u);
+      CHECK_EQ(lazer.hit_objects[1].end_time, test.lazer_end_time);
+    }
+  }
+}
+
 // stable has no rules past v14, its latest format, so it reads a v128 map
 // like a v14 one: it truncates coordinates, reads curve types as markers and
 // uses the legacy path rules. The map still reports v128.
@@ -455,6 +505,8 @@ int main() {
   test_combo_colour_order();
   test_curve_type_tokens();
   test_coordinate_and_length_bounds();
+  test_fractional_start_times();
+  test_integer_end_times();
   test_v128_maps_in_stable();
   test_stack_leniency_range();
   test_difficulty_bytes_before_v13();
