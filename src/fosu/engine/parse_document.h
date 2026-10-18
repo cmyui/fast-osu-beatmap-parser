@@ -166,6 +166,7 @@ ParseError parse_sections(const char*  begin,
                           size_t&      velocity_preset_count,
                           bool&        velocity_presets_seen) {
   size_t             break_count = 0, colour_count = 0, timing_point_count = 0;
+  ComboColourSlots   colour_slots;
   HitObjectCounts    counts;
   std::optional<f64> approach_rate;
   u32                pending = options.sections & 0x1FEu;
@@ -203,7 +204,8 @@ ParseError parse_sections(const char*  begin,
                                                 end);
           break;
         case Section::Colours:
-          p = parse_colours_section<C>(beatmap, colour_count, p, end);
+          p = parse_colours_section<C>(beatmap, colour_count, colour_slots, p,
+                                       end);
           break;
         case Section::HitObjects:
           p = parse_hitobjects_section<F, C>(beatmap, counts, p, end);
@@ -239,6 +241,8 @@ ParseError parse_sections(const char*  begin,
   if ((options.sections & kSectionEditor) && !velocity_presets_seen &&
       beatmap.velocity_presets.size() >= 3)
     velocity_preset_count = set_default_velocity_presets(beatmap);
+  if constexpr (C == Client::Stable)
+    colour_count = list_stable_combo_colours(beatmap, colour_slots);
   beatmap.breaks = beatmap.breaks.first(break_count);
   beatmap.combo_colours = beatmap.combo_colours.first(colour_count);
   beatmap.timing_points = beatmap.timing_points.first(timing_point_count);

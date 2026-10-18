@@ -1204,7 +1204,7 @@ static void test_combo_colour_domain() {
         "[Colours]\nCombo1:1,2,3\nCombo0:4,5,6\nCombo9:7,8,9\n"
         "Combo:10,11,12\nCombo1suffix:13,14,15\nCombo-1:16,17,18\n"
         "Combo+8:19,20,21\nCombo01:22,23,24\nSliderBorder:25,26,27\n",
-        simd);
+        simd, kLazer);
     CHECK_EQ(map.combo_colours.size(), 3u);
     CHECK_EQ(map.combo_colours[0], 0x010203u);
     CHECK_EQ(map.combo_colours[1], 0x131415u);
