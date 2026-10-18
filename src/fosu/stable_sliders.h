@@ -45,9 +45,12 @@ inline i32 wrapping_sub(i32 a, i32 b) {
 }
 
 // Stable's work grows with path detail, spans and ticks. A map demanding more
-// than this fails the parse, as lazer's event expansion does.
+// than this fails the parse, as lazer's event expansion does. v9 Béziers'
+// interpolations are counted apart: each is a fraction of a nanosecond's
+// vector work, and real v9 maps need billions of them.
 struct StableBudget {
   size_t work = size_t{1} << 28;
+  size_t wrong_bezier_lerps = size_t{1} << 32;
   size_t events = size_t{1} << 20;
 
   bool spend(size_t& pool, size_t amount) {
@@ -157,7 +160,8 @@ inline bool add_stable_wrong_bezier(std::span<const CurvePoint> points,
                                     Arena*                      arena) {
   const size_t count = points.size();
   const size_t steps = kStableCurveDetail * count;
-  if (count > 1 << 16 || !budget.spend(budget.work, steps * count * count))
+  if (count > 1 << 16 ||
+      !budget.spend(budget.wrong_bezier_lerps, steps * count * (count - 1) / 2))
     return false;
   // The steps are independent, so a block of them is worked out at once, one
   // per lane, each lane's arithmetic exactly the scalar's.
