@@ -25,9 +25,21 @@ struct PathPoint {
   f32 length() const { return std::sqrt(squared_length()); }
 };
 
+// How osu!stable draws the line ending at a path point. Its renderer merges
+// consecutive lines into pieces until one spans more than 6 px, or 32 px of
+// straight lines, never past a segment's end.
+enum StableLineFlags : u8 {
+  kStableLineStraight = 1,    // from a linear segment
+  kStableLineSegmentEnd = 2,  // the last line of a curve segment
+  kStableLineStart = 4,       // no line ends here: one starts, after a gap
+};
+
 struct SliderPath {
   std::span<PathPoint> points;
   std::span<f64>       cumulative_lengths;
+  // Stable mode only, indexed like points: each point's StableLineFlags. The
+  // first point is a kStableLineStart.
+  std::span<u8>        stable_line_flags;
 
   f64 distance() const {
     return cumulative_lengths.empty() ? 0 : cumulative_lengths.back();

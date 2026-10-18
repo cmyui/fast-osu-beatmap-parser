@@ -65,6 +65,7 @@ struct StableBudget {
 // separately, so consecutive pieces can leave sub-pixel gaps.
 struct StableLine {
   CurvePoint p1, p2;
+  u8         flags = 0;  // StableLineFlags
 
   f32 length() const { return (p2 - p1).length(); }
 };
@@ -145,11 +146,18 @@ inline CurvePoint stable_catmull(CurvePoint v1,
 inline constexpr i32 kStableCurveDetail = 50;  // SLIDER_DETAIL_LEVEL
 
 // A straight line as stable adds one: a single piece interpolated between
-// its ends.
+// its ends, which is a segment of its own.
 inline void add_stable_straight_line(CurvePoint   p1,
                                      CurvePoint   p2,
                                      StableLines& out) {
-  out.push({p1 + (p2 - p1) * 0.0f, p1 + (p2 - p1) * 1.0f});
+  out.push({p1 + (p2 - p1) * 0.0f, p1 + (p2 - p1) * 1.0f,
+            kStableLineStraight | kStableLineSegmentEnd});
+}
+
+// Ends the curve segment just added at the last line so far, as stable does.
+inline void end_stable_segment(StableLines& out) {
+  if (out.count)
+    out.values[out.count - 1].flags |= kStableLineSegmentEnd;
 }
 
 // The evenly sampled curve v9 maps use, which stops short of its last point
@@ -230,6 +238,7 @@ inline bool add_stable_bezier_path(std::span<const CurvePoint> points,
       } else if (!add_stable_bezier(segment, out, arena)) {
         return false;
       }
+      end_stable_segment(out);
       if (multipart)
         ++i;  // The repeated point starts the next segment.
       last = i;
@@ -237,6 +246,7 @@ inline bool add_stable_bezier_path(std::span<const CurvePoint> points,
       // Older maps split after a repeated point, keeping both copies.
       if (!add_stable_bezier(points.subspan(last, i - last + 1), out, arena))
         return false;
+      end_stable_segment(out);
       last = i;
     }
   }
@@ -322,6 +332,7 @@ inline bool add_stable_path(std::span<const CurvePoint> points,
                             static_cast<f32>(k) / kStableCurveDetail),
              stable_catmull(v1, v2, v3, v4,
                             static_cast<f32>(k + 1) / kStableCurveDetail)});
+      end_stable_segment(out);
     }
     return true;
   }
@@ -635,19 +646,23 @@ inline bool calculate_stable_slider(
     const size_t size = lines.empty() ? 1 : lines.size() + 1 + gaps;
     auto*        output = arena_push_array<PathPoint>(result_arena, size);
     auto*        lengths = arena_push_array<f64>(result_arena, size);
-    if (!output || !lengths)
+    auto*        flags = arena_push_array<u8>(result_arena, size);
+    if (!output || !lengths || !flags)
       return false;
     output[0] = (lines.empty() ? head : lines[0].p1) - head;
     lengths[0] = 0;
+    flags[0] = kStableLineStart;
     for (size_t i = 0, next = 1; i < lines.size(); ++i) {
       if (i && lines[i].p1 != lines[i - 1].p2) {
         output[next] = lines[i].p1 - head;
+        flags[next] = kStableLineStart;
         lengths[next++] = cumulative[i - 1];
       }
       output[next] = lines[i].p2 - head;
+      flags[next] = lines[i].flags;
       lengths[next++] = cumulative[i];
     }
-    paths[object.slider] = {{output, size}, {lengths, size}};
+    paths[object.slider] = {{output, size}, {lengths, size}, {flags, size}};
   }
 
   if (!outputs.events)
