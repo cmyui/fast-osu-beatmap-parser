@@ -3,6 +3,7 @@
 #include <fosu/engine/hit_objects/samples.h>
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/primitives/packed_digits.h>
+#include <fosu/parse_options.h>
 #include <fosu/types.h>
 
 #include <cstddef>
@@ -55,14 +56,28 @@ struct TimedHitObjectDetails {
   std::string_view hit_sample;
 };
 
+// stable reads spinner and hold end times as integers, so it cannot load a
+// map where either has a fraction or exponent. Lazer reads doubles.
+template <Client C>
+const char* parse_end_time(const char* p, const char* end, f64& out) {
+  if constexpr (C == Client::Stable) {
+    i64         value = 0;
+    const char* next = parse_osu_int(p, end, value);
+    out = static_cast<f64>(value);
+    return next;
+  } else {
+    return parse_osu_double(p, end, out);
+  }
+}
+
 // Raw timestamps remain unshifted and unclamped.
-inline std::optional<TimedHitObjectDetails> parse_spinner_details(
-    const char* p,
-    const char* end) {
+template <Client C>
+std::optional<TimedHitObjectDetails> parse_spinner_details(const char* p,
+                                                           const char* end) {
   if (p == end || *p != ',')
     return std::nullopt;
   f64         end_time;
-  const char* next = parse_osu_double(p + 1, end, end_time);
+  const char* next = parse_end_time<C>(p + 1, end, end_time);
   if (next == p + 1 || (next < end && *next != ','))
     return std::nullopt;
   const auto sample = parse_hit_sample(next < end ? next + 1 : end, end);
@@ -72,8 +87,10 @@ inline std::optional<TimedHitObjectDetails> parse_spinner_details(
 }
 
 // Omitted endpoints and the ':' separator follow ConvertHitObjectParser.
-inline std::optional<TimedHitObjectDetails>
-parse_hold_details(f64 start_time, const char* p, const char* end) {
+template <Client C>
+std::optional<TimedHitObjectDetails> parse_hold_details(f64         start_time,
+                                                        const char* p,
+                                                        const char* end) {
   if (p == end || (p + 1 == end && *p == ','))
     return TimedHitObjectDetails{start_time, {}};
   if (*p != ',')
@@ -91,7 +108,7 @@ parse_hold_details(f64 start_time, const char* p, const char* end) {
     }
   }
   if (next == field)
-    next = parse_osu_double(field, end, end_time);
+    next = parse_end_time<C>(field, end, end_time);
   if (next == p + 1 || (next < end && *next != ',' && *next != ':'))
     return std::nullopt;
   // The official decoder ignores a comma-separated value here; a hold's

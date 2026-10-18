@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <optional>
 
@@ -49,7 +50,7 @@ FOSU_NOINLINE bool parse_hitobject_details(
              parse_slider_as<F.lazer_format, C>(beatmap, counts, object, p + 1,
                                                 end, constants);
     case HitObjectKind::Spinner: {
-      const auto details = parse_spinner_details(p, end);
+      const auto details = parse_spinner_details<C>(p, end);
       if (!details)
         return false;
       object.end_time = details->end_time;
@@ -57,7 +58,7 @@ FOSU_NOINLINE bool parse_hitobject_details(
       return true;
     }
     case HitObjectKind::Hold: {
-      const auto details = parse_hold_details(object.time, p, end);
+      const auto details = parse_hold_details<C>(object.time, p, end);
       if (!details)
         return false;
       object.end_time = details->end_time;
@@ -97,6 +98,9 @@ std::optional<HitObjectPrefix> parse_hitobject_prefix(const char* p,
   if (next == p || next >= line_end || *next != ',')
     return std::nullopt;
   p = next + 1;
+  // stable truncates the start time toward zero to whole milliseconds.
+  if constexpr (C == Client::Stable)
+    time = std::trunc(time);
 
   i64 type;
   next = parse_osu_int(p, line_end, type);
