@@ -42,6 +42,7 @@ for note in b.hit_objects:
         assert_type(note.control_points, list[fosu.Point])
         assert_type(note.path, fosu.SliderPath | None)
         assert_type(note.events, list[fosu.SliderEvent])
+        assert_type(note.velocity, float | None)
         if note.path is not None:
             assert_type(fosu.slider_position_at(note.path, 0.5), fosu.PathPoint)
         for event in note.events:

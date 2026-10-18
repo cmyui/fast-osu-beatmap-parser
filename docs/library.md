@@ -62,7 +62,8 @@ Slider end times are not calculated by default. Request the work per parse with
 `{.calculate_slider_end_times = true}`.
 `HitObject::end_time` is a `double`. Uncalculated slider endpoints are `0`;
 do not use them unless calculation was requested. Other object types always
-have their endpoints populated.
+have their endpoints populated. End-time calculation also fills
+`Beatmap::slider_velocities`, in osu! pixels per millisecond, indexed by slider.
 Reading a field never triggers calculation.
 
 ## Runtime engine selection

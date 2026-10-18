@@ -4,6 +4,7 @@
 #include <fosu/engine/parsing/numbers.h>
 #include <fosu/engine/primitives/vector_ops.h>
 #include <fosu/engine/timing_points/beat_length.h>
+#include <fosu/parse_options.h>
 
 #include <cmath>
 #include <cstdint>
@@ -71,8 +72,8 @@ static_assert(!FOSU_SIMD,
 extern "C" __attribute__((visibility("default"))) void
 fosu_numeric_oracle(const char* data, size_t size, std::string& output) {
   fosu::Parser parser;
-  auto         parsed =
-      parser.parse({data, size}, {.calculate_slider_end_times = true});
+  auto parsed = parser.parse({data, size}, {.calculate_slider_end_times = true,
+                                            .client = fosu::Client::Lazer});
   if (!parsed)
     return;
   auto map = *parsed;

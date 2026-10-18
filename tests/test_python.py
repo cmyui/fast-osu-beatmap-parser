@@ -72,7 +72,9 @@ def test_slider_paths_convert(tmp_path):
     map = fosu.parse(data, calculate_slider_paths=True)
     assert map == fosu.parse_file(source, calculate_slider_paths=True)
     path = map.hit_objects[0].path
-    assert path is not None and path.distance() == 200
+    assert map.hit_objects[0].velocity is None
+    # Stable trims the path in single precision.
+    assert path is not None and path.distance() == pytest.approx(200)
     assert len(path.points) == len(path.cumulative_lengths)
     assert path.cumulative_lengths == sorted(path.cumulative_lengths)
     assert fosu.slider_position_at(path, -1) == path.points[0]
@@ -104,6 +106,7 @@ def test_slider_events_convert(tmp_path):
     map = fosu.parse(data, calculate_slider_events=True)
     assert map == fosu.parse_file(path, calculate_slider_events=True)
     slider = map.hit_objects[0]
+    assert slider.velocity == 0.2
     assert slider.events[5] == fosu.SliderEvent(
         type=fosu.SliderEventType.TICK,
         time=3500,

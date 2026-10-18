@@ -27,7 +27,9 @@ std::string beatmap(std::string_view timing_points,
 }
 
 double end_time(const std::string& input, bool simd, size_t object = 0) {
-  return parse_str(input, simd, {.calculate_slider_end_times = true})
+  return parse_str(input, simd,
+                   {.calculate_slider_end_times = true,
+                    .client = fosu::Client::Lazer})
       .hit_objects[object]
       .end_time;
 }
@@ -41,8 +43,10 @@ struct TimedEvent {
 using Events = std::vector<TimedEvent>;
 
 Events timed_events(const std::string& input, bool simd) {
-  const auto map = parse_str(input, simd, {.calculate_slider_events = true});
-  Events     events;
+  const auto map = parse_str(
+      input, simd,
+      {.calculate_slider_events = true, .client = fosu::Client::Lazer});
+  Events events;
   for (const auto& event : map.slider_events[map.hit_objects[0].slider])
     events.push_back({event.type, event.time});
   return events;
@@ -207,7 +211,8 @@ static void test_without_timing_points_sliders_use_60_bpm() {
   for (bool simd : {false, true}) {
     const auto map = parse_str(input, simd,
                                {.sections = fosu::kSectionHitObjects,
-                                .calculate_slider_end_times = true});
+                                .calculate_slider_end_times = true,
+                                .client = fosu::Client::Lazer});
     CHECK_EQ(map.hit_objects[0].end_time, 140 / (100 * 1.4 / 1000));
   }
 }
@@ -255,11 +260,14 @@ static void test_end_times_are_calculated_only_when_needed() {
   const auto input = beatmap("0,500\n", "0,0,1000,2,0,L|100:0,1,100\n");
   for (bool simd : {false, true}) {
     CHECK_EQ(parse_str(input, simd).hit_objects[0].end_time, 0);
-    CHECK_EQ(parse_str(input, simd, {.calculate_slider_paths = true})
+    CHECK_EQ(parse_str(input, simd,
+                       {.calculate_slider_paths = true,
+                        .client = fosu::Client::Lazer})
                  .hit_objects[0]
                  .end_time,
              0);
-    const auto stacked = parse_str(input, simd, {.apply_stacking = true});
+    const auto stacked = parse_str(
+        input, simd, {.apply_stacking = true, .client = fosu::Client::Lazer});
     CHECK_EQ(stacked.hit_objects[0].end_time, 1500);
     CHECK(stacked.slider_events.empty());
   }
@@ -318,7 +326,9 @@ static void test_events_cover_head_ticks_repeats_and_tail() {
                   {SliderEventType::Tick, 2500},
                   {SliderEventType::LegacyLastTick, 2964},
                   {SliderEventType::Tail, 3000}}));
-    const auto map = parse_str(input, simd, {.calculate_slider_events = true});
+    const auto map = parse_str(
+        input, simd,
+        {.calculate_slider_events = true, .client = fosu::Client::Lazer});
     const auto events = map.slider_events[0];
     CHECK(events[2].position == (fosu::PathPoint{400, 0}));
     CHECK(events[5].position == (fosu::PathPoint{0, 0}));
@@ -352,7 +362,9 @@ static void test_ticks_before_v8_ignore_velocity_multiplier() {
 static void test_legacy_last_tick_is_at_least_halfway() {
   const auto input = beatmap("0,500\n", "0,0,1000,2,0,L|10:0,1,10\n");
   for (bool simd : {false, true}) {
-    const auto  map = parse_str(input, simd, {.calculate_slider_events = true});
+    const auto map = parse_str(
+        input, simd,
+        {.calculate_slider_events = true, .client = fosu::Client::Lazer});
     const auto& legacy = map.slider_events[0][1];
     CHECK(legacy.type == SliderEventType::LegacyLastTick);
     CHECK_EQ(legacy.time, 1025);
@@ -371,8 +383,9 @@ static void test_nan_inherited_point_suppresses_ticks() {
            Events{{SliderEventType::Head, 0},
                   {SliderEventType::LegacyLastTick, 1464},
                   {SliderEventType::Tail, 1500}}));
-    const auto map =
-        parse_str(zero_length, simd, {.calculate_slider_events = true});
+    const auto map = parse_str(
+        zero_length, simd,
+        {.calculate_slider_events = true, .client = fosu::Client::Lazer});
     CHECK_EQ(map.slider_events[0].size(), 3u);
     for (const auto& event : map.slider_events[0])
       CHECK(std::isfinite(event.time) && std::isfinite(event.path_progress));

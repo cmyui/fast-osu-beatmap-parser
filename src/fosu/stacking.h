@@ -6,6 +6,7 @@
 #include <fosu/beatmap.h>
 #include <fosu/compiler.h>
 #include <fosu/slider_path.h>
+#include <fosu/stable_sliders.h>
 #include <fosu/types.h>
 
 #include <algorithm>
@@ -116,6 +117,23 @@ inline void calculate_legacy_stacks(Beatmap&             map,
   }
 }
 
+inline void move_stacked_objects(Beatmap& map) {
+  for (size_t i = 0; i < map.hit_objects.size(); ++i) {
+    auto&      object = map.hit_objects[i];
+    const auto offset = map.stacking[i].stack_offset;
+    object.x += offset.x;
+    object.y += offset.y;
+    if (object.slider == HitObject::kNoSlider)
+      continue;
+    const auto& slider = map.sliders[object.slider];
+    for (auto& point :
+         map.slider_points.subspan(slider.point_begin, slider.point_count)) {
+      point.x += offset.x;
+      point.y += offset.y;
+    }
+  }
+}
+
 inline bool apply_stacking(Beatmap&             map,
                            Arena*               result_arena,
                            std::span<const f64> slider_end_times) {
@@ -150,20 +168,177 @@ inline bool apply_stacking(Beatmap&             map,
     stack.stack_offset = {offset, offset};
   }
   // Calculate every height against unstacked geometry before moving anything.
-  for (size_t i = 0; i < map.hit_objects.size(); ++i) {
-    auto&      object = map.hit_objects[i];
-    const auto offset = map.stacking[i].stack_offset;
-    object.x += offset.x;
-    object.y += offset.y;
-    if (object.slider == HitObject::kNoSlider)
+  move_stacked_objects(map);
+  return true;
+}
+
+// osu!stable's stacking (UpdateStacking from v6, ApplyOldStacking before),
+// on its whole-millisecond times and its own slider ends. Stable plays holds
+// in an osu!standard map as circles.
+struct StableStackObject {
+  enum Kind : u8 { Circle, Slider, Spinner } kind;
+  i32       time;      // without the pre-v5 offset
+  i32       end_time;  // the same
+  PathPoint position;
+  PathPoint end_position;  // after the last span
+  PathPoint path_end;      // the far end of a slider's path
+};
+
+inline void calculate_stable_stacks(std::span<const StableStackObject> objects,
+                                    std::span<Stacking>                stacks,
+                                    f32 threshold) {
+  const auto count = static_cast<ptrdiff_t>(objects.size());
+  const auto is = [&](ptrdiff_t i, StableStackObject::Kind kind) {
+    return objects[i].kind == kind;
+  };
+  const auto beyond = [&](i32 later, i32 earlier) {
+    return static_cast<f32>(wrapping_sub(later, earlier)) > threshold;
+  };
+  // Stable first reaches forward to include objects stacked on the range it
+  // updates. Over a whole map that changes nothing, so only its backward pass
+  // remains: each stack built up from its last object.
+  for (ptrdiff_t i = count - 1; i > 0; --i) {
+    ptrdiff_t n = i;
+    ptrdiff_t top = i;
+    if (stacks[top].stack_height != 0 || is(top, StableStackObject::Spinner))
       continue;
-    const auto& slider = map.sliders[object.slider];
-    for (auto& point :
-         map.slider_points.subspan(slider.point_begin, slider.point_count)) {
-      point.x += offset.x;
-      point.y += offset.y;
+    if (is(top, StableStackObject::Circle)) {
+      while (--n >= 0) {
+        if (is(n, StableStackObject::Spinner))
+          continue;
+        if (beyond(objects[top].time, objects[n].end_time))
+          break;
+        // Circles under the end of the last slider in a stack go down and
+        // right of it instead.
+        if (is(n, StableStackObject::Slider) &&
+            within_stack_distance(objects[n].end_position,
+                                  objects[top].position)) {
+          const i32 offset =
+              stacks[top].stack_height - stacks[n].stack_height + 1;
+          for (ptrdiff_t j = n + 1; j <= i; ++j)
+            if (within_stack_distance(objects[n].end_position,
+                                      objects[j].position))
+              stacks[j].stack_height -= offset;
+          break;
+        }
+        if (within_stack_distance(objects[n].position, objects[top].position)) {
+          stacks[n].stack_height = stacks[top].stack_height + 1;
+          top = n;
+        }
+      }
+    } else if (is(top, StableStackObject::Slider)) {
+      while (--n >= 0) {
+        if (is(n, StableStackObject::Spinner))
+          continue;
+        if (beyond(objects[top].time, objects[n].time))
+          break;
+        if (within_stack_distance(objects[n].end_position,
+                                  objects[top].position)) {
+          stacks[n].stack_height = stacks[top].stack_height + 1;
+          top = n;
+        }
+      }
     }
   }
+}
+
+inline void calculate_stable_old_stacks(
+    std::span<const StableStackObject> objects,
+    std::span<Stacking>                stacks,
+    f32                                threshold) {
+  for (size_t i = 0; i < objects.size(); ++i) {
+    const auto& current = objects[i];
+    i32         end = current.end_time;
+    if (stacks[i].stack_height != 0 &&
+        current.kind != StableStackObject::Slider)
+      continue;
+    i32 slider_stack = 0;
+    for (size_t j = i + 1; j < objects.size(); ++j) {
+      if (!(static_cast<f32>(objects[j].time) - threshold <= end))
+        break;
+      // Stable works out each slider's path as it reaches it, so later
+      // sliders still end when they start.
+      const i32 later_end = objects[j].kind == StableStackObject::Slider
+                                ? objects[j].time
+                                : objects[j].end_time;
+      if (within_stack_distance(objects[j].position, current.position)) {
+        ++stacks[i].stack_height;
+        end = later_end;
+      } else if (within_stack_distance(objects[j].position, current.path_end)) {
+        stacks[j].stack_height -= ++slider_stack;
+        end = later_end;
+      }
+    }
+  }
+}
+
+inline bool apply_stable_stacking(Beatmap&                         map,
+                                  std::span<const StableSliderEnd> slider_ends,
+                                  Arena*                           result_arena,
+                                  Arena* scratch_arena) {
+  if (map.mode != 0 || map.hit_objects.empty())
+    return true;
+  const size_t count = map.hit_objects.size();
+  auto*        stacking = arena_push_array<Stacking>(result_arena, count);
+  if (!stacking)
+    return false;
+  std::fill_n(stacking, count, Stacking{});
+  map.stacking = {stacking, count};
+  const TempArena temp{scratch_arena};
+  auto* objects = arena_push_array<StableStackObject>(scratch_arena, count);
+  if (!objects)
+    return false;
+  const f64 shift = map.format_version < 5 ? 24 : 0;
+  for (size_t i = 0; i < count; ++i) {
+    const auto& object = map.hit_objects[i];
+    const auto  position = object_position(object);
+    const auto  time = stable_int(object.time - shift);
+    if (object.is_slider()) {
+      const auto& end = slider_ends[object.slider];
+      objects[i] = {StableStackObject::Slider,
+                    time,
+                    stable_int(object.end_time - shift),
+                    position,
+                    end.end_position,
+                    end.path_end};
+    } else if (object.is_spinner()) {
+      objects[i] = {StableStackObject::Spinner,
+                    time,
+                    stable_int(object.end_time - shift),
+                    position,
+                    position,
+                    position};
+    } else {
+      objects[i] = {
+          StableStackObject::Circle, time, time, position, position, position};
+    }
+  }
+  // Difficulty is final, with any mods applied.
+  const i32 preempt =
+      stable_int(map.ar > 5   ? 1200 + (450 - 1200) * (map.ar - 5) / 5
+                 : map.ar < 5 ? 1200 - (1200 - 1800) * (5 - map.ar) / 5
+                              : 1200);
+  const f32 threshold =
+      static_cast<f32>(preempt) * static_cast<f32>(map.stack_leniency);
+  const std::span<const StableStackObject> stack_objects{objects, count};
+  if (map.format_version >= 6)
+    calculate_stable_stacks(stack_objects, map.stacking, threshold);
+  else
+    calculate_stable_old_stacks(stack_objects, map.stacking, threshold);
+  // Stable's stack offset is a tenth of its circle radius, which it works
+  // out in window pixels; this is a 640x480 window's.
+  const f32 size =
+      static_cast<f32>(512.0f / 8.0f * (1.0f - 0.7f * ((map.cs - 5) / 5)));
+  const f32 offset = size / 2.0f * 1.00041f / 10;
+  for (size_t i = 0; i < count; ++i) {
+    auto& stack = map.stacking[i];
+    // Stable's spinners never move.
+    if (map.hit_objects[i].is_spinner()) [[unlikely]]
+      continue;
+    const f32 shift_by = -(static_cast<f32>(stack.stack_height) * offset);
+    stack.stack_offset = {shift_by, shift_by};
+  }
+  move_stacked_objects(map);
   return true;
 }
 

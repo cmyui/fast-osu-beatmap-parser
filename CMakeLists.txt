@@ -92,6 +92,7 @@ target_sources(fosu_headers INTERFACE FILE_SET HEADERS BASE_DIRS src FILES
   src/fosu/slider_path.h
   src/fosu/slider_event.h
   src/fosu/slider_events.h
+  src/fosu/stable_sliders.h
   src/fosu/stacking.h
   src/fosu/slider_timing.h
   src/fosu/os.h

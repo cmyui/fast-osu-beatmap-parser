@@ -133,6 +133,8 @@ inline void apply_clock_rate(Beatmap& map, Mods mods) {
       event.time /= rate;
       event.span_start_time /= rate;
     }
+  for (auto& velocity : map.slider_velocities)
+    velocity *= rate;
 }
 
 }  // namespace internal

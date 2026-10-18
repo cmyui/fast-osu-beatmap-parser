@@ -32,7 +32,7 @@ inline bool set_slider_events(Beatmap&       map,
   auto* ranges = arena_push_array<std::span<SliderEvent>>(result_arena,
                                                           map.sliders.size());
   if (!timings || !ranges ||
-      !set_slider_end_times(map, client, scratch_arena,
+      !set_slider_end_times(map, client, result_arena, scratch_arena,
                             {timings, map.sliders.size()},
                             stacking_end_times)) {
     return false;

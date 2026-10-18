@@ -106,6 +106,9 @@ struct Beatmap : BeatmapHeader {
   // Empty unless requested; otherwise indexed identically to sliders.
   std::span<SliderPath>             slider_paths;
   std::span<std::span<SliderEvent>> slider_events;
+  // Empty unless end times are calculated; osu! pixels per millisecond,
+  // indexed identically to sliders.
+  std::span<f64>                    slider_velocities;
 
   // Empty unless osu!standard stacking was requested; indexed by hit object.
   std::span<Stacking>               stacking;

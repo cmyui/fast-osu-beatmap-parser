@@ -200,6 +200,7 @@ enum Field {
   f_degree,
   f_sample_volume,
   f_velocity_presets,
+  f_velocity,
   field_count
 };
 const char* field_names[] = {"stacking",
@@ -290,7 +291,8 @@ const char* field_names[] = {"stacking",
                              "curve_segments",
                              "degree",
                              "sample_volume",
-                             "velocity_presets"};
+                             "velocity_presets",
+                             "velocity"};
 static_assert(sizeof(field_names) / sizeof(field_names[0]) == field_count);
 enum PythonType {
   t_point,
@@ -592,6 +594,10 @@ struct BeatmapConverter {
       const auto& s = map.sliders[h.slider];
       set_field(out, kind, f_slides, integer(s.slides));
       set_field(out, kind, f_events, slider_events(h.slider));
+      set_field(out, kind, f_velocity,
+                map.slider_velocities.empty()
+                    ? none()
+                    : number(map.slider_velocities[h.slider]));
       set_field(out, kind, f_path,
                 map.slider_paths.empty()
                     ? none()

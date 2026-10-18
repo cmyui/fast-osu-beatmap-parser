@@ -133,6 +133,8 @@ that polyline, with progress clamped to [0, 1]. Returned `PathPoint` coordinates
 are relative to the head; add the slider's x/y for playfield coordinates.
 Paths alone do not calculate end times. Requesting both reuses their distance.
 Native code exposes the same query and `Beatmap.slider_paths`, indexed by slider.
+Calculating end times, directly or through events or stacking, also sets each
+slider's `velocity` in osu! pixels per millisecond (otherwise `None`).
 
 `calculate_slider_events=True` additionally populates `slider.events` with
 `HEAD`, `TICK`, `REPEAT`, `LEGACY_LAST_TICK`, and `TAIL` records in official
@@ -169,7 +171,8 @@ They are not yet supported for osu!catch or osu!mania because those modes requir
 converted fruit offsets or resolved hit windows; support is planned. DT,
 NIGHTCORE, and HT support every mode and divide gameplay timeline values by
 1.5, 1.5, and 0.75 respectively. This includes hit objects, calculated slider
-events, timing-point offsets and uninherited beat lengths, and breaks. General
+events, timing-point offsets and uninherited beat lengths, and breaks; slider
+velocities are multiplied instead. General
 and Editor timestamp metadata remains in source-map time.
 
 See
