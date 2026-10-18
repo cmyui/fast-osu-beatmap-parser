@@ -66,17 +66,37 @@ struct StableLine {
   f32 length() const { return (p2 - p1).length(); }
 };
 
-// Counts a path's lines when `lines` is null, and stores them otherwise.
-struct StableLines {
-  StableLine* lines = nullptr;
-  size_t      count = 0;
+// An array kept as its arena's newest allocation, so that it grows in place.
+// Nothing else may be pushed to the arena while it grows.
+template <typename T>
+struct GrowingArray {
+  Arena* arena;
+  T*     values = nullptr;
+  size_t count = 0;
+  size_t capacity = 0;
+  bool   failed = false;
 
-  void add(CurvePoint p1, CurvePoint p2) {
-    if (lines)
-      lines[count] = {p1, p2};
-    ++count;
+  FOSU_ALWAYS_INLINE void push(const T& value) {
+    if (count == capacity && !grow())
+      return;
+    values[count++] = value;
+  }
+
+  FOSU_NOINLINE bool grow() {
+    const size_t added = values ? capacity : 64;
+    auto*        more = arena_push_array<T>(arena, added);
+    if (!more || (values && more != values + capacity)) {
+      failed = true;
+      return false;
+    }
+    if (!values)
+      values = more;
+    capacity += added;
+    return true;
   }
 };
+
+using StableLines = GrowingArray<StableLine>;
 
 // Lines between consecutive points, for the shared Bézier approximation.
 struct StableCurve {
@@ -88,7 +108,7 @@ struct StableCurve {
 
   void append(CurvePoint point) {
     if (started)
-      out.add(last, point);
+      out.push({last, point});
     last = point;
     started = true;
   }
@@ -126,7 +146,7 @@ inline constexpr i32 kStableCurveDetail = 50;  // SLIDER_DETAIL_LEVEL
 inline void add_stable_straight_line(CurvePoint   p1,
                                      CurvePoint   p2,
                                      StableLines& out) {
-  out.add(p1 + (p2 - p1) * 0.0f, p1 + (p2 - p1) * 1.0f);
+  out.push({p1 + (p2 - p1) * 0.0f, p1 + (p2 - p1) * 1.0f});
 }
 
 // The evenly sampled curve v9 maps use, which stops short of its last point
@@ -139,18 +159,39 @@ inline bool add_stable_wrong_bezier(std::span<const CurvePoint> points,
   const size_t steps = kStableCurveDetail * count;
   if (count > 1 << 16 || !budget.spend(budget.work, steps * count * count))
     return false;
+  // The steps are independent, so a block of them is worked out at once, one
+  // per lane, each lane's arithmetic exactly the scalar's.
+  constexpr size_t kLanes = 8;
+  // One array, so that compilers can tell its rows apart and vectorize.
+  struct Row {
+    f32 x[kLanes];
+    f32 y[kLanes];
+  };
   const TempArena temp{arena};
-  auto*           working = arena_push_array<CurvePoint>(arena, count);
-  if (!working)
+  auto*           rows = arena_push_array<Row>(arena, count);
+  if (!rows)
     return false;
   StableCurve curve{out};
-  for (size_t step = 0; step < steps; ++step) {
-    std::copy(points.begin(), points.end(), working);
-    const f32 t = static_cast<f32>(step) / static_cast<f32>(steps);
+  for (size_t first = 0; first < steps; first += kLanes) {
+    f32 t[kLanes];
+    for (size_t lane = 0; lane < kLanes; ++lane)
+      t[lane] = static_cast<f32>(first + lane) / static_cast<f32>(steps);
+    for (size_t i = 0; i < count; ++i)
+      for (size_t lane = 0; lane < kLanes; ++lane) {
+        rows[i].x[lane] = points[i].x;
+        rows[i].y[lane] = points[i].y;
+      }
     for (size_t level = 0; level < count; ++level)
-      for (size_t i = 0; i + level + 1 < count; ++i)
-        working[i] = working[i] + (working[i + 1] - working[i]) * t;
-    curve.append(working[0]);
+      for (size_t i = 0; i + level + 1 < count; ++i) {
+        Row&       row = rows[i];
+        const Row& next = rows[i + 1];
+        for (size_t lane = 0; lane < kLanes; ++lane) {
+          row.x[lane] = row.x[lane] + (next.x[lane] - row.x[lane]) * t[lane];
+          row.y[lane] = row.y[lane] + (next.y[lane] - row.y[lane]) * t[lane];
+        }
+      }
+    for (size_t lane = 0; lane < kLanes && first + lane < steps; ++lane)
+      curve.append({rows[0].x[lane], rows[0].y[lane]});
   }
   return true;
 }
@@ -243,10 +284,10 @@ inline bool add_stable_arc(CurvePoint    a,
         CurvePoint{static_cast<f32>(std::cos(t) * radius),
                    static_cast<f32>(std::sin(t) * radius)} +
         centre;
-    out.add(last, point);
+    out.push({last, point});
     last = point;
   }
-  out.add(last, c);
+  out.push({last, c});
   return true;
 }
 
@@ -272,10 +313,11 @@ inline bool add_stable_path(std::span<const CurvePoint> points,
       const auto v3 = points[j + 1];
       const auto v4 = j + 2 < count ? points[j + 2] : v3 + (v3 - v2);
       for (i32 k = 0; k < kStableCurveDetail; ++k)
-        out.add(stable_catmull(v1, v2, v3, v4,
-                               static_cast<f32>(k) / kStableCurveDetail),
-                stable_catmull(v1, v2, v3, v4,
-                               static_cast<f32>(k + 1) / kStableCurveDetail));
+        out.push(
+            {stable_catmull(v1, v2, v3, v4,
+                            static_cast<f32>(k) / kStableCurveDetail),
+             stable_catmull(v1, v2, v3, v4,
+                            static_cast<f32>(k + 1) / kStableCurveDetail)});
     }
     return true;
   }
@@ -495,17 +537,12 @@ inline bool calculate_stable_slider(
     points[i + !listed_head] = {control[i].x, control[i].y};
   const std::span<const CurvePoint> control_points{points, count};
 
-  const i32                         version = map.format_version;
-  StableLines                       counted;
-  if (!add_stable_path(control_points, slider.curve_type, version, counted,
-                       budget, scratch_arena) ||
-      !budget.spend(budget.work, counted.count))
-    return false;
-  StableLines path{arena_push_array<StableLine>(scratch_arena, counted.count)};
-  if (!path.lines && counted.count)
-    return false;
-  if (!add_stable_path(control_points, slider.curve_type, version, path, budget,
-                       scratch_arena))
+  // The lines grow as scratch's newest allocation, so curve work borrows the
+  // result arena's free space, releasing it before anything is stored there.
+  StableLines                       path{scratch_arena};
+  if (!add_stable_path(control_points, slider.curve_type, map.format_version,
+                       path, budget, result_arena) ||
+      path.failed || !budget.spend(budget.work, path.count))
     return false;
 
   // Velocity in pixels per second, and tick spacing, at the slider's start.
@@ -527,7 +564,7 @@ inline bool calculate_stable_slider(
   // Trim or extend the last lines to the declared length.
   f64 total = 0;
   for (size_t i = 0; i < path.count; ++i)
-    total += path.lines[i].length();
+    total += path.values[i].length();
   if (total > 0) {
     const f64 spatial_length = slider.length == 0 ? total : slider.length;
     if (tick_distance > spatial_length)
@@ -535,7 +572,7 @@ inline bool calculate_stable_slider(
     constexpr f64 kMinSegmentLength = 0.0001;
     f64           excess = total - spatial_length;
     while (path.count) {
-      StableLine& last = path.lines[path.count - 1];
+      StableLine& last = path.values[path.count - 1];
       const f32   last_length = (last.p1 - last.p2).length();
       if (last_length > excess + kMinSegmentLength) {
         if (last.p2 != last.p1)
@@ -547,7 +584,7 @@ inline bool calculate_stable_slider(
       excess -= last_length;
     }
   }
-  const std::span<const StableLine> lines{path.lines, path.count};
+  const std::span<const StableLine> lines{path.values, path.count};
 
   velocities[object.slider] = velocity / 1000;
   StableWalk walk{start_time, head};
@@ -555,7 +592,8 @@ inline bool calculate_stable_slider(
   i32*       span_starts = arena_push_array<i32>(scratch_arena, slider.slides);
   if ((!cumulative && !lines.empty()) || !span_starts)
     return false;
-  size_t point_count = 0;
+  // Kept for events; otherwise only counted against the budget.
+  GrowingArray<StableScoringPoint> points_found{scratch_arena};
   if (!lines.empty()) {
     total = 0;
     for (size_t i = 0; i < lines.size(); ++i)
@@ -565,9 +603,10 @@ inline bool calculate_stable_slider(
     walk = walk_stable_slider(
         lines, {cumulative, lines.size()}, slider.slides, start_time, velocity,
         tick_distance,
-        [&](const StableScoringPoint&) {
-          ++point_count;
-          return budget.spend(budget.events, 1);
+        [&](const StableScoringPoint& point) {
+          if (outputs.events)
+            points_found.push(point);
+          return budget.spend(budget.events, 1) && !points_found.failed;
         },
         [&](i32 span, i32 time) {
           span_starts[span] = time;
@@ -610,6 +649,7 @@ inline bool calculate_stable_slider(
   if (!outputs.events)
     return true;
   const i32    spans = slider.slides;
+  const size_t point_count = points_found.count;
   const size_t event_count = point_count + 2;
   auto* events = arena_push_array<SliderEvent>(result_arena, event_count);
   if (!events)
@@ -625,23 +665,18 @@ inline bool calculate_stable_slider(
     // Stable scores every (count / spans)th point as a repeat, which is not
     // always a span's end when spans hold different numbers of ticks.
     const size_t per_span = point_count / spans;
-    size_t       next = 1;
-    walk_stable_slider(
-        lines, {cumulative, lines.size()}, spans, start_time, velocity,
-        tick_distance,
-        [&](const StableScoringPoint& point) {
-          const bool repeat = per_span && next % per_span == 0;
-          events[next++] =
-              event(repeat ? SliderEventType::Repeat : SliderEventType::Tick,
-                    point.time, point.span, point.progress, point.position);
-          return true;
-        },
-        [](i32, i32) {});
+    for (size_t i = 0; i < point_count; ++i) {
+      const auto& point = points_found.values[i];
+      const bool  repeat = per_span && (i + 1) % per_span == 0;
+      events[i + 1] =
+          event(repeat ? SliderEventType::Repeat : SliderEventType::Tick,
+                point.time, point.span, point.progress, point.position);
+    }
     // The last point, judged a little early and inaudibly, replaces the end.
     const i32 length = wrapping_sub(walk.end_time, start_time);
     const i32 final_span = spans - 1;
     const i32 final_start = span_starts[final_span];
-    const i32 last_time = stable_int(events[point_count].time - shift);
+    const i32 last_time = points_found.values[point_count - 1].time;
     const i32 legacy_time = std::max(wrapping_add(start_time, length / 2),
                                      wrapping_sub(last_time, 36));
     f64       progress = static_cast<f64>(spans % 2);
