@@ -176,6 +176,7 @@ class Slider(_HitObject):
     control_points: list[Point]
     path: SliderPath | None
     events: list[SliderEvent]
+    velocity: float | None
     is_slider: ClassVar[bool] = True
 
 

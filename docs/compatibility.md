@@ -75,11 +75,28 @@ compiles its own parse, so the choice adds no per-line cost.
   mode and keeps any stack leniency.
 - **Defaults.** An omitted `Countdown` is 1 (normal) in stable and 0 (none) in
   lazer. An omitted `BeatmapID` is 0 in stable and -1 in lazer.
+- **Calculated values.** For osu!standard maps, stable mode follows stable's
+  own slider calculations and stacking; other modes follow lazer in both
+  modes. Stable's paths are straight pieces from its own approximations:
+  Catmull curves are 50 pieces per pair of points, perfect curves are chords
+  of 8 to 16 px of arc, and v9 Béziers are sampled evenly, stopping short of
+  their last point. Where consecutive pieces leave a sub-pixel gap, the path
+  gets a point that adds no length. Stable works in absolute coordinates, so
+  the relative points can differ from its own by about 2⁻¹⁶ px; lengths are
+  its own. End times and event times are whole milliseconds. After a tick too
+  near the end, ticks on the way back restart their spacing instead of
+  mirroring. A path with no length keeps its repeats, and every
+  (points ÷ spans)th point is a repeat, as stable scores it. Stacking uses
+  these end times, treats holds as circles, and offsets by a tenth of stable's
+  circle radius as a 640×480 window works it out. Like lazer's event
+  expansion, this work is bounded: a map that needs more fails the parse.
 
-Stable mode does not yet model the rest of stable. Calculated values (slider
-end times, paths, events and stacking) follow lazer in both modes. So do header
-values, timing points, breaks and colours that stable cannot read, though its
-header reader stops at the first such value. Other hit-object numbers still
+Stable mode does not yet model the rest of stable. Header values, timing
+points, breaks and colours that stable cannot read follow lazer, though its
+header reader stops at the first such value. With Hard Rock, stable flips
+fractional control points before truncating them; fosu flips the truncated
+points. Stable also ends spinners 50 ms before the audio does, which needs
+the audio's length. Other hit-object numbers still
 use lazer's parsing, though stable reads positions and start times as
 decimals, which have no exponent. Lazer's trailing `//` comments are not
 stripped.

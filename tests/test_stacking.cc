@@ -11,7 +11,8 @@
 
 namespace {
 
-constexpr fosu::ParseOptions kStacking{.apply_stacking = true};
+constexpr fosu::ParseOptions kStacking{.apply_stacking = true,
+                                       .client = fosu::Client::Lazer};
 
 std::vector<int> heights(const std::string& input, bool simd) {
   std::vector<int> heights;
@@ -143,13 +144,16 @@ static void test_stacked_slider_moves_its_points_but_not_its_path() {
       "100,100,1000,2,0,L|200:100,2,100\n100,100,1100,2,0,L|200:100,1,100\n";
   for (bool simd : {false, true}) {
     std::vector<fosu::PathPoint> unstacked;
-    for (const auto point :
-         parse_str(input, simd, {.calculate_slider_paths = true})
-             .slider_paths[0]
-             .points)
+    for (const auto point : parse_str(input, simd,
+                                      {.calculate_slider_paths = true,
+                                       .client = fosu::Client::Lazer})
+                                .slider_paths[0]
+                                .points)
       unstacked.push_back(point);
-    const auto map = parse_str(
-        input, simd, {.calculate_slider_paths = true, .apply_stacking = true});
+    const auto map = parse_str(input, simd,
+                               {.calculate_slider_paths = true,
+                                .apply_stacking = true,
+                                .client = fosu::Client::Lazer});
     CHECK_EQ(map.stacking[0].stack_height, 1);
     const auto points = map.slider_points.subspan(map.sliders[0].point_begin,
                                                   map.sliders[0].point_count);

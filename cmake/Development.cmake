@@ -8,7 +8,8 @@ set_target_properties(test_scalar_engine PROPERTIES
   CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 if(BUILD_TESTING)
   set(_tests numeric sections string_lookup hitobject_fields storage hardening
-             slider_timing slider_paths stacking mods clients)
+             slider_timing slider_paths stacking mods clients
+             stable_calculations)
   set(_test_targets)
   foreach(name IN LISTS _tests)
     list(APPEND _test_targets test_${name})

@@ -30,18 +30,17 @@ struct Path {
 Path path(const std::string& input,
           bool               simd,
           size_t             object = 0,
-          fosu::Client       client = fosu::Client::Stable) {
+          fosu::Client       client = fosu::Client::Lazer) {
   const auto map = parse_str(
       input, simd, {.calculate_slider_paths = true, .client = client});
   const auto& path = map.slider_paths[map.hit_objects[object].slider];
   return {{path.points.begin(), path.points.end()}, path.distance()};
 }
 
-// The same slider with another curve description. Only lazer has v128 rules.
+// The same slider with another curve description.
 Path path_as(std::string_view slider, bool simd, int version = 14) {
   return path(beatmap("0,0,1000,2,0," + std::string(slider) + "\n", version),
-              simd, 0,
-              version >= 128 ? fosu::Client::Lazer : fosu::Client::Stable);
+              simd);
 }
 
 }  // namespace
@@ -243,8 +242,9 @@ static void test_segments_of_different_types_join() {
 
 static void test_position_query_clamps_and_interpolates() {
   for (bool simd : {false, true}) {
-    const auto map = parse_str(beatmap("10,20,1000,2,0,L|110:20,1,100\n"), simd,
-                               {.calculate_slider_paths = true});
+    const auto map = parse_str(
+        beatmap("10,20,1000,2,0,L|110:20,1,100\n"), simd,
+        {.calculate_slider_paths = true, .client = fosu::Client::Lazer});
     const auto& path = map.slider_paths[0];
     CHECK(fosu::slider_position_at(path, 0.5) == (fosu::PathPoint{50, 0}));
     CHECK(fosu::slider_position_at(path, -1) == (fosu::PathPoint{0, 0}));

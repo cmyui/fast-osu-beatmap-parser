@@ -10,6 +10,7 @@
 #include <fosu/slider_events.h>
 #include <fosu/slider_geometry.h>
 #include <fosu/slider_timing.h>
+#include <fosu/stable_sliders.h>
 #include <fosu/stacking.h>
 #include <fosu/types.h>
 
@@ -212,21 +213,13 @@ class Parser {
     return &beatmap_;
   }
 
-  // Calculated values follow lazer for both clients; stable's own end times,
-  // paths, events and stacking are not modelled yet.
   ParseErrorCode post_process(ParseOptions opts) noexcept {
     const bool stacking = opts.apply_stacking && beatmap_.mode == 0;
     const bool events = opts.calculate_slider_events;
     const bool paths = opts.calculate_slider_paths || events || stacking;
 
-    const bool end_times =
-        (opts.calculate_slider_end_times || stacking) && !events;
-
-    std::span<f64> stacking_end_times;
-
-    auto&          map = beatmap_;
-    auto*          result = result_arena_;
-    auto*          scratch = scratch_arena_;
+    auto&      map = beatmap_;
+    auto*      scratch = scratch_arena_;
 
     using namespace internal;
     if (!apply_legacy_rules(map, scratch))
@@ -234,20 +227,54 @@ class Parser {
     // Difficulty mods catch and mania do not implement.
     if (!apply_mods_before_calculations(map, opts.mods))
       return ParseErrorCode::InvalidOptions;
-    if (stacking && !push_span(scratch, stacking_end_times, map.sliders.size()))
-      return ParseErrorCode::OutOfMemory;
-    if (paths && !set_slider_paths(map, opts.client, result, scratch))
-      return ParseErrorCode::OutOfMemory;
-    if (events && !set_slider_events(map, opts.client, result, scratch,
-                                     stacking_end_times))
-      return ParseErrorCode::OutOfMemory;
-    if (end_times && !set_slider_end_times(map, opts.client, scratch, {},
-                                           stacking_end_times))
-      return ParseErrorCode::OutOfMemory;
-    if (stacking && !apply_stacking(map, result, stacking_end_times))
+    // Stable's own calculations are its osu!standard ones.
+    const bool stable = opts.client == Client::Stable && map.mode == 0;
+    if (stable ? !calculate_stable(map, opts, paths, events, stacking)
+               : !calculate_lazer(map, opts, paths, events, stacking))
       return ParseErrorCode::OutOfMemory;
     apply_clock_rate(map, opts.mods);
     return ParseErrorCode::None;
+  }
+
+  bool calculate_lazer(Beatmap&     map,
+                       ParseOptions opts,
+                       bool         paths,
+                       bool         events,
+                       bool         stacking) noexcept {
+    using namespace internal;
+    const bool end_times =
+        (opts.calculate_slider_end_times || stacking) && !events;
+    auto*          result = result_arena_;
+    auto*          scratch = scratch_arena_;
+    std::span<f64> stacking_end_times;
+    return (!stacking ||
+            push_span(scratch, stacking_end_times, map.sliders.size())) &&
+           (!paths || set_slider_paths(map, opts.client, result, scratch)) &&
+           (!events || set_slider_events(map, opts.client, result, scratch,
+                                         stacking_end_times)) &&
+           (!end_times ||
+            set_slider_end_times(map, opts.client, result, scratch, {},
+                                 stacking_end_times)) &&
+           (!stacking || apply_stacking(map, result, stacking_end_times));
+  }
+
+  bool calculate_stable(Beatmap&     map,
+                        ParseOptions opts,
+                        bool         paths,
+                        bool         events,
+                        bool         stacking) noexcept {
+    using namespace internal;
+    const bool end_times =
+        opts.calculate_slider_end_times || events || stacking;
+    if (!paths && !end_times)
+      return true;
+    auto*                      result = result_arena_;
+    auto*                      scratch = scratch_arena_;
+    std::span<StableSliderEnd> ends;
+    return (!stacking || push_span(scratch, ends, map.sliders.size())) &&
+           set_stable_slider_calculations(map, {paths, events, end_times}, ends,
+                                          result, scratch) &&
+           (!stacking || apply_stable_stacking(map, ends, result, scratch));
   }
 
   // Reads the whole file into the result arena. Returns a span with a null
