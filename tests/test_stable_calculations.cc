@@ -2,7 +2,9 @@
 // lazer's. Expected values follow osu!stable's SliderOsu.UpdateCalculations
 // and HitObjectManager stacking.
 #include <fosu/beatmap.h>
+#include <fosu/engine/parse_document.h>
 #include <fosu/engine/parsing_engine.h>
+#include <fosu/mods.h>
 #include <fosu/parse_options.h>
 #include <fosu/parser.h>
 #include <fosu/slider_event.h>

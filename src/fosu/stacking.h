@@ -177,11 +177,11 @@ inline bool apply_stacking(Beatmap&             map,
 // in an osu!standard map as circles.
 struct StableStackObject {
   enum Kind : u8 { Circle, Slider, Spinner } kind;
-  i32        time;      // without the pre-v5 offset
-  i32        end_time;  // the same
-  CurvePoint position;
-  CurvePoint end_position;  // after the last span
-  CurvePoint path_end;      // the far end of a slider's path
+  i32       time;      // without the pre-v5 offset
+  i32       end_time;  // the same
+  PathPoint position;
+  PathPoint end_position;  // after the last span
+  PathPoint path_end;      // the far end of a slider's path
 };
 
 inline void calculate_stable_stacks(std::span<const StableStackObject> objects,
@@ -191,38 +191,13 @@ inline void calculate_stable_stacks(std::span<const StableStackObject> objects,
   const auto is = [&](ptrdiff_t i, StableStackObject::Kind kind) {
     return objects[i].kind == kind;
   };
-  const auto near = [](CurvePoint a, CurvePoint b) {
-    return within_stack_distance(a, b);
-  };
   const auto beyond = [&](i32 later, i32 earlier) {
     return static_cast<f32>(wrapping_sub(later, earlier)) > threshold;
   };
-  // Reach forward to include the objects stacked on each one.
-  ptrdiff_t extended_end = count - 1;
-  for (ptrdiff_t i = count - 1; i >= 0; --i) {
-    ptrdiff_t base = i;
-    for (ptrdiff_t n = base + 1; n < count; ++n) {
-      if (is(base, StableStackObject::Spinner))
-        break;
-      if (is(n, StableStackObject::Spinner))
-        continue;
-      if (beyond(objects[n].time, objects[base].end_time))
-        break;
-      if (near(objects[base].position, objects[n].position) ||
-          (is(base, StableStackObject::Slider) &&
-           near(objects[base].end_position, objects[n].position))) {
-        base = n;
-        stacks[n].stack_height = 0;
-      }
-    }
-    if (base > extended_end) {
-      extended_end = base;
-      if (extended_end == count - 1)
-        break;
-    }
-  }
-  // Then backwards, building each stack up from its last object.
-  for (ptrdiff_t i = extended_end; i > 0; --i) {
+  // Stable first reaches forward to include objects stacked on the range it
+  // updates. Over a whole map that changes nothing, so only its backward pass
+  // remains: each stack built up from its last object.
+  for (ptrdiff_t i = count - 1; i > 0; --i) {
     ptrdiff_t n = i;
     ptrdiff_t top = i;
     if (stacks[top].stack_height != 0 || is(top, StableStackObject::Spinner))
@@ -236,15 +211,17 @@ inline void calculate_stable_stacks(std::span<const StableStackObject> objects,
         // Circles under the end of the last slider in a stack go down and
         // right of it instead.
         if (is(n, StableStackObject::Slider) &&
-            near(objects[n].end_position, objects[top].position)) {
+            within_stack_distance(objects[n].end_position,
+                                  objects[top].position)) {
           const i32 offset =
               stacks[top].stack_height - stacks[n].stack_height + 1;
           for (ptrdiff_t j = n + 1; j <= i; ++j)
-            if (near(objects[n].end_position, objects[j].position))
+            if (within_stack_distance(objects[n].end_position,
+                                      objects[j].position))
               stacks[j].stack_height -= offset;
           break;
         }
-        if (near(objects[n].position, objects[top].position)) {
+        if (within_stack_distance(objects[n].position, objects[top].position)) {
           stacks[n].stack_height = stacks[top].stack_height + 1;
           top = n;
         }
@@ -255,7 +232,8 @@ inline void calculate_stable_stacks(std::span<const StableStackObject> objects,
           continue;
         if (beyond(objects[top].time, objects[n].time))
           break;
-        if (near(objects[n].end_position, objects[top].position)) {
+        if (within_stack_distance(objects[n].end_position,
+                                  objects[top].position)) {
           stacks[n].stack_height = stacks[top].stack_height + 1;
           top = n;
         }
