@@ -265,6 +265,27 @@ static void test_indented_colours() {
   CHECK_EQ(parse_str(input, true, kLazer).combo_colours.size(), 2u);
 }
 
+// stable stores colours by key and lists Combo1 to Combo8 in that order: a
+// repeated key keeps its last colour, across [Colours] sections, and another
+// spelling of a number is another key. Lazer lists in file order every
+// colour whose key names a number from 1 to 8.
+static void test_combo_colour_order() {
+  const auto input =
+      "osu file format v14\n[Colours]\nCombo3:3,3,3\nCombo1:1,1,1\n"
+      "Combo01:2,2,2\n[Colours]\nCombo3:4,4,4\n" +
+      kTimingAndCircle;
+  const auto colours = [](const fosu::Beatmap& map) {
+    return std::vector<fosu::u32>(map.combo_colours.begin(),
+                                  map.combo_colours.end());
+  };
+  for (bool simd : {false, true}) {
+    CHECK(colours(parse_str(input, simd, kStable)) ==
+          std::vector<fosu::u32>({0x010101, 0x040404}));
+    CHECK(colours(parse_str(input, simd, kLazer)) ==
+          std::vector<fosu::u32>({0x030303, 0x010101, 0x020202, 0x040404}));
+  }
+}
+
 // stable reads a one-character token as the curve type of the whole slider,
 // the last one winning, and ignores one naming no type; a longer token must
 // be a point. Lazer starts a segment at each letter (see test_slider_paths)
@@ -431,6 +452,7 @@ int main() {
   test_hit_object_lines_stable_skips();
   test_unknown_curve_types();
   test_indented_colours();
+  test_combo_colour_order();
   test_curve_type_tokens();
   test_coordinate_and_length_bounds();
   test_v128_maps_in_stable();

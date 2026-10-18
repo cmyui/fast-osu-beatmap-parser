@@ -49,6 +49,11 @@ compiles its own parse, so the choice adds no per-line cost.
 - **Indented lines.** stable skips hit-object and colour lines starting with
   a space or `_`, and hit-object lines starting with `[`. Lazer reads
   indented lines and rejects the others.
+- **Combo colours.** stable stores each colour under its key and lists the
+  keys `Combo1` to `Combo8` in that order: `Combo2` comes after `Combo1`
+  wherever it is, a repeated key keeps its last colour, and `Combo01` is
+  ignored. Lazer lists in file order every colour whose key is `Combo`
+  followed by an integer from 1 to 8.
 - **Curve types.** stable reads a one-character token as the curve type of
   the whole slider, the last one winning, and ignores one naming no type; a
   longer token must be a point. Lazer starts a segment at each letter and
@@ -143,7 +148,8 @@ fields as integers. Lazer's trailing `//` comments are not stripped.
   usually makes the map unloadable. A rejected slider leaves no points or segments in
   the native pools. Invalid known numeric or enum
   metadata retains its previous/default value and increments the same counter.
-- Combo colours accept indices 1–8 and three integer RGB components in 0–255.
+- Combo colours accept indices 1–8 (see [target client](#target-client) for
+  their keys and order) and three integer RGB components in 0–255.
   Like the official legacy decoder, a fourth component is accepted but ignored.
   Invalid colours increment `stats.malformed_lines`; valid colours with other
   keys or combo indices are ignored.

@@ -7,6 +7,7 @@
 #include <fosu/parse_options.h>
 #include <fosu/types.h>
 
+#include <array>
 #include <cstddef>
 #include <optional>
 #include <string_view>
@@ -34,11 +35,16 @@ inline std::optional<u32> parse_colour(std::string_view input) {
   return rgb;
 }
 
+// stable's colours for the keys Combo1 to Combo8. Lazer instead lists every
+// combo colour in file order.
+using ComboColourSlots = std::array<std::optional<u32>, 8>;
+
 template <Client C>
-const char* parse_colours_section(Beatmap&    beatmap,
-                                  size_t&     colour_count,
-                                  const char* p,
-                                  const char* end) {
+const char* parse_colours_section(Beatmap&          beatmap,
+                                  size_t&           colour_count,
+                                  ComboColourSlots& slots,
+                                  const char*       p,
+                                  const char*       end) {
   return for_each_section_line<C>(p, end, [&](std::string_view line) {
     // Like storyboard commands, stable skips lines indented with ' ' or '_'.
     if (C == Client::Stable && (line.front() == ' ' || line.front() == '_'))
@@ -57,10 +63,28 @@ const char* parse_colours_section(Beatmap&    beatmap,
     const auto key = trim(line.data(), colon);
     if (key.substr(0, 5) != "Combo")
       return;
-    const auto index = parse_field_integer(key.substr(5));
-    if (index && *index >= 1 && *index <= 8)
-      beatmap.combo_colours[colour_count++] = *colour;
+    if constexpr (C == Client::Stable) {
+      // stable stores each colour under its key, so a repeated key keeps its
+      // last colour, and reads back exactly Combo1 to Combo8.
+      if (key.size() == 6 && key[5] >= '1' && key[5] <= '8')
+        slots[key[5] - '1'] = *colour;
+    } else {
+      const auto index = parse_field_integer(key.substr(5));
+      if (index && *index >= 1 && *index <= 8)
+        beatmap.combo_colours[colour_count++] = *colour;
+    }
   });
+}
+
+// stable lists the colours of Combo1 to Combo8 in that order, skipping keys
+// the map does not name.
+inline size_t list_stable_combo_colours(Beatmap&                beatmap,
+                                        const ComboColourSlots& slots) {
+  size_t count = 0;
+  for (const auto& colour : slots)
+    if (colour)
+      beatmap.combo_colours[count++] = *colour;
+  return count;
 }
 
 }  // namespace fosu::internal
