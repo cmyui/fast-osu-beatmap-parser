@@ -2,9 +2,12 @@
 // lazer's. Expected values follow osu!stable's SliderOsu.UpdateCalculations
 // and HitObjectManager stacking.
 #include <fosu/beatmap.h>
+#include <fosu/engine/parsing_engine.h>
 #include <fosu/parse_options.h>
+#include <fosu/parser.h>
 #include <fosu/slider_event.h>
 #include <fosu/slider_path.h>
+#include <tests/support/scalar_engine.h>
 #include <tests/support/test.h>
 
 #include <string>
@@ -177,6 +180,23 @@ static void test_slider_velocities() {
   }
 }
 
+// Ticks along a path too long to walk exhaust the event budget, failing the
+// parse rather than hanging: at this length, a tick no longer shortens the
+// distance left.
+static void test_huge_paths_fail_the_parse() {
+  const auto input = beatmap("0,0,1000,2,0,L|100:0,1,1e30\n");
+  for (bool simd : {false, true}) {
+    for (const fosu::ParseOptions options :
+         {fosu::ParseOptions{.calculate_slider_end_times = true},
+          fosu::ParseOptions{.calculate_slider_events = true}}) {
+      fosu::Parser parser(simd ? fosu::internal::compiled_engine
+                               : fosu_test::scalar_engine());
+      CHECK(!parser.parse(input, options));
+      CHECK(parser.error().code == fosu::ParseErrorCode::OutOfMemory);
+    }
+  }
+}
+
 int main() {
   test_end_times_are_whole_milliseconds();
   test_other_modes_keep_lazer_calculations();
@@ -187,5 +207,6 @@ int main() {
   test_catmull_lines();
   test_holds_stack_as_circles();
   test_slider_velocities();
+  test_huge_paths_fail_the_parse();
   return test_result();
 }

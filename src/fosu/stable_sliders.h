@@ -363,16 +363,18 @@ struct StableScoringPoint {
   f64        progress;
 };
 
-// What a stable slider's timing walk works out.
+// What a stable slider's timing walk works out. `complete` is false when a
+// visit stopped it.
 struct StableWalk {
   i32        end_time;
   CurvePoint end_position;
+  bool       complete = true;
 };
 
 // Stable's walk along a slider's lines, span by span: the time its ball
 // takes over each line, and its ticks, from the distance travelled since the
-// last. Calls visit(point) for each scoring point and span_start(span, time)
-// at each span's start.
+// last. Calls visit(point) for each scoring point, stopping if it returns
+// false, and span_start(span, time) at each span's start.
 template <typename Visit, typename SpanStart>
 inline StableWalk walk_stable_slider(std::span<const StableLine> lines,
                                      std::span<const f64>        cumulative,
@@ -414,16 +416,18 @@ inline StableWalk walk_stable_slider(std::span<const StableLine> lines,
           break;
         const f32 ratio = 1 - static_cast<f32>(scoring / (p2 - p1).length());
         const f64 along = ratio * static_cast<f64>(distance);
-        visit(StableScoringPoint{
-            time_at_length(static_cast<f32>(scoring_length_total)), span,
-            p1 + (p2 - p1) * ratio,
-            (reverse ? cumulative[j] - along : before + along) / total});
+        if (!visit(StableScoringPoint{
+                time_at_length(static_cast<f32>(scoring_length_total)), span,
+                p1 + (p2 - p1) * ratio,
+                (reverse ? cumulative[j] - along : before + along) / total}))
+          return {0, p2, false};
       }
     }
     scoring_length_total += scoring;
-    visit(StableScoringPoint{
-        time_at_length(static_cast<f32>(scoring_length_total)), span, p2,
-        static_cast<f64>(!reverse)});
+    if (!visit(StableScoringPoint{
+            time_at_length(static_cast<f32>(scoring_length_total)), span, p2,
+            static_cast<f64>(!reverse)}))
+      return {0, p2, false};
     // A tick too near the end isn't mirrored on the way back.
     if (skip_tick) {
       scoring = 0;
@@ -558,18 +562,17 @@ inline bool calculate_stable_slider(
       cumulative[i] = total += lines[i].length();
     if (!budget.spend(budget.work, lines.size() * slider.slides))
       return false;
-    bool over_budget = false;
     walk = walk_stable_slider(
         lines, {cumulative, lines.size()}, slider.slides, start_time, velocity,
         tick_distance,
         [&](const StableScoringPoint&) {
-          over_budget |= !budget.spend(budget.events, 1);
-          point_count += !over_budget;
+          ++point_count;
+          return budget.spend(budget.events, 1);
         },
         [&](i32 span, i32 time) {
           span_starts[span] = time;
         });
-    if (over_budget)
+    if (!walk.complete)
       return false;
   } else {
     std::fill_n(span_starts, slider.slides, start_time);
@@ -631,6 +634,7 @@ inline bool calculate_stable_slider(
           events[next++] =
               event(repeat ? SliderEventType::Repeat : SliderEventType::Tick,
                     point.time, point.span, point.progress, point.position);
+          return true;
         },
         [](i32, i32) {});
     // The last point, judged a little early and inaudibly, replaces the end.
