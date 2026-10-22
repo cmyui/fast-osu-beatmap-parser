@@ -9,6 +9,7 @@
 #include <fosu/parser.h>
 #include <fosu/slider_event.h>
 #include <fosu/slider_path.h>
+#include <fosu/types.h>
 #include <tests/support/scalar_engine.h>
 #include <tests/support/test.h>
 
