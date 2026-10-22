@@ -707,7 +707,7 @@ inline std::optional<SliderPath> calculate_slider_path(const Beatmap&   map,
         (edge / edge.length()) * static_cast<f32>(expected - lengths[end - 1]);
     lengths[end] = expected;
   }
-  return SliderPath{{output, end + 1}, {lengths, end + 1}};
+  return SliderPath{{output, end + 1}, {lengths, end + 1}, {}};
 }
 
 inline bool set_slider_paths(Beatmap& map,

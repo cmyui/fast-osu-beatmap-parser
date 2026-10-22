@@ -9,9 +9,11 @@
 #include <fosu/parser.h>
 #include <fosu/slider_event.h>
 #include <fosu/slider_path.h>
+#include <fosu/types.h>
 #include <tests/support/scalar_engine.h>
 #include <tests/support/test.h>
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -146,6 +148,31 @@ static void test_catmull_lines() {
              51u);
 }
 
+// Each line says how stable's renderer merges it: a red anchor's straight
+// piece, and the last line of each curve segment, end a merge; an arc's
+// chords merge freely.
+static void test_stable_line_flags() {
+  using fosu::kStableLineSegmentEnd, fosu::kStableLineStart,
+      fosu::kStableLineStraight;
+  for (bool simd : {false, true}) {
+    const auto bezier =
+        path(beatmap("0,0,1000,2,0,B|100:0|100:0|200:100|300:0,1,0\n"), simd);
+    const auto flags = bezier.stable_line_flags;
+    CHECK_EQ(flags.size(), bezier.points.size());
+    CHECK_EQ(flags[0], kStableLineStart);
+    CHECK_EQ(flags[1], kStableLineStraight | kStableLineSegmentEnd);
+    CHECK_EQ(flags[2], 0);
+    CHECK_EQ(flags.back(), kStableLineSegmentEnd);
+
+    const auto arc = path(beatmap("0,0,1000,2,0,P|100:100|200:0,1,0\n"), simd);
+    CHECK_EQ(arc.stable_line_flags[0], kStableLineStart);
+    CHECK(std::all_of(arc.stable_line_flags.begin() + 1,
+                      arc.stable_line_flags.end(), [](fosu::u8 flag) {
+                        return flag == 0;
+                      }));
+  }
+}
+
 // Stable plays a hold in an osu!standard map as a circle, which stacks.
 static void test_holds_stack_as_circles() {
   const auto input =
@@ -223,6 +250,7 @@ int main() {
   test_v9_bezier_stops_short();
   test_perfect_curve_chords();
   test_catmull_lines();
+  test_stable_line_flags();
   test_holds_stack_as_circles();
   test_slider_velocities();
   test_huge_paths_fail_the_parse();
