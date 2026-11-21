@@ -4,6 +4,9 @@
 #include <fosu/types.h>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
+#include <utility>
 
 namespace fosu {
 
@@ -50,6 +53,18 @@ constexpr bool has_mod(Mods mods, Mods mod) {
   return (static_cast<u32>(mods) & static_cast<u32>(mod)) != 0;
 }
 
+// Settings that replace a map's own, as osu!lazer's Difficulty Adjust sets
+// them: after Easy's or Hard Rock's changes, before slider paths and
+// stacking. Each NaN keeps the map's. `flip` flips an osu!standard map
+// vertically, as Hard Rock does, without changing its settings.
+struct DifficultyAdjust {
+  f64  cs = std::numeric_limits<f64>::quiet_NaN();
+  f64  ar = std::numeric_limits<f64>::quiet_NaN();
+  f64  od = std::numeric_limits<f64>::quiet_NaN();
+  f64  hp = std::numeric_limits<f64>::quiet_NaN();
+  bool flip = false;
+};
+
 namespace internal {
 
 inline constexpr u32 kKnownMods =
@@ -68,6 +83,26 @@ constexpr bool invalid_mods(Mods mods) {
 
 constexpr bool has_difficulty_mod(Mods mods) {
   return has_mod(mods, Mods::Easy) || has_mod(mods, Mods::HardRock);
+}
+
+inline bool adjusts_settings(const DifficultyAdjust& adjust) {
+  return !std::isnan(adjust.cs) || !std::isnan(adjust.ar) ||
+         !std::isnan(adjust.od) || !std::isnan(adjust.hp);
+}
+
+// A setting that isn't NaN is finite.
+inline bool invalid_adjust(const DifficultyAdjust& adjust) {
+  for (const f64 setting : {adjust.cs, adjust.ar, adjust.od, adjust.hp})
+    if (!std::isnan(setting) && !std::isfinite(setting))
+      return true;
+  return false;
+}
+
+inline void flip_vertically(Beatmap& map) {
+  for (auto& object : map.hit_objects)
+    object.y = 384 - object.y;
+  for (auto& point : map.slider_points)
+    point.y = 384 - point.y;
 }
 
 constexpr f64 clock_rate(Mods mods) {
@@ -101,14 +136,22 @@ inline bool apply_mods_before_calculations(Beatmap& map, Mods mods) {
   if (map.mode == 0) {
     map.cs = std::min(map.cs * 1.3, 10.0);
     map.ar = std::min(map.ar * 1.4, 10.0);
-    for (auto& object : map.hit_objects)
-      object.y = 384 - object.y;
-    for (auto& point : map.slider_points)
-      point.y = 384 - point.y;
+    flip_vertically(map);
   } else {
     map.slider_multiplier *= 1.4 * 4 / 3;
   }
   return true;
+}
+
+inline void apply_difficulty_adjust(Beatmap&                map,
+                                    const DifficultyAdjust& adjust) {
+  for (const auto [setting, value] :
+       {std::pair{&map.cs, adjust.cs}, std::pair{&map.ar, adjust.ar},
+        std::pair{&map.od, adjust.od}, std::pair{&map.hp, adjust.hp}})
+    if (!std::isnan(value))
+      *setting = value;
+  if (adjust.flip && map.mode == 0)
+    flip_vertically(map);
 }
 
 inline void apply_clock_rate(Beatmap& map, Mods mods) {

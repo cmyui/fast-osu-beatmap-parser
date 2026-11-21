@@ -9,6 +9,7 @@
 #include <tests/support/scalar_engine.h>
 #include <tests/support/test.h>
 
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -145,6 +146,52 @@ static void test_rate_mods_scale_calculated_slider_values() {
   }
 }
 
+// Difficulty Adjust's settings replace the map's, after Hard Rock's, and
+// its flip moves objects without changing settings.
+static void test_difficulty_adjust_replaces_settings_and_flips() {
+  const std::string input =
+      "osu file format v14\n[General]\nMode:0\n"
+      "[Difficulty]\nHPDrainRate:4\nCircleSize:4\nOverallDifficulty:4\n"
+      "ApproachRate:4\nSliderMultiplier:1\n[TimingPoints]\n0,500\n"
+      "[HitObjects]\n100,100,1000,2,0,L|200:150,1,100\n";
+  for (bool simd : {false, true}) {
+    auto map = parse_str(input, simd, {.adjust = {.cs = 5.5, .ar = 9.3}});
+    CHECK_EQ(map.cs, 5.5);
+    CHECK_EQ(map.ar, 9.3);
+    CHECK_EQ(map.od, 4);
+    CHECK_EQ(map.hp, 4);
+    CHECK_EQ(map.hit_objects[0].y, 100);
+    map = parse_str(input, simd, {.mods = Mods::HardRock, .adjust = {.od = 2}});
+    CHECK_EQ(map.od, 2);
+    CHECK_EQ(map.cs, 4 * 1.3);
+    map = parse_str(input, simd, {.adjust = {.flip = true}});
+    CHECK_EQ(map.cs, 4);
+    CHECK_EQ(map.hit_objects[0].y, 384 - 100);
+    CHECK_EQ(map.slider_points[0].y, 384 - 150);
+  }
+}
+
+// Stacking uses the adjusted approach rate: circles 500 ms apart are within
+// AR 0's stacking time (1800 ms x 0.7), past AR 10's (450 ms x 0.7).
+static void test_stacking_follows_the_adjusted_approach_rate() {
+  const std::string input =
+      "osu file format v14\n[General]\nStackLeniency:0.7\n"
+      "[Difficulty]\nApproachRate:5\n"
+      "[HitObjects]\n100,100,1000,1,0\n100,100,1500,1,0\n";
+  for (bool simd : {false, true}) {
+    CHECK_EQ(
+        parse_str(input, simd, {.apply_stacking = true, .adjust = {.ar = 0}})
+            .stacking[0]
+            .stack_height,
+        1);
+    CHECK_EQ(
+        parse_str(input, simd, {.apply_stacking = true, .adjust = {.ar = 10}})
+            .stacking[0]
+            .stack_height,
+        0);
+  }
+}
+
 static void test_invalid_mod_options_fail_the_parse() {
   const std::string input =
       "osu file format "
@@ -161,6 +208,10 @@ static void test_invalid_mod_options_fail_the_parse() {
     // Difficulty mods need the General and Difficulty sections they adjust.
     CHECK(!parser.parse(
         input, {.sections = fosu::kSectionHitObjects, .mods = Mods::HardRock}));
+    CHECK(!parser.parse(
+        input, {.sections = fosu::kSectionHitObjects, .adjust = {.cs = 3}}));
+    CHECK(!parser.parse(
+        input, {.adjust = {.ar = std::numeric_limits<double>::infinity()}}));
     // A failed parse leaves the parser usable.
     CHECK(parser.parse(input, {.mods = Mods::HardRock}));
   }
@@ -174,6 +225,8 @@ int main() {
   test_catch_and_mania_reject_difficulty_mods();
   test_rate_mods_scale_every_time();
   test_rate_mods_scale_calculated_slider_values();
+  test_difficulty_adjust_replaces_settings_and_flips();
+  test_stacking_follows_the_adjusted_approach_rate();
   test_invalid_mod_options_fail_the_parse();
   return test_result();
 }
