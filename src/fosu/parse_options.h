@@ -30,7 +30,7 @@ struct ParseOptions {
   bool             apply_stacking = false;
   Mods             mods = Mods::None;
   Client           client = Client::Stable;
-  DifficultyAdjust adjust;
+  DifficultyAdjust adjust{};
 };
 
 // Why a parse returned no beatmap.
