@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Python.h>
+#include <bit>
+#include <cstdint>
 #include <structmember.h>
 
 namespace {
@@ -9,6 +11,7 @@ struct RecordObject {
   // clang-format off
   PyObject_HEAD
   Py_ssize_t field_count;
+  std::uint64_t gc_field_mask;
   // clang-format on
 };
 PyObject** record_fields(PyObject* object) {
@@ -20,18 +23,30 @@ const PyMemberDef* record_members(PyTypeObject* type) {
 }
 PyObject* allocate_record(PyTypeObject* type, Py_ssize_t count) {
   PyObject* object = PyType_GenericAlloc(type, 0);
-  if (object)
+  if (object) {
     reinterpret_cast<RecordObject*>(object)->field_count = count;
+    reinterpret_cast<RecordObject*>(object)->gc_field_mask = 0;
+  }
   return object;
 }
 int record_traverse(PyObject* object, visitproc visit, void* arg) {
   Py_VISIT(Py_TYPE(object));
   auto* fields = record_fields(object);
-  for (Py_ssize_t i = 0;
-       i < reinterpret_cast<RecordObject*>(object)->field_count; ++i) {
-    Py_VISIT(fields[i]);
+  auto* record = reinterpret_cast<RecordObject*>(object);
+  auto  mask = record->gc_field_mask;
+  while (mask) {
+    Py_VISIT(fields[std::countr_zero(mask)]);
+    mask &= mask - 1;
   }
   return 0;
+}
+void record_set_field(PyObject* object, Py_ssize_t index, PyObject* value) {
+  record_fields(object)[index] = value;
+  // Read-only fields can only enter a cycle when their type supports GC.
+  if (PyType_HasFeature(Py_TYPE(value), Py_TPFLAGS_HAVE_GC)) {
+    auto* record = reinterpret_cast<RecordObject*>(object);
+    record->gc_field_mask |= std::uint64_t{1} << index;
+  }
 }
 int record_clear(PyObject* object) {
   auto* fields = record_fields(object);
@@ -84,7 +99,7 @@ PyObject* record_new(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
       return nullptr;
     }
     keywords += keyword != nullptr;
-    record_fields(object)[i] = Py_NewRef(value);
+    record_set_field(object, i, Py_NewRef(value));
   }
   if (kwargs && keywords != PyDict_Size(kwargs)) {
     PyErr_SetString(PyExc_TypeError, "unexpected keyword argument");
@@ -161,7 +176,7 @@ PyObject* record_setstate(PyObject* object, PyObject* values) {
     }
   }
   for (Py_ssize_t i = 0; i < count; ++i)
-    fields[i] = Py_NewRef(PyTuple_GetItem(values, i));
+    record_set_field(object, i, Py_NewRef(PyTuple_GetItem(values, i)));
   Py_RETURN_NONE;
 }
 PyObject* record_repr(PyObject* object) {
