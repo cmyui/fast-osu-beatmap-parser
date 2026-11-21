@@ -23,13 +23,14 @@ enum : u32 {
 enum class Client : u8 { Stable, Lazer };
 
 struct ParseOptions {
-  u32    sections = kAllSections;
-  bool   calculate_slider_end_times = false;
-  bool   calculate_slider_paths = false;
-  bool   calculate_slider_events = false;
-  bool   apply_stacking = false;
-  Mods   mods = Mods::None;
-  Client client = Client::Stable;
+  u32              sections = kAllSections;
+  bool             calculate_slider_end_times = false;
+  bool             calculate_slider_paths = false;
+  bool             calculate_slider_events = false;
+  bool             apply_stacking = false;
+  Mods             mods = Mods::None;
+  Client           client = Client::Stable;
+  DifficultyAdjust adjust{};
 };
 
 // Why a parse returned no beatmap.

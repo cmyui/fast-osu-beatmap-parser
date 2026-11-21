@@ -227,6 +227,7 @@ class Parser {
     // Difficulty mods catch and mania do not implement.
     if (!apply_mods_before_calculations(map, opts.mods))
       return ParseErrorCode::InvalidOptions;
+    apply_difficulty_adjust(map, opts.adjust);
     // Stable's own calculations are its osu!standard ones.
     const bool stable = opts.client == Client::Stable && map.mode == 0;
     if (stable ? !calculate_stable(map, opts, paths, events, stacking)
@@ -310,7 +311,9 @@ class Parser {
   static bool invalid_options(ParseOptions opts) noexcept {
     return (opts.sections & ~kAllSections) ||
            internal::invalid_mods(opts.mods) ||
-           (internal::has_difficulty_mod(opts.mods) &&
+           internal::invalid_adjust(opts.adjust) ||
+           ((internal::has_difficulty_mod(opts.mods) ||
+             internal::adjusts_settings(opts.adjust)) &&
             (opts.sections & (kSectionGeneral | kSectionDifficulty)) !=
                 (kSectionGeneral | kSectionDifficulty));
   }
