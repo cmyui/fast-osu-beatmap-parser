@@ -86,6 +86,11 @@ after the logical end**. See the
 The compiled library and Python package select AVX2 on supported x86-64 CPUs
 or NEON on AArch64, with scalar fallback. Header-only C++ uses the caller’s compile flags.
 
+## License
+
+MIT; see [LICENSE](LICENSE). Code adapted from osu! and osu!framework is
+ppy Pty Ltd's, also under MIT, and keeps their notice in its files.
+
 ## Acknowledgments
 
 - [osu!](https://github.com/ppy/osu) and
