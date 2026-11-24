@@ -147,24 +147,29 @@ static void test_slider_repeats_and_length() {
     const char* tail;
     int32_t     slides;
     double      length;
+    double      lazer_length;  // lazer reads a negative length as zero
   };
   const Case cases[] = {
-      {",1", 1, 0},
-      {",1,10", 1, 10},
-      {", 12 , 1e2 ", 12, 100},
-      {",9000,131072", 9000, 131072},
-      {",-1,-5", 1, 0},
-      {",1,-131072", 1, 0},
+      {",1", 1, 0, 0},
+      {",1,10", 1, 10, 10},
+      {", 12 , 1e2 ", 12, 100, 100},
+      {",9000,131072", 9000, 131072, 131072},
+      {",-1,-5", 1, -5, 0},
+      {",1,-131072", 1, -131072, 0},
   };
   for (bool simd : {false, true}) {
     for (const auto& test : cases) {
-      const auto map =
-          parse_str(slider_document("B|1:2" + std::string(test.tail)), simd);
-      CHECK_EQ(map.sliders.size(), 1u);
-      if (map.sliders.empty())
-        continue;
-      CHECK_EQ(map.sliders[0].slides, test.slides);
-      CHECK_EQ(map.sliders[0].length, test.length);
+      const auto document = slider_document("B|1:2" + std::string(test.tail));
+      for (const bool lazer : {false, true}) {
+        const auto map =
+            parse_str(document, simd, lazer ? kLazer : fosu::ParseOptions{});
+        CHECK_EQ(map.sliders.size(), 1u);
+        if (map.sliders.empty())
+          continue;
+        CHECK_EQ(map.sliders[0].slides, test.slides);
+        CHECK_EQ(map.sliders[0].length,
+                 lazer ? test.lazer_length : test.length);
+      }
     }
     for (const auto tail : {"", ",", ",1,", ",9001,10", ",1,131073",
                             ",1,-131073", ",1,10,,/:0", ",1,10,,,/:0"}) {

@@ -174,15 +174,45 @@ static void test_stable_line_flags() {
 }
 
 // Stable plays a hold in an osu!standard map as a circle, which stacks.
-static void test_holds_stack_as_circles() {
+// A hold stacks as a circle that ends at its own end time: a circle 500 ms
+// after this one's end, within the 840 ms threshold, stacks on it, though it
+// is 2500 ms after its start.
+static void test_holds_stack_from_their_end() {
   const auto input =
-      beatmap("100,100,1000,128,0,1500:0:0:0:0:\n100,100,1100,1,0,0:0:0:0:\n");
+      beatmap("100,100,1000,128,0,3000:0:0:0:0:\n100,100,3500,1,0,0:0:0:0:\n");
   for (bool simd : {false, true}) {
     const auto stable = parse_str(input, simd, {.apply_stacking = true});
     CHECK_EQ(stable.stacking[0].stack_height, 1);
     const auto lazer = parse_str(
         input, simd, {.apply_stacking = true, .client = Client::Lazer});
     CHECK_EQ(lazer.stacking[0].stack_height, 0);
+  }
+}
+
+// stable keeps a negative length, and trimming the path to it removes every
+// line: the slider ends where it starts, with only its head and tail.
+static void test_negative_length_leaves_no_path() {
+  const auto input = beatmap("0,0,1000,2,0,L|100:0,2,-10\n");
+  for (bool simd : {false, true}) {
+    CHECK(
+        (timed_events(input, simd, Client::Stable) ==
+         Events{{SliderEventType::Head, 1000}, {SliderEventType::Tail, 1000}}));
+    CHECK_EQ(path(input, simd).points.size(), 1u);
+  }
+}
+
+// stable keeps a spinner or hold that ends before it starts; lazer ends it at
+// its start.
+static void test_ends_before_starts_are_kept() {
+  const auto input =
+      beatmap("256,192,2000,8,0,1500\n100,100,3000,128,0,2500:0:0:0:0:\n");
+  for (bool simd : {false, true}) {
+    const auto stable = parse_str(input, simd);
+    CHECK_EQ(stable.hit_objects[0].end_time, 1500);
+    CHECK_EQ(stable.hit_objects[1].end_time, 2500);
+    const auto lazer = parse_str(input, simd, kLazer);
+    CHECK_EQ(lazer.hit_objects[0].end_time, 2000);
+    CHECK_EQ(lazer.hit_objects[1].end_time, 3000);
   }
 }
 
@@ -251,7 +281,9 @@ int main() {
   test_perfect_curve_chords();
   test_catmull_lines();
   test_stable_line_flags();
-  test_holds_stack_as_circles();
+  test_holds_stack_from_their_end();
+  test_negative_length_leaves_no_path();
+  test_ends_before_starts_are_kept();
   test_slider_velocities();
   test_huge_paths_fail_the_parse();
   test_v9_bezier_budget();

@@ -222,7 +222,7 @@ class Parser {
     auto*      scratch = scratch_arena_;
 
     using namespace internal;
-    if (!apply_legacy_rules(map, scratch))
+    if (!apply_legacy_rules(map, opts.client, scratch))
       return ParseErrorCode::OutOfMemory;
     // Difficulty mods catch and mania do not implement.
     if (!apply_mods_before_calculations(map, opts.mods))
@@ -245,18 +245,13 @@ class Parser {
     using namespace internal;
     const bool end_times =
         (opts.calculate_slider_end_times || stacking) && !events;
-    auto*          result = result_arena_;
-    auto*          scratch = scratch_arena_;
-    std::span<f64> stacking_end_times;
-    return (!stacking ||
-            push_span(scratch, stacking_end_times, map.sliders.size())) &&
-           (!paths || set_slider_paths(map, opts.client, result, scratch)) &&
-           (!events || set_slider_events(map, opts.client, result, scratch,
-                                         stacking_end_times)) &&
+    auto* result = result_arena_;
+    auto* scratch = scratch_arena_;
+    return (!paths || set_slider_paths(map, opts.client, result, scratch)) &&
+           (!events || set_slider_events(map, opts.client, result, scratch)) &&
            (!end_times ||
-            set_slider_end_times(map, opts.client, result, scratch, {},
-                                 stacking_end_times)) &&
-           (!stacking || apply_stacking(map, result, stacking_end_times));
+            set_slider_end_times(map, opts.client, result, scratch)) &&
+           (!stacking || apply_stacking(map, result));
   }
 
   bool calculate_stable(Beatmap&     map,

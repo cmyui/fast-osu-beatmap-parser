@@ -19,11 +19,10 @@ namespace fosu::internal {
 
 FOSU_FP_CONTRACT_OFF_BEGIN
 
-inline bool set_slider_events(Beatmap&       map,
-                              Client         client,
-                              Arena*         result_arena,
-                              Arena*         scratch_arena,
-                              std::span<f64> stacking_end_times = {}) {
+inline bool set_slider_events(Beatmap& map,
+                              Client   client,
+                              Arena*   result_arena,
+                              Arena*   scratch_arena) {
   if (map.sliders.empty())
     return true;
   const TempArena temp{scratch_arena};
@@ -33,11 +32,11 @@ inline bool set_slider_events(Beatmap&       map,
                                                           map.sliders.size());
   if (!timings || !ranges ||
       !set_slider_end_times(map, client, result_arena, scratch_arena,
-                            {timings, map.sliders.size()},
-                            stacking_end_times)) {
+                            {timings, map.sliders.size()})) {
     return false;
   }
-  size_t remaining = 1u << 20;  // Bound pathological repeat/tick expansion.
+  const bool standard = uses_lazer_standard_sliders(map, client);
+  size_t     remaining = 1u << 20;  // Bound pathological repeat/tick expansion.
   for (const auto& object : map.hit_objects) {
     if (object.slider == HitObject::kNoSlider)
       continue;
@@ -82,10 +81,13 @@ inline bool set_slider_events(Beatmap&       map,
                   start + time_progress * timing.span_duration, span, progress);
       }
       next += tick_count;
+      // osu!standard's Slider times repeat n at start + n × span duration.
       if (span < timing.spans - 1)
         events[next++] =
-            event(SliderEventType::Repeat, start + timing.span_duration, span,
-                  (span + 1) % 2);
+            event(SliderEventType::Repeat,
+                  standard ? object.time + (span + 1) * timing.span_duration
+                           : start + timing.span_duration,
+                  span, (span + 1) % 2);
     }
     const i32 final_span = timing.spans - 1;
     const f64 final_span_start =
@@ -104,8 +106,8 @@ inline bool set_slider_events(Beatmap&       map,
     }
     events[next++] = event(SliderEventType::LegacyLastTick, legacy_time,
                            final_span, legacy_progress);
-    events[next++] = event(SliderEventType::Tail, object.end_time, final_span,
-                           timing.spans % 2);
+    events[next++] = event(SliderEventType::Tail, object.time + duration,
+                           final_span, timing.spans % 2);
     ranges[object.slider] = {events, count};
   }
   map.slider_events = {ranges, map.sliders.size()};

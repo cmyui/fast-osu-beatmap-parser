@@ -402,7 +402,7 @@ static void test_invalid_byte_in_other_sections() {
         "[General]\nMode:\x01\nMode:0\n"
         "[Editor]\nGridSize:3\x01\nGridSize:32\n"
         "[Difficulty]\nSliderMultiplier:1.\x01\nSliderMultiplier:1.4\n"
-        "[Events]\n2,10\x01,20\n2,30,40\n"
+        "[Events]\n2,10\x01,20\n2,30,700\n"
         "[Colours]\nCombo1:1,\x01,3\nCombo2:4,5,6\n"
         "[Metadata]\nTitle:a\x01"
         "b\nBeatmapID:1\x01\nBeatmapID:42\n"
@@ -489,7 +489,7 @@ static void test_line_endings() {
       "[Editor]\nGridSize:32\n"
       "[Metadata]\nTitle:sentinel\n"
       "[Difficulty]\nSliderMultiplier:1.4\n"
-      "[Events]\n2,100,200\n"
+      "[Events]\n2,100,800\n"
       "[TimingPoints]\n100,500,4,1,0,100,1,0\n"
       "[Colours]\nCombo1:255,128,0\n"
       "[HitObjects]\n256,192,1000,1,0\n";
@@ -1320,12 +1320,28 @@ static void test_legacy_rules() {
         "osu file format v14\n[Events]\n2,0,200\n2,0,100\n2,0,350\n"
         "[HitObjects]\n0,0,100,1,0\n0,0,200,1,0\n0,0,300,1,0\n"
         "0,0,400,1,0\n",
-        simd);
+        simd, kLazer);
     CHECK(breaks.hit_objects[0].new_combo);
     CHECK(!breaks.hit_objects[1].new_combo);  // Break ends are exclusive.
     CHECK(breaks.hit_objects[2]
               .new_combo);  // Earlier breaks cannot move backward.
     CHECK(breaks.hit_objects[3].new_combo);
+
+    // stable reads only breaks of 650 ms or more, sorted by start, so the
+    // short first break neither appears nor starts a combo at 1100.
+    const std::string unsorted =
+        "osu file format v14\n[Events]\n2,800,1000\n2,2000,2700\n2,0,700\n"
+        "[HitObjects]\n0,0,750,1,0\n0,0,1100,1,0\n0,0,2800,1,0\n";
+    const auto stable = parse_str(unsorted, simd);
+    CHECK_EQ(stable.breaks.size(), 2u);
+    CHECK_EQ(stable.breaks[0].start, 0);
+    CHECK_EQ(stable.breaks[1].start, 2000);
+    CHECK(!stable.hit_objects[1].new_combo);
+    CHECK(stable.hit_objects[2].new_combo);
+    const auto lazer = parse_str(unsorted, simd, kLazer);
+    CHECK_EQ(lazer.breaks.size(), 3u);
+    CHECK(lazer.hit_objects[1].new_combo);
+    CHECK(lazer.hit_objects[2].new_combo);
   }
 }
 
@@ -1402,10 +1418,10 @@ static void test_trailing_comments_are_not_stripped() {
 static void test_break_ignores_fields_after_its_end() {
   for (bool simd : {false, true}) {
     const auto map =
-        parse_str("osu file format v14\n[Events]\n2,100,200,junk\n", simd);
+        parse_str("osu file format v14\n[Events]\n2,100,800,junk\n", simd);
     CHECK_EQ(map.breaks.size(), 1u);
     CHECK_EQ(map.breaks[0].start, 100);
-    CHECK_EQ(map.breaks[0].end, 200);
+    CHECK_EQ(map.breaks[0].end, 800);
     CHECK_EQ(map.stats.malformed_lines, 0u);
   }
 }

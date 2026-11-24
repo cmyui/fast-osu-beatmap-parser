@@ -60,32 +60,11 @@ sealed class RawFields
                 var tickDistance = ((IHasGenerateTicks)decoded).GenerateTicks
                     ? velocity * beatLength / map.Difficulty.SliderTickRate * (map.BeatmapVersion < 8 ? 1 / speed : 1)
                     : double.PositiveInfinity;
-                record["events"] = SliderEventGenerator.Generate(decoded.StartTime,
+                record["events"] = Events(SliderEventGenerator.Generate(decoded.StartTime,
                     ((IHasDuration)decoded).Duration / repeated.SpanCount(), velocity,
-                    tickDistance, slider.Path.Distance, repeated.SpanCount())
-                    .Select(e => {
-                        // Keep FOSU's public result finite for a degenerate zero-duration
-                        // slider; the official division produces NaN for this progress.
-                        var progress = e.Type == SliderEventType.LegacyLastTick && double.IsNaN(e.PathProgress)
-                            ? repeated.SpanCount() % 2
-                            : e.PathProgress;
-                        var p = slider.Path.PositionAt(progress);
-                        return new {
-                            type = e.Type switch {
-                                SliderEventType.Head => 0,
-                                SliderEventType.Tick => 1,
-                                SliderEventType.Repeat => 2,
-                                SliderEventType.LegacyLastTick => 3,
-                                _ => 4,
-                            },
-                            time = e.Time, span_index = e.SpanIndex, span_start_time = e.SpanStartTime,
-                            path_progress = progress, position = new { x = (double)p.X, y = (double)p.Y },
-                        };
-                    }).ToArray();
-                record["path_samples"] = new[] { 0.0, 0.1, 0.5, 0.9, 1.0 }.Select(progress => {
-                    var p = slider.Path.PositionAt(progress);
-                    return new { x = (double)p.X, y = (double)p.Y };
-                }).ToArray();
+                    tickDistance, slider.Path.Distance, repeated.SpanCount()),
+                    slider.Path, repeated.SpanCount(), e => e.Time);
+                record["path_samples"] = PathSamples(slider.Path);
             }
             hit_objects.Add(record);
         }
@@ -99,6 +78,23 @@ sealed class RawFields
             {
                 if (!objects.TryGetValue(map.HitObjects[i], out var record)) continue;
                 var obj = (osu.Game.Rulesets.Osu.Objects.OsuHitObject)converted.HitObjects[i];
+                // Lazer mode gives osu!standard maps' sliders as its Slider has them:
+                // its own velocity, span duration, repeat times and simplified path.
+                if (obj is osu.Game.Rulesets.Osu.Objects.Slider standard)
+                {
+                    record["end_time"] = standard.EndTime;
+                    record["path"] = new { points = standard.Path.CalculatedPath.Select(p => new { x = (double)p.X, y = (double)p.Y }).ToArray() };
+                    record["path_distance"] = standard.Path.Distance;
+                    // Times are its nested objects', in the generator's order; the
+                    // legacy last tick is not one of them.
+                    using var nested = standard.NestedHitObjects.GetEnumerator();
+                    record["events"] = Events(SliderEventGenerator.Generate(standard.StartTime,
+                        standard.SpanDuration, standard.Velocity, standard.TickDistance,
+                        standard.Path.Distance, standard.SpanCount()),
+                        standard.Path, standard.SpanCount(),
+                        e => e.Type == SliderEventType.LegacyLastTick || !nested.MoveNext() ? e.Time : nested.Current.StartTime);
+                    record["path_samples"] = PathSamples(standard.Path);
+                }
                 record["stacking"] = new { stack_height = obj.StackHeight,
                     stack_offset = new { x = (double)obj.StackOffset.X, y = (double)obj.StackOffset.Y } };
                 record["x"] = (double)obj.StackedPosition.X;
@@ -109,6 +105,34 @@ sealed class RawFields
             }
         }
     }
+
+    static object[] Events(IEnumerable<SliderEventDescriptor> events, SliderPath path, int spans,
+        Func<SliderEventDescriptor, double> time) =>
+        events.Select(e => {
+            // Keep FOSU's public result finite for a degenerate zero-duration
+            // slider; the official division produces NaN for this progress.
+            var progress = e.Type == SliderEventType.LegacyLastTick && double.IsNaN(e.PathProgress)
+                ? spans % 2
+                : e.PathProgress;
+            var p = path.PositionAt(progress);
+            return (object)new {
+                type = e.Type switch {
+                    SliderEventType.Head => 0,
+                    SliderEventType.Tick => 1,
+                    SliderEventType.Repeat => 2,
+                    SliderEventType.LegacyLastTick => 3,
+                    _ => 4,
+                },
+                time = time(e), span_index = e.SpanIndex, span_start_time = e.SpanStartTime,
+                path_progress = progress, position = new { x = (double)p.X, y = (double)p.Y },
+            };
+        }).ToArray();
+
+    static object[] PathSamples(SliderPath path) =>
+        new[] { 0.0, 0.1, 0.5, 0.9, 1.0 }.Select(progress => {
+            var p = path.PositionAt(progress);
+            return (object)new { x = (double)p.X, y = (double)p.Y };
+        }).ToArray();
 
     static double Number(string text) => Parsing.ParseDouble(text);
     static int Integer(string text) => Parsing.ParseInt(text);

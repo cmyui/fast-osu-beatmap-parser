@@ -1,5 +1,6 @@
-// Slider end times and events. Expected values match osu!'s legacy decoder
-// (ConvertHitObjectParser, LegacyBeatmapDecoder) and SliderEventGenerator.
+// Slider end times and events in lazer mode. Expected values match osu!'s
+// legacy decoder (ConvertHitObjectParser, LegacyBeatmapDecoder),
+// SliderEventGenerator and, for osu!standard maps, its Slider.
 #include <fosu/beatmap.h>
 #include <fosu/parse_options.h>
 #include <fosu/slider_event.h>
@@ -80,15 +81,41 @@ static void test_slide_count_below_one_is_one_slide() {
   }
 }
 
-// The generic decoder's end time; rulesets convert sliders afterwards.
-static void test_end_time_does_not_depend_on_game_mode() {
+// osu!standard's Slider takes its velocity from the beat length with the
+// slider velocity rounded to single precision, here 100 / 1.5; other modes
+// keep the decoder's. Values from osu! 2026.1026.0.
+static void test_standard_sliders_round_their_velocity() {
   for (const char* mode : {"0", "1", "2"}) {
     const auto input = std::string("osu file format v14\n[General]\nMode:") +
                        mode +
                        "\n[Difficulty]\nSliderMultiplier:1\n[TimingPoints]\n"
-                       "0,500\n[HitObjects]\n0,0,1000,2,0,L|100:0,2,100\n";
+                       "0,500\n0,-66.6666666666667,4,0,0,100,0,0\n"
+                       "[HitObjects]\n0,0,1000,2,0,L|100:0,3,100\n";
     for (bool simd : {false, true})
-      CHECK_EQ(end_time(input, simd), 2000);
+      CHECK_EQ(end_time(input, simd),
+               *mode == '0' ? 1999.9999618530273 : 2000.0000000000005);
+  }
+}
+
+// osu!standard's Slider times repeat n at its start plus n span durations,
+// each the end time's duration over the spans; the event generator adds a
+// span to the previous repeat. Values from osu! 2026.1026.0.
+static void test_standard_repeats_count_from_the_start() {
+  const std::string input =
+      "osu file format v14\n[Difficulty]\nSliderMultiplier:1.8\n"
+      "[TimingPoints]\n6966,166.527893422148\n"
+      "[HitObjects]\n236,192,17290,2,0,L|284:192,7,45\n";
+  for (bool simd : {false, true}) {
+    CHECK((timed_events(input, simd) ==
+           Events{{SliderEventType::Head, 17290},
+                  {SliderEventType::Repeat, 17331.631973355536},
+                  {SliderEventType::Repeat, 17373.263946711075},
+                  {SliderEventType::Repeat, 17414.89592006661},
+                  {SliderEventType::Repeat, 17456.52789342215},
+                  {SliderEventType::Repeat, 17498.159866777685},
+                  {SliderEventType::Repeat, 17539.791840133224},
+                  {SliderEventType::LegacyLastTick, 17545.42381348876},
+                  {SliderEventType::Tail, 17581.42381348876}}));
   }
 }
 
@@ -396,7 +423,8 @@ int main() {
   test_end_time_covers_every_span();
   test_omitted_or_nonpositive_length_uses_path_distance();
   test_slide_count_below_one_is_one_slide();
-  test_end_time_does_not_depend_on_game_mode();
+  test_standard_sliders_round_their_velocity();
+  test_standard_repeats_count_from_the_start();
   test_inherited_point_scales_velocity();
   test_velocity_multiplier_is_clamped_from_tenth_to_tenfold();
   test_nan_inherited_point_keeps_default_velocity();

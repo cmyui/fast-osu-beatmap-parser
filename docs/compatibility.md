@@ -3,8 +3,8 @@
 fosu decodes legacy `.osu` files and applies the official decoder's metadata
 precision/clamps, legacy clock offsets, stable hitobject ordering and combo rules.
 Optional calculations provide slider paths, end times, path events and
-osu!standard stacking. They do not resolve samples or convert rulesets.
-Retained paths use decoder geometry, not ruleset-specific Catmull rendering optimisations.
+osu!standard stacking, as the [target client](#target-client) plays the map.
+They do not resolve samples or convert rulesets.
 Sample strings and encoded type bits are
 retained separately from effective combo flags.
 
@@ -75,21 +75,38 @@ compiles its own parse, so the choice adds no per-line cost.
   mode and keeps any stack leniency.
 - **Defaults.** An omitted `Countdown` is 1 (normal) in stable and 0 (none) in
   lazer. An omitted `BeatmapID` is 0 in stable and -1 in lazer.
-- **Calculated values.** For osu!standard maps, stable mode follows stable's
-  own slider calculations and stacking; other modes follow lazer in both
-  modes. Stable's paths are straight pieces from its own approximations:
-  Catmull curves are 50 pieces per pair of points, perfect curves are chords
-  of 8 to 16 px of arc, and v9 Béziers are sampled evenly, stopping short of
-  their last point. Where consecutive pieces leave a sub-pixel gap, the path
-  gets a point that adds no length. Stable works in absolute coordinates, so
-  the relative points can differ from its own by about 2⁻¹⁶ px; lengths are
-  its own. End times and event times are whole milliseconds. After a tick too
-  near the end, ticks on the way back restart their spacing instead of
-  mirroring. A path with no length keeps its repeats, and every
-  (points ÷ spans)th point is a repeat, as stable scores it. Stacking uses
-  these end times, treats holds as circles, and offsets by a tenth of stable's
-  circle radius as a 640×480 window works it out. Like lazer's event
-  expansion, this work is bounded: a map that needs more fails the parse.
+- **Breaks, slider lengths and end times.** stable reads only breaks of 650 ms
+  or more and sorts them by start, so a shorter break neither appears nor
+  starts a combo. It keeps a negative slider length, which trims away the
+  whole path: the slider ends where it starts, with only its head and tail.
+  It keeps a spinner or hold that ends before it starts. Lazer keeps every
+  break in file order, reads a negative length as zero and ends such a
+  spinner or hold at its start.
+- **Calculated values.** For osu!standard maps, lazer mode gives sliders as
+  lazer's osu!standard ruleset rebuilds those its decoder reads. Its velocity
+  comes from the beat length with the slider velocity rounded to single
+  precision, as stable works it out; its span duration is its end time's
+  duration over its spans, and repeat n comes at its start plus n span
+  durations. It thins Catmull paths: after each vertex it keeps, it keeps the
+  next, then skips vertices until one is more than 6 px from that one or ends
+  a span. The length skipped counts at the start of the path's cumulative
+  lengths. Other modes keep the decoder's sliders in lazer mode.
+
+  For osu!standard maps, stable mode follows stable's own slider calculations
+  and stacking; other modes follow lazer's decoder. Stable's paths are
+  straight pieces from its own approximations: Catmull curves are 50 pieces
+  per pair of points, perfect curves are chords of 8 to 16 px of arc, and v9
+  Béziers are sampled evenly, stopping short of their last point. Where
+  consecutive pieces leave a sub-pixel gap, the path gets a point that adds no
+  length. Stable works in absolute coordinates, so the relative points can
+  differ from its own by about 2⁻¹⁶ px; lengths are its own. End times and
+  event times are whole milliseconds. After a tick too near the end, ticks on
+  the way back restart their spacing instead of mirroring. A path with no
+  length keeps its repeats, and every (points ÷ spans)th point is a repeat, as
+  stable scores it. Stacking uses these end times, treats holds as circles
+  that end at their own end time, and offsets by a tenth of stable's circle
+  radius as a 640×480 window works it out. Like lazer's event expansion, this
+  work is bounded: a map that needs more fails the parse.
 
 Stable mode does not yet model the rest of stable. Header values, timing
 points, breaks and colours that stable cannot read follow lazer, though its
@@ -110,7 +127,8 @@ stripped.
   used unless end-time calculation is requested, directly or through slider events
   or standard stacking. Calculation includes repeats and degenerate-path handling.
   Spinner, hold and break endpoints follow the
-  official clamps; spinners are centred at (256, 192). Pre-v5 timestamps use
+  official clamps in lazer mode (see [target client](#target-client) for
+  stable's); spinners are centred at (256, 192). Pre-v5 timestamps use
   the official +24 ms adjustment, including its distinct hold-end ordering.
 - Coordinate acceptance follows the official decoder's float32 conversion and,
   in lazer mode, its ±131,072 bound. Accepted object positions clamp to [0, 512] on both axes,
@@ -154,7 +172,7 @@ stripped.
   accept `,` group separators anywhere in the integer part after its first
   digit: `1,,0` is 10. fosu reads separators only in values of up to 128 bytes.
 - Slider span counts above 9,000 are rejected. Counts below 1 become 1, and
-  negative lengths become zero. Geometry-dependent repeat corrections remain
+  lazer mode reads negative lengths as zero (see [target client](#target-client)). Geometry-dependent repeat corrections remain
   outside this parser.
   An omitted slider length is represented as zero. Missing hold end times use
   the start time. Hit-sample and edge-bank fields remain raw strings, with the
@@ -220,8 +238,9 @@ numeric behavior. FOSU deliberately rejects unknown enum values rather than
 exposing undefined choices through its typed APIs, even where the official
 decoder accepts them. These domain checks are not a ranking validator.
 Third-party parsers are not the authority for those decisions. Duration resolves
-timing and curve distance; resolved samples and ruleset
-processing remain outside decoding.
+timing and curve distance. Resolved samples and ruleset processing remain
+outside decoding, except osu!standard's in lazer mode: its slider timing,
+Catmull simplification and stacking.
 
 The reference is the unmodified open-source legacy decoder from osu! at
 [`fc790c78c4b393f4a0101b9ad54cb3b4391037cd`](https://github.com/ppy/osu/tree/fc790c78c4b393f4a0101b9ad54cb3b4391037cd).

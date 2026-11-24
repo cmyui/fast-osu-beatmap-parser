@@ -51,7 +51,9 @@ def differences(expected, actual, path=""):
     elif expected == "NaN" and isinstance(actual, float) and math.isnan(actual):
         return
     elif isinstance(expected, float) or isinstance(actual, float):
-        if (".path" in path or ".position" in path) and math.isclose(
+        # The Python helper slider_position_at interpolates in double precision,
+        # osu! in single; fosu's own paths and event positions must be exact.
+        if ".path_samples" in path and math.isclose(
             float(expected), float(actual), rel_tol=1e-6, abs_tol=1e-3
         ):
             return
