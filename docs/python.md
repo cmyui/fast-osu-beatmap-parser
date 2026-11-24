@@ -145,9 +145,10 @@ tail judgement, not an additional score or combo event; the real `TAIL` and
 slider `end_time` remain unchanged. This option includes path and end-time
 calculation. Each record has time, span index/start time, path progress, and a
 position relative to the head. Native code exposes `Beatmap.slider_events`,
-indexed by slider. Without the option, events are empty. These are path events
-using the decoded slider's timing, not a converted ruleset's nested hitobjects:
-no samples or catch conversion.
+indexed by slider. Without the option, events are empty. In lazer mode,
+an osu!standard map's events are timed as lazer's osu!standard sliders time
+their nested objects; other modes' use the decoded slider's timing. Events
+have no samples, and catch's conversion is not applied.
 Expansion beyond 1,048,576 events per map fails the parse with `ValueError`
 rather than silently dropping events.
 

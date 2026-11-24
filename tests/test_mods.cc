@@ -108,7 +108,7 @@ static void test_rate_mods_scale_every_time() {
                                     : "0,0,900,8,0,1500,0:0:0:0:";
       const auto input =
           "osu file format v14\n[General]\nMode:" + std::to_string(mode) +
-          "\n[Events]\n2,1500,2000\n[TimingPoints]\n300,600\n"
+          "\n[Events]\n2,1500,2400\n[TimingPoints]\n300,600\n"
           "600,-50,4,0,0,100,0,0\n[HitObjects]\n" +
           object + "\n";
       for (bool simd : {false, true}) {
@@ -120,7 +120,7 @@ static void test_rate_mods_scale_every_time() {
         CHECK_EQ(map.timing_points[0].beat_length, 600 / rate);
         CHECK_EQ(map.timing_points[1].beat_length, -50);
         CHECK_EQ(map.breaks[0].start, 1500 / rate);
-        CHECK_EQ(map.breaks[0].end, 2000 / rate);
+        CHECK_EQ(map.breaks[0].end, 2400 / rate);
       }
     }
   }

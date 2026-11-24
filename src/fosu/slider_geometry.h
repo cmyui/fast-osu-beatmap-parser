@@ -46,6 +46,13 @@ FOSU_FP_CONTRACT_OFF_BEGIN
 // head.
 using CurvePoint = PathPoint;
 
+// Whether the map's sliders are osu!lazer's osu!standard ones: its Slider
+// recomputes the decoded slider's velocity, span duration and repeat times,
+// and simplifies Catmull paths. Other modes keep the decoder's values.
+inline bool uses_lazer_standard_sliders(const Beatmap& map, Client client) {
+  return client == Client::Lazer && map.mode == 0;
+}
+
 // Duration only needs the distance and final edge, not a retained path array.
 struct CurveDistance {
   f64        length = 0;
@@ -266,6 +273,41 @@ inline CurvePoint catmull_point(CurvePoint a,
          0.5f;
 }
 
+// osu!standard's simplification of a Catmull segment's vertices. After each
+// vertex it passes on to `curve`, it passes on the next, then skips vertices
+// until one is more than 6 px from that one or ends a span or the segment.
+// The length of each skipped run, less its chord, adds to `optimised_length`,
+// which osu! counts at the start of the path's length.
+template <typename Curve>
+struct CatmullOptimiser {
+  Curve&     curve;
+  f64&       optimised_length;
+  size_t     count;  // the segment's vertices
+  size_t     index = 0;
+  CurvePoint start{}, previous{};
+  bool       started = false;
+  f64        removed = 0;
+
+  void append(CurvePoint point) {
+    const size_t i = index++;
+    if (!started) {
+      curve.append(point);
+      start = previous = point;
+      started = true;
+      return;
+    }
+    const f32 from_start = (point - start).length();
+    removed += (point - previous).length();
+    previous = point;
+    if (from_start > 6 || (i + 1) % 100 == 0 || i == count - 1) {
+      curve.append(point);
+      optimised_length += removed - from_start;
+      started = false;
+      removed = 0;
+    }
+  }
+};
+
 template <typename Curve>
 inline void catmull_distance(std::span<const CurvePoint> points,
                              Curve&                      distance) {
@@ -340,16 +382,23 @@ inline bool circular_arc_distance(std::span<const CurvePoint> points,
   return true;
 }
 
+// With `optimised_length`, Catmull segments are simplified as osu!standard
+// does (see CatmullOptimiser).
 template <typename Curve>
 inline bool approximate_curve_segment(std::span<const CurvePoint> points,
                                       CurveType                   type,
                                       std::optional<u32>          degree,
                                       Curve&                      segment,
-                                      Arena*                      arena) {
+                                      Arena*                      arena,
+                                      f64* optimised_length = nullptr) {
   if (points.size() == 1 || type == CurveType::Linear ||
       (points.size() == 2 && type != CurveType::Catmull)) {
     for (auto point : points)
       segment.append(point);
+  } else if (type == CurveType::Catmull && optimised_length) {
+    CatmullOptimiser<Curve> optimiser{segment, *optimised_length,
+                                      100 * (points.size() - 1)};
+    catmull_distance(points, optimiser);
   } else if (type == CurveType::Catmull) {
     catmull_distance(points, segment);
   } else if (type != CurveType::PerfectCurve || points.size() != 3 ||
@@ -482,23 +531,31 @@ inline bool for_each_legacy_segment(std::span<const CurvePoint>   points,
   return true;
 }
 
+// A non-degenerate final linear edge can always reach the declared length.
+// No approximation or scratch allocation is needed to establish its distance.
+inline bool reaches_declared_length(const Beatmap&   map,
+                                    const HitObject& object) {
+  const auto& slider = map.sliders[object.slider];
+  const auto  control_points =
+      map.slider_points.subspan(slider.point_begin, slider.point_count);
+  if (slider.length <= 0 || control_points.empty())
+    return false;
+  const auto last = control_points.back();
+  const auto previous = control_points.size() > 1
+                            ? control_points[control_points.size() - 2]
+                            : SliderPoint{object.x, object.y};
+  return last.x != previous.x || last.y != previous.y;
+}
+
 inline f64 slider_distance(const Beatmap&   map,
                            Client           client,
                            const HitObject& object,
                            Arena*           arena) {
   const auto& slider = map.sliders[object.slider];
-  const auto  control_points =
+  if (reaches_declared_length(map, object))
+    return slider.length;
+  const auto control_points =
       map.slider_points.subspan(slider.point_begin, slider.point_count);
-  // A non-degenerate final linear edge can always reach the declared length.
-  // No approximation or scratch allocation is needed to establish its distance.
-  if (slider.length > 0 && !control_points.empty()) {
-    const auto last = control_points.back();
-    const auto previous = control_points.size() > 1
-                              ? control_points[control_points.size() - 2]
-                              : SliderPoint{object.x, object.y};
-    if (last.x != previous.x || last.y != previous.y)
-      return slider.length;
-  }
   const TempArena temp{arena};
   auto* points = arena_push_array<CurvePoint>(arena, control_points.size() + 1);
   if (!points)
@@ -577,7 +634,8 @@ inline bool calculate_legacy_slider_curve(std::span<const CurvePoint> points,
                                           bool           continues_path,
                                           CurveType      type,
                                           CurveVertices& curve,
-                                          Arena*         arena) {
+                                          Arena*         arena,
+                                          f64*           optimised_length) {
   type = legacy_curve_type(points, type);
   size_t begin = 0;
   for (size_t i = 1; i <= points.size(); ++i) {
@@ -591,7 +649,8 @@ inline bool calculate_legacy_slider_curve(std::span<const CurvePoint> points,
       const bool after_previous_segment = continues_path && begin == 0;
       curve.first_in_segment = several_points || after_previous_segment;
       if (!approximate_curve_segment(points.subspan(begin, i - begin), type,
-                                     std::nullopt, curve, arena) ||
+                                     std::nullopt, curve, arena,
+                                     optimised_length) ||
           curve.failed) {
         return false;
       }
@@ -605,7 +664,8 @@ inline bool calculate_lazer_slider_curve(std::span<const CurvePoint>   points,
                                          std::span<const CurveSegment> segments,
                                          CurveType                     type,
                                          CurveVertices&                curve,
-                                         Arena*                        arena) {
+                                         Arena*                        arena,
+                                         f64* optimised_length) {
   if (segments.empty()) {
     type = lazer_curve_type(points, type);
     size_t begin = 0;
@@ -617,7 +677,8 @@ inline bool calculate_lazer_slider_curve(std::span<const CurvePoint>   points,
       if (i == points.size() || i - begin > 1) {
         curve.first_in_segment = i - begin > 1;
         if (!approximate_curve_segment(points.subspan(begin, i - begin), type,
-                                       std::nullopt, curve, arena) ||
+                                       std::nullopt, curve, arena,
+                                       optimised_length) ||
             curve.failed) {
           return false;
         }
@@ -635,7 +696,7 @@ inline bool calculate_lazer_slider_curve(std::span<const CurvePoint>   points,
     const auto   segment_type = lazer_curve_type(segment_points, source.type);
     curve.begin_segment();
     if (!approximate_curve_segment(segment_points, segment_type, source.degree,
-                                   curve, arena) ||
+                                   curve, arena, optimised_length) ||
         curve.failed) {
       return false;
     }
@@ -669,18 +730,21 @@ inline std::optional<SliderPath> calculate_slider_path(const Beatmap&   map,
   const std::span<const CurvePoint> relative_points{points, count};
   const auto                        segments =
       map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
+  f64        optimised = 0;
+  f64* const optimised_length =
+      uses_lazer_standard_sliders(map, client) ? &optimised : nullptr;
   const bool calculated =
       reads_lazer_format(map.format_version, client)
           ? calculate_lazer_slider_curve(relative_points, segments,
                                          slider.curve_type, curve,
-                                         scratch_arena)
+                                         scratch_arena, optimised_length)
           : for_each_legacy_segment(
                 relative_points, segments, slider.curve_type,
                 [&](std::span<const CurvePoint> points, size_t vertex_count,
                     CurveType type, bool continues_path) {
-                  return calculate_legacy_slider_curve(points, vertex_count,
-                                                       continues_path, type,
-                                                       curve, scratch_arena);
+                  return calculate_legacy_slider_curve(
+                      points, vertex_count, continues_path, type, curve,
+                      scratch_arena, optimised_length);
                 });
   if (!calculated)
     return std::nullopt;
@@ -692,9 +756,12 @@ inline std::optional<SliderPath> calculate_slider_path(const Beatmap&   map,
   auto* lengths = arena_push_array<f64>(result_arena, curve.count());
   if (!lengths)
     return std::nullopt;
+  // osu! starts the running length at what Catmull simplification left out,
+  // so every length after the first includes it.
   lengths[0] = 0;
+  f64 length = optimised;
   for (size_t i = 1; i < curve.count(); ++i)
-    lengths[i] = lengths[i - 1] + (output[i] - output[i - 1]).length();
+    lengths[i] = length += (output[i] - output[i - 1]).length();
   size_t    end = curve.count() - 1;
   const f64 expected = slider.length;
   if (expected > 0 && end && expected != lengths[end] &&
@@ -702,12 +769,23 @@ inline std::optional<SliderPath> calculate_slider_path(const Beatmap&   map,
     while (end > 1 && lengths[end - 1] >= expected)
       --end;
     const auto edge = output[end] - output[end - 1];
+    // osuTK normalises by multiplying with the length's reciprocal.
     output[end] =
-        output[end - 1] +
-        (edge / edge.length()) * static_cast<f32>(expected - lengths[end - 1]);
+        output[end - 1] + (edge * (1.0f / edge.length())) *
+                              static_cast<f32>(expected - lengths[end - 1]);
     lengths[end] = expected;
   }
   return SliderPath{{output, end + 1}, {lengths, end + 1}, {}};
+}
+
+inline bool has_catmull_segment(const Beatmap& map, const Slider& slider) {
+  if (slider.segment_count == 0)
+    return slider.curve_type == CurveType::Catmull;
+  const auto segments =
+      map.slider_segments.subspan(slider.segment_begin, slider.segment_count);
+  return std::any_of(segments.begin(), segments.end(), [](const auto& segment) {
+    return segment.type == CurveType::Catmull;
+  });
 }
 
 inline bool set_slider_paths(Beatmap& map,

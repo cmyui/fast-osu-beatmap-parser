@@ -252,7 +252,50 @@ static void test_position_query_clamps_and_interpolates() {
   }
 }
 
+// osu!standard simplifies Catmull paths, keeping vertices 6 px or more
+// apart, and counts what it leaves out at the start of the path's length.
+// Other modes keep the decoder's path. Values from osu! 2026.1026.0.
+static void test_standard_simplifies_catmull_paths() {
+  const std::string sliders =
+      "100,100,1000,2,0,C|150:200|250:150|300:250,1,200\n"
+      "100,100,3000,2,0,C|150:200|250:150|300:250,1\n";
+  const std::string taiko =
+      "osu file format v14\n[General]\nMode:1\n[Difficulty]\n"
+      "SliderMultiplier:1\n[TimingPoints]\n0,500\n[HitObjects]\n" +
+      sliders;
+  for (bool simd : {false, true}) {
+    const auto trimmed = path(beatmap(sliders), simd);
+    CHECK_EQ(trimmed.points.size(), 54u);
+    CHECK((trimmed.points.back() ==
+           fosu::PathPoint{122.731689453125f, 58.315868377685547f}));
+    const auto natural = path(beatmap(sliders), simd, 1);
+    CHECK_EQ(natural.points.size(), 94u);
+    CHECK_EQ(natural.distance, 343.48702275753021);
+    // Without paths, the end time comes from the same length.
+    CHECK_EQ(parse_str(beatmap(sliders), simd,
+                       {.calculate_slider_end_times = true,
+                        .client = fosu::Client::Lazer})
+                 .hit_objects[1]
+                 .end_time,
+             4717.4351137876511);
+    const auto decoded = path(taiko, simd);
+    CHECK_EQ(decoded.points.size(), 172u);
+    CHECK((decoded.points.back() ==
+           fosu::PathPoint{122.81044006347656f, 58.246150970458984f}));
+  }
+}
+
+// osuTK normalises the shortened last edge by multiplying with its length's
+// reciprocal, not dividing by it. Value from osu! 2026.1026.0.
+static void test_shortened_path_ends_where_osu_puts_it() {
+  const auto input = beatmap("32,208,1000,2,0,B|92:32,1,180\n");
+  for (bool simd : {false, true})
+    CHECK_EQ(path(input, simd).points.back().x, 58.081310272216797f);
+}
+
 int main() {
+  test_standard_simplifies_catmull_paths();
+  test_shortened_path_ends_where_osu_puts_it();
   test_declared_length_trims_or_extends_the_path();
   test_each_curve_type_honours_the_declared_length();
   test_repeated_end_point_prevents_extension();

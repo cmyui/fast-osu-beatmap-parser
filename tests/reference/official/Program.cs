@@ -22,7 +22,11 @@ Logger.Enabled = false;
 _ = new OsuRuleset(); _ = new TaikoRuleset(); _ = new CatchRuleset(); _ = new ManiaRuleset();
 Decoder.RegisterDependencies(new AssemblyRulesetStore());
 AuditDecoder.RegisterAudit();
-var json = new JsonSerializerOptions { NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals };
+var json = new JsonSerializerOptions
+{
+    NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+    Converters = { new ExactDouble() },
+};
 string? request;
 while ((request = Console.ReadLine()) != null)
 {
@@ -98,5 +102,20 @@ sealed class AuditDecoder(int version) : LegacyBeatmapDecoder(version)
                 ProjectionErrors.Add(new { section = section.ToString(), error = e.GetType().Name });
             }
         }
+    }
+}
+
+// .NET's shortest form of some doubles reads back as a neighbour (2^-25 is
+// written 2.980232238769531E-08), so values are written with 17 digits.
+sealed class ExactDouble : JsonConverter<double>
+{
+    public override double Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options) => reader.GetDouble();
+
+    public override void Write(Utf8JsonWriter writer, double value, JsonSerializerOptions options)
+    {
+        if (double.IsFinite(value))
+            writer.WriteRawValue(value.ToString("G17", CultureInfo.InvariantCulture));
+        else
+            writer.WriteStringValue(double.IsNaN(value) ? "NaN" : value > 0 ? "Infinity" : "-Infinity");
     }
 }

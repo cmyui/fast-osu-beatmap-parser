@@ -11,11 +11,15 @@ are not skipped comparisons.
 
 `tests/test_official_values.py` additionally requests `RawFields`. It audits
 the represented object, slider, timing-point, break, colour, and explicitly
-provided header fields, plus retained paths and event descriptors, using the
-official standard processor for stacking. Metadata settings, object order,
+provided header fields, plus retained paths and event descriptors. For
+osu!standard maps it uses the official osu!standard converter and processor:
+stacking, and each slider's end time, path and event times, come from its
+`Slider`, as lazer mode gives them. Metadata settings, object order,
 positions, endpoints, and combo values come from the finished official map.
-Path coordinates allow 0.001-pixel/1e-6-relative tolerance for float
-arithmetic; other fields are compared exactly. This is not an assertion that
+Values are written with 17 significant digits and compared exactly, except
+samples from the Python `slider_position_at` helper: it interpolates in double
+precision where osu! uses single, so they allow a 0.001-pixel/1e-6-relative
+tolerance. This is not an assertion that
 FOSU builds every part of osu!'s gameplay model.
 
 Run them with the .NET 10 SDK and an interpreter with fosu installed:

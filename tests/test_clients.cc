@@ -342,7 +342,7 @@ static void test_coordinate_and_length_bounds() {
     CHECK_EQ(stable.slider_points[0].x, 262144);
     CHECK_EQ(stable.slider_points[0].y, -460440);
     CHECK_EQ(stable.sliders[0].length, 140000);
-    CHECK_EQ(stable.sliders[1].length, 0);
+    CHECK_EQ(stable.sliders[1].length, -1.79769313486231E+308);
     const auto lazer = parse_str(input, simd, kLazer);
     CHECK(lazer.hit_objects.empty());
     CHECK_EQ(lazer.stats.malformed_lines, 3u);

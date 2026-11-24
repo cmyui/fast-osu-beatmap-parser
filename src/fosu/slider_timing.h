@@ -36,8 +36,7 @@ inline bool set_slider_end_times(Beatmap&                map,
                                  Client                  client,
                                  Arena*                  result_arena,
                                  Arena*                  scratch_arena,
-                                 std::span<SliderTiming> timings = {},
-                                 std::span<f64> stacking_end_times = {}) {
+                                 std::span<SliderTiming> timings = {}) {
   if (map.sliders.empty())
     return true;
   auto* velocities = arena_push_array<f64>(result_arena, map.sliders.size());
@@ -117,7 +116,8 @@ inline bool set_slider_end_times(Beatmap&                map,
       break;
     }
   }
-  size_t next = 0;
+  const bool standard = uses_lazer_standard_sliders(map, client);
+  size_t     next = 0;
   for (auto& object : map.hit_objects) {
     if (object.slider == HitObject::kNoSlider)
       continue;
@@ -131,37 +131,49 @@ inline bool set_slider_end_times(Beatmap&                map,
       ++next;
     }
     const auto& slider = map.sliders[object.slider];
-    auto distance = !map.slider_paths.empty()
-                        ? map.slider_paths[object.slider].distance()
-                        : slider_distance(map, client, object, scratch_arena);
-    const f64 pixels_per_millisecond =
+    f64         distance;
+    if (!map.slider_paths.empty()) {
+      distance = map.slider_paths[object.slider].distance();
+    } else if (standard && has_catmull_segment(map, slider) &&
+               !reaches_declared_length(map, object)) {
+      // osu! counts what Catmull simplification leaves out before the rest
+      // of the path, so the distance comes from the path, released again.
+      const size_t mark = arena_pos(result_arena);
+      const auto path = calculate_slider_path(map, client, object, result_arena,
+                                              scratch_arena);
+      if (!path)
+        return false;
+      distance = path->distance();
+      arena_pop_to(result_arena, mark);
+    } else {
+      distance = slider_distance(map, client, object, scratch_arena);
+    }
+    f64 pixels_per_millisecond =
         100 * map.slider_multiplier * velocity / beat_length;
+    if (standard) {
+      // osu!standard's Slider takes its velocity from the beat length with
+      // the slider velocity rounded to single precision, as osu!stable does.
+      const f64 bpm_multiplier =
+          std::clamp(static_cast<f32>(100 / velocity), 10.0f, 1000.0f) / 100.0;
+      pixels_per_millisecond =
+          100 * map.slider_multiplier / (beat_length * bpm_multiplier);
+    }
     // osu! suppresses repeats on effectively zero-length paths. Keep the
     // encoded span count on Slider, but use the effective count for duration.
     const i32 spans = distance <= 1e-7 ? 1 : slider.slides;
     object.end_time = object.time + spans * distance / pixels_per_millisecond;
     velocities[object.slider] = pixels_per_millisecond;
-    if (!stacking_end_times.empty()) {
-      // Standard stacking uses the osu! ruleset slider velocity, including its
-      // legacy f32 precision adjustment. Keep the public end time as the
-      // generic decoder value and expose this difference only to stacking.
-      const f64 adjusted_multiplier =
-          std::clamp(static_cast<f32>(100 / velocity), 10.0f, 1000.0f) / 100.0;
-      const f64 adjusted_beat_length = beat_length * adjusted_multiplier;
-      const f64 stacking_velocity =
-          100 * map.slider_multiplier / adjusted_beat_length;
-      stacking_end_times[object.slider] =
-          object.time + spans * distance / stacking_velocity;
-    }
     if (!timings.empty()) {
       const f64 tick_distance =
           generate_ticks
               ? pixels_per_millisecond * beat_length / map.slider_tick_rate *
                     (map.format_version < 8 ? 1 / velocity : 1)
               : std::numeric_limits<f64>::infinity();
-      timings[object.slider] = {
-          pixels_per_millisecond, tick_distance,
-          (spans * distance / pixels_per_millisecond) / spans, spans};
+      // osu!standard's Slider spans its duration as rounded into the end time.
+      const f64 duration = standard ? object.end_time - object.time
+                                    : spans * distance / pixels_per_millisecond;
+      timings[object.slider] = {pixels_per_millisecond, tick_distance,
+                                duration / spans, spans};
     }
   }
   return true;

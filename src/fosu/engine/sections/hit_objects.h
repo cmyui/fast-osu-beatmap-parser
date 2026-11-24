@@ -226,6 +226,7 @@ bool ignored_hitobject_line(const char* p, const char* line_end) {
 // Interpret a successfully decoded record of `kind` before publishing it to
 // the arena. The preceding object is in source order, including across
 // repeated HitObjects sections.
+template <Client C>
 inline HitObject normalize_hitobject(HitObject     object,
                                      HitObjectKind kind,
                                      size_t        preceding_count,
@@ -244,7 +245,12 @@ inline HitObject normalize_hitobject(HitObject     object,
     object.new_combo = explicit_combo;
     object.x = 256;
     object.y = 192;
-    object.end_time = std::max(object.time, object.end_time + offset);
+    // stable keeps a spinner or hold ending before it starts.
+    object.end_time = C == Client::Stable
+                          ? object.end_time + offset
+                          : std::max(object.time, object.end_time + offset);
+  } else if (C == Client::Stable) {
+    object.end_time += offset;
   } else {
     // Legacy holds clamp against the offset start before offsetting the end.
     object.end_time = std::max(object.time, object.end_time) + offset;
@@ -285,7 +291,7 @@ FOSU_ALWAYS_INLINE void accept_hitobject(
     return;
   }
   const size_t count = counts.objects++;
-  beatmap.hit_objects[count] = normalize_hitobject(
+  beatmap.hit_objects[count] = normalize_hitobject<C>(
       object, kind, count, preceding_was_spinner, F.time_offset);
   preceding_was_spinner = kind == HitObjectKind::Spinner;
 }
@@ -484,7 +490,7 @@ const char* parse_hitobjects_section(Beatmap&         beatmap,
               beatmap, counts, p, line_end, constants)) {
         const size_t count = counts.objects++;
         const auto   kind = classify_hitobject_kind(object->type);
-        beatmap.hit_objects[count] = normalize_hitobject(
+        beatmap.hit_objects[count] = normalize_hitobject<C>(
             *object, kind, count, preceding_was_spinner, F.time_offset);
         preceding_was_spinner = kind == HitObjectKind::Spinner;
       } else [[unlikely]] {

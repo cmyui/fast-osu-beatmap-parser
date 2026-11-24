@@ -236,7 +236,7 @@ def test_complete_map(tmp_path):
         "Bookmarks:100,-200,300\nVelocityPresets:1,1.5,2\n"
         "[Metadata]\nTitle:日本語\nArtist:artist\nVersion:Hard\nBeatmapID:12345\n"
         "[Difficulty]\nOverallDifficulty:9\nCircleSize:4\n"
-        '[Events]\n0,0,"bg.jpg",0,0\n2,100,200\n'
+        '[Events]\n0,0,"bg.jpg",0,0\n2,100,800\n'
         "[Colours]\nCombo1:12,34,56\n"
         "[TimingPoints]\n1.25,342.857142857142857142857,4,2,1,60,1,0\n"
         "[HitObjects]\n-48,192,1000,1,0,0:0:0:0:\n"
@@ -289,7 +289,7 @@ def test_complete_map(tmp_path):
     assert spinner.is_spinner and spinner.end_time == 4000
     assert hold.is_hold and hold.end_time == 6000
     assert b.timing_points[0].uninherited is True
-    assert b.breaks == [fosu.Break(100, 200)]
+    assert b.breaks == [fosu.Break(100, 800)]
     assert b.combo_colours == [0x0C2238]
     assert b.stats.fast_path_lines + b.stats.slow_path_lines == 4
     assert "hit_objects=4" in repr(b) and len(repr(b)) < 150

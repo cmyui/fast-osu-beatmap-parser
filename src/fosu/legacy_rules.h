@@ -48,7 +48,23 @@ inline bool sort_hit_objects(std::span<HitObject> objects,
                     });
 }
 
-inline bool apply_legacy_rules(Beatmap& map, Arena* scratch_arena) {
+inline bool apply_legacy_rules(Beatmap& map,
+                               Client   client,
+                               Arena*   scratch_arena) {
+  if (client == Client::Stable) {
+    // stable reads only breaks of 650 ms or more, and sorts them by start.
+    const auto kept = std::remove_if(map.breaks.begin(), map.breaks.end(),
+                                     [](const Break& period) {
+                                       return period.end - period.start < 650;
+                                     });
+    map.breaks =
+        map.breaks.first(static_cast<size_t>(kept - map.breaks.begin()));
+    if (!merge_sort(map.breaks, scratch_arena,
+                    [](const Break& a, const Break& b) {
+                      return a.start < b.start;
+                    }))
+      return false;
+  }
   const bool ordered =
       std::is_sorted(map.hit_objects.begin(), map.hit_objects.end(),
                      [](const HitObject& a, const HitObject& b) {

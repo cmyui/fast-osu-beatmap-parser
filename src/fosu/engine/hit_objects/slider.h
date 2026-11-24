@@ -569,7 +569,8 @@ FOSU_NOINLINE bool parse_slider_as(
                                  : 0,
       .slides = std::max(1, slides),
       .curve_type = kSegments ? first_curve_type : current_curve_type,
-      .length = std::max(0.0, length),
+      // stable keeps a negative length, which trims away the whole path.
+      .length = C == Client::Stable ? length : std::max(0.0, length),
       .edge_sounds = edge_sounds,
       .edge_sets = edge_sets,
   };
